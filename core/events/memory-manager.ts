@@ -20,6 +20,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-21: Shell tool continuation context now requests minimal LLM result mode (`status`/`exit_code`) and passes agent name for assistant-stream shell SSE attribution.
  * - 2026-02-16: Added plain-text tool-intent fallback parser in continuation to synthesize executable `tool_calls` when providers return `Calling tool: ...` text.
  * - 2026-02-16: Max tool-hop guardrail now emits UI/tool errors and injects transient LLM context, then continues loop instead of returning.
  * - 2026-02-16: Removed plain-text tool-intent reminder/retry path; continuation now relies only on tool-call loop + hop guardrail.
@@ -1004,6 +1005,8 @@ export async function continueLLMAfterToolExecution(
           chatId: targetChatId,
           abortSignal: options?.abortSignal,
           workingDirectory: trustedWorkingDirectory,
+          agentName: agent.id,
+          llmResultMode: toolCall.function.name === 'shell_cmd' ? 'minimal' : 'verbose',
         };
 
         const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);

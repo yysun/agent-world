@@ -18,6 +18,7 @@
  * - 2026-02-14: Added interactive + pipeline HITL option response handling for generic approval requests.
  * - 2026-02-11: Fixed tool-stream timeout: extendTimeout() resets idle timeout on streaming data
  * - 2026-02-11: Pipeline mode now listens for tool-stream SSE events to extend timeout
+ * - 2026-02-21: Extended timeout-refresh detection to include shell assistant-stream SSE events (`start`/`chunk`/`end` with `toolName='shell_cmd'`) in addition to legacy `tool-stream`.
  * - 2026-01-09: Added --streaming flag for explicit streaming control (overrides TTY auto-detection)
  * - 2025-02-06: Prevented duplicate MESSAGE output when streaming already rendered agent responses
  * - 2025-11-01: Added multi-world selection in loadWorldFromFile
@@ -577,8 +578,11 @@ function attachCLIListeners(
   // SSE events (interactive mode only - pipeline mode uses non-streaming LLM calls)
   if (streaming && globalState && rl && statusLine) {
     const sseListener = (eventData: any) => {
-      // Extend timeout when tool-stream data arrives (keeps long-running tools alive)
-      if (eventData.type === 'tool-stream') {
+      // Extend timeout when long-running shell stream activity arrives.
+      const isLegacyToolStream = eventData.type === 'tool-stream';
+      const isShellAssistantStream = eventData.toolName === 'shell_cmd' &&
+        (eventData.type === 'start' || eventData.type === 'chunk' || eventData.type === 'end');
+      if (isLegacyToolStream || isShellAssistantStream) {
         activityMonitor.extendTimeout();
       }
       handleWorldEvent(EventType.SSE, eventData, streaming, globalState, activityMonitor, statusLine, rl)
@@ -587,9 +591,12 @@ function attachCLIListeners(
     world.eventEmitter.on(EventType.SSE, sseListener);
     listeners.set(EventType.SSE, sseListener);
   } else {
-    // Pipeline mode: listen for tool-stream events to extend timeout on long-running commands
+    // Pipeline mode: listen for shell stream events to extend timeout on long-running commands.
     const sseTimeoutListener = (eventData: any) => {
-      if (eventData.type === 'tool-stream') {
+      const isLegacyToolStream = eventData.type === 'tool-stream';
+      const isShellAssistantStream = eventData.toolName === 'shell_cmd' &&
+        (eventData.type === 'start' || eventData.type === 'chunk' || eventData.type === 'end');
+      if (isLegacyToolStream || isShellAssistantStream) {
         activityMonitor.extendTimeout();
       }
     };

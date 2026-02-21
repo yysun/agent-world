@@ -385,7 +385,7 @@ describe('createStreamingState', () => {
         expect(callbacks.onToolStreamUpdate).not.toHaveBeenCalled();
 
         rafCallback();
-        expect(callbacks.onToolStreamUpdate).toHaveBeenCalledWith('msg-1', 'Output', 'stdout');
+        expect(callbacks.onToolStreamUpdate).toHaveBeenCalledWith('msg-1', 'Output', 'stdout', undefined, undefined);
       });
 
       it('should update streamType when switching streams', () => {
@@ -452,7 +452,7 @@ describe('createStreamingState', () => {
 
         state.handleToolStreamEnd('msg-1');
 
-        expect(callbacks.onToolStreamUpdate).toHaveBeenCalledWith('msg-1', 'Final', 'stdout');
+        expect(callbacks.onToolStreamUpdate).toHaveBeenCalledWith('msg-1', 'Final', 'stdout', undefined, undefined);
       });
 
       it('should return null for unknown stream', () => {

@@ -33,6 +33,7 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-02-21: Excluded persisted shell stdout stream assistant messages (messageId suffix `-stdout`) from LLM-history relevance filtering to prevent tool-continuation token amplification loops.
  * - 2026-02-20: Updated HITL tool system-prompt guidance to enforce options-only HITL usage.
  * - 2026-02-20: Added `buildToolUsagePromptSection()` for centralized, tool-aware system-prompt guidance (including HITL usage guidance when available).
  * - 2026-02-19: Replaced raw `working directory: <value>` system-prompt suffix with explicit `shell_cmd` scope instructions and a no-echo directive.
@@ -406,6 +407,16 @@ export function wouldAgentHaveRespondedToHistoricalMessage(
   agent: Agent,
   message: AgentMessage
 ): boolean {
+  const shellStdoutStreamMessage = message.role === 'assistant'
+    && typeof message.messageId === 'string'
+    && message.messageId.endsWith('-stdout');
+
+  // Persisted shell stdout stream messages are UI/history artifacts.
+  // Excluding them prevents large transcript echoes from inflating continuation context.
+  if (shellStdoutStreamMessage) {
+    return false;
+  }
+
   // Always include own messages (by agentId or sender)
   if (message.agentId === agent.id || message.sender?.toLowerCase() === agent.id.toLowerCase()) {
     return true;

@@ -12,6 +12,8 @@
  * - Runtime validation remains in higher-level handlers.
  *
  * Recent Changes:
+ * - 2026-02-21: Preserved assistant tool-call metadata (`tool_calls`, `toolCallStatus`) in realtime message serialization so renderer can reliably render tool-request rows.
+ * - 2026-02-21: Included SSE `toolName` and `stream` fields in realtime serialization so renderer can label/format tool-stream rows correctly.
  * - 2026-02-19: Added realtime CRUD-event serialization so renderer can refresh world/agent state after background updates.
  * - 2026-02-13: Added realtime system-event serialization so renderer can react to chat title updates.
  * - 2026-02-12: Extracted world/chat/message/event serialization helpers from `electron/main.ts`.
@@ -219,7 +221,11 @@ export function serializeRealtimeMessageEvent(
       createdAt,
       chatId: resolvedChatId,
       messageId,
-      replyToMessageId: event?.replyToMessageId || null
+      replyToMessageId: event?.replyToMessageId || null,
+      tool_calls: Array.isArray(event?.tool_calls) ? event.tool_calls : undefined,
+      toolCallStatus: event?.toolCallStatus && typeof event.toolCallStatus === 'object'
+        ? event.toolCallStatus
+        : undefined,
     }
   };
 }
@@ -238,6 +244,8 @@ export function serializeRealtimeSSEEvent(
       eventType: event?.type || 'chunk',
       messageId,
       agentName: event?.agentName || 'assistant',
+      toolName: event?.toolName || null,
+      stream: event?.stream || null,
       content: event?.content || '',
       error: event?.error || null,
       createdAt: new Date().toISOString(),

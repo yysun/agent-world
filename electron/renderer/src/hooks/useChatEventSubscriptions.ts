@@ -13,6 +13,8 @@
  * - Accepts state setters/callbacks via dependency injection.
  *
  * Recent Changes:
+ * - 2026-02-21: Extended tool-stream callback typing with optional command metadata for shell command labeling.
+ * - 2026-02-21: Updated realtime stream typing to include optional tool name in tool-stream callbacks.
  * - 2026-02-20: Enforced options-only HITL parsing and queue ingestion.
  * - 2026-02-19: Extended activity-state typing with optional elapsed reset hook used by activity event transitions.
  * - 2026-02-17: Extracted from App.tsx during CC pass.
@@ -54,8 +56,8 @@ type RealtimeState = {
   handleChunk: (messageId: string, content: string) => void;
   handleEnd: (messageId: string) => void;
   handleError: (messageId: string, errorMessage: string) => void;
-  handleToolStreamStart: (messageId: string, agentName: string, streamType: 'stdout' | 'stderr') => void;
-  handleToolStreamChunk: (messageId: string, content: string, streamType: 'stdout' | 'stderr') => void;
+  handleToolStreamStart: (messageId: string, agentName: string, streamType: 'stdout' | 'stderr', toolName?: string, command?: string) => void;
+  handleToolStreamChunk: (messageId: string, content: string, streamType: 'stdout' | 'stderr', toolName?: string, command?: string) => void;
   handleToolStreamEnd: (messageId: string) => void;
   isActive: (messageId: string) => boolean;
   cleanup: () => void;

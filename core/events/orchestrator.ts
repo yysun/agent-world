@@ -37,6 +37,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-21: Passed `agentName` + minimal shell `llmResultMode` in initial tool-execution context so `shell_cmd` tool results stay status-only for LLM continuation and stdout assistant attribution remains consistent.
  * - 2026-02-16: Added `LOG_LLM_TOOL_BRIDGE` gate for LLM↔tool console bridge logs.
  * - 2026-02-16: Added explicit console debug logs for LLM↔tool request/result/error handoff payloads.
  * - 2026-02-14: Shell tool trusted cwd fallback now uses core default working directory (user home) when world `working_directory` is missing.
@@ -687,7 +688,9 @@ export async function processAgentMessage(
             toolCallId: toolCall.id,
             chatId: targetChatId,
             abortSignal: processingHandle?.signal,
-            workingDirectory: trustedWorkingDirectory
+            workingDirectory: trustedWorkingDirectory,
+            agentName: agent.id,
+            llmResultMode: toolCall.function.name === 'shell_cmd' ? 'minimal' : 'verbose'
           };
 
           const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);

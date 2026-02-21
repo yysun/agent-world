@@ -13,6 +13,8 @@
  * - Keeps manager setup/teardown centralized in one hook.
  *
  * Recent Changes:
+ * - 2026-02-21: Propagated tool-stream command metadata into renderer messages so shell tool cards can display `Running command: <name>`.
+ * - 2026-02-21: Propagated tool-stream `toolName` into renderer messages so tool-running headers can resolve specific tool labels.
  * - 2026-02-20: Restored web-aligned assistant placeholder lifecycle (start placeholder, chunk updates, end removes placeholder).
  * - 2026-02-19: Prevented empty assistant cards by creating stream messages on first chunk instead of stream start.
  * - 2026-02-17: Extracted streaming/activity lifecycle from `App.jsx` during Phase 3.
@@ -108,18 +110,26 @@ export function useStreamingActivity({ setMessages }) {
           messageId: entry.messageId,
           role: 'tool',
           sender: entry.agentName || 'shell_cmd',
+          toolName: entry.toolName || entry.agentName || 'shell_cmd',
+          command: entry.command || '',
           content: '',
           createdAt: entry.createdAt,
           isToolStreaming: true,
           streamType: entry.streamType
         }));
       },
-      onToolStreamUpdate: (messageId, content, streamType) => {
+      onToolStreamUpdate: (messageId, content, streamType, toolName, command) => {
         setMessages((existing) => {
           const index = existing.findIndex((message) => String(message.messageId || '') === String(messageId));
           if (index < 0) return existing;
           const next = [...existing];
-          next[index] = { ...next[index], content, streamType };
+          next[index] = {
+            ...next[index],
+            content,
+            streamType,
+            ...(toolName ? { toolName } : {}),
+            ...(command ? { command } : {})
+          };
           return next;
         });
       },

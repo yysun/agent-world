@@ -13,6 +13,8 @@
  * - Helper functions are scoped to this module because only this component uses them.
  *
  * Recent Changes:
+ * - 2026-02-21: Added shell command header labeling (`Running command: <name>`) from tool-stream command metadata and unified stderr/stdout tool output styling to dark background with light text.
+ * - 2026-02-21: Prefer tool name from `tool_calls` metadata and treat assistant messages with `tool_calls` as explicit tool requests in header labeling.
  * - 2026-02-16: Extracted from `App.jsx` as part of renderer refactor Phase 2.
  */
 
@@ -27,6 +29,13 @@ function extractToolNameFromMessage(message) {
     return explicitToolName;
   }
 
+  if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
+    const firstToolName = String(message.tool_calls[0]?.function?.name || '').trim();
+    if (firstToolName) {
+      return firstToolName;
+    }
+  }
+
   const content = String(message?.content || '');
   const callingToolMatch = content.match(/calling tool\s*:\s*([a-z0-9_.:-]+)/i);
   if (callingToolMatch?.[1]) {
@@ -36,9 +45,25 @@ function extractToolNameFromMessage(message) {
   return '';
 }
 
+function extractCommandNameFromMessage(message) {
+  const rawCommand = String(message?.command || '').trim();
+  if (!rawCommand) {
+    return '';
+  }
+
+  const firstToken = rawCommand.split(/\s+/)[0] || '';
+  if (!firstToken) {
+    return '';
+  }
+
+  const pathSegments = firstToken.split(/[\\/]/).filter(Boolean);
+  return pathSegments[pathSegments.length - 1] || firstToken;
+}
+
 function getToolMessageHeaderLabel(message) {
   const content = String(message?.content || '');
-  const isToolCallRequest = /calling tool\s*:/i.test(content);
+  const hasToolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
+  const isToolCallRequest = hasToolCalls || /calling tool\s*:/i.test(content);
   const toolName = extractToolNameFromMessage(message);
   const normalizedToolName = toolName.toLowerCase();
   const isShellCommandTool = normalizedToolName === 'shell_cmd' || normalizedToolName === 'shell-cmd' || normalizedToolName === 'shell';
@@ -50,7 +75,8 @@ function getToolMessageHeaderLabel(message) {
 
   if (message?.isToolStreaming) {
     if (isShellCommandTool) {
-      return '⚙️ Running command...';
+      const commandName = extractCommandNameFromMessage(message);
+      return commandName ? `⚙️ Running command: ${commandName}` : '⚙️ Running command...';
     }
     return toolName ? `⚙️ Running ${toolName}...` : '⚙️ Running action...';
   }
@@ -165,10 +191,7 @@ export default function MessageContent({ message }) {
         {!isToolCollapsed ? (
           <div
             className="rounded-md overflow-hidden border"
-            style={message.streamType === 'stderr' ? {
-              backgroundColor: 'rgba(69, 10, 10, 0.3)',
-              borderColor: 'rgba(239, 68, 68, 0.3)'
-            } : {
+            style={{
               backgroundColor: 'rgb(15, 23, 42)',
               borderColor: 'rgb(51, 65, 85)'
             }}
@@ -176,9 +199,7 @@ export default function MessageContent({ message }) {
             <pre
               className="text-xs p-3 font-mono whitespace-pre-wrap"
               style={{
-                color: message.streamType === 'stderr'
-                  ? 'rgb(248, 113, 113)'
-                  : 'rgb(203, 213, 225)',
+                color: 'rgb(203, 213, 225)',
                 wordBreak: 'break-all'
               }}
             >

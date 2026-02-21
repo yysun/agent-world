@@ -31,6 +31,7 @@
  * Created: 2025-11-10 - Extracted from api.ts for reusability
  * Updated: 2026-02-20 - Removed stale legacy event-channel SSE forwarding from this handler.
  * Updated: 2026-02-20 - Keep `hitl-option-request` system events bypassing strict chat scope filtering so HITL prompts are always delivered.
+ * Updated: 2026-02-21 - Refresh fallback timeout on shell assistant-stream SSE activity (`start`/`chunk`/`end` + `toolName='shell_cmd'`) as well as legacy `tool-stream`.
  * Updated: 2026-02-11 - Extended fallback timeout on tool-stream events to prevent premature timeout
  * Updated: 2026-02-08 - Removed manual tool-intervention SSE commentary and kept generic tool_call forwarding
  * Updated: 2025-11-10 - Added tool event forwarding to SSE channel
@@ -283,8 +284,11 @@ export function createSSEHandler(
     if (!isChatEventInScope(eventData?.chatId, false)) {
       return;
     }
-    // Extend fallback timeout when tool-stream data arrives (keeps long-running tools alive)
-    if (eventData.type === 'tool-stream') {
+    // Extend fallback timeout for long-running shell stream activity.
+    const isLegacyToolStream = eventData.type === 'tool-stream';
+    const isShellAssistantStream = eventData.toolName === 'shell_cmd' &&
+      (eventData.type === 'start' || eventData.type === 'chunk' || eventData.type === 'end');
+    if (isLegacyToolStream || isShellAssistantStream) {
       startTimeoutFallback();
     }
     sendSSE({ type: EventType.SSE, data: eventData });

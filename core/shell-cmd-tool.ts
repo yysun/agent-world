@@ -27,6 +27,9 @@
  * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - 2026-02-21: Streamed stderr via legacy `tool-stream` events while streaming stdout as assistant SSE; persisted only finalized stdout assistant message after execution completes.
+ * - 2026-02-21: Added assistant-style SSE start/chunk/end streaming for shell runtime output so command chunks are delivered as assistant stream events instead of `tool-stream` messages.
+ * - 2026-02-21: Added minimal LLM shell-result mode (`status` + `exit_code` semantics) for tool-call continuations, excluding stdout/stderr transcript bodies.
  * - 2026-02-15: Moved core cwd-boundary enforcement into `executeShellCommand` via optional `trustedWorkingDirectory` execution option.
  * - 2026-02-15: Added optional `output_format=json` for machine-readable command results.
  * - 2026-02-15: Added optional `artifact_paths` support with SHA-256 hashing and byte-size metadata for files within trusted scope.
@@ -70,7 +73,7 @@ import { homedir } from 'os';
 import { realpathSync, promises as fsPromises } from 'fs';
 import { createCategoryLogger } from './logger.js';
 import { validateToolParameters } from './tool-utils.js';
-import { publishSSE } from './events/index.js';
+import { publishSSE, publishMessageWithId } from './events/index.js';
 import { getDefaultWorkingDirectory, getEnvValueFromText } from './utils.js';
 import {
   createShellProcessExecution,
@@ -139,6 +142,14 @@ export interface StructuredCommandExecutionResult {
   artifacts: CommandExecutionArtifact[];
   stdout_truncated?: boolean;
   stderr_truncated?: boolean;
+}
+
+export interface MinimalShellLLMResult {
+  status: 'success' | 'failed';
+  exit_code: number | null;
+  timed_out: boolean;
+  canceled: boolean;
+  reason?: 'timeout' | 'canceled' | 'non_zero_exit' | 'execution_error';
 }
 
 interface OutputSnippet {
@@ -1140,6 +1151,49 @@ export function formatStructuredResult(
   };
 }
 
+export function formatMinimalShellResult(
+  result: CommandExecutionResult
+): MinimalShellLLMResult {
+  const timedOut = Boolean(result.timedOut || result.error?.includes('timed out'));
+  const canceled = Boolean(result.canceled || result.error?.toLowerCase().includes('canceled'));
+  const failed = timedOut || canceled || result.exitCode !== 0 || Boolean(result.error);
+
+  let reason: MinimalShellLLMResult['reason'];
+  if (timedOut) {
+    reason = 'timeout';
+  } else if (canceled) {
+    reason = 'canceled';
+  } else if (result.exitCode !== null && result.exitCode !== 0) {
+    reason = 'non_zero_exit';
+  } else if (result.error) {
+    reason = 'execution_error';
+  }
+
+  return {
+    status: failed ? 'failed' : 'success',
+    exit_code: result.exitCode,
+    timed_out: timedOut,
+    canceled,
+    ...(reason ? { reason } : {})
+  };
+}
+
+export function formatMinimalShellResultForLLM(result: CommandExecutionResult): string {
+  const minimal = formatMinimalShellResult(result);
+  const lines = [
+    `status: ${minimal.status}`,
+    `exit_code: ${minimal.exit_code === null ? 'null' : String(minimal.exit_code)}`,
+    `timed_out: ${minimal.timed_out ? 'true' : 'false'}`,
+    `canceled: ${minimal.canceled ? 'true' : 'false'}`
+  ];
+
+  if (minimal.reason) {
+    lines.push(`reason: ${minimal.reason}`);
+  }
+
+  return lines.join('\n');
+}
+
 /**
  * Format command execution result for LLM consumption
  * Provides a human-readable summary of the execution with improved markdown formatting
@@ -1309,9 +1363,11 @@ export function createShellCmdToolDefinition() {
         required: ['command']
       };
 
+      const llmResultMode = context?.llmResultMode === 'minimal' ? 'minimal' : 'verbose';
+
       const validation = validateToolParameters(args, toolSchema, 'shell_cmd');
       if (!validation.valid) {
-        return formatResultForLLM({
+        const validationResult: CommandExecutionResult = {
           executionId: 'validation-error',
           command: args?.command || '<invalid>',
           parameters: [],
@@ -1322,7 +1378,13 @@ export function createShellCmdToolDefinition() {
           stderr: '',
           executedAt: new Date(),
           duration: 0
-        });
+        };
+
+        if (llmResultMode === 'minimal') {
+          return formatMinimalShellResultForLLM(validationResult);
+        }
+
+        return formatResultForLLM(validationResult);
       }
 
       const {
@@ -1344,6 +1406,15 @@ export function createShellCmdToolDefinition() {
       const currentMessageId = context?.toolCallId;
       const chatId = context?.chatId ? String(context.chatId) : undefined;
       const abortSignal = context?.abortSignal as AbortSignal | undefined;
+      const streamAgentName = typeof context?.agentName === 'string' && context.agentName.trim()
+        ? context.agentName.trim()
+        : 'assistant';
+      const hasAssistantStreamContext = Boolean(world && typeof currentMessageId === 'string' && currentMessageId.trim());
+      const streamBaseMessageId = hasAssistantStreamContext ? String(currentMessageId).trim() : '';
+      const stdoutMessageId = streamBaseMessageId ? `${streamBaseMessageId}-stdout` : '';
+      const streamMessages = Array.isArray(context?.messages) ? context.messages : null;
+      let stdoutStarted = false;
+      let streamedStdout = '';
       const resolvedDirectory = resolveTrustedShellWorkingDirectory(context);
       const directoryValidation = validateShellDirectoryRequest(
         validation.correctedArgs.directory,
@@ -1361,39 +1432,109 @@ export function createShellCmdToolDefinition() {
         throw new Error(scopeValidation.error);
       }
 
-      // Execute command with streaming callbacks if world is available
-      const result = await executeShellCommand(command, validParameters, resolvedDirectory, {
-        timeout,
-        abortSignal,
-        worldId: world?.id,
-        chatId,
-        trustedWorkingDirectory: resolvedDirectory,
-        onStdout: world ? (chunk) => {
-          // Publish streaming events to world event system
-          publishSSE(world, {
-            type: 'tool-stream',
-            toolName: 'shell_cmd',
-            content: chunk,
-            stream: 'stdout',
-            messageId: currentMessageId,
-            agentName: 'shell_cmd'
+      const ensureStdoutStreamStarted = () => {
+        if (!hasAssistantStreamContext) return;
+        if (stdoutStarted) return;
+        if (!stdoutMessageId) return;
+        stdoutStarted = true;
+        publishSSE(world, {
+          type: 'start',
+          toolName: 'shell_cmd',
+          messageId: stdoutMessageId,
+          agentName: streamAgentName,
+          stream: 'stdout',
+          chatId
+        });
+      };
+
+      const emitStdoutAssistantChunk = (chunk: string) => {
+        if (!hasAssistantStreamContext) return;
+        if (!chunk) return;
+        if (!stdoutMessageId) return;
+
+        streamedStdout += chunk;
+        ensureStdoutStreamStarted();
+        publishSSE(world, {
+          type: 'chunk',
+          toolName: 'shell_cmd',
+          content: chunk,
+          stream: 'stdout',
+          messageId: stdoutMessageId,
+          agentName: streamAgentName,
+          chatId
+        });
+      };
+
+      const emitStderrToolStreamChunk = (chunk: string) => {
+        if (!world || !chunk) return;
+        publishSSE(world, {
+          type: 'tool-stream',
+          toolName: 'shell_cmd',
+          content: chunk,
+          stream: 'stderr',
+          messageId: currentMessageId,
+          agentName: 'shell_cmd',
+          chatId
+        });
+      };
+
+      const finalizeStdoutAssistantStream = () => {
+        if (!hasAssistantStreamContext) return;
+        if (!stdoutStarted || !stdoutMessageId) return;
+
+        const content = streamedStdout;
+        if (streamMessages) {
+          streamMessages.push({
+            role: 'assistant',
+            content,
+            sender: streamAgentName,
+            agentId: streamAgentName,
+            createdAt: new Date(),
+            chatId: chatId || null,
+            messageId: stdoutMessageId
           });
-        } : undefined,
-        onStderr: world ? (chunk) => {
-          // Publish streaming events to world event system
-          publishSSE(world, {
-            type: 'tool-stream',
-            toolName: 'shell_cmd',
-            content: chunk,
-            stream: 'stderr',
-            messageId: currentMessageId,
-            agentName: 'shell_cmd'
-          });
-        } : undefined
-      });
+        }
+
+        publishMessageWithId(world, content, streamAgentName, stdoutMessageId, chatId);
+        publishSSE(world, {
+          type: 'end',
+          toolName: 'shell_cmd',
+          messageId: stdoutMessageId,
+          agentName: streamAgentName,
+          stream: 'stdout',
+          chatId
+        });
+      };
+
+      let result: CommandExecutionResult;
+      try {
+        // Execute command with assistant-streaming callbacks when world context is available
+        result = await executeShellCommand(command, validParameters, resolvedDirectory, {
+          timeout,
+          abortSignal,
+          worldId: world?.id,
+          chatId,
+          trustedWorkingDirectory: resolvedDirectory,
+          onStdout: hasAssistantStreamContext ? (chunk) => {
+            emitStdoutAssistantChunk(chunk);
+          } : undefined,
+          onStderr: world ? (chunk) => {
+            emitStderrToolStreamChunk(chunk);
+          } : undefined
+        });
+      } finally {
+        finalizeStdoutAssistantStream();
+      }
 
       if (isCommandExecutionCanceled(result)) {
         throw new DOMException('Shell command execution canceled by user', 'AbortError');
+      }
+
+      if (llmResultMode === 'minimal') {
+        if (outputFormat === 'json') {
+          return JSON.stringify(formatMinimalShellResult(result), null, 2);
+        }
+        return formatMinimalShellResultForLLM(result);
       }
 
       const validatedArtifactPaths = Array.isArray(artifactPaths)

@@ -13,6 +13,7 @@
  * - Helper functions are intentionally colocated to preserve behavior parity.
  *
  * Recent Changes:
+ * - 2026-02-21: Classified assistant messages with `tool_calls` as tool-related so tool-request rows render reliably even when text lacks `Calling tool: ...`.
  * - 2026-02-20: Added `isRenderableMessageEntry` so welcome-state and list rendering share identical message-presence logic.
  * - 2026-02-16: Extracted from App.jsx into dedicated utility module.
  */
@@ -31,6 +32,9 @@ export function isHumanMessage(message) {
 export function isToolRelatedMessage(message) {
   const role = String(message?.role || '').trim().toLowerCase();
   if (role === 'tool' || Boolean(message?.isToolStreaming)) {
+    return true;
+  }
+  if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
     return true;
   }
 

@@ -8,11 +8,16 @@
  * - Escaping of quotes within parameters
  * 
  * Changes:
+ * - 2026-02-21: Added minimal shell LLM-result formatting assertions (status + exit semantics, no stdout/stderr transcript body).
  * - 2025-11-11: Initial implementation to test parameter quoting
  */
 
 import { describe, test, expect } from 'vitest';
-import { formatResultForLLM } from '../../core/shell-cmd-tool.js';
+import {
+  formatResultForLLM,
+  formatMinimalShellResult,
+  formatMinimalShellResultForLLM
+} from '../../core/shell-cmd-tool.js';
 import type { CommandExecutionResult } from '../../core/shell-cmd-tool.js';
 
 describe('formatResultForLLM', () => {
@@ -148,5 +153,55 @@ describe('formatResultForLLM', () => {
     expect(formatted).toContain('### Standard Output');
     expect(formatted).toContain('full-output');
     expect(formatted).toContain('**Executed at:**');
+  });
+});
+
+describe('formatMinimalShellResultForLLM', () => {
+  test('should format success status with exit code only', () => {
+    const result: CommandExecutionResult = {
+      executionId: 'test-success',
+      command: 'echo',
+      parameters: ['ok'],
+      stdout: 'hidden from llm',
+      stderr: '',
+      exitCode: 0,
+      signal: null,
+      executedAt: new Date(),
+      duration: 12
+    };
+
+    const minimal = formatMinimalShellResult(result);
+    const text = formatMinimalShellResultForLLM(result);
+
+    expect(minimal.status).toBe('success');
+    expect(minimal.exit_code).toBe(0);
+    expect(text).toContain('status: success');
+    expect(text).toContain('exit_code: 0');
+    expect(text).not.toContain('hidden from llm');
+  });
+
+  test('should format failed status with reason for non-zero exit', () => {
+    const result: CommandExecutionResult = {
+      executionId: 'test-fail',
+      command: 'ls',
+      parameters: ['/missing'],
+      stdout: '',
+      stderr: 'No such file',
+      exitCode: 2,
+      signal: null,
+      error: 'Command exited with code 2',
+      executedAt: new Date(),
+      duration: 17
+    };
+
+    const minimal = formatMinimalShellResult(result);
+    const text = formatMinimalShellResultForLLM(result);
+
+    expect(minimal.status).toBe('failed');
+    expect(minimal.reason).toBe('non_zero_exit');
+    expect(text).toContain('status: failed');
+    expect(text).toContain('exit_code: 2');
+    expect(text).toContain('reason: non_zero_exit');
+    expect(text).not.toContain('No such file');
   });
 });

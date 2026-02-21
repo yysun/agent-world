@@ -13,6 +13,9 @@
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
+ * - 2026-02-21: Backfilled tool-stream row metadata on late `tool-start` events so shell cards still resolve command/tool labels even when stream chunks arrive first.
+ * - 2026-02-21: Derived shell command labels for tool-stream rows from `tool-start` input (`toolUseId -> command`) and forwarded command metadata into streaming state.
+ * - 2026-02-21: Forwarded SSE `toolName` into tool-stream state so tool streaming cards can render tool-specific running labels.
  * - 2026-02-20: Allow `hitl-option-request` system events to bypass strict chatId session filtering so approval prompts remain visible when event scope is stale/unscoped.
  * - 2026-02-19: Reset elapsed activity timer on idle→active session-activity transition so new agent work starts from 0s.
  * - 2026-02-16: Added defensive SSE end/error handling when `messageId` is missing by clearing response state and ending lingering streams.
@@ -46,8 +49,8 @@ interface RealtimeRefs {
     handleChunk: (messageId: string, content: string) => void;
     handleEnd: (messageId: string) => void;
     handleError: (messageId: string, errorMessage: string) => void;
-    handleToolStreamStart: (messageId: string, agentName: string, streamType: 'stdout' | 'stderr') => void;
-    handleToolStreamChunk: (messageId: string, content: string, streamType: 'stdout' | 'stderr') => void;
+    handleToolStreamStart: (messageId: string, agentName: string, streamType: 'stdout' | 'stderr', toolName?: string, command?: string) => void;
+    handleToolStreamChunk: (messageId: string, content: string, streamType: 'stdout' | 'stderr', toolName?: string, command?: string) => void;
     handleToolStreamEnd: (messageId: string) => void;
     isActive: (messageId: string) => boolean;
   } | null;
@@ -190,6 +193,7 @@ export function createChatSubscriptionEventHandler({
   onSessionSystemEvent,
 }: ChatHandlerOptions) {
   let lastActivityPendingOperations = 0;
+  const toolCommandByUseId = new Map<string, string>();
 
   const syncActiveStreamCount = () => {
     const streaming = streamingStateRef.current;
@@ -323,15 +327,19 @@ export function createChatSubscriptionEventHandler({
       } else if (eventType === 'tool-stream') {
         const content = String(streamPayload.content || '');
         const stream = String(streamPayload.stream || 'stdout') === 'stderr' ? 'stderr' : 'stdout';
+        const toolName = String(streamPayload.toolName || 'shell_cmd').trim() || 'shell_cmd';
+        const command = toolCommandByUseId.get(messageId);
         if (!streaming.isActive(messageId)) {
           streaming.handleToolStreamStart(
             messageId,
             String(streamPayload.agentName || 'shell_cmd'),
             stream,
+            toolName,
+            command,
           );
           syncActiveStreamCount();
         }
-        streaming.handleToolStreamChunk(messageId, content, stream);
+        streaming.handleToolStreamChunk(messageId, content, stream, toolName, command);
       }
       return;
     }
@@ -351,15 +359,38 @@ export function createChatSubscriptionEventHandler({
       if (!toolUseId) return;
 
       if (toolEventType === 'tool-start') {
+        const toolName = String(toolPayload.toolName || 'unknown');
+        const toolInput = (toolPayload.toolInput as Record<string, unknown> | undefined) || undefined;
+        const command = typeof toolInput?.command === 'string' ? toolInput.command.trim() : '';
+        if (command) {
+          toolCommandByUseId.set(toolUseId, command);
+
+          // Stream chunks can occasionally arrive before tool-start metadata.
+          // Backfill command/tool label onto an already-created tool stream row.
+          setMessages((existing) => {
+            const index = existing.findIndex(
+              (message) => String(message?.messageId || '').trim() === toolUseId
+            );
+            if (index < 0) return existing;
+            const next = [...existing];
+            next[index] = {
+              ...next[index],
+              ...(toolName ? { toolName } : {}),
+              command
+            };
+            return next;
+          });
+        }
         if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
           onSessionResponseStateChange(responseChatId, true);
         }
         activity.handleToolStart(
           toolUseId,
-          String(toolPayload.toolName || 'unknown'),
-          (toolPayload.toolInput as Record<string, unknown> | undefined) || undefined,
+          toolName,
+          toolInput,
         );
       } else if (toolEventType === 'tool-result') {
+        toolCommandByUseId.delete(toolUseId);
         if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
           onSessionResponseStateChange(responseChatId, false);
         }
@@ -372,6 +403,7 @@ export function createChatSubscriptionEventHandler({
           endAllToolStreams();
         }
       } else if (toolEventType === 'tool-error') {
+        toolCommandByUseId.delete(toolUseId);
         if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
           onSessionResponseStateChange(responseChatId, false);
         }

@@ -12,6 +12,7 @@
  *   - Delegates edit/remove/resubmit flow to `core.editUserMessage` for cross-client consistency
  *   - Streams edit-resubmission follow-up events over SSE by default (`stream: true`)
  *   - Keeps DELETE endpoint focused on removal-only behavior
+ * - 2026-02-21: Extended non-streaming timeout refresh to include shell assistant-stream SSE activity (`start`/`chunk`/`end` with `toolName='shell_cmd'`) in addition to legacy `tool-stream`.
  * - 2026-02-11: Extended non-streaming timeout on tool-stream events to prevent premature timeout during long-running tools
  * - Standardized world-scoped routes to use validateWorld middleware to load and attach worldCtx/world
  * - Removed ad-hoc world loading and undefined getWorldOrError usage; handlers now use (req as any).worldCtx and (req as any).world
@@ -657,7 +658,7 @@ async function handleNonStreamingChat(
         }
       }, 60000); // Longer timeout as fallback since we rely on events
 
-      // Helper to reset the fallback timeout (called when tool-stream data arrives)
+      // Helper to reset the fallback timeout when long-running shell stream activity arrives.
       const resetTimeout = () => {
         clearTimeout(timeoutTimer);
         timeoutTimer = setTimeout(() => {
@@ -712,9 +713,13 @@ async function handleNonStreamingChat(
         world.eventEmitter.on(EventType.MESSAGE, messageListener);
         listeners.set(EventType.MESSAGE, messageListener);
 
-        // Listen to SSE events to extend timeout on tool-stream data
+        // Listen to SSE events to extend timeout on shell stream activity.
         const sseListener = (eventData: any) => {
-          if (eventData.type === 'tool-stream') {
+          const isLegacyToolStream = eventData.type === 'tool-stream';
+          const isShellAssistantStream = eventData.toolName === 'shell_cmd' &&
+            (eventData.type === 'start' || eventData.type === 'chunk' || eventData.type === 'end');
+
+          if (isLegacyToolStream || isShellAssistantStream) {
             resetTimeout();
           }
         };

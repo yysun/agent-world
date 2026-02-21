@@ -225,6 +225,10 @@ describe('extracted message utils', () => {
   it('classifies human/tool/assistant message roles correctly', () => {
     expect(isHumanMessage({ role: 'user' })).toBe(true);
     expect(isToolRelatedMessage({ role: 'tool' })).toBe(true);
+    expect(isToolRelatedMessage({
+      role: 'assistant',
+      tool_calls: [{ type: 'function', function: { name: 'shell_cmd', arguments: '{}' } }]
+    })).toBe(true);
     expect(isTrueAgentResponseMessage({ role: 'assistant', sender: 'agent-a', content: 'hello' })).toBe(true);
     expect(isTrueAgentResponseMessage({ role: 'assistant', content: 'Calling tool: shell_cmd' })).toBe(false);
   });
