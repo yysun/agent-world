@@ -299,6 +299,7 @@ export AGENT_WORLD_DATA_PATH=./data/worlds
 - **[Building Agents with Just Words](docs/Building%20Agents%20with%20Just%20Words.md)** - Complete guide with examples
 - **[Shell Command Tool (shell_cmd)](docs/shell-cmd-tool.md)** - Built-in tool for executing shell commands
 - **[HITL Approval Flow](docs/hitl-approval-flow.md)** - Option-based approval flow across Core/Electron/Web/CLI
+- **[API Reference](openapi.yaml)** - OpenAPI 3.1 spec for the REST API
 - **[Using Core from npm](docs/core-npm-usage.md)** - Integration guide for server and browser apps
 - **[Electron Desktop App](docs/electron-desktop.md)** - Open-folder workflow and local world creation
 

@@ -1,0 +1,1105 @@
+openapi: 3.1.0
+info:
+  title: Agent World API
+  description: REST API for managing AI agent worlds, agents, chats, and messaging with SSE streaming support.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:{port}/api
+    description: Local development server (auto-assigned port)
+    variables:
+      port:
+        default: "3000"
+
+paths:
+  /worlds:
+    get:
+      summary: List all worlds
+      operationId: listWorlds
+      tags: [Worlds]
+      description: Returns all worlds. Creates a default world if none exist.
+      responses:
+        "200":
+          description: List of worlds
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WorldListItem"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      summary: Create a new world
+      operationId: createWorld
+      tags: [Worlds]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorldCreate"
+      responses:
+        "201":
+          description: World created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, id]
+                properties:
+                  name:
+                    type: string
+                  id:
+                    type: string
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "409":
+          description: World with this name already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /worlds/{worldName}:
+    parameters:
+      - $ref: "#/components/parameters/worldName"
+
+    get:
+      summary: Get world details
+      operationId: getWorld
+      tags: [Worlds]
+      responses:
+        "200":
+          description: World details with agents and chats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/World"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    patch:
+      summary: Update world settings
+      operationId: updateWorld
+      tags: [Worlds]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorldUpdate"
+      responses:
+        "200":
+          description: Updated world
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/World"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      summary: Delete a world
+      operationId: deleteWorld
+      tags: [Worlds]
+      responses:
+        "204":
+          description: World deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /worlds/{worldName}/export:
+    parameters:
+      - $ref: "#/components/parameters/worldName"
+
+    get:
+      summary: Export world to Markdown
+      operationId: exportWorld
+      tags: [Worlds]
+      responses:
+        "200":
+          description: Markdown file download
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+                example: 'attachment; filename="my-world-2026-02-21T12-00.md"'
+          content:
+            text/markdown:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /worlds/{worldName}/agents:
+    parameters:
+      - $ref: "#/components/parameters/worldName"
+
+    get:
+      summary: List agents in a world
+      operationId: listAgents
+      tags: [Agents]
+      responses:
+        "200":
+          description: List of agents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Agent"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      summary: Create a new agent
+      operationId: createAgent
+      tags: [Agents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentCreate"
+      responses:
+        "201":
+          description: Agent created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Agent with this name already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /worlds/{worldName}/agents/{agentName}:
+    parameters:
+      - $ref: "#/components/parameters/worldName"
+      - $ref: "#/components/parameters/agentName"
+
+    get:
+      summary: Get agent details
+      operationId: getAgent
+      tags: [Agents]
+      responses:
+        "200":
+          description: Agent details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    patch:
+      summary: Update an agent
+      operationId: updateAgent
+      tags: [Agents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentUpdate"
+      responses:
+        "200":
+          description: Updated agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      summary: Delete an agent
+      operationId: deleteAgent
+      tags: [Agents]
+      responses:
+        "204":
+          description: Agent deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /worlds/{worldName}/agents/{agentName}/memory:
+    parameters:
+      - $ref: "#/components/parameters/worldName"
+      - $ref: "#/components/parameters/agentName"
+
+    delete:
+      summary: Clear agent memory
+      operationId: clearAgentMemory
+      tags: [Agents]
+      responses:
+        "204":
+          description: Agent memory cleared
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /worlds/{worldName}/messages:
+    parameters:
+      - $ref: "#/components/parameters/worldName"
+
+    post:
+      summary: Send a message to the world
+      operationId: sendMessage
+      tags: [Chat]
+      description: |
+        Sends a message to the world. By default streams the response as Server-Sent Events (SSE).
+        Set `stream: false` to receive a JSON response after processing completes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatMessage"
+      responses:
+        "200":
+          description: |
+            When `stream: true` (default): SSE event stream.
+            When `stream: false`: JSON response with processed result.
+          content:
+            text/event-stream:
+              schema:
+                description: SSE event stream with message, world, sse, and system events
+                type: string
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      content:
+                        type: string
+                      timestamp:
+                        type: string
+                        format: date-time
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /worlds/{worldName}/messages/stop:
+    parameters:
+      - $ref: "#/components/parameters/worldName"
+
+    post:
+      summary: Stop message processing
+      operationId: stopMessageProcessing
+      tags: [Chat]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [chatId]
+              properties:
+                chatId:
+                  type: string
+                  minLength: 1
+      responses:
+        "200":
+          description: Processing stopped
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /worlds/{worldName}/messages/{messageId}:
+    parameters:
+      - $ref: "#/components/parameters/worldName"
+      - name: messageId
+        in: path
+        required: true
+        schema:
+          type: string
+
+    put:
+      summary: Edit and resubmit a message
+      operationId: editMessage
+      tags: [Chat]
+      description: |
+        Edits a user message and resubmits it. Removes all messages from the target message
+        onward across all agents, then resubmits with the new content.
+        By default streams the resubmission response as SSE.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessageEdit"
+      responses:
+        "200":
+          description: |
+            When `stream: true` (default): SSE event stream of resubmission.
+            When `stream: false`: JSON result of the edit operation.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemovalResult"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "423":
+          description: World is currently processing another message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      summary: Remove a message and its descendants
+      operationId: deleteMessage
+      tags: [Chat]
+      description: |
+        Removes a user message and all subsequent messages from agent memory.
+        Does not resubmit; the frontend handles resubmission separately via POST /messages.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [chatId]
+              properties:
+                chatId:
+                  type: string
+      responses:
+        "200":
+          description: Messages removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemovalResult"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "423":
+          description: World is currently processing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /worlds/{worldName}/hitl/respond:
+    parameters:
+      - $ref: "#/components/parameters/worldName"
+
+    post:
+      summary: Submit a human-in-the-loop response
+      operationId: submitHitlResponse
+      tags: [HITL]
+      description: Submits an approval option for a pending human-in-the-loop request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HitlResponse"
+      responses:
+        "200":
+          description: HITL response submitted
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /worlds/{worldName}/chats:
+    parameters:
+      - $ref: "#/components/parameters/worldName"
+
+    get:
+      summary: List chats in a world
+      operationId: listChats
+      tags: [Chats]
+      responses:
+        "200":
+          description: List of chats
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Chat"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      summary: Create a new chat
+      operationId: createChat
+      tags: [Chats]
+      responses:
+        "200":
+          description: Chat created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  world:
+                    $ref: "#/components/schemas/World"
+                  chatId:
+                    type: string
+                    nullable: true
+                  success:
+                    type: boolean
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /worlds/{worldName}/chats/{chatId}:
+    parameters:
+      - $ref: "#/components/parameters/worldName"
+      - $ref: "#/components/parameters/chatId"
+
+    delete:
+      summary: Delete a chat
+      operationId: deleteChat
+      tags: [Chats]
+      responses:
+        "200":
+          description: Chat deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /worlds/{worldName}/setChat/{chatId}:
+    parameters:
+      - $ref: "#/components/parameters/worldName"
+      - $ref: "#/components/parameters/chatId"
+
+    post:
+      summary: Switch to a chat session
+      operationId: setChat
+      tags: [Chats]
+      responses:
+        "200":
+          description: Chat switched
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  world:
+                    $ref: "#/components/schemas/World"
+                  chatId:
+                    type: string
+                    nullable: true
+                  success:
+                    type: boolean
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /mcp/servers:
+    get:
+      summary: List MCP servers
+      operationId: listMCPServers
+      tags: [MCP]
+      responses:
+        "200":
+          description: MCP servers and registry stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  servers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/MCPServer"
+                  stats:
+                    type: object
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /mcp/servers/{serverId}/restart:
+    parameters:
+      - name: serverId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Server ID or partial ID prefix
+
+    post:
+      summary: Restart an MCP server
+      operationId: restartMCPServer
+      tags: [MCP]
+      responses:
+        "200":
+          description: Server restarted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  serverId:
+                    type: string
+        "404":
+          description: MCP server not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /mcp/health:
+    get:
+      summary: Get MCP system health
+      operationId: getMCPHealth
+      tags: [MCP]
+      responses:
+        "200":
+          description: MCP health status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [healthy, degraded, unhealthy]
+                  timestamp:
+                    type: string
+                    format: date-time
+                  registry:
+                    type: object
+        "500":
+          description: MCP system unhealthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: unhealthy
+
+components:
+  parameters:
+    worldName:
+      name: worldName
+      in: path
+      required: true
+      schema:
+        type: string
+      description: World name (converted to kebab-case ID internally)
+
+    agentName:
+      name: agentName
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Agent name (converted to kebab-case ID internally)
+
+    chatId:
+      name: chatId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    LLMProvider:
+      type: string
+      enum:
+        - openai
+        - anthropic
+        - azure
+        - google
+        - xai
+        - openai-compatible
+        - ollama
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+        details: {}
+
+    WorldListItem:
+      type: object
+      properties:
+        name:
+          type: string
+        agentCount:
+          type: integer
+        id:
+          type: string
+        description:
+          type: string
+          nullable: true
+
+    WorldCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          nullable: true
+        turnLimit:
+          type: integer
+          minimum: 1
+        mainAgent:
+          type: string
+          nullable: true
+        chatLLMProvider:
+          $ref: "#/components/schemas/LLMProvider"
+        chatLLMModel:
+          type: string
+          nullable: true
+        mcpConfig:
+          type: string
+          nullable: true
+          description: MCP configuration as JSON string
+        variables:
+          type: string
+          nullable: true
+          description: ".env-style world variables"
+
+    WorldUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          nullable: true
+        turnLimit:
+          type: integer
+          minimum: 1
+        mainAgent:
+          type: string
+          nullable: true
+        chatLLMProvider:
+          $ref: "#/components/schemas/LLMProvider"
+        chatLLMModel:
+          type: string
+          nullable: true
+        mcpConfig:
+          type: string
+          nullable: true
+        variables:
+          type: string
+          nullable: true
+
+    World:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        turnLimit:
+          type: integer
+        mainAgent:
+          type: string
+          nullable: true
+        chatLLMProvider:
+          $ref: "#/components/schemas/LLMProvider"
+        chatLLMModel:
+          type: string
+        currentChatId:
+          type: string
+          nullable: true
+        mcpConfig:
+          type: string
+          nullable: true
+        variables:
+          type: string
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"
+        chats:
+          type: array
+          items:
+            $ref: "#/components/schemas/Chat"
+
+    AgentCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        type:
+          type: string
+          default: default
+        autoReply:
+          type: boolean
+          default: true
+        provider:
+          $ref: "#/components/schemas/LLMProvider"
+        model:
+          type: string
+          default: gpt-4
+        systemPrompt:
+          type: string
+        apiKey:
+          type: string
+        baseUrl:
+          type: string
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 1
+        maxTokens:
+          type: integer
+          minimum: 1
+
+    AgentUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        type:
+          type: string
+        autoReply:
+          type: boolean
+        status:
+          type: string
+          enum: [active, inactive, error]
+        provider:
+          $ref: "#/components/schemas/LLMProvider"
+        model:
+          type: string
+        systemPrompt:
+          type: string
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 1
+        maxTokens:
+          type: integer
+          minimum: 1
+        clearMemory:
+          type: boolean
+          description: If true, clears the agent's memory before applying other updates
+
+    Agent:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        autoReply:
+          type: boolean
+        provider:
+          $ref: "#/components/schemas/LLMProvider"
+        model:
+          type: string
+        temperature:
+          type: number
+        maxTokens:
+          type: integer
+        systemPrompt:
+          type: string
+        llmCallCount:
+          type: integer
+        memory:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentMessage"
+        messageCount:
+          type: integer
+
+    Chat:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        messageCount:
+          type: integer
+
+    AgentMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant, tool]
+        content:
+          type: string
+        messageId:
+          type: string
+        replyToMessageId:
+          type: string
+        sender:
+          type: string
+        chatId:
+          type: string
+          nullable: true
+        agentId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        tool_calls:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              type:
+                type: string
+                enum: [function]
+              function:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  arguments:
+                    type: string
+        tool_call_id:
+          type: string
+
+    ChatMessage:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          minLength: 1
+        sender:
+          type: string
+          default: human
+        stream:
+          type: boolean
+          default: true
+        chatId:
+          type: string
+          minLength: 1
+        messages:
+          type: array
+          items: {}
+
+    MessageEdit:
+      type: object
+      required: [chatId, newContent]
+      properties:
+        chatId:
+          type: string
+          minLength: 1
+        newContent:
+          type: string
+          minLength: 1
+        stream:
+          type: boolean
+          default: true
+
+    HitlResponse:
+      type: object
+      required: [requestId, optionId]
+      properties:
+        requestId:
+          type: string
+          minLength: 1
+        optionId:
+          type: string
+          minLength: 1
+        chatId:
+          type: string
+          nullable: true
+
+    RemovalResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        messageId:
+          type: string
+        totalAgents:
+          type: integer
+        processedAgents:
+          type: array
+          items:
+            type: string
+        failedAgents:
+          type: array
+          items:
+            type: object
+            properties:
+              agentId:
+                type: string
+              error:
+                type: string
+        messagesRemovedTotal:
+          type: integer
+        requiresRetry:
+          type: boolean
+        resubmissionStatus:
+          type: string
+          enum: [success, failed, skipped]
+        resubmissionError:
+          type: string
+        newMessageId:
+          type: string
+        message:
+          type: string
+
+    MCPServer:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Truncated server ID (8 chars)
+        name:
+          type: string
+        transport:
+          type: string
+        status:
+          type: string
+        referenceCount:
+          type: integer
+        startedAt:
+          type: string
+          format: date-time
+        lastHealthCheck:
+          type: string
+          format: date-time
+        associatedWorlds:
+          type: array
+          items:
+            type: string
+        error:
+          type: string
+
+  responses:
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+tags:
+  - name: Worlds
+    description: World lifecycle management
+  - name: Agents
+    description: Agent CRUD and memory management
+  - name: Chat
+    description: Messaging and SSE streaming
+  - name: Chats
+    description: Chat session management
+  - name: HITL
+    description: Human-in-the-loop approval workflow
+  - name: MCP
+    description: MCP server monitoring and management
