@@ -1,40 +1,21 @@
 /*
- * World Selection Screen Styles
- * 
- * Features:
- * - World selection interface with carousel-style preview
- * - Animated world graphics (Neon City, Mystic Forest, Cyber Ocean)
- * - Responsive design with mobile-first approach
- * - Interactive controls and navigation indicators
- * - Memory-only message styling (gray border for agent→agent messages)
- * - Agent activity display with fade-in animation
- * 
- * Implementation:
- * - CSS Grid and Flexbox for layout
- * - CSS animations for graphics and transitions
- * - CSS custom properties for theming
- * - Gradient effects and box shadows for visual depth
- * 
- * Recent Changes:
+ * Purpose:
+ * - Define shared visual styles for the web world screens, including world selection, chat layout, and composer UI.
+ *
+ * Key Features:
+ * - World selection visuals, responsive layout primitives, and interactive controls.
+ * - Chat transcript styling (message roles, tool output, avatars, activity indicators).
+ * - Electron-aligned chat composer shell with toolbar actions and send/stop control visuals.
+ *
+ * Notes on Implementation:
+ * - Uses CSS custom properties for theme tokens and predictable light-theme rendering.
+ * - Balances AppRun/Tailwind utility usage with stylesheet-level overrides for complex chat behavior.
+ *
+ * Summary of Recent Changes:
+ * - 2026-02-21: Made composer float above conversation content so chat messages render beneath it.
+ * - 2026-02-21: Restyled composer toolbar to match Electron app structure shown in product reference (plus action, project pill, gray circular send button).
  * - 2026-02-21: Updated world chat composer styling to mirror Electron's textarea-based composer shell and icon send/stop button.
  * - 2026-02-20: Added top-row main-agent highlight treatment and badge.
- * - Matched system/log message typography with regular agent message font in world chat
- * - Prevented wide markdown content from stretching the chat column by constraining overflow inside message content
- * - Fixed user-message edit/delete controls clipping by placing action buttons inside the message bubble
- * - Matched chat avatar size to top agent sprites, kept avatars on the left, and constrained widths to prevent horizontal scroll
- * - Moved right-aligned message avatars to the message side and removed circular avatar mask
- * - Fixed message avatar sprite-sheet coordinates for 32px chat avatars
- * - Left human message avatars empty while preserving avatar spacing
- * - Added left-side avatar layout for world chat message boxes
- * - Added activity indicator styles for world events (response-start, tool-start)
- * - Added .memory-only-message class for agent messages saved to other agents' memory (gray border)
- * - Removed @import for Google Fonts to prevent flickering during route changes
- * - Font is now preloaded in HTML head for better performance
- * - Removed text-shadow from banner title to reduce blur
- * - Changed select button text color from white to light gray (#f8f9fa)
- * - Made indicator dots less bright with gray border instead of theme variable
- * - Updated body font to game-style typography with Orbitron/Exo 2 fallbacks
- * - Fixed .world-back-icon styling by adding desktop styles and improving mobile sizing
  */
 
 /* Reset and base styles */
@@ -925,6 +906,7 @@ legend {
 }
 
 .chat-container {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -954,6 +936,12 @@ legend {
   max-width: 100%;
 }
 
+/* Keep composer constrained/centered on large screens despite doodle/chat-fieldset overrides */
+.chat-fieldset .composer-shell {
+  max-width: 48rem;
+  width: min(100%, 48rem);
+}
+
 /* Settings fieldset - takes up the remaining space in settings column */
 .settings-fieldset {
   flex: 1;
@@ -978,7 +966,8 @@ legend {
   background-color: transparent;
   border-radius: 8px;
   padding: 1rem;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0;
+  padding-bottom: clamp(8.5rem, 13vh, 11rem);
   min-height: 400px;
   min-width: 0;
   width: 100%;
@@ -1522,36 +1511,50 @@ legend {
 
 /* User Input Area */
 .input-area {
-  padding: 0;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  padding: 0.15rem 0.7rem 0.35rem;
   background-color: transparent;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
 }
 
 .composer-shell {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.55rem;
   width: 100%;
-  border: 1px solid var(--border-primary);
-  border-radius: 10px;
-  background-color: var(--bg-primary);
-  padding: 0.6rem 0.75rem;
-  box-shadow: var(--shadow-sm);
+  max-width: 48rem;
+  border: 1px solid color-mix(in srgb, var(--border-secondary) 85%, #c4c4c4 15%);
+  border-radius: 14px;
+  background-color: #ffffff;
+  padding: 0.9rem 1rem 0.75rem;
+  box-shadow: var(--shadow-md);
+  pointer-events: auto;
+}
+
+.composer-shell:focus-within {
+  border-color: color-mix(in srgb, var(--border-secondary) 70%, #b5b5b5 30%);
 }
 
 .composer-textarea {
   flex: 1;
   width: 100%;
-  min-height: 1.75rem;
-  max-height: 8rem;
-  padding: 0.2rem 0.1rem;
+  min-height: 3.05rem;
+  max-height: 9rem;
+  padding: 0.15rem 0.1rem;
   border: none;
-  resize: vertical;
+  resize: none;
   outline: none;
   background-color: transparent;
-  font-family: 'Short Stack', cursive;
-  font-size: 0.85rem;
-  line-height: 1.35;
-  color: var(--text-primary);
+  font-family: 'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--text-primary) 70%, #4b5563 30%);
   overflow-y: auto;
 }
 
@@ -1560,61 +1563,124 @@ legend {
 }
 
 .composer-textarea::placeholder {
-  color: var(--text-tertiary);
+  color: color-mix(in srgb, var(--text-tertiary) 80%, #7a7a7a 20%);
 }
 
 .composer-textarea:disabled {
   cursor: not-allowed;
-  color: var(--text-tertiary);
+  color: color-mix(in srgb, var(--text-tertiary) 85%, #8b8b8b 15%);
 }
 
 .composer-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.5rem;
 }
 
 .composer-toolbar-left {
-  min-height: 1.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 2rem;
+}
+
+.composer-action-icon-button {
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: color-mix(in srgb, var(--text-secondary) 80%, #7a7a7a 20%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.composer-action-icon-button:hover {
+  background-color: color-mix(in srgb, var(--bg-accent) 80%, white 20%);
+  color: var(--text-primary);
+}
+
+.composer-toolbar-icon {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.composer-project-button {
+  height: 2rem;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: color-mix(in srgb, var(--text-secondary) 80%, #7a7a7a 20%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0 0.55rem;
+  font-family: 'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.composer-project-button:hover {
+  background-color: color-mix(in srgb, var(--bg-accent) 80%, white 20%);
+  color: var(--text-primary);
+}
+
+.composer-project-icon {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+/* Override doodle.css button/textarea border-image styles for composer controls */
+.doodle .composer-textarea,
+.doodle .composer-action-icon-button,
+.doodle .composer-project-button {
+  border: none !important;
+  border-image: none !important;
 }
 
 .composer-submit-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2rem;
-  height: 2rem;
+  width: 2.05rem;
+  height: 2.05rem;
   padding: 0;
   border-radius: 9999px;
   border: none;
-  background-color: var(--text-primary);
-  color: var(--bg-primary);
+  background-color: color-mix(in srgb, var(--text-tertiary) 65%, #8f8f8f 35%);
+  color: #ffffff;
   cursor: pointer;
   transition: background-color 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
 }
 
 .composer-submit-button:hover:not(:disabled) {
-  background-color: var(--text-secondary);
+  background-color: color-mix(in srgb, var(--text-secondary) 70%, #808080 30%);
   transform: translateY(-1px);
 }
 
 .composer-submit-button.stop-button {
-  background-color: var(--text-secondary);
+  background-color: color-mix(in srgb, #c2410c 75%, #ea580c 25%);
 }
 
 .composer-submit-button.stop-button:hover:not(:disabled) {
-  background-color: var(--text-primary);
+  background-color: color-mix(in srgb, #9a3412 80%, #c2410c 20%);
 }
 
 .composer-submit-button:disabled {
-  opacity: 0.4;
+  opacity: 0.45;
   cursor: not-allowed;
   transform: none;
 }
 
 .composer-submit-icon {
-  width: 1rem;
-  height: 1rem;
+  width: 1.05rem;
+  height: 1.05rem;
 }
 
 /* Shared text input fields (e.g., chat history search) */
@@ -1827,6 +1893,7 @@ legend {
 
   .conversation-area {
     min-height: 250px;
+    padding-bottom: clamp(8rem, 22vh, 10rem);
   }
 }
 
@@ -1881,16 +1948,36 @@ legend {
   }
 
   .composer-shell {
-    padding: 0.55rem 0.6rem;
+    max-width: 100%;
+    padding: 0.65rem 0.7rem 0.55rem;
+  }
+
+  .input-area {
+    padding: 0.1rem 0.35rem 0.25rem;
   }
 
   .composer-textarea {
-    font-size: 0.8rem;
+    min-height: 2.45rem;
+    font-size: 0.84rem;
+  }
+
+  .composer-action-icon-button,
+  .composer-project-button {
+    height: 1.8rem;
+  }
+
+  .composer-action-icon-button {
+    width: 1.8rem;
+  }
+
+  .composer-project-button {
+    font-size: 0.84rem;
+    padding: 0 0.5rem;
   }
 
   .composer-submit-button {
-    width: 1.9rem;
-    height: 1.9rem;
+    width: 1.85rem;
+    height: 1.85rem;
   }
 
   .agents-list {
