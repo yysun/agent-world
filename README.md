@@ -355,9 +355,9 @@ HITL options for skill activation:
 - `yes_in_session`: approve this `skill_id` in the current world/chat session
 - `no`: decline
 
-### hitl_request (Generic Human Input)
+### human_intervention_request (Generic Human Input)
 
-`hitl_request` lets the model ask a human question, present options, and optionally require explicit confirmation.
+`human_intervention_request` lets the model ask a human question, present options, and optionally require explicit confirmation.
 The tool is options-only (no free-text mode).
 
 Option example:

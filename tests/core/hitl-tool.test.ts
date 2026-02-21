@@ -2,7 +2,7 @@
  * HITL Request Tool Tests
  *
  * Purpose:
- * - Validate built-in `hitl_request` tool argument handling and HITL flow behavior.
+ * - Validate built-in `human_intervention_request` tool argument handling and HITL flow behavior.
  *
  * Key Features:
  * - Covers validation errors for missing/invalid prompt configuration.
@@ -15,7 +15,7 @@
  *
  * Recent Changes:
  * - 2026-02-20: Updated coverage for strict options-only HITL policy.
- * - 2026-02-20: Added initial unit coverage for new built-in `hitl_request` tool.
+ * - 2026-02-20: Added initial unit coverage for new built-in `human_intervention_request` tool.
  */
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';

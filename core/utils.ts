@@ -215,7 +215,7 @@ export function buildToolUsagePromptSection(options: { toolNames: string[] }): s
   }
 
   const normalizedToolNames = new Set(toolNames.map((toolName) => toolName.toLowerCase()));
-  const hasHitlTool = normalizedToolNames.has('hitl_request') || normalizedToolNames.has('human_intervention_request');
+  const hasHitlTool = normalizedToolNames.has('human_intervention_request');
 
   const lines = [
     'You have access to tools.',
@@ -224,7 +224,7 @@ export function buildToolUsagePromptSection(options: { toolNames: string[] }): s
 
   if (hasHitlTool) {
     lines.push(
-      'If you need to ask the human a clarifying question, request an option choice, or request confirmation, call hitl_request (alias: human_intervention_request) instead of asking directly in plain assistant text.'
+      'If you need to ask the human a clarifying question, request an option choice, or request confirmation, call human_intervention_request instead of asking directly in plain assistant text.'
     );
     lines.push(
       'Use multiple-choice options only; do not request free-text HITL input.'

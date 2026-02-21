@@ -95,7 +95,7 @@
  *
  * Recent Changes:
  * - 2026-02-20: Switched injected tool-usage guidance to shared `buildToolUsagePromptSection()` so HITL and other tool rules are centralized in one utility.
- * - 2026-02-20: Updated injected tool-usage guidance to direct LLMs to use `hitl_request`/`human_intervention_request` for human clarifications and confirmations.
+ * - 2026-02-20: Updated injected tool-usage guidance to direct LLMs to use `human_intervention_request` for human clarifications and confirmations.
  * - 2026-02-13: Reclassified stop-triggered aborts as cancellation/info logs (not errors) in queue and non-streaming paths.
  * - 2026-02-13: Added merged external+queue abort-signal support so chat stop requests can cancel follow-up continuation calls.
  * - 2026-02-13: Added chat-scoped LLM cancellation controls so Electron stop requests can abort active and queued calls by `worldId` + `chatId`.

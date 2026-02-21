@@ -2,7 +2,7 @@
  * HITL Request Tool Module - Built-in tool for generic human-in-the-loop input
  *
  * Purpose:
- * - Expose a built-in `hitl_request` tool that lets the model ask questions, offer options, and require explicit confirmation.
+ * - Expose a built-in `human_intervention_request` tool that lets the model ask questions, offer options, and require explicit confirmation.
  *
  * Key Features:
  * - Supports option-only response mode for deterministic user selection.
@@ -16,8 +16,8 @@
  * - Tool execution requires world context; no external side effects beyond HITL events.
  *
  * Recent Changes:
- * - 2026-02-20: Removed free-text mode from `hitl_request`; tool now enforces options-only interactions.
- * - 2026-02-20: Added initial built-in `hitl_request` tool implementation.
+ * - 2026-02-20: Removed free-text mode from `human_intervention_request`; tool now enforces options-only interactions.
+ * - 2026-02-20: Added initial built-in `human_intervention_request` tool implementation.
  */
 
 import { requestWorldOption, type HitlOption } from './hitl.js';
@@ -186,7 +186,7 @@ async function requestPrimaryResolution(options: {
     defaultOptionId: resolveDefaultOptionId(promptOptions, args.defaultOption),
     metadata: {
       ...(args.metadata || {}),
-      tool: 'hitl_request',
+      tool: 'human_intervention_request',
       mode: MODE_OPTION,
     },
   });
@@ -230,7 +230,7 @@ async function requestConfirmation(options: {
     ],
     metadata: {
       ...(options.metadata || {}),
-      tool: 'hitl_request',
+      tool: 'human_intervention_request',
       mode: 'confirmation',
       requestId: options.resolution.requestId,
     },
@@ -322,7 +322,7 @@ export function createHitlToolDefinition() {
           selectedOption: null,
           status: 'error',
           source: 'system',
-          message: 'hitl_request requires a valid world context.',
+          message: 'human_intervention_request requires a valid world context.',
         });
       }
 

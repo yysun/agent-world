@@ -459,7 +459,7 @@ describe('Tool Utils - validateToolParameters', () => {
         answer: 'free text should be rejected',
       },
       schema,
-      'hitl_request',
+      'human_intervention_request',
     );
 
     expect(validation.valid).toBe(false);

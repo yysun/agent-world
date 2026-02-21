@@ -12,7 +12,7 @@ The runtime is options-only, so features request selectable choices and block un
 
 Current policy:
 
-- `hitl_request` (LLM-initiated HITL tool) is options-only.
+- `human_intervention_request` (LLM-initiated HITL tool) is options-only.
 - System-enforced approvals (`create_agent`, `load_skill`) are also options-only.
 - While a HITL prompt is pending in UI, sending a new chat message is blocked until prompt resolution.
 
@@ -27,7 +27,7 @@ HITL interactions use two distinct initiation routes that share the same runtime
 - System-enforced approval route:
   - initiated inside specific tools/features (`create_agent`, `load_skill`) via `requestWorldOption(...)`.
 - LLM-initiated HITL route:
-  - initiated by built-in `hitl_request`/`human_intervention_request`.
+  - initiated by built-in `human_intervention_request`.
 
 Both routes resolve through the same response API (`submitWorldHitlResponse`) and the same client queue/UI rendering.
 
@@ -78,8 +78,8 @@ Current triggers in core include:
 
 - `load_skill` performs a skill-level HITL gate before applying skill instructions.
 - `create_agent` uses HITL for pre-create approval and post-create informational dismissal.
-- Built-in `hitl_request` allows LLMs to ask a question, offer options, and optionally require confirm/cancel.
-  - `hitl_request` requires options and does not allow free-text mode.
+- Built-in `human_intervention_request` allows LLMs to ask a question, offer options, and optionally require confirm/cancel.
+  - `human_intervention_request` requires options and does not allow free-text mode.
 
 ### `yes_once` vs `yes_in_session` (load_skill)
 
