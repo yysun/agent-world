@@ -83,10 +83,22 @@ a {
   font-size: 0.5em;
 }
 
+.home-page {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
 @media only screen and (max-width: 600px) {
   body {
     font-size: 1.25em;
     padding: 0.5em;
+  }
+
+  .home-page {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+    overflow-x: hidden;
   }
 
   .container {
@@ -126,6 +138,59 @@ a {
   .world-carousel {
     padding: 1rem 0;
     max-width: 100%;
+  }
+
+  .home-page .world-carousel {
+    gap: 0.45rem;
+  }
+
+  .home-page .world-cards {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .home-page .carousel-arrow {
+    font-size: 1.35rem;
+    padding: 0.35rem 0.45rem;
+  }
+
+  .home-page .carousel-arrow {
+    display: none;
+  }
+
+  .home-page .description-card {
+    padding: 0.9rem;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .home-page .action-buttons {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+  }
+
+  .home-page .btn.enter-btn {
+    font-size: 1.05rem !important;
+    padding: 0.6rem 1.1rem;
+  }
+}
+
+@media only screen and (max-width: 1024px) {
+  .home-page {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+    overflow-x: hidden;
+  }
+
+  .home-page .world-carousel {
+    max-width: 100%;
+    gap: 0.6rem;
+  }
+
+  .home-page .world-cards {
+    min-width: 0;
+    width: 100%;
   }
 }
 
@@ -197,6 +262,23 @@ h2 {
   padding: 2rem 0;
   width: 100%;
   max-width: 800px;
+  touch-action: pan-y;
+}
+
+/* SwipeCarousel component */
+.swipe-carousel {
+  width: 100%;
+}
+
+.swipe-carousel-viewport {
+  border-radius: 1rem;
+}
+
+/* Hide arrows on mobile – swipe is the primary gesture */
+@media (max-width: 640px) {
+  .swipe-carousel-arrow {
+    display: none;
+  }
 }
 
 .world-cards {
@@ -1792,9 +1874,10 @@ legend {
 @media only screen and (max-width: 1024px) {
   .world-container {
     --world-scale: 1;
-    max-width: 100vw !important;
-    width: 100vw;
+    max-width: 100% !important;
+    width: 100%;
     padding: 0.5rem 0.75rem 0.75rem;
+    overflow-x: hidden;
   }
 
   .world-columns {
