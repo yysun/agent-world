@@ -541,6 +541,8 @@ export default function App() {
     setIsBusy,
     setSessionActivity,
     hasActiveHitlPrompt,
+    setHitlPromptQueue,
+    setSubmittingHitlRequestId,
   });
 
   const initialize = useCallback(async () => {
@@ -632,6 +634,11 @@ export default function App() {
     setHitlPromptQueue([]);
     setSubmittingHitlRequestId(null);
   }, [loadedWorld?.id, resetActivityRuntimeState, resetMessageRuntimeState]);
+
+  useEffect(() => {
+    setHitlPromptQueue([]);
+    setSubmittingHitlRequestId(null);
+  }, [selectedSessionId]);
 
   useEffect(() => {
     setSessionSearch('');

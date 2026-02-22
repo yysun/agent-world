@@ -53,6 +53,8 @@ export function useMessageManagement({
   setIsBusy,
   setSessionActivity,
   hasActiveHitlPrompt = false,
+  setHitlPromptQueue,
+  setSubmittingHitlRequestId,
 }) {
   const [composer, setComposer] = useState('');
   const [sendingSessionIds, setSendingSessionIds] = useState<Set<string>>(new Set());
@@ -312,6 +314,8 @@ export function useMessageManagement({
     setMessages(optimisticMessages);
     setEditingMessageId(null);
     setEditingText('');
+    setHitlPromptQueue?.([]);
+    setSubmittingHitlRequestId?.(null);
 
     try {
       const editResult = await api.editMessage(loadedWorldId, message.messageId, editedText, targetChatId);

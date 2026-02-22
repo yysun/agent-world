@@ -18,7 +18,7 @@
  * - 2026-02-16: Extracted from `App.jsx` as part of renderer refactor Phase 2.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { renderMarkdown } from '../utils/markdown';
 import { formatLogMessage } from '../utils/formatting';
 import { isToolRelatedMessage } from '../utils/message-utils';
@@ -99,9 +99,8 @@ function getToolMessageHeaderLabel(message) {
   return '⚙️ Execution result';
 }
 
-export default function MessageContent({ message }) {
+export default function MessageContent({ message, collapsed = false }) {
   const isToolMessage = isToolRelatedMessage(message);
-  const [isToolCollapsed, setIsToolCollapsed] = useState(true);
   const MAX_TOOL_OUTPUT_LENGTH = 50000;
 
   const renderedContent = useMemo(() => {
@@ -148,47 +147,10 @@ export default function MessageContent({ message }) {
 
     return (
       <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-xs font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
-            {toolHeaderLabel}
-          </div>
-          <button
-            type="button"
-            onClick={() => setIsToolCollapsed((collapsed) => !collapsed)}
-            className="inline-flex h-6 w-6 items-center justify-center rounded border border-border text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
-            aria-label={isToolCollapsed ? 'Expand tool output' : 'Collapse tool output'}
-            title={isToolCollapsed ? 'Expand tool output' : 'Collapse tool output'}
-          >
-            {isToolCollapsed ? (
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-3.5 w-3.5"
-                aria-hidden="true"
-              >
-                <path d="m6 9 6 6 6-6" />
-              </svg>
-            ) : (
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-3.5 w-3.5"
-                aria-hidden="true"
-              >
-                <path d="m18 15-6-6-6 6" />
-              </svg>
-            )}
-          </button>
+        <div className="text-xs font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
+          {toolHeaderLabel}
         </div>
-        {!isToolCollapsed ? (
+        {!collapsed ? (
           <div
             className="rounded-md overflow-hidden border"
             style={{
@@ -215,6 +177,8 @@ export default function MessageContent({ message }) {
       </div>
     );
   }
+
+  if (collapsed) return null;
 
   return (
     <div

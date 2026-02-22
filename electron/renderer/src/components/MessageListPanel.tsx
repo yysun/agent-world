@@ -24,6 +24,7 @@
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component extraction.
  */
 
+import { useState } from 'react';
 import MessageContent from './MessageContent';
 import ElapsedTimeCounter from './ElapsedTimeCounter';
 import { compactSkillDescription, formatTime } from '../utils/formatting';
@@ -77,6 +78,15 @@ export default function MessageListPanel({
   const inlineElapsedMs = Number(inlineWorkingIndicatorState?.elapsedMs || 0);
   const renderableMessages = messages.filter(isRenderableMessageEntry);
   const shouldShowLoading = messagesLoading && renderableMessages.length === 0;
+  const [collapsedMessageIds, setCollapsedMessageIds] = useState<Set<string>>(new Set());
+  const toggleMessageCollapsed = (messageId: string) => {
+    setCollapsedMessageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(messageId)) next.delete(messageId);
+      else next.add(messageId);
+      return next;
+    });
+  };
   const shouldShowWelcome = !messagesLoading && !hasConversationMessages;
 
   return (
@@ -197,7 +207,28 @@ export default function MessageListPanel({
                 <article className={`min-w-0 ${getMessageCardClassName(message, messagesById, renderableMessages, messageIndex)}`}>
                   <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
                     <span>{senderLabel}</span>
-                    <span>{formatTime(message.createdAt)}</span>
+                    <div className="flex items-center gap-1">
+                      <span>{formatTime(message.createdAt)}</span>
+                      {(isBranchableAgentMessage || isToolRelatedMessage(message)) && messageKey ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleMessageCollapsed(messageKey)}
+                          className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
+                          title={collapsedMessageIds.has(messageKey) ? 'Expand' : 'Collapse'}
+                          aria-label={collapsedMessageIds.has(messageKey) ? 'Expand' : 'Collapse'}
+                        >
+                          {collapsedMessageIds.has(messageKey) ? (
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3" aria-hidden="true">
+                              <path d="m6 9 6 6 6-6" />
+                            </svg>
+                          ) : (
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3" aria-hidden="true">
+                              <path d="m18 15-6-6-6 6" />
+                            </svg>
+                          )}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
 
                   {editingMessageId === getMessageIdentity(message) ? (
@@ -234,7 +265,7 @@ export default function MessageListPanel({
                       </div>
                     </div>
                   ) : (
-                    <MessageContent message={message} />
+                    <MessageContent message={message} collapsed={(isBranchableAgentMessage || isToolRelatedMessage(message)) && Boolean(messageKey) && collapsedMessageIds.has(messageKey)} />
                   )}
 
                   {isHumanMessage(message) && message.messageId && !isPendingOptimisticUserMessage && editingMessageId !== getMessageIdentity(message) ? (
@@ -268,7 +299,7 @@ export default function MessageListPanel({
                   ) : null}
 
                   {isBranchableAgentMessage && editingMessageId !== getMessageIdentity(message) ? (
-                    <div className="absolute bottom-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="mt-2 flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         type="button"
                         onClick={() => onBranchFromMessage(message)}
