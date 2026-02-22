@@ -13,6 +13,8 @@
  * - Keeps branch/session refresh semantics aligned with the existing desktop IPC flows.
  *
  * Recent Changes:
+ * - 2026-02-22: Removed renderer-side no-agent inference on send; status now follows core-emitted activity events only.
+ * - 2026-02-22: Enforced strict pending semantics: `pendingResponseSessionIds` is now populated only from realtime agent-start signals, never on send.
  * - 2026-02-21: Added assistant-message raw-markdown copy action with clipboard API + legacy fallback.
  * - 2026-02-20: Blocked composer sends while HITL prompt queue is non-empty to enforce resolve-first workflow.
  * - 2026-02-20: Added defensive renderer-side chatId invariant before IPC send so UI fails fast when session context is missing.
@@ -98,7 +100,11 @@ export function useMessageManagement({
     });
     const optimisticMessageId = String(optimisticMessage.messageId || '').trim();
 
-    setPendingResponseSessionIds((prev) => new Set([...prev, activeSessionId]));
+    setPendingResponseSessionIds((prev) => {
+      const next = new Set(prev);
+      next.delete(activeSessionId);
+      return next;
+    });
     setSendingSessionIds((prev) => new Set([...prev, activeSessionId]));
     setMessages((existing) => upsertMessageList(existing, optimisticMessage));
     try {
@@ -134,6 +140,7 @@ export function useMessageManagement({
           },
         }));
       }
+
       setComposer('');
     } catch (error) {
       if (optimisticMessageId) {

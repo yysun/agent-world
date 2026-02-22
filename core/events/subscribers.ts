@@ -20,6 +20,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-22: Persist incoming human messages to agent memory even when agents do not respond (e.g., invalid @mention), preventing UI-only unsaved messages.
  * - 2026-02-20: Publish chat-title update notifications as structured `system` events (`chat-title-updated`).
  * - 2026-02-13: Added no-activity user-message fallback title scheduling to cover edited chats with no agent response.
  * - 2026-02-13: Switched title commit path to compare-and-set storage update to avoid concurrent overwrite races.
@@ -278,13 +279,19 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
     // Reset LLM call count if needed (for human/system messages)
     await resetLLMCallCountIfNeeded(world, agent, routedMessageEvent);
 
+    const isIncomingHumanMessage = isHumanSender(routedMessageEvent.sender);
+    if (isIncomingHumanMessage) {
+      await saveIncomingMessageToMemory(world, agent, routedMessageEvent);
+    }
+
     // Process message if agent should respond
     loggerAgent.debug('Checking if agent should respond', { agentId: agent.id, sender: routedMessageEvent.sender });
     const shouldRespond = await shouldAgentRespond(world, agent, routedMessageEvent);
 
     if (shouldRespond) {
-      // Save incoming messages to agent memory only when they plan to respond
-      await saveIncomingMessageToMemory(world, agent, routedMessageEvent);
+      if (!isIncomingHumanMessage) {
+        await saveIncomingMessageToMemory(world, agent, routedMessageEvent);
+      }
 
       loggerAgent.debug('Agent will respond - processing message', { agentId: agent.id, sender: routedMessageEvent.sender });
       await processAgentMessage(world, agent, routedMessageEvent);

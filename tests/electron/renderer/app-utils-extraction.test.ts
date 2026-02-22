@@ -12,6 +12,9 @@
  * - No filesystem or network dependencies.
  *
  * Recent Changes:
+ * - 2026-02-22: Added regression for pending-only inline status to avoid fallback agent names on invalid mention flows.
+ * - 2026-02-22: Added coverage for end-of-run processed-agent status summary text helper.
+ * - 2026-02-22: Added regression coverage to prevent fallback agent attribution when no concrete agent activity state exists.
  * - 2026-02-20: Added coverage for `isRenderableMessageEntry` used by Electron welcome-card visibility logic.
  * - 2026-02-19: Updated phase-label expectations to `calling LLM...` and `streaming response...`.
  * - 2026-02-19: Added coverage for per-agent inline status summary formatting (`buildInlineAgentStatusSummary`).
@@ -39,6 +42,7 @@ import {
 import {
   buildInlineAgentStatusSummary,
   getAgentWorkPhaseText,
+  getProcessedAgentsStatusText,
 } from '../../../electron/renderer/src/utils/app-helpers';
 import {
   getMessageCardClassName,
@@ -182,7 +186,43 @@ describe('extracted app-helpers utils', () => {
       phaseText: 'streaming response...',
       fallbackAgentName: 'Agent',
     })).toBe('a1: done; a2: streaming response...');
+
+    expect(buildInlineAgentStatusSummary({
+      activeAgentNames: [],
+      doneAgentNames: [],
+      pendingAgentNames: [],
+      pendingAgentCount: 0,
+      phaseText: 'streaming response...',
+      fallbackAgentName: 'a1',
+    })).toBe('');
+
+    expect(buildInlineAgentStatusSummary({
+      activeAgentNames: [],
+      doneAgentNames: [],
+      pendingAgentNames: [],
+      pendingAgentCount: 1,
+      phaseText: 'streaming response...',
+      fallbackAgentName: 'a1',
+    })).toBe('1 pending ...');
   });
+
+  it('formats processed-agent completion status text', () => {
+    expect(getProcessedAgentsStatusText(0)).toEqual({
+      text: 'No agent processed the message.',
+      kind: 'info',
+    });
+
+    expect(getProcessedAgentsStatusText(1)).toEqual({
+      text: '1 agent processed this message.',
+      kind: 'success',
+    });
+
+    expect(getProcessedAgentsStatusText(3)).toEqual({
+      text: '3 agents processed this message.',
+      kind: 'success',
+    });
+  });
+
 });
 
 describe('extracted validation utils', () => {

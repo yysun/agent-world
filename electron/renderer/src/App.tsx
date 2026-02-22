@@ -13,6 +13,11 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-02-22: Status bar completion is now driven by core activity events plus a send-finish no-activity fallback for zero-agent runs.
+ * - 2026-02-22: Removed frontend @mention validation/inference from status and pending decisions; renderer now follows core event signals only.
+ * - 2026-02-22: Restored immediate working-indicator visibility during send handshake by including per-session sending state in composer activity detection.
+ * - 2026-02-22: Reset completion-transition ref on session changes to avoid cross-session false "processed" status messages.
+ * - 2026-02-22: Added end-of-run status-bar summary showing how many agents processed the latest message.
  * - 2026-02-21: Wired assistant-message raw-markdown copy action into message-list props for desktop chat cards.
  * - 2026-02-20: Disabled new-message sending while HITL prompt queue is non-empty.
  * - 2026-02-20: Moved HITL prompt UX from overlay modal to inline message-flow cards inside the message list.
@@ -72,6 +77,7 @@ import {
   getAgentDisplayName,
   getAgentWorkPhaseText,
   getAgentInitials,
+  getProcessedAgentsStatusText,
   getDefaultWorldForm,
   getEnvValueFromText,
   getWorldFormFromWorld,
@@ -121,6 +127,12 @@ type HitlPrompt = {
 export default function App() {
   const api = useMemo(() => getDesktopApi(), []);
   const chatSubscriptionCounter = useRef(0);
+  const previousPendingOperationsRef = useRef(0);
+  const previousSessionSendingRef = useRef(false);
+  const noAgentFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestCoreProcessedAgentCountRef = useRef(0);
+  const latestPendingOperationsRef = useRef(0);
+  const latestPendingResponseRef = useRef(false);
   const messageRefreshCounter = useRef(0);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -825,6 +837,106 @@ export default function App() {
       return Array.from(merged);
     });
   }, [activeAgentSources, resolveAgentName, selectedSessionId, sessionActivity.pendingOperations]);
+
+  const processedAgentCountFromCore = useMemo(() => {
+    const processedAgentNames = new Set<string>(
+      recentlyActiveAgentNames
+        .map((name) => String(name || '').trim())
+        .filter(Boolean),
+    );
+
+    const currentlyActiveNames = activeAgentSources
+      .map((source) => resolveAgentName(source))
+      .map((name) => String(name || '').trim())
+      .filter(Boolean);
+    for (const name of currentlyActiveNames) {
+      processedAgentNames.add(name);
+    }
+
+    return processedAgentNames.size;
+  }, [activeAgentSources, recentlyActiveAgentNames, resolveAgentName]);
+
+  useEffect(() => {
+    latestCoreProcessedAgentCountRef.current = processedAgentCountFromCore;
+    latestPendingOperationsRef.current = Number(sessionActivity.pendingOperations || 0);
+    latestPendingResponseRef.current = isCurrentSessionPendingResponse;
+  }, [isCurrentSessionPendingResponse, processedAgentCountFromCore, sessionActivity.pendingOperations]);
+
+  useEffect(() => {
+    if (!selectedSessionId) {
+      previousSessionSendingRef.current = false;
+      if (noAgentFallbackTimerRef.current) {
+        clearTimeout(noAgentFallbackTimerRef.current);
+        noAgentFallbackTimerRef.current = null;
+      }
+      return;
+    }
+
+    const wasSending = previousSessionSendingRef.current;
+    const isSending = isCurrentSessionSending;
+    previousSessionSendingRef.current = isSending;
+
+    if (isSending) {
+      if (noAgentFallbackTimerRef.current) {
+        clearTimeout(noAgentFallbackTimerRef.current);
+        noAgentFallbackTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (!wasSending) {
+      return;
+    }
+
+    if (noAgentFallbackTimerRef.current) {
+      clearTimeout(noAgentFallbackTimerRef.current);
+      noAgentFallbackTimerRef.current = null;
+    }
+
+    noAgentFallbackTimerRef.current = setTimeout(() => {
+      noAgentFallbackTimerRef.current = null;
+
+      const hasPending = latestPendingOperationsRef.current > 0 || latestPendingResponseRef.current;
+      const processedCount = latestCoreProcessedAgentCountRef.current;
+      if (hasPending || processedCount > 0) {
+        return;
+      }
+
+      const completionStatus = getProcessedAgentsStatusText(0);
+      setStatusText(completionStatus.text, completionStatus.kind);
+    }, 1200);
+
+    return () => {
+      if (noAgentFallbackTimerRef.current) {
+        clearTimeout(noAgentFallbackTimerRef.current);
+        noAgentFallbackTimerRef.current = null;
+      }
+    };
+  }, [isCurrentSessionSending, selectedSessionId, setStatusText]);
+
+  useEffect(() => {
+    previousPendingOperationsRef.current = 0;
+  }, [selectedSessionId]);
+
+  useEffect(() => {
+    const pendingOperations = Number(sessionActivity.pendingOperations || 0);
+    const previousPendingOperations = previousPendingOperationsRef.current;
+
+    if (selectedSessionId && previousPendingOperations > 0 && pendingOperations <= 0) {
+      const completionStatus = getProcessedAgentsStatusText(processedAgentCountFromCore);
+      setStatusText(completionStatus.text, completionStatus.kind);
+    }
+
+    previousPendingOperationsRef.current = pendingOperations;
+  }, [
+    activeAgentSources,
+    processedAgentCountFromCore,
+    recentlyActiveAgentNames,
+    resolveAgentName,
+    selectedSessionId,
+    sessionActivity.pendingOperations,
+    setStatusText,
+  ]);
   const activeHeaderAgentIds = useMemo(() => {
     if (!Array.isArray(activeAgentSources) || activeAgentSources.length === 0) return [];
     if (!Array.isArray(worldAgents) || worldAgents.length === 0) return [];
@@ -851,6 +963,7 @@ export default function App() {
   const pendingAgentCount = Math.max(0, Number(sessionActivity.pendingOperations || 0) - workingAgentCount);
   const isAgentWorkInProgress = workingAgentCount > 0;
   const hasComposerActivity =
+    isCurrentSessionSending ||
     isCurrentSessionPendingResponse ||
     Number(sessionActivity.pendingOperations || 0) > 0 ||
     activeTools.length > 0 ||

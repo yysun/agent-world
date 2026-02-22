@@ -13,6 +13,9 @@
  * - Keep defaults aligned with existing renderer constants.
  *
  * Recent Changes:
+ * - 2026-02-22: Removed inline agent-name fallback for activity summaries with no resolved active agents to prevent random-agent labels on invalid @mentions.
+ * - 2026-02-22: Added `getProcessedAgentsStatusText` to format end-of-run status-bar summaries with agent processed counts.
+ * - 2026-02-22: Suppressed fallback agent status text when no concrete active/done/pending agents are present to avoid false `a1: streaming response...` attribution on invalid mentions.
  * - 2026-02-19: Extended `buildInlineAgentStatusSummary` with explicit done-state rendering for completed agents during active runs.
  * - 2026-02-19: Updated LLM phase wording to distinguish pre-stream (`calling LLM...`) vs active stream (`streaming response...`).
  * - 2026-02-19: Added `buildInlineAgentStatusSummary` for per-agent inline activity text composition.
@@ -196,7 +199,11 @@ export function buildInlineAgentStatusSummary({
   const pendingNames = Array.isArray(pendingAgentNames)
     ? pendingAgentNames.map((name) => String(name || '').trim()).filter(Boolean)
     : [];
-  const safeFallback = String(fallbackAgentName || '').trim() || 'Agent';
+  const hasConcreteAgentState = activeNames.length > 0 || doneNames.length > 0 || pendingNames.length > 0 || Number(pendingAgentCount) > 0;
+
+  if (!hasConcreteAgentState) {
+    return '';
+  }
 
   const parts: string[] = [];
   if (doneNames.length > 0) {
@@ -205,8 +212,6 @@ export function buildInlineAgentStatusSummary({
 
   if (activeNames.length > 0) {
     parts.push(...activeNames.map((name) => `${name}: ${normalizedPhase}`));
-  } else if (normalizedPhase) {
-    parts.push(`${safeFallback}: ${normalizedPhase}`);
   }
 
   if (pendingNames.length > 0) {
@@ -223,4 +228,27 @@ export function buildInlineAgentStatusSummary({
   }
 
   return parts.join('; ').trim();
+}
+
+export function getProcessedAgentsStatusText(processedAgentCount: number): {
+  text: string;
+  kind: 'success' | 'info';
+} {
+  const normalizedCount = Number.isFinite(Number(processedAgentCount))
+    ? Math.max(0, Math.floor(Number(processedAgentCount)))
+    : 0;
+
+  if (normalizedCount <= 0) {
+    return {
+      text: 'No agent processed the message.',
+      kind: 'info',
+    };
+  }
+
+  return {
+    text: normalizedCount === 1
+      ? '1 agent processed this message.'
+      : `${normalizedCount} agents processed this message.`,
+    kind: 'success',
+  };
 }

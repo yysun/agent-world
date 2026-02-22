@@ -176,12 +176,12 @@ export function useChatEventSubscriptions({
 
         const options = Array.isArray(content?.options)
           ? content.options
-              .map((option) => ({
-                id: String(option?.id || '').trim(),
-                label: String(option?.label || '').trim(),
-                description: option?.description ? String(option.description) : ''
-              }))
-              .filter((option) => option.id && option.label)
+            .map((option) => ({
+              id: String(option?.id || '').trim(),
+              label: String(option?.label || '').trim(),
+              description: option?.description ? String(option.description) : ''
+            }))
+            .filter((option) => option.id && option.label)
           : [];
         if (options.length === 0) {
           return;
