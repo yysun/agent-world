@@ -169,7 +169,9 @@ export function createGlobalLogEventHandler({
 
     const hasActiveSession = Boolean(loadedWorldId && selectedSessionId);
     if (hasActiveSession) {
-      setMessages((existing) => [...existing, createLogMessage(logEvent)]);
+      const logChatId = String(payload.chatId || logEvent?.chatId || '').trim();
+      if (logChatId && logChatId !== selectedSessionId) return;
+      setMessages((existing) => [...existing, createLogMessage(logEvent, logChatId || (selectedSessionId ?? undefined))]);
       return;
     }
 

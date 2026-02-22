@@ -156,7 +156,7 @@ export function removeOptimisticUserMessage(
   return next.length === existingMessages.length ? existingMessages : next;
 }
 
-export function createLogMessage(logEvent: LogEventLike): MessageLike {
+export function createLogMessage(logEvent: LogEventLike, chatId?: string): MessageLike {
   return {
     id: `log-${logEvent?.messageId || Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
     messageId: `log-${Date.now()}`,
@@ -167,6 +167,7 @@ export function createLogMessage(logEvent: LogEventLike): MessageLike {
     type: 'log',
     createdAt: logEvent?.timestamp || new Date().toISOString(),
     logEvent,
+    ...(chatId ? { chatId } : {}),
   };
 }
 
