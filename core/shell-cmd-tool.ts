@@ -73,7 +73,7 @@ import { homedir } from 'os';
 import { realpathSync, promises as fsPromises } from 'fs';
 import { createCategoryLogger } from './logger.js';
 import { validateToolParameters } from './tool-utils.js';
-import { publishSSE, publishMessageWithId } from './events/index.js';
+import { publishSSE } from './events/index.js';
 import { getDefaultWorkingDirectory, getEnvValueFromText } from './utils.js';
 import {
   createShellProcessExecution,
@@ -1363,7 +1363,9 @@ export function createShellCmdToolDefinition() {
         required: ['command']
       };
 
-      const llmResultMode = context?.llmResultMode === 'minimal' ? 'minimal' : 'verbose';
+      const llmResultMode = context?.llmResultMode === 'minimal' ? 'minimal'
+        : context?.llmResultMode === 'smart' ? 'smart'
+        : 'verbose';
 
       const validation = validateToolParameters(args, toolSchema, 'shell_cmd');
       if (!validation.valid) {
@@ -1382,6 +1384,10 @@ export function createShellCmdToolDefinition() {
 
         if (llmResultMode === 'minimal') {
           return formatMinimalShellResultForLLM(validationResult);
+        }
+
+        if (llmResultMode === 'smart') {
+          return validationResult.stderr || validationResult.error || '(validation error, no details)';
         }
 
         return formatResultForLLM(validationResult);
@@ -1409,12 +1415,9 @@ export function createShellCmdToolDefinition() {
       const streamAgentName = typeof context?.agentName === 'string' && context.agentName.trim()
         ? context.agentName.trim()
         : 'assistant';
-      const hasAssistantStreamContext = Boolean(world && typeof currentMessageId === 'string' && currentMessageId.trim());
-      const streamBaseMessageId = hasAssistantStreamContext ? String(currentMessageId).trim() : '';
+      const hasToolStreamContext = Boolean(world && typeof currentMessageId === 'string' && currentMessageId.trim());
+      const streamBaseMessageId = hasToolStreamContext ? String(currentMessageId).trim() : '';
       const stdoutMessageId = streamBaseMessageId ? `${streamBaseMessageId}-stdout` : '';
-      const streamMessages = Array.isArray(context?.messages) ? context.messages : null;
-      let stdoutStarted = false;
-      let streamedStdout = '';
       const resolvedDirectory = resolveTrustedShellWorkingDirectory(context);
       const directoryValidation = validateShellDirectoryRequest(
         validation.correctedArgs.directory,
@@ -1432,30 +1435,12 @@ export function createShellCmdToolDefinition() {
         throw new Error(scopeValidation.error);
       }
 
-      const ensureStdoutStreamStarted = () => {
-        if (!hasAssistantStreamContext) return;
-        if (stdoutStarted) return;
-        if (!stdoutMessageId) return;
-        stdoutStarted = true;
-        publishSSE(world, {
-          type: 'start',
-          toolName: 'shell_cmd',
-          messageId: stdoutMessageId,
-          agentName: streamAgentName,
-          stream: 'stdout',
-          chatId
-        });
-      };
-
-      const emitStdoutAssistantChunk = (chunk: string) => {
-        if (!hasAssistantStreamContext) return;
+      const emitStdoutToolStreamChunk = (chunk: string) => {
+        if (!hasToolStreamContext) return;
         if (!chunk) return;
         if (!stdoutMessageId) return;
-
-        streamedStdout += chunk;
-        ensureStdoutStreamStarted();
         publishSSE(world, {
-          type: 'chunk',
+          type: 'tool-stream',
           toolName: 'shell_cmd',
           content: chunk,
           stream: 'stdout',
@@ -1478,53 +1463,20 @@ export function createShellCmdToolDefinition() {
         });
       };
 
-      const finalizeStdoutAssistantStream = () => {
-        if (!hasAssistantStreamContext) return;
-        if (!stdoutStarted || !stdoutMessageId) return;
-
-        const content = streamedStdout;
-        if (streamMessages) {
-          streamMessages.push({
-            role: 'assistant',
-            content,
-            sender: streamAgentName,
-            agentId: streamAgentName,
-            createdAt: new Date(),
-            chatId: chatId || null,
-            messageId: stdoutMessageId
-          });
-        }
-
-        publishMessageWithId(world, content, streamAgentName, stdoutMessageId, chatId);
-        publishSSE(world, {
-          type: 'end',
-          toolName: 'shell_cmd',
-          messageId: stdoutMessageId,
-          agentName: streamAgentName,
-          stream: 'stdout',
-          chatId
-        });
-      };
-
-      let result: CommandExecutionResult;
-      try {
-        // Execute command with assistant-streaming callbacks when world context is available
-        result = await executeShellCommand(command, validParameters, resolvedDirectory, {
-          timeout,
-          abortSignal,
-          worldId: world?.id,
-          chatId,
-          trustedWorkingDirectory: resolvedDirectory,
-          onStdout: hasAssistantStreamContext ? (chunk) => {
-            emitStdoutAssistantChunk(chunk);
-          } : undefined,
-          onStderr: world ? (chunk) => {
-            emitStderrToolStreamChunk(chunk);
-          } : undefined
-        });
-      } finally {
-        finalizeStdoutAssistantStream();
-      }
+      // Execute command with tool-streaming callbacks when world context is available
+      const result = await executeShellCommand(command, validParameters, resolvedDirectory, {
+        timeout,
+        abortSignal,
+        worldId: world?.id,
+        chatId,
+        trustedWorkingDirectory: resolvedDirectory,
+        onStdout: hasToolStreamContext ? (chunk) => {
+          emitStdoutToolStreamChunk(chunk);
+        } : undefined,
+        onStderr: world ? (chunk) => {
+          emitStderrToolStreamChunk(chunk);
+        } : undefined
+      });
 
       if (isCommandExecutionCanceled(result)) {
         throw new DOMException('Shell command execution canceled by user', 'AbortError');
@@ -1535,6 +1487,13 @@ export function createShellCmdToolDefinition() {
           return JSON.stringify(formatMinimalShellResult(result), null, 2);
         }
         return formatMinimalShellResultForLLM(result);
+      }
+
+      if (llmResultMode === 'smart') {
+        const isSuccess = result.exitCode === 0 && !result.timedOut && !result.canceled && !result.error;
+        return isSuccess
+          ? (result.stdout || `(exit code 0, no output)`)
+          : (result.stderr || result.error || `(exit code ${result.exitCode ?? 'null'}, no stderr)`);
       }
 
       const validatedArtifactPaths = Array.isArray(artifactPaths)

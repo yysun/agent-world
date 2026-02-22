@@ -690,7 +690,7 @@ export async function processAgentMessage(
             abortSignal: processingHandle?.signal,
             workingDirectory: trustedWorkingDirectory,
             agentName: agent.id,
-            llmResultMode: toolCall.function.name === 'shell_cmd' ? 'minimal' : 'verbose'
+            llmResultMode: toolCall.function.name === 'shell_cmd' ? 'smart' : 'verbose'
           };
 
           const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);

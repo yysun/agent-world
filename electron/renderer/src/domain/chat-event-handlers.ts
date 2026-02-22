@@ -401,9 +401,8 @@ export function createChatSubscriptionEventHandler({
         if (streaming?.isActive(toolUseId)) {
           streaming.handleToolStreamEnd(toolUseId);
           syncActiveStreamCount();
-        } else {
-          endAllToolStreams();
         }
+        endAllToolStreams();
       } else if (toolEventType === 'tool-error') {
         toolCommandByUseId.delete(toolUseId);
         if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
@@ -414,9 +413,8 @@ export function createChatSubscriptionEventHandler({
         if (streaming?.isActive(toolUseId)) {
           streaming.handleToolStreamEnd(toolUseId);
           syncActiveStreamCount();
-        } else {
-          endAllToolStreams();
         }
+        endAllToolStreams();
       } else if (toolEventType === 'tool-progress') {
         activity.handleToolProgress(toolUseId, String(toolPayload.progress || ''));
       }
