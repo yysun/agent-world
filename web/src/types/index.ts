@@ -18,6 +18,7 @@
  * - SSE event data structures for real-time updates
  * 
  * Changes:
+ * - 2026-02-22: Added responsive right-panel UI state typings (`rightPanelTab`, `isRightPanelOpen`, `viewportMode`) for World page mobile/tablet behavior.
  * - 2026-02-21: Added project-folder selection props/state (`selectedProjectPath`) for web composer parity with Electron.
  * - 2026-02-20: Added inline HITL card props to `WorldChatProps` for in-flow prompt rendering (replacing popup-only HITL UI).
  * - 2026-02-20: Enforced options-only HITL prompt typing.
@@ -298,6 +299,9 @@ export interface WorldChatHistoryProps {
   world: World | null;
 }
 
+export type RightPanelTab = 'chats' | 'world';
+export type WorldViewportMode = 'desktop' | 'tablet' | 'mobile';
+
 // ========================================
 // COMPONENT STATE INTERFACES
 // ========================================
@@ -372,6 +376,11 @@ export interface WorldComponentState extends SSEComponentState {
   // HITL option prompts
   hitlPromptQueue: HitlPromptRequest[];
   submittingHitlRequestId: string | null;
+
+  // Responsive right-panel state
+  rightPanelTab: RightPanelTab;
+  isRightPanelOpen: boolean;
+  viewportMode: WorldViewportMode;
 }
 
 // ========================================

@@ -25,6 +25,7 @@
  * ```
  * 
  * Changes:
+ * - 2026-02-22: Added responsive right-panel events (`open-right-panel`, `close-right-panel`, `toggle-right-panel`, `switch-right-panel-tab`, `sync-right-panel-viewport`).
  * - 2026-02-21: Added `select-project-folder` event variant for web composer project picker integration.
  * - 2026-02-21: Extended `key-press` payload typing with keyboard modifier/preventDefault fields for textarea Enter/Shift+Enter composer behavior.
  * - 2026-02-20: Enforced options-only HITL event set.
@@ -79,6 +80,21 @@ export type WorldEvents =
 
   /** Open project-folder picker and persist world `working_directory` */
   | { name: 'select-project-folder'; payload: void }
+
+  /** Open right panel with optional tab selection */
+  | { name: 'open-right-panel'; payload: 'chats' | 'world' | void }
+
+  /** Close right panel */
+  | { name: 'close-right-panel'; payload: void }
+
+  /** Toggle right panel with optional tab selection */
+  | { name: 'toggle-right-panel'; payload: 'chats' | 'world' | void }
+
+  /** Switch active right-panel tab */
+  | { name: 'switch-right-panel-tab'; payload: 'chats' | 'world' }
+
+  /** Sync viewport mode/panel defaults on resize/orientation change */
+  | { name: 'sync-right-panel-viewport'; payload: { width: number } }
 
   // ========================================
   // MESSAGE EDITING EVENTS

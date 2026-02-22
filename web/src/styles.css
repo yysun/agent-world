@@ -12,6 +12,9 @@
  * - Balances AppRun/Tailwind utility usage with stylesheet-level overrides for complex chat behavior.
  *
  * Summary of Recent Changes:
+ * - 2026-02-21: Aligned mobile right-panel world action buttons on the same header row as the close button.
+ * - 2026-02-21: Removed right-panel mobile Chats/World tab styling, kept world actions at the top of the panel, and added right spacing for the hamburger toggle button.
+ * - 2026-02-22: Added responsive right-panel styles (desktop side panel, tablet slide-in, mobile bottom-sheet) and disabled world zoom scaling on smaller viewports.
  * - 2026-02-21: Changed tool output toggle to an SVG icon button and set `Tool Output` label size to regular message text.
  * - 2026-02-21: Updated tool output header to left label + right Open/Collapse control and removed tool output card border.
  * - 2026-02-21: Made composer float above conversation content so chat messages render beneath it.
@@ -612,6 +615,52 @@ h2 {
   justify-content: center;
   height: 100%;
   min-height: 100px;
+}
+
+.right-panel-toggle-container {
+  display: none;
+  align-items: center;
+  justify-content: flex-end;
+  margin-left: 0.5rem;
+  margin-right: 0.5rem;
+}
+
+.right-panel-toggle {
+  display: inline-flex;
+}
+
+.world-panel-backdrop {
+  display: none;
+}
+
+.right-panel-mobile-header {
+  display: none;
+}
+
+.right-panel-mobile-header-spacer {
+  flex: 1;
+}
+
+.right-panel-mobile-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.world-right-panel .settings-fieldset {
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+}
+
+.world-panel-world-actions {
+  flex-shrink: 0;
+}
+
+.world-panel-chats-section {
+  flex: 1;
+  min-height: 0;
 }
 
 .agent-item {
@@ -1740,51 +1789,112 @@ legend {
 }
 
 /* Responsive design for smaller screens */
-@media only screen and (max-width: 768px) {
+@media only screen and (max-width: 1024px) {
   .world-container {
-    max-width: 90vw;
-    width: 90vw;
-    padding: 1rem 1rem 1rem 1rem;
+    --world-scale: 1;
+    max-width: 100vw !important;
+    width: 100vw;
+    padding: 0.5rem 0.75rem 0.75rem;
   }
 
   .world-columns {
-    flex-direction: column;
-    height: calc(100vh - 3rem);
+    height: calc(100dvh - 1.25rem);
     min-height: 0;
-    width: 100%;
+    zoom: 1;
+  }
+
+  .world-container .modal-content {
+    zoom: 1;
   }
 
   @supports not (zoom: 1) {
     .world-columns {
-      height: calc((100vh - 3rem) / var(--world-scale));
-      width: calc(100% / var(--world-scale));
+      width: 100%;
+      height: calc(100dvh - 1.25rem);
+      transform: none;
+      min-height: 0;
+    }
+
+    .world-container .modal-content {
+      transform: none;
     }
   }
 
-  .chat-column {
-    flex: none;
-    order: 1;
+  .right-panel-toggle-container {
+    display: flex;
   }
 
-  .settings-column {
-    flex: none;
-    min-width: auto;
+  .world-panel-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    border: none;
+    background: rgba(15, 23, 42, 0.35);
+    z-index: 25;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .world-right-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    width: min(92vw, 24rem);
     max-width: none;
-    order: 2;
+    min-width: 0;
+    height: 100dvh;
+    background: var(--bg-primary);
+    border-left: 1px solid var(--border-primary);
+    box-shadow: -12px 0 24px rgba(15, 23, 42, 0.16);
+    transform: translateX(100%);
+    transition: transform 0.22s ease;
+    overflow: hidden;
   }
 
-  .settings-section {
-    justify-content: center;
-    padding: 0.5rem;
+  .world-right-panel.is-open {
+    transform: translateX(0);
   }
 
-  .world-settings-btn {
-    width: 35px;
-    height: 35px;
+  .right-panel-mobile-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.75rem 0.75rem 0.5rem;
+    border-bottom: 1px solid var(--border-primary);
+    background: var(--bg-primary);
   }
 
-  .world-gear-icon {
-    font-size: 1.3rem;
+  .right-panel-mobile-header .world-settings-btn {
+    width: 34px;
+    height: 34px;
+  }
+
+  .right-panel-mobile-header .world-gear-icon {
+    font-size: 1.25rem;
+  }
+
+  .right-panel-mobile-header .right-panel-close {
+    margin-left: auto;
+  }
+
+  .world-right-panel .settings-row {
+    min-height: auto;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    row-gap: 0.35rem;
+  }
+
+  .world-right-panel .settings-section {
+    justify-content: flex-start;
+    min-height: auto;
+    padding: 0.75rem;
+  }
+
+  .world-right-panel .settings-fieldset {
+    height: calc(100dvh - 7rem);
   }
 
   .agents-section {
@@ -1800,15 +1910,26 @@ legend {
     justify-content: center;
     gap: 1rem;
   }
+}
 
-  .settings-section {
-    justify-content: center;
-    padding: 0.5rem;
-    min-height: 80px;
+@media only screen and (max-width: 768px) {
+  .world-columns {
+    flex-direction: column;
+    width: 100%;
   }
 
-  .settings-row {
-    min-height: 80px;
+  .chat-column {
+    flex: none;
+    order: 1;
+  }
+
+  .world-settings-btn {
+    width: 35px;
+    height: 35px;
+  }
+
+  .world-gear-icon {
+    font-size: 1.3rem;
   }
 
   .agent-sprite {
@@ -1906,6 +2027,29 @@ legend {
     min-height: 250px;
     padding-bottom: clamp(8rem, 22vh, 10rem);
   }
+
+  .world-right-panel {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: min(88dvh, 40rem);
+    border-left: none;
+    border-top: 1px solid var(--border-primary);
+    border-top-left-radius: 14px;
+    border-top-right-radius: 14px;
+    box-shadow: 0 -10px 24px rgba(15, 23, 42, 0.16);
+    transform: translateY(100%);
+  }
+
+  .world-right-panel.is-open {
+    transform: translateY(0);
+  }
+
+  .world-right-panel .settings-fieldset {
+    height: calc(min(88dvh, 40rem) - 7rem);
+  }
 }
 
 @media only screen and (max-width: 480px) {
@@ -1919,25 +2063,7 @@ legend {
 
   .world-columns {
     gap: 0.5rem;
-    height: calc(100vh - 2rem);
-    min-height: 0;
-    width: 100%;
-  }
-
-  @supports not (zoom: 1) {
-    .world-columns {
-      height: calc((100vh - 2rem) / var(--world-scale));
-      width: calc(100% / var(--world-scale));
-    }
-  }
-
-  .settings-section {
-    padding: 0.25rem;
-    min-height: 70px;
-  }
-
-  .settings-row {
-    min-height: 70px;
+    height: calc(100dvh - 1.25rem);
   }
 
   .world-settings-btn {
@@ -2043,6 +2169,11 @@ legend {
     font-size: 0.7rem;
     top: -6px;
     right: -6px;
+  }
+
+  .right-panel-mobile-tab {
+    font-size: 0.74rem;
+    padding: 0.25rem 0.55rem;
   }
 }
 
@@ -2403,6 +2534,14 @@ legend {
   border: 2px solid var(--border-primary);
 }
 
+.modal-content.edit-modal {
+  --edit-form-title-size: 1.15rem;
+  --edit-form-label-size: 0.95rem;
+  --edit-form-help-size: 0.8rem;
+  --edit-form-input-size: 0.95rem;
+  --edit-form-checkbox-size: 0.95rem;
+}
+
 .modal-header {
   display: flex;
   align-items: center;
@@ -2412,7 +2551,7 @@ legend {
 }
 
 .modal-title {
-  font-size: 1.5rem;
+  font-size: var(--edit-form-title-size, 1.5rem);
   font-weight: bold;
   color: var(--text-primary);
   margin: 0;
@@ -2501,11 +2640,11 @@ legend {
 .form-group label {
   font-weight: 500;
   color: var(--text-secondary);
-  font-size: 1.2 rem;
+  font-size: var(--edit-form-label-size, 0.95rem);
 }
 
 .form-checkbox-row {
-  --form-control-size: 1rem;
+  --form-control-size: var(--edit-form-checkbox-size, 1rem);
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -2521,13 +2660,13 @@ legend {
 .form-checkbox-title {
   font-weight: 500;
   color: var(--text-secondary);
-  font-size: var(--form-control-size);
+  font-size: var(--edit-form-label-size, var(--form-control-size));
   margin: 0;
   cursor: pointer;
 }
 
 .form-help-text {
-  font-size: 0.78rem;
+  font-size: var(--edit-form-help-size, 0.78rem);
   line-height: 1.35;
   color: var(--text-tertiary);
   margin: 0;
@@ -2544,7 +2683,7 @@ legend {
   padding: 0.75rem;
   border: 2px solid var(--border-primary);
   border-radius: 6px;
-  font-size: 0.9rem;
+  font-size: var(--edit-form-input-size, 0.9rem);
   background-color: var(--bg-primary);
   color: var(--text-primary);
   transition: border-color 0.2s ease;
