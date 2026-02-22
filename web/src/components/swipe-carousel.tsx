@@ -1,51 +1,66 @@
 /**
- * SwipeCarousel – continuous world carousel with distance-based card scaling
+ * SwipeCarousel – coverflow-style 3D fan carousel
  *
- * Layout:
- *   The track (all cards in a flex row) is absolutely positioned with
- *   `left: 50%`, then translated so that the current card's centre sits
- *   at the viewport's 50% mark:
+ * Visual design (matches reference image):
+ *   - Center card: large portrait rectangle, faces flat toward viewer.
+ *   - Side cards: rotateY fans them out left/right; they overlap the center
+ *     card because each button (CARD_W wide) is wider than its track slot
+ *     (CARD_SLOT wide). overflow:visible + zIndex keeps center on top.
+ *   - Outer cards: rotated even more steeply, lower opacity.
  *
- *     translateX = -(currentIndex * CARD_SLOT + CARD_SLOT/2) + dragOffset
+ * 3D per-card formula (all continuous during drag):
+ *   fractCenter  = currentIndex − dragOffset / CARD_SLOT
+ *   signedDist   = i − fractCenter
+ *   rotateY      = clamp(±MAX_ROT, −signedDist × ROT_PER_DIST)
+ *   translateZ   = −|signedDist| × DEPTH_PX
+ *   scale        = max(0.70, 1 − |d| × 0.14)
+ *   opacity      = max(0.50, 1 − |d| × 0.26)
+ *   zIndex       = 100 − round(|d| × 10)
  *
- *   No viewport-width measurement is needed; the centring is purely
- *   arithmetic over the fixed CARD_SLOT constant.
- *
- * Card scaling:
- *   During every pointermove the fractional centre is recomputed:
- *     fractCenter = currentIndex - dragOffset / CARD_SLOT
- *   Each card's scale and opacity derive from its distance to fractCenter,
- *   so the shrink/grow transition is continuous and follows the finger.
- *
- * Snap:
- *   On pointerup, if |dragOffset| >= SNAP_THRESHOLD the index advances;
- *   otherwise it snaps back. A CSS transition animates the settle.
- *
- * Rubber-band:
- *   Dragging past the first or last card applies ÷3 resistance.
+ * Drag-vs-tap:
+ *   After any drag > 10 px a one-shot capture click listener is installed
+ *   to swallow the post-pointerup click so the newly centred card is not
+ *   accidentally entered.
  */
 
-import { Component } from 'apprun';
+import { app, Component } from 'apprun';
 import type { World } from '../types';
 
 interface SwipeCarouselState {
   worlds: World[];
   currentIndex: number;
-  dragOffset: number;   // live px offset while dragging; 0 when idle
+  dragOffset: number;
   isDragging: boolean;
   startX: number | null;
   startY: number | null;
 }
 
-const CARD_SLOT = 220;       // px – slot width for every card in the track
-const SNAP_THRESHOLD = 60;  // px – drag distance needed to advance one slide
-const VIEWPORT_H = 220;     // px – clipping viewport height
+// ── Layout constants ─────────────────────────────────────────────────────────
+const CARD_SLOT      = 200;   // px – track slot width (determines card spacing)
+const CARD_W         = 300;   // px – actual button width (wider than slot → overlap)
+const CARD_H         = 180;   // px – button height (landscape rectangle)
+const VIEWPORT_H     = 220;   // px – clipping viewport height
+const SNAP_THRESHOLD = 50;    // px – drag needed to advance one card
 
-/** Scale [0.55 … 1.0] as a function of distance from centre. */
-const scaleAt = (d: number) => Math.max(0.55, 1 - d * 0.18);
+// ── 3D constants ──────────────────────────────────────────────────────────────
+const PERSPECTIVE    = 900;   // px – per-card perspective distance
+const ROT_PER_DIST   = 52;    // degrees of rotateY per unit distance from centre
+const MAX_ROT        = 72;    // degrees – cap for distant cards
+const DEPTH_PX       = 35;    // px translateZ push-back per unit distance
+const PULL_PX        = 120;   // px – extra inward pull applied to 2nd+ cards
+const PULL_PX_3      = 60;    // px – additional pull for 3rd+ (ghost) cards
 
-/** Opacity [0.4 … 1.0] as a function of distance from centre. */
-const opacityAt = (d: number) => Math.max(0.4, 1 - d * 0.28);
+const scaleAt   = (d: number) => Math.max(0.40, 1 - d * 0.28);
+const opacityAt = (d: number) => {
+  const base = Math.max(0.50, 1 - d * 0.26);
+  // Sharply fade out from the 3rd card onward
+  return Math.max(0.12, base - Math.max(0, d - 2) * 0.38);
+};
+const rotateAt  = (sd: number) =>
+  Math.max(-MAX_ROT, Math.min(MAX_ROT, -sd * ROT_PER_DIST));
+
+// Horizontal margin to centre CARD_W button inside CARD_SLOT slot
+const CARD_MARGIN = (CARD_SLOT - CARD_W) / 2;  // negative → button overflows slot
 
 export default class SwipeCarousel extends Component<SwipeCarouselState> {
   declare props: Readonly<{ worlds: World[] }>;
@@ -69,8 +84,6 @@ export default class SwipeCarousel extends Component<SwipeCarouselState> {
     if (!worlds.length) return <div className="swipe-carousel" />;
 
     const world = worlds[currentIndex];
-
-    // Fractional centre index – moves smoothly between integers during drag
     const fractCenter = currentIndex - dragOffset / CARD_SLOT;
 
     // Track: left edge at viewport 50%, then pulled left to centre current card
@@ -90,19 +103,15 @@ export default class SwipeCarousel extends Component<SwipeCarouselState> {
     return (
       <div className="swipe-carousel">
 
-        {/* ── Viewport row: arrows + clipping area ── */}
-        <div className="flex items-center gap-2">
-          <button
-            className="btn carousel-arrow swipe-carousel-arrow w-14 h-14 flex items-center justify-center text-4xl flex-shrink-0"
-            $onclick="sc-prev"
-          >‹</button>
+        {/* ── Viewport + overlay arrows ── */}
+        <div style={{ position: 'relative', width: '100%' }}>
 
           {/* Clipping viewport */}
           <div
             className="swipe-carousel-viewport"
             style={{
               position: 'relative',
-              flex: '1',
+              width: '100%',
               overflow: 'hidden',
               height: `${VIEWPORT_H}px`,
               touchAction: 'pan-y',
@@ -116,10 +125,22 @@ export default class SwipeCarousel extends Component<SwipeCarouselState> {
             {/* Sliding track */}
             <div style={trackStyle}>
               {worlds.map((w, i) => {
-                const distance = Math.abs(i - fractCenter);
-                const scale = scaleAt(distance);
-                const opacity = opacityAt(distance);
-                const isCenter = i === currentIndex;
+                const signedDist = i - fractCenter;
+                const absDist    = Math.abs(signedDist);
+                const rotation   = rotateAt(signedDist);
+                const tz         = -absDist * DEPTH_PX;
+                const scale      = scaleAt(absDist);
+                const opacity    = opacityAt(absDist);
+                const zIndex     = Math.round(100 - absDist * 10);
+                const isCenter   = i === currentIndex;
+
+                // Pull 2nd+ cards inward; ghost (3rd+) cards get extra pull
+                const pullIn = -Math.sign(signedDist) * (
+                  Math.max(0, absDist - 1) * PULL_PX +
+                  Math.max(0, absDist - 2) * PULL_PX_3
+                );
+                const cardTransform =
+                  `translateX(${pullIn}px) perspective(${PERSPECTIVE}px) rotateY(${rotation}deg) translateZ(${tz}px) scale(${scale})`;
 
                 return (
                   <div
@@ -127,18 +148,19 @@ export default class SwipeCarousel extends Component<SwipeCarouselState> {
                     style={{
                       width: `${CARD_SLOT}px`,
                       flexShrink: 0,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      padding: '0 0.4rem',
-                      boxSizing: 'border-box' as const,
+                      position: 'relative' as const,
+                      overflow: 'visible' as const,
+                      zIndex,
                     }}
                   >
                     <button
-                      className={`btn world-card-btn ${isCenter ? 'btn-primary center' : 'btn-secondary side'} flex flex-col items-center justify-center w-full rounded-2xl`}
+                      className={`btn world-card-btn ${isCenter ? 'btn-primary center' : 'btn-secondary side'} flex flex-col items-center justify-center rounded-xl`}
                       style={{
-                        height: '180px',
-                        transform: `scale(${scale})`,
+                        width: `${CARD_W}px`,
+                        height: `${CARD_H}px`,
+                        marginLeft: `${CARD_MARGIN}px`,
+                        display: 'flex',
+                        transform: cardTransform,
                         opacity,
                         transformOrigin: 'center center',
                         transition: isDragging
@@ -147,7 +169,7 @@ export default class SwipeCarousel extends Component<SwipeCarouselState> {
                       }}
                       $onclick={isCenter ? ['sc-enter', w] : ['sc-goto', i]}
                     >
-                      <span className="world-name text-lg font-medium">{w.name}</span>
+                      <span className="world-name text-3xl font-bold">{w.name}</span>
                     </button>
                   </div>
                 );
@@ -155,8 +177,42 @@ export default class SwipeCarousel extends Component<SwipeCarouselState> {
             </div>
           </div>
 
+          {/* Overlay arrows (hidden on mobile via CSS) */}
           <button
-            className="btn carousel-arrow swipe-carousel-arrow w-14 h-14 flex items-center justify-center text-4xl flex-shrink-0"
+            className="btn carousel-arrow swipe-carousel-arrow"
+            style={{
+              position: 'absolute',
+              left: '0.25rem',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              zIndex: 200,
+              width: '1.75rem',
+              height: '1.75rem',
+              fontSize: '1.1rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 0,
+            }}
+            $onclick="sc-prev"
+          >‹</button>
+
+          <button
+            className="btn carousel-arrow swipe-carousel-arrow"
+            style={{
+              position: 'absolute',
+              right: '0.25rem',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              zIndex: 200,
+              width: '1.75rem',
+              height: '1.75rem',
+              fontSize: '1.1rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 0,
+            }}
             $onclick="sc-next"
           >›</button>
         </div>
@@ -212,17 +268,13 @@ export default class SwipeCarousel extends Component<SwipeCarouselState> {
       return { ...state, isDragging: true, startX: e.clientX, startY: e.clientY, dragOffset: 0 };
     },
 
-    /**
-     * Update dragOffset in state on every move → triggers re-render →
-     * both the track translateX and each card's scale/opacity update in real time.
-     */
     'sc-move': (state: SwipeCarouselState, e: PointerEvent): SwipeCarouselState => {
       if (!state.isDragging || state.startX === null || state.startY === null) return state;
       const dx = e.clientX - state.startX;
       const dy = e.clientY - state.startY;
       if (Math.abs(dx) > Math.abs(dy)) e.preventDefault();
       const atStart = state.currentIndex === 0 && dx > 0;
-      const atEnd = state.currentIndex === state.worlds.length - 1 && dx < 0;
+      const atEnd   = state.currentIndex === state.worlds.length - 1 && dx < 0;
       return { ...state, dragOffset: (atStart || atEnd) ? dx / 3 : dx };
     },
 
@@ -230,8 +282,7 @@ export default class SwipeCarousel extends Component<SwipeCarouselState> {
       if (!state.isDragging) return state;
       const { dragOffset, currentIndex, worlds } = state;
 
-      // If the finger moved enough to count as a drag, swallow the next click
-      // so the card that lands in the centre isn't accidentally entered.
+      // Swallow the post-drag click so the newly centred card isn't entered
       if (Math.abs(dragOffset) > 10) {
         document.addEventListener('click', (ev) => ev.stopPropagation(), {
           capture: true,
