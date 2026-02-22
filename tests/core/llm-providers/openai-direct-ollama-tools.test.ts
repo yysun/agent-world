@@ -3,17 +3,13 @@
  *
  * Features:
  * - Verifies OpenAI provider requests include converted MCP tool definitions
- * - Verifies Ollama provider requests omit tool definitions
+ * - Verifies Ollama provider requests include tool definitions
  * - Covers both non-streaming and streaming request paths
  *
  * Implementation Notes:
  * - Uses local fake OpenAI clients to inspect outbound request params
  * - Unmocks openai-direct module to validate real request construction logic
  * - Avoids filesystem and network usage
- *
- * Recent Changes:
- * - 2026-02-10: Added env-flag coverage for opt-in Ollama tool attachment
- * - 2026-02-07: Added regression tests for Ollama tool-attachment exclusion
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -58,7 +54,6 @@ const mcpTools = {
 describe('openai-direct tool attachment by provider', () => {
   beforeEach(() => {
     vi.resetModules();
-    delete process.env.ENABLE_OLLAMA_TOOLS;
   });
 
   it('attaches tools for non-Ollama providers', async () => {
@@ -82,49 +77,7 @@ describe('openai-direct tool attachment by provider', () => {
     expect(requestParams.tools[0].function.name).toBe('weather_lookup');
   });
 
-  it('does not attach tools for Ollama in non-streaming requests', async () => {
-    vi.doUnmock('../../../core/openai-direct');
-    vi.doUnmock('../../../core/openai-direct.js');
-    const openaiDirect = await import('../../../core/openai-direct.js');
-    const { client, create } = createFakeNonStreamingClient();
-
-    await openaiDirect.generateOpenAIResponse(
-      client,
-      'llama3.2',
-      [{ role: 'user', content: 'hello' }],
-      { id: 'agent-ollama', provider: 'ollama', temperature: 0.1, maxTokens: 1000 } as any,
-      mcpTools as any,
-      { id: 'world-1' } as any
-    );
-
-    const requestParams = create.mock.calls[0][0];
-    expect(requestParams.tools).toBeUndefined();
-  });
-
-  it('does not attach tools for Ollama in streaming requests', async () => {
-    vi.doUnmock('../../../core/openai-direct');
-    vi.doUnmock('../../../core/openai-direct.js');
-    const openaiDirect = await import('../../../core/openai-direct.js');
-    const { client, create } = createFakeStreamingClient();
-    const onChunk = vi.fn();
-
-    await openaiDirect.streamOpenAIResponse(
-      client,
-      'llama3.2',
-      [{ role: 'user', content: 'hello' }],
-      { id: 'agent-ollama', provider: 'ollama', temperature: 0.1, maxTokens: 1000 } as any,
-      mcpTools as any,
-      { id: 'world-1' } as any,
-      onChunk,
-      'message-1'
-    );
-
-    const requestParams = create.mock.calls[0][0];
-    expect(requestParams.tools).toBeUndefined();
-  });
-
-  it('attaches tools for Ollama in non-streaming requests when ENABLE_OLLAMA_TOOLS=true', async () => {
-    process.env.ENABLE_OLLAMA_TOOLS = 'true';
+  it('attaches tools for Ollama in non-streaming requests', async () => {
     vi.doUnmock('../../../core/openai-direct');
     vi.doUnmock('../../../core/openai-direct.js');
     const openaiDirect = await import('../../../core/openai-direct.js');
@@ -145,8 +98,7 @@ describe('openai-direct tool attachment by provider', () => {
     expect(requestParams.tools[0].function.name).toBe('weather_lookup');
   });
 
-  it('attaches tools for Ollama in streaming requests when ENABLE_OLLAMA_TOOLS=1', async () => {
-    process.env.ENABLE_OLLAMA_TOOLS = '1';
+  it('attaches tools for Ollama in streaming requests', async () => {
     vi.doUnmock('../../../core/openai-direct');
     vi.doUnmock('../../../core/openai-direct.js');
     const openaiDirect = await import('../../../core/openai-direct.js');
