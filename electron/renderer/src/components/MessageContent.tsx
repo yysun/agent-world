@@ -65,8 +65,6 @@ function getToolMessageHeaderLabel(message) {
   const hasToolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
   const isToolCallRequest = hasToolCalls || /calling tool\s*:/i.test(content);
   const toolName = extractToolNameFromMessage(message);
-  const normalizedToolName = toolName.toLowerCase();
-  const isShellCommandTool = normalizedToolName === 'shell_cmd' || normalizedToolName === 'shell-cmd' || normalizedToolName === 'shell';
   const streamType = String(message?.streamType || '').toLowerCase();
 
   if (isToolCallRequest) {
@@ -74,29 +72,20 @@ function getToolMessageHeaderLabel(message) {
   }
 
   if (message?.isToolStreaming) {
-    if (isShellCommandTool) {
+    const normalized = toolName.toLowerCase();
+    const isShell = normalized === 'shell_cmd' || normalized === 'shell-cmd' || normalized === 'shell';
+    if (isShell) {
       const commandName = extractCommandNameFromMessage(message);
-      return commandName ? `⚙️ Running command: ${commandName}` : '⚙️ Running command...';
+      return commandName ? `⚙️ Running: ${commandName}` : '⚙️ Running shell command...';
     }
-    return toolName ? `⚙️ Running ${toolName}...` : '⚙️ Running action...';
+    return toolName ? `⚙️ Running ${toolName}...` : '⚙️ Running...';
   }
 
   if (streamType === 'stderr') {
-    if (isShellCommandTool) {
-      return '⚙️ Command errors';
-    }
     return toolName ? `⚙️ ${toolName} errors` : '⚙️ Execution errors';
   }
 
-  if (isShellCommandTool) {
-    return '⚙️ Terminal output';
-  }
-
-  if (toolName) {
-    return `⚙️ ${toolName} result`;
-  }
-
-  return '⚙️ Execution result';
+  return toolName ? `⚙️ ${toolName} result` : '⚙️ Tool result';
 }
 
 export default function MessageContent({ message, collapsed = false }) {
@@ -151,19 +140,9 @@ export default function MessageContent({ message, collapsed = false }) {
           {toolHeaderLabel}
         </div>
         {!collapsed ? (
-          <div
-            className="rounded-md overflow-hidden border"
-            style={{
-              backgroundColor: 'rgb(15, 23, 42)',
-              borderColor: 'rgb(51, 65, 85)'
-            }}
-          >
+          <div className="rounded-md overflow-hidden border border-border bg-muted">
             <pre
-              className="text-xs p-3 font-mono whitespace-pre-wrap"
-              style={{
-                color: 'rgb(203, 213, 225)',
-                wordBreak: 'break-all'
-              }}
+              className="text-xs p-3 font-mono whitespace-pre-wrap break-all text-foreground"
             >
               {visibleContent || (message.isToolStreaming ? '(waiting for output...)' : '(no output)')}
             </pre>

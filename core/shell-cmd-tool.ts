@@ -73,7 +73,7 @@ import { homedir } from 'os';
 import { realpathSync, promises as fsPromises } from 'fs';
 import { createCategoryLogger } from './logger.js';
 import { validateToolParameters } from './tool-utils.js';
-import { publishSSE } from './events/index.js';
+import { publishSSE } from './events/publishers.js';
 import { getDefaultWorkingDirectory, getEnvValueFromText } from './utils.js';
 import {
   createShellProcessExecution,
