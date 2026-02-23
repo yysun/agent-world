@@ -31,7 +31,8 @@
  */
 
 import { createLogMessage, upsertMessageList, type MessageLike } from './message-updates';
-import { publishStatusBarStatus } from './status-bar';
+import { updateRegistry } from './status-registry';
+import { applyEventToRegistry } from './status-updater';
 
 interface BasePayload {
   type?: string;
@@ -74,15 +75,6 @@ interface ChatHandlerOptions {
   streamingStateRef: RealtimeRefs;
   activityStateRef: ActivityRefs;
   setMessages: (updater: (existing: MessageLike[]) => MessageLike[]) => void;
-  setActiveStreamCount: (count: number) => void;
-  onSessionResponseStateChange?: (chatId: string, isActive: boolean) => void;
-  onSessionActivityUpdate?: (activity: {
-    eventType: string;
-    pendingOperations: number;
-    activityId: number;
-    source: string | null;
-    activeSources: string[];
-  }) => void;
   onSessionSystemEvent?: (event: {
     eventType: string;
     chatId: string | null;
@@ -107,35 +99,6 @@ function isAssistantLikeMessage(message: Record<string, unknown> | null | undefi
   return true;
 }
 
-function buildLogStatusText(logEvent: Record<string, unknown> | null | undefined) {
-  const category = String(logEvent?.category || 'system');
-  const baseMessage = String(logEvent?.message || 'Unknown error');
-  const data = logEvent?.data && typeof logEvent.data === 'object'
-    ? (logEvent.data as Record<string, unknown>)
-    : null;
-
-  if (!data) {
-    return `${category} - ${baseMessage}`;
-  }
-
-  const detailParts: string[] = [];
-  const detailText = data.error || data.errorMessage || data.message;
-  if (detailText) {
-    detailParts.push(String(detailText));
-  }
-  if (data.toolCallId) {
-    detailParts.push(`toolCallId=${String(data.toolCallId)}`);
-  }
-  if (data.agentId) {
-    detailParts.push(`agent=${String(data.agentId)}`);
-  }
-
-  if (detailParts.length === 0) {
-    return `${category} - ${baseMessage}`;
-  }
-
-  return `${category} - ${baseMessage}: ${detailParts.join(' | ')}`;
-}
 
 function isHitlRequestPayload(systemPayload: Record<string, unknown>): boolean {
   const topLevelType = String(systemPayload.eventType || '').trim();
@@ -154,12 +117,10 @@ export function createGlobalLogEventHandler({
   loadedWorldId,
   selectedSessionId,
   setMessages,
-  setStatusText,
 }: {
   loadedWorldId: string | null | undefined;
   selectedSessionId: string | null | undefined;
   setMessages: (updater: (existing: MessageLike[]) => MessageLike[]) => void;
-  setStatusText?: (text: string, kind: 'info' | 'error' | 'success') => void;
 }) {
   return (payload: BasePayload & { logEvent?: Record<string, unknown> }) => {
     if (!payload || payload.type !== 'log') return;
@@ -168,17 +129,11 @@ export function createGlobalLogEventHandler({
     if (!logEvent) return;
 
     const hasActiveSession = Boolean(loadedWorldId && selectedSessionId);
-    if (hasActiveSession) {
-      const logChatId = String(payload.chatId || logEvent?.chatId || '').trim();
-      if (logChatId && logChatId !== selectedSessionId) return;
-      setMessages((existing) => [...existing, createLogMessage(logEvent, logChatId || (selectedSessionId ?? undefined))]);
-      return;
-    }
+    if (!hasActiveSession) return;
 
-    const statusText = buildLogStatusText(logEvent);
-    const level = String(logEvent?.level || '').toLowerCase();
-    const emitStatus = typeof setStatusText === 'function' ? setStatusText : publishStatusBarStatus;
-    emitStatus(statusText, level === 'error' ? 'error' : 'info');
+    const logChatId = String(payload.chatId || logEvent?.chatId || '').trim();
+    if (logChatId && logChatId !== selectedSessionId) return;
+    setMessages((existing) => [...existing, createLogMessage(logEvent, logChatId || (selectedSessionId ?? undefined))]);
   };
 }
 
@@ -189,12 +144,8 @@ export function createChatSubscriptionEventHandler({
   streamingStateRef,
   activityStateRef,
   setMessages,
-  setActiveStreamCount,
-  onSessionResponseStateChange,
-  onSessionActivityUpdate,
   onSessionSystemEvent,
 }: ChatHandlerOptions) {
-  let lastActivityPendingOperations = 0;
   const toolCommandByUseId = new Map<string, string>();
 
   const syncActiveStreamCount = () => {
@@ -202,7 +153,6 @@ export function createChatSubscriptionEventHandler({
     if (!streaming) return;
 
     const count = streaming.getActiveCount();
-    setActiveStreamCount(count);
     if (activityStateRef.current) {
       activityStateRef.current.setActiveStreamCount(count);
     }
@@ -252,12 +202,7 @@ export function createChatSubscriptionEventHandler({
 
       const incomingChatId = String(incomingMessage.chatId || payload.chatId || '').trim() || null;
       if (selectedSessionId && incomingChatId !== selectedSessionId) {
-        if (
-          !incomingChatId
-          && isAssistantLikeMessage(incomingMessage)
-          && typeof onSessionResponseStateChange === 'function'
-        ) {
-          onSessionResponseStateChange(selectedSessionId, false);
+        if (!incomingChatId && isAssistantLikeMessage(incomingMessage)) {
           endResponseStreamByMessage(incomingMessage);
           endAllToolStreams();
         }
@@ -272,9 +217,6 @@ export function createChatSubscriptionEventHandler({
       }));
 
       if (isAssistantLikeMessage(incomingMessage)) {
-        if (typeof onSessionResponseStateChange === 'function' && incomingChatId) {
-          onSessionResponseStateChange(incomingChatId, false);
-        }
         endResponseStreamByMessage(incomingMessage);
         endAllToolStreams();
       }
@@ -287,45 +229,47 @@ export function createChatSubscriptionEventHandler({
 
       const streamChatId = String(streamPayload.chatId || payload.chatId || '').trim() || null;
       if (selectedSessionId && streamChatId && streamChatId !== selectedSessionId) return;
-      const responseChatId = streamChatId || selectedSessionId || null;
 
       const eventType = String(streamPayload.eventType || '').toLowerCase();
       const messageId = streamPayload.messageId ? String(streamPayload.messageId) : '';
       const streaming = streamingStateRef.current;
       if (!streaming) return;
 
+      const sseAgentName = String(streamPayload.agentName || '').trim() || null;
+      const sseChatId = streamChatId || selectedSessionId || null;
+
       if (!messageId) {
         if (eventType === 'end' || eventType === 'error') {
-          if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
-            onSessionResponseStateChange(responseChatId, false);
-          }
           endAllToolStreams();
           syncActiveStreamCount();
+          if (sseAgentName && loadedWorldId && sseChatId) {
+            updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', eventType));
+          }
         }
         return;
       }
 
       if (eventType === 'start') {
-        if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
-          onSessionResponseStateChange(responseChatId, true);
-        }
         endAllToolStreams();
         streaming.handleStart(messageId, String(streamPayload.agentName || 'assistant'));
         syncActiveStreamCount();
+        if (sseAgentName && loadedWorldId && sseChatId) {
+          updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', 'start'));
+        }
       } else if (eventType === 'chunk') {
         streaming.handleChunk(messageId, String(streamPayload.content || ''));
       } else if (eventType === 'end') {
-        if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
-          onSessionResponseStateChange(responseChatId, false);
-        }
         streaming.handleEnd(messageId);
         syncActiveStreamCount();
-      } else if (eventType === 'error') {
-        if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
-          onSessionResponseStateChange(responseChatId, false);
+        if (sseAgentName && loadedWorldId && sseChatId) {
+          updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', 'end'));
         }
+      } else if (eventType === 'error') {
         streaming.handleError(messageId, String(streamPayload.error || 'Stream error'));
         syncActiveStreamCount();
+        if (sseAgentName && loadedWorldId && sseChatId) {
+          updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', 'error'));
+        }
       } else if (eventType === 'tool-stream') {
         const content = String(streamPayload.content || '');
         const stream = String(streamPayload.stream || 'stdout') === 'stderr' ? 'stderr' : 'stdout';
@@ -351,7 +295,6 @@ export function createChatSubscriptionEventHandler({
       if (!toolPayload) return;
       const toolChatId = String(payload.chatId || toolPayload.chatId || '').trim() || null;
       if (selectedSessionId && toolChatId && toolChatId !== selectedSessionId) return;
-      const responseChatId = toolChatId || selectedSessionId || null;
 
       const activity = activityStateRef.current;
       if (!activity) return;
@@ -359,6 +302,9 @@ export function createChatSubscriptionEventHandler({
       const toolEventType = String(toolPayload.eventType || '').toLowerCase();
       const toolUseId = String(toolPayload.toolUseId || '').trim();
       if (!toolUseId) return;
+
+      const toolAgentName = String(toolPayload.agentName || toolPayload.agentId || '').trim() || null;
+      const toolChatIdResolved = toolChatId || selectedSessionId || null;
 
       if (toolEventType === 'tool-start') {
         const toolName = String(toolPayload.toolName || 'unknown');
@@ -383,19 +329,16 @@ export function createChatSubscriptionEventHandler({
             return next;
           });
         }
-        if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
-          onSessionResponseStateChange(responseChatId, true);
-        }
         activity.handleToolStart(
           toolUseId,
           toolName,
           toolInput,
         );
+        if (toolAgentName && loadedWorldId && toolChatIdResolved) {
+          updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, toolChatIdResolved, toolAgentName, 'tool', 'tool-start'));
+        }
       } else if (toolEventType === 'tool-result') {
         toolCommandByUseId.delete(toolUseId);
-        if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
-          onSessionResponseStateChange(responseChatId, false);
-        }
         activity.handleToolResult(toolUseId, String(toolPayload.result || ''));
         const streaming = streamingStateRef.current;
         if (streaming?.isActive(toolUseId)) {
@@ -403,11 +346,11 @@ export function createChatSubscriptionEventHandler({
           syncActiveStreamCount();
         }
         endAllToolStreams();
+        if (toolAgentName && loadedWorldId && toolChatIdResolved) {
+          updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, toolChatIdResolved, toolAgentName, 'tool', 'tool-result'));
+        }
       } else if (toolEventType === 'tool-error') {
         toolCommandByUseId.delete(toolUseId);
-        if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
-          onSessionResponseStateChange(responseChatId, false);
-        }
         activity.handleToolError(toolUseId, String(toolPayload.error || 'Tool error'));
         const streaming = streamingStateRef.current;
         if (streaming?.isActive(toolUseId)) {
@@ -415,43 +358,11 @@ export function createChatSubscriptionEventHandler({
           syncActiveStreamCount();
         }
         endAllToolStreams();
+        if (toolAgentName && loadedWorldId && toolChatIdResolved) {
+          updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, toolChatIdResolved, toolAgentName, 'tool', 'tool-error'));
+        }
       } else if (toolEventType === 'tool-progress') {
         activity.handleToolProgress(toolUseId, String(toolPayload.progress || ''));
-      }
-    }
-
-    if (payload.type === 'activity') {
-      const activityPayload = payload.activity as Record<string, unknown> | undefined;
-      if (!activityPayload) return;
-
-      const activityChatId = String(payload.chatId || '').trim() || null;
-      if (selectedSessionId && activityChatId && activityChatId !== selectedSessionId) return;
-
-      if (typeof onSessionActivityUpdate === 'function') {
-        onSessionActivityUpdate({
-          eventType: String(activityPayload.eventType || ''),
-          pendingOperations: Number(activityPayload.pendingOperations) || 0,
-          activityId: Number(activityPayload.activityId) || 0,
-          source: activityPayload.source ? String(activityPayload.source) : null,
-          activeSources: Array.isArray(activityPayload.activeSources)
-            ? activityPayload.activeSources.map((source) => String(source))
-            : [],
-        });
-      }
-
-      const pendingOperations = Number(activityPayload.pendingOperations) || 0;
-      if (pendingOperations > 0 && lastActivityPendingOperations <= 0) {
-        activityStateRef.current?.resetElapsed?.();
-      }
-      lastActivityPendingOperations = pendingOperations;
-
-      if (typeof onSessionResponseStateChange === 'function') {
-        if (pendingOperations <= 0) {
-          const responseChatId = activityChatId || selectedSessionId || null;
-          if (responseChatId) {
-            onSessionResponseStateChange(responseChatId, false);
-          }
-        }
       }
     }
 
@@ -471,6 +382,14 @@ export function createChatSubscriptionEventHandler({
           createdAt: systemPayload.createdAt ? String(systemPayload.createdAt) : null,
           content: systemPayload.content,
         });
+      }
+
+      if (isHitlRequest) {
+        const hitlAgentName = String(systemPayload.agentName || '').trim() || null;
+        const hitlChatId = systemChatId || selectedSessionId || null;
+        if (hitlAgentName && loadedWorldId && hitlChatId) {
+          updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, hitlChatId, hitlAgentName, 'system', 'hitl-option-request'));
+        }
       }
     }
   };

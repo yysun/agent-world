@@ -982,6 +982,19 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     return normalizeSessionMessages(memory.map((message: any) => serializeMessage(message)));
   }
 
+  async function getChatEvents(worldId: unknown, chatId: unknown) {
+    await ensureCoreReady();
+    const id = String(worldId || '');
+    if (!id) throw new Error('World ID is required.');
+
+    const requestedChatId = chatId ? String(chatId) : null;
+    const world = await getWorld(id);
+    if (!world?.eventStorage) return [];
+
+    const events = await world.eventStorage.getEventsByWorldAndChat(id, requestedChatId);
+    return Array.isArray(events) ? events : [];
+  }
+
   async function sendChatMessage(payload: any) {
     await ensureCoreReady();
     const worldId = String(payload?.worldId || '');
@@ -1167,6 +1180,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     editMessageInChat,
     respondHitlOption,
     stopChatMessage,
-    deleteMessageFromChat
+    deleteMessageFromChat,
+    getChatEvents
   };
 }

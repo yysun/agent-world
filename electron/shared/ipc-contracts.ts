@@ -62,7 +62,8 @@ export const DESKTOP_INVOKE_CHANNELS = {
   CHAT_UNSUBSCRIBE_EVENTS: 'chat:unsubscribeEvents',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SAVE: 'settings:save',
-  DIALOG_PICK_FILE: 'dialog:pickFile'
+  DIALOG_PICK_FILE: 'dialog:pickFile',
+  CHAT_GET_EVENTS: 'chat:getEvents'
 } as const;
 
 export type DesktopInvokeChannel =
@@ -186,4 +187,5 @@ export interface DesktopApi {
   getSettings: () => Promise<unknown>;
   saveSettings: (settings: Record<string, unknown>) => Promise<unknown>;
   pickFile: () => Promise<unknown>;
+  getChatEvents: (worldId: string, chatId: string) => Promise<unknown>;
 }

@@ -40,13 +40,10 @@ import {
   AppFrameLayout,
   MainWorkspaceLayout,
   AppOverlaysHost,
+  WorkingStatusBar,
 } from './components/index';
+import { useWorkingStatus } from './hooks/useWorkingStatus';
 import { getDesktopApi, safeMessage } from './domain/desktop-api';
-import {
-  getStatusBarStatus,
-  publishStatusBarStatus,
-  subscribeStatusBarStatus
-} from './domain/status-bar';
 import { useSkillRegistry } from './hooks/useSkillRegistry';
 import { useStreamingActivity } from './hooks/useStreamingActivity';
 import { useMessageManagement } from './hooks/useMessageManagement';
@@ -73,18 +70,16 @@ import {
   isRenderableMessageEntry,
 } from './utils/message-utils';
 import {
-  buildInlineAgentStatusSummary,
   getAgentDisplayName,
-  getAgentWorkPhaseText,
   getAgentInitials,
-  getProcessedAgentsStatusText,
   getDefaultWorldForm,
   getEnvValueFromText,
   getWorldFormFromWorld,
-  normalizeActivitySourceLabel,
   parseOptionalInteger,
 } from './utils/app-helpers';
 import { useChatEventSubscriptions } from './hooks/useChatEventSubscriptions';
+import { clearChatAgents, syncWorldRoster, updateRegistry } from './domain/status-registry';
+import { applyEventToRegistry } from './domain/status-updater';
 import {
   createLeftSidebarProps,
   createMainContentComposerProps,
@@ -92,7 +87,6 @@ import {
   createMainContentRightPanelContentProps,
   createMainContentRightPanelShellProps,
   createMainHeaderProps,
-  createStatusActivityBarProps,
 } from './utils/app-layout-props';
 
 type WorkspaceState = {
@@ -127,12 +121,6 @@ type HitlPrompt = {
 export default function App() {
   const api = useMemo(() => getDesktopApi(), []);
   const chatSubscriptionCounter = useRef(0);
-  const previousPendingOperationsRef = useRef(0);
-  const previousSessionSendingRef = useRef(false);
-  const noAgentFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const latestCoreProcessedAgentCountRef = useRef(0);
-  const latestPendingOperationsRef = useRef(0);
-  const latestPendingResponseRef = useRef(false);
   const messageRefreshCounter = useRef(0);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -150,7 +138,6 @@ export default function App() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelMode, setPanelMode] = useState('create-world');
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
-  const [status, setStatus] = useState<any>(() => getStatusBarStatus());
   const [creatingAgent, setCreatingAgent] = useState<any>(DEFAULT_AGENT_FORM);
   const [editingAgent, setEditingAgent] = useState<any>(DEFAULT_AGENT_FORM);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
@@ -174,10 +161,9 @@ export default function App() {
   const [hitlPromptQueue, setHitlPromptQueue] = useState<HitlPrompt[]>([]);
   const [submittingHitlRequestId, setSubmittingHitlRequestId] = useState<string | null>(null);
   const hasActiveHitlPrompt = hitlPromptQueue.length > 0;
-  const [recentlyActiveAgentNames, setRecentlyActiveAgentNames] = useState<string[]>([]);
 
-  const setStatusText = useCallback((text: string, kind: string = 'info') => {
-    publishStatusBarStatus(text, kind);
+  const setStatusText = useCallback((_text: string, _kind: string = 'info') => {
+    // Status notifications to be wired in Phase 7
   }, []);
 
   const {
@@ -245,21 +231,8 @@ export default function App() {
   const {
     streamingStateRef,
     activityStateRef,
-    isBusy,
-    setIsBusy,
-    elapsedMs,
-    activeTools,
-    setActiveTools,
-    activeStreamCount,
-    setActiveStreamCount,
-    sessionActivity,
-    setSessionActivity,
     resetActivityRuntimeState,
   } = useStreamingActivity({ setMessages });
-
-  useEffect(() => {
-    return subscribeStatusBarStatus(setStatus);
-  }, []);
 
   const respondToHitlPrompt = useCallback(async (prompt: HitlPrompt, optionId: string) => {
     if (!prompt) return;
@@ -507,7 +480,6 @@ export default function App() {
     sendingSessionIds,
     stoppingSessionIds,
     pendingResponseSessionIds,
-    setPendingResponseSessionIds,
     editingMessageId,
     editingText,
     setEditingText,
@@ -536,10 +508,6 @@ export default function App() {
     setStatusText,
     streamingStateRef,
     activityStateRef,
-    setActiveStreamCount,
-    setActiveTools,
-    setIsBusy,
-    setSessionActivity,
     hasActiveHitlPrompt,
     setHitlPromptQueue,
     setSubmittingHitlRequestId,
@@ -595,6 +563,35 @@ export default function App() {
     refreshMessages(loadedWorld?.id, selectedSessionId);
   }, [loadedWorld?.id, selectedSessionId, refreshMessages]);
 
+  // Phase 6.2b: Clear registry for the new chat and replay stored events to reconstruct status
+  useEffect(() => {
+    const worldId = loadedWorld?.id;
+    const chatId = selectedSessionId;
+    if (!worldId || !chatId) return;
+
+    updateRegistry(r => clearChatAgents(r, worldId, chatId));
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const events = (await api.getChatEvents(worldId, chatId)) as any[];
+        if (cancelled || !Array.isArray(events)) return;
+        for (const storedEvent of events) {
+          const eventCategory = String(storedEvent?.type || '').trim();
+          const payload = storedEvent?.payload || {};
+          const subtype = String(payload?.type || '').trim();
+          const agentName = String(payload?.agentName || '').trim();
+          if (!agentName || !subtype) continue;
+          if (eventCategory !== 'sse' && eventCategory !== 'tool') continue;
+          updateRegistry(r => applyEventToRegistry(r, worldId, chatId, agentName, eventCategory as any, subtype as any));
+        }
+      } catch {
+        // event replay failure is non-critical
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [api, loadedWorld?.id, selectedSessionId]);
+
   useEffect(() => {
     const normalizedSessionId = String(selectedSessionId || '').trim();
     if (!normalizedSessionId) return;
@@ -630,7 +627,6 @@ export default function App() {
     if (loadedWorld?.id) return;
     resetMessageRuntimeState();
     resetActivityRuntimeState();
-    setRecentlyActiveAgentNames([]);
     setHitlPromptQueue([]);
     setSubmittingHitlRequestId(null);
   }, [loadedWorld?.id, resetActivityRuntimeState, resetMessageRuntimeState]);
@@ -644,6 +640,15 @@ export default function App() {
     setSessionSearch('');
   }, [loadedWorld?.id]);
 
+  // Phase 6.3: Sync world roster (agents + chats) into registry on every CRUD change
+  useEffect(() => {
+    if (!loadedWorld?.id) return;
+    const chatIds = (sessions as any[]).map((s: any) => String(s?.id || '')).filter(Boolean);
+    const agentIds = (Array.isArray(loadedWorld.agents) ? loadedWorld.agents : [])
+      .map((a: any) => String(a?.id || '')).filter(Boolean);
+    updateRegistry(r => syncWorldRoster(r, loadedWorld.id, chatIds, agentIds));
+  }, [loadedWorld, sessions]);
+
   useChatEventSubscriptions({
     api,
     loadedWorld,
@@ -652,11 +657,7 @@ export default function App() {
     chatSubscriptionCounter,
     streamingStateRef,
     activityStateRef,
-    setActiveStreamCount,
-    setPendingResponseSessionIds,
-    setSessionActivity,
     refreshSessions,
-    setStatusText,
     resetActivityRuntimeState,
     setHitlPromptQueue,
   });
@@ -759,6 +760,12 @@ export default function App() {
     saveSystemSettings,
   });
 
+  const agentStatusInput = useMemo(
+    () => worldAgents.map((a: any) => ({ id: String(a.id || ''), name: String(a.name || '') })),
+    [worldAgents]
+  );
+  const { chatStatus, agentStatuses } = useWorkingStatus(loadedWorld?.id, selectedSessionId, agentStatusInput);
+
   useEffect(() => {
     const textarea = composerTextareaRef.current;
     if (!textarea) return;
@@ -795,275 +802,6 @@ export default function App() {
   const isCurrentSessionStopping = Boolean(selectedSessionId && stoppingSessionIds.has(selectedSessionId));
   const isCurrentSessionPendingResponse = Boolean(selectedSessionId && pendingResponseSessionIds.has(selectedSessionId));
   const canStopCurrentSession = Boolean(selectedSessionId) && !isCurrentSessionSending && !isCurrentSessionStopping && isCurrentSessionPendingResponse;
-  const activeAgentSources = useMemo(() => {
-    if (!Array.isArray(sessionActivity.activeSources)) return [];
-
-    const unique = new Set();
-    for (const source of sessionActivity.activeSources) {
-      const normalized = normalizeActivitySourceLabel(source);
-      if (normalized) unique.add(normalized);
-    }
-
-    return Array.from(unique);
-  }, [sessionActivity.activeSources]);
-  const resolveAgentName = useCallback((source: any) => {
-    const rawSource = String(source || '').trim();
-    if (!rawSource) return '';
-
-    const normalizedSource = normalizeActivitySourceLabel(rawSource).toLowerCase();
-    if (!normalizedSource) return '';
-    if (!Array.isArray(worldAgents) || worldAgents.length === 0) return rawSource;
-
-    const matchedAgent = worldAgents.find((agent) => {
-      const normalizedId = String(agent?.id || '').trim().toLowerCase();
-      const normalizedName = String(agent?.name || '').trim().toLowerCase();
-      return normalizedSource === normalizedId || normalizedSource === normalizedName;
-    });
-
-    return String(matchedAgent?.name || rawSource);
-  }, [worldAgents]);
-
-  useEffect(() => {
-    if (!selectedSessionId || Number(sessionActivity.pendingOperations || 0) <= 0) {
-      setRecentlyActiveAgentNames([]);
-      return;
-    }
-
-    const activeAgentNames = Array.from(
-      new Set(
-        activeAgentSources
-          .map((source) => resolveAgentName(source))
-          .map((name) => String(name || '').trim())
-          .filter(Boolean)
-      )
-    );
-    if (activeAgentNames.length === 0) return;
-
-    setRecentlyActiveAgentNames((existing) => {
-      const merged = new Set([...existing, ...activeAgentNames]);
-      return Array.from(merged);
-    });
-  }, [activeAgentSources, resolveAgentName, selectedSessionId, sessionActivity.pendingOperations]);
-
-  const processedAgentCountFromCore = useMemo(() => {
-    const processedAgentNames = new Set<string>(
-      recentlyActiveAgentNames
-        .map((name) => String(name || '').trim())
-        .filter(Boolean),
-    );
-
-    const currentlyActiveNames = activeAgentSources
-      .map((source) => resolveAgentName(source))
-      .map((name) => String(name || '').trim())
-      .filter(Boolean);
-    for (const name of currentlyActiveNames) {
-      processedAgentNames.add(name);
-    }
-
-    return processedAgentNames.size;
-  }, [activeAgentSources, recentlyActiveAgentNames, resolveAgentName]);
-
-  useEffect(() => {
-    latestCoreProcessedAgentCountRef.current = processedAgentCountFromCore;
-    latestPendingOperationsRef.current = Number(sessionActivity.pendingOperations || 0);
-    latestPendingResponseRef.current = isCurrentSessionPendingResponse;
-  }, [isCurrentSessionPendingResponse, processedAgentCountFromCore, sessionActivity.pendingOperations]);
-
-  useEffect(() => {
-    if (!selectedSessionId) {
-      previousSessionSendingRef.current = false;
-      if (noAgentFallbackTimerRef.current) {
-        clearTimeout(noAgentFallbackTimerRef.current);
-        noAgentFallbackTimerRef.current = null;
-      }
-      return;
-    }
-
-    const wasSending = previousSessionSendingRef.current;
-    const isSending = isCurrentSessionSending;
-    previousSessionSendingRef.current = isSending;
-
-    if (isSending) {
-      if (noAgentFallbackTimerRef.current) {
-        clearTimeout(noAgentFallbackTimerRef.current);
-        noAgentFallbackTimerRef.current = null;
-      }
-      return;
-    }
-
-    if (!wasSending) {
-      return;
-    }
-
-    if (noAgentFallbackTimerRef.current) {
-      clearTimeout(noAgentFallbackTimerRef.current);
-      noAgentFallbackTimerRef.current = null;
-    }
-
-    noAgentFallbackTimerRef.current = setTimeout(() => {
-      noAgentFallbackTimerRef.current = null;
-
-      const hasPending = latestPendingOperationsRef.current > 0 || latestPendingResponseRef.current;
-      const processedCount = latestCoreProcessedAgentCountRef.current;
-      if (hasPending || processedCount > 0) {
-        return;
-      }
-
-      const completionStatus = getProcessedAgentsStatusText(0);
-      setStatusText(completionStatus.text, completionStatus.kind);
-    }, 1200);
-
-    return () => {
-      if (noAgentFallbackTimerRef.current) {
-        clearTimeout(noAgentFallbackTimerRef.current);
-        noAgentFallbackTimerRef.current = null;
-      }
-    };
-  }, [isCurrentSessionSending, selectedSessionId, setStatusText]);
-
-  useEffect(() => {
-    previousPendingOperationsRef.current = 0;
-  }, [selectedSessionId]);
-
-  useEffect(() => {
-    const pendingOperations = Number(sessionActivity.pendingOperations || 0);
-    const previousPendingOperations = previousPendingOperationsRef.current;
-
-    if (selectedSessionId && previousPendingOperations > 0 && pendingOperations <= 0) {
-      const completionStatus = getProcessedAgentsStatusText(processedAgentCountFromCore);
-      setStatusText(completionStatus.text, completionStatus.kind);
-    }
-
-    previousPendingOperationsRef.current = pendingOperations;
-  }, [
-    activeAgentSources,
-    processedAgentCountFromCore,
-    recentlyActiveAgentNames,
-    resolveAgentName,
-    selectedSessionId,
-    sessionActivity.pendingOperations,
-    setStatusText,
-  ]);
-  const activeHeaderAgentIds = useMemo(() => {
-    if (!Array.isArray(activeAgentSources) || activeAgentSources.length === 0) return [];
-    if (!Array.isArray(worldAgents) || worldAgents.length === 0) return [];
-
-    const activeIds = new Set<string>();
-    for (const source of activeAgentSources) {
-      const normalizedSource = normalizeActivitySourceLabel(source).toLowerCase();
-      if (!normalizedSource) continue;
-
-      const matchedAgent = worldAgents.find((agent) => {
-        const normalizedId = String(agent?.id || '').trim().toLowerCase();
-        const normalizedName = String(agent?.name || '').trim().toLowerCase();
-        return normalizedSource === normalizedId || normalizedSource === normalizedName;
-      });
-
-      if (matchedAgent?.id) {
-        activeIds.add(String(matchedAgent.id));
-      }
-    }
-
-    return Array.from(activeIds);
-  }, [activeAgentSources, worldAgents]);
-  const workingAgentCount = activeAgentSources.length;
-  const pendingAgentCount = Math.max(0, Number(sessionActivity.pendingOperations || 0) - workingAgentCount);
-  const isAgentWorkInProgress = workingAgentCount > 0;
-  const hasComposerActivity =
-    isCurrentSessionSending ||
-    isCurrentSessionPendingResponse ||
-    Number(sessionActivity.pendingOperations || 0) > 0 ||
-    activeTools.length > 0 ||
-    activeStreamCount > 0 ||
-    isBusy;
-  const inlineWorkingAgentLabel = useMemo(() => {
-    if (Array.isArray(activeAgentSources) && activeAgentSources.length > 0) {
-      const firstResolved = resolveAgentName(activeAgentSources[0]);
-      if (firstResolved) return firstResolved;
-    }
-
-    const mainAgentResolved = resolveAgentName(loadedWorld?.mainAgent);
-    if (mainAgentResolved) return mainAgentResolved;
-
-    if (Array.isArray(worldAgents) && worldAgents.length > 0) {
-      const firstAgentName = String(worldAgents[0]?.name || '').trim();
-      if (firstAgentName) return firstAgentName;
-    }
-
-    return 'Agent';
-  }, [activeAgentSources, resolveAgentName, worldAgents, loadedWorld?.mainAgent]);
-  const inlineWorkingIndicatorState = useMemo(() => {
-    const activeAgentNames = Array.from(
-      new Set(
-        activeAgentSources
-          .map((source) => resolveAgentName(source))
-          .map((name) => String(name || '').trim())
-          .filter(Boolean)
-      )
-    );
-
-    const primaryText = activeAgentNames.length > 0
-      ? activeAgentNames.join(', ')
-      : inlineWorkingAgentLabel;
-
-    const detailParts: string[] = [];
-    const phaseText = getAgentWorkPhaseText({
-      activeTools,
-      activeStreamCount,
-      activeAgentCount: workingAgentCount,
-      pendingAgentCount,
-    });
-    const allAgentNames = Array.from(
-      new Set(
-        (Array.isArray(worldAgents) ? worldAgents : [])
-          .map((agent) => String(agent?.name || '').trim())
-          .filter(Boolean),
-      ),
-    );
-    const activeAgentNameSet = new Set(activeAgentNames.map((name) => name.toLowerCase()));
-    const doneAgentNames = recentlyActiveAgentNames.filter(
-      (name) => !activeAgentNameSet.has(String(name || '').toLowerCase()),
-    );
-    const doneAgentNameSet = new Set(doneAgentNames.map((name) => String(name || '').toLowerCase()));
-    const pendingAgentNames = allAgentNames
-      .filter((name) => !activeAgentNameSet.has(name.toLowerCase()) && !doneAgentNameSet.has(name.toLowerCase()))
-      .slice(0, Math.max(0, pendingAgentCount));
-    const statusText = buildInlineAgentStatusSummary({
-      activeAgentNames,
-      doneAgentNames,
-      pendingAgentNames,
-      pendingAgentCount,
-      phaseText,
-      fallbackAgentName: inlineWorkingAgentLabel,
-    });
-    const inlineStatusText = phaseText === 'calling LLM...'
-      ? `${activeAgentNames[0] || inlineWorkingAgentLabel} calling LLM...`
-      : '';
-    if (statusText) {
-      detailParts.push(statusText);
-    }
-
-    return {
-      primaryText: inlineStatusText || statusText || primaryText,
-      detailText: detailParts.length > 1 ? detailParts.slice(1).join(' · ') : '',
-      elapsedMs,
-      statusText,
-      inlineStatusText,
-    };
-  }, [
-    activeAgentSources,
-    activeStreamCount,
-    activeTools,
-    inlineWorkingAgentLabel,
-    pendingAgentCount,
-    recentlyActiveAgentNames,
-    resolveAgentName,
-    worldAgents,
-    elapsedMs,
-  ]);
-  const showInlineWorkingIndicator =
-    Boolean(selectedSessionId)
-    && hasComposerActivity;
   const activeHitlPrompt = hitlPromptQueue.length > 0 ? hitlPromptQueue[0] : null;
   const hasConversationMessages = useMemo(() => {
     return messages.some(isRenderableMessageEntry);
@@ -1092,8 +830,8 @@ export default function App() {
     onDeleteMessage,
     onBranchFromMessage,
     onCopyRawMarkdownFromMessage,
-    showInlineWorkingIndicator,
-    inlineWorkingIndicatorState,
+    showInlineWorkingIndicator: false,
+    inlineWorkingIndicatorState: null,
     activeHitlPrompt,
     submittingHitlRequestId,
     onRespondHitlOption: (prompt: HitlPrompt, optionId: string) => respondToHitlPrompt(prompt, optionId),
@@ -1204,7 +942,7 @@ export default function App() {
     selectedSession,
     visibleWorldAgents,
     hiddenWorldAgentCount,
-    activeHeaderAgentIds,
+    activeHeaderAgentIds: [],
     onOpenEditAgentPanel,
     onOpenCreateAgentPanel,
     onOpenSettingsPanel,
@@ -1213,15 +951,6 @@ export default function App() {
     panelOpen,
     DRAG_REGION_STYLE,
     NO_DRAG_REGION_STYLE,
-  });
-
-  const statusActivityBarProps = createStatusActivityBarProps({
-    status,
-    agentStatusText: inlineWorkingIndicatorState?.statusText || '',
-    hasComposerActivity,
-    isAgentWorkInProgress,
-    activeTools,
-    elapsedMs,
   });
 
   return (
@@ -1236,7 +965,7 @@ export default function App() {
             rightPanelShellProps: mainContentRightPanelShellProps,
             rightPanelContentProps: mainContentRightPanelContentProps,
           }}
-          statusActivityBarProps={statusActivityBarProps}
+          statusBar={<WorkingStatusBar chatStatus={chatStatus} agentStatuses={agentStatuses} />}
         />
       )}
       overlays={(

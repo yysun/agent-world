@@ -41,6 +41,7 @@ type HitlRequestToolArgs = {
 type HitlRequestToolContext = {
   world?: World;
   chatId?: string | null;
+  agentName?: string | null;
 };
 
 type NormalizedHitlRequestArgs = {
@@ -174,8 +175,9 @@ async function requestPrimaryResolution(options: {
   world: World;
   chatId: string | null;
   args: NormalizedHitlRequestArgs;
+  agentName?: string | null;
 }): Promise<PrimaryResolution> {
-  const { world, chatId, args } = options;
+  const { world, chatId, args, agentName } = options;
   const promptOptions = buildOptionPromptOptions(args.options);
   const optionResolution = await requestWorldOption(world, {
     title: 'Human input required',
@@ -189,6 +191,7 @@ async function requestPrimaryResolution(options: {
       tool: 'human_intervention_request',
       mode: MODE_OPTION,
     },
+    agentName: agentName || null,
   });
 
   const selectedOption = promptOptions.find((option) => option.id === optionResolution.optionId)?.label || null;
@@ -327,12 +330,14 @@ export function createHitlToolDefinition() {
       }
 
       const chatId = context?.chatId ?? world.currentChatId ?? null;
+      const agentName = context?.agentName || null;
 
       try {
         const primaryResolution = await requestPrimaryResolution({
           world,
           chatId,
           args: normalized.args,
+          agentName,
         });
 
         if (normalized.args.requireConfirmation) {

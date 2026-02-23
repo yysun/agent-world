@@ -58,6 +58,7 @@ export interface MainIpcHandlers {
   deleteWorldSession: (worldId: unknown, chatId: unknown) => Promise<unknown> | unknown;
   selectWorldSession: (worldId: unknown, chatId: unknown) => Promise<unknown> | unknown;
   getSessionMessages: (worldId: unknown, chatId: unknown) => Promise<unknown> | unknown;
+  getChatEvents: (worldId: unknown, chatId: unknown) => Promise<unknown> | unknown;
   sendChatMessage: (payload: unknown) => Promise<unknown> | unknown;
   editMessageInChat: (payload: unknown) => Promise<unknown> | unknown;
   respondHitlOption: (payload: unknown) => Promise<unknown> | unknown;
@@ -130,6 +131,13 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
       handler: async (_event, payload) => {
         const normalized = payload as WorldChatPayload | undefined;
         return handlers.getSessionMessages(normalized?.worldId, normalized?.chatId);
+      }
+    },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.CHAT_GET_EVENTS,
+      handler: async (_event, payload) => {
+        const normalized = payload as WorldChatPayload | undefined;
+        return handlers.getChatEvents(normalized?.worldId, normalized?.chatId);
       }
     },
     { channel: DESKTOP_INVOKE_CHANNELS.CHAT_SEND_MESSAGE, handler: async (_event, payload) => handlers.sendChatMessage(payload) },

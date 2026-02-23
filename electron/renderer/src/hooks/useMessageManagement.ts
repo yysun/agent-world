@@ -48,10 +48,6 @@ export function useMessageManagement({
   setStatusText,
   streamingStateRef,
   activityStateRef,
-  setActiveStreamCount,
-  setActiveTools,
-  setIsBusy,
-  setSessionActivity,
   hasActiveHitlPrompt = false,
   setHitlPromptQueue,
   setSubmittingHitlRequestId,
@@ -189,16 +185,6 @@ export function useMessageManagement({
         if (activityStateRef.current) {
           activityStateRef.current.cleanup();
         }
-        setActiveStreamCount(0);
-        setActiveTools([]);
-        setIsBusy(false);
-        setSessionActivity({
-          eventType: 'idle',
-          pendingOperations: 0,
-          activityId: 0,
-          source: null,
-          activeSources: []
-        });
       }
 
       if (stopped) {
@@ -222,10 +208,6 @@ export function useMessageManagement({
     api,
     loadedWorldId,
     selectedSessionId,
-    setActiveStreamCount,
-    setActiveTools,
-    setIsBusy,
-    setSessionActivity,
     setStatusText,
     stoppingSessionIds,
     streamingStateRef,

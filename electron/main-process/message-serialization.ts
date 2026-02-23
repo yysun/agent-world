@@ -280,6 +280,7 @@ export function serializeRealtimeToolEvent(
       error: event?.error || toolExecution?.error || null,
       progress: event?.progress || null,
       agentId: event?.agentId || null,
+      agentName: event?.agentName || null,
       createdAt: new Date().toISOString()
     }
   };
@@ -299,6 +300,9 @@ export function serializeRealtimeSystemEvent(
         ? content.type
         : 'system';
 
+  const contentObj = content && typeof content === 'object' ? (content as Record<string, unknown>) : null;
+  const agentName = contentObj?.agentName != null ? String(contentObj.agentName) : null;
+
   return {
     type: 'system',
     worldId,
@@ -308,7 +312,8 @@ export function serializeRealtimeSystemEvent(
       content,
       messageId: typeof event?.messageId === 'string' ? event.messageId : null,
       createdAt: toIsoTimestamp(event?.timestamp),
-      chatId: chatId || null
+      chatId: chatId || null,
+      agentName,
     }
   };
 }

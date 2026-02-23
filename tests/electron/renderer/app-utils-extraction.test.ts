@@ -40,11 +40,6 @@ import {
   validateWorldForm,
 } from '../../../electron/renderer/src/utils/validation';
 import {
-  buildInlineAgentStatusSummary,
-  getAgentWorkPhaseText,
-  getProcessedAgentsStatusText,
-} from '../../../electron/renderer/src/utils/app-helpers';
-import {
   getMessageCardClassName,
   getMessageIdentity,
   getMessageSenderLabel,
@@ -119,111 +114,6 @@ describe('extracted formatting utils', () => {
   });
 });
 
-describe('extracted app-helpers utils', () => {
-  it('prefers tool-calling phase text when tools are active', () => {
-    expect(getAgentWorkPhaseText({
-      activeTools: [{ toolName: 'read_file' }],
-      activeStreamCount: 1,
-      activeAgentCount: 1,
-      pendingAgentCount: 2,
-    })).toBe('calling tool: read_file');
-
-    expect(getAgentWorkPhaseText({
-      activeTools: [{ toolName: 'read_file' }, { toolName: 'write_file' }],
-      activeStreamCount: 0,
-      activeAgentCount: 1,
-      pendingAgentCount: 0,
-    })).toBe('calling 2 tools');
-  });
-
-  it('uses waiting/queued fallback phases when no tools are active', () => {
-    expect(getAgentWorkPhaseText({
-      activeTools: [],
-      activeStreamCount: 1,
-      activeAgentCount: 1,
-      pendingAgentCount: 0,
-    })).toBe('streaming response...');
-
-    expect(getAgentWorkPhaseText({
-      activeTools: [],
-      activeStreamCount: 0,
-      activeAgentCount: 1,
-      pendingAgentCount: 0,
-    })).toBe('calling LLM...');
-
-    expect(getAgentWorkPhaseText({
-      activeTools: [],
-      activeStreamCount: 0,
-      activeAgentCount: 0,
-      pendingAgentCount: 2,
-    })).toBe('queued');
-  });
-
-  it('builds per-agent inline status summary text', () => {
-    expect(buildInlineAgentStatusSummary({
-      activeAgentNames: ['a1'],
-      doneAgentNames: [],
-      pendingAgentNames: ['a2'],
-      pendingAgentCount: 1,
-      phaseText: 'streaming response...',
-      fallbackAgentName: 'Agent',
-    })).toBe('a1: streaming response...; a2: pending ...');
-
-    expect(buildInlineAgentStatusSummary({
-      activeAgentNames: ['a1', 'a2'],
-      doneAgentNames: [],
-      pendingAgentNames: [],
-      pendingAgentCount: 1,
-      phaseText: 'calling 2 tools',
-      fallbackAgentName: 'Agent',
-    })).toBe('a1: calling 2 tools; a2: calling 2 tools; 1 pending ...');
-
-    expect(buildInlineAgentStatusSummary({
-      activeAgentNames: ['a2'],
-      doneAgentNames: ['a1'],
-      pendingAgentNames: [],
-      pendingAgentCount: 0,
-      phaseText: 'streaming response...',
-      fallbackAgentName: 'Agent',
-    })).toBe('a1: done; a2: streaming response...');
-
-    expect(buildInlineAgentStatusSummary({
-      activeAgentNames: [],
-      doneAgentNames: [],
-      pendingAgentNames: [],
-      pendingAgentCount: 0,
-      phaseText: 'streaming response...',
-      fallbackAgentName: 'a1',
-    })).toBe('');
-
-    expect(buildInlineAgentStatusSummary({
-      activeAgentNames: [],
-      doneAgentNames: [],
-      pendingAgentNames: [],
-      pendingAgentCount: 1,
-      phaseText: 'streaming response...',
-      fallbackAgentName: 'a1',
-    })).toBe('1 pending ...');
-  });
-
-  it('formats processed-agent completion status text', () => {
-    expect(getProcessedAgentsStatusText(0)).toEqual({
-      text: 'No agent processed the message.',
-      kind: 'info',
-    });
-
-    expect(getProcessedAgentsStatusText(1)).toEqual({
-      text: '1 agent processed this message.',
-      kind: 'success',
-    });
-
-    expect(getProcessedAgentsStatusText(3)).toEqual({
-      text: '3 agents processed this message.',
-      kind: 'success',
-    });
-  });
-
-});
 
 describe('extracted validation utils', () => {
   it('validates world form and enforces required fields', () => {

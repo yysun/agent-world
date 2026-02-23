@@ -178,6 +178,12 @@ export function createDesktopApi(ipcRendererLike: IpcRendererLike = ipcRenderer)
         DESKTOP_INVOKE_CHANNELS.CHAT_GET_MESSAGES,
         toWorldChatPayload(worldId, chatId)
       ),
+    getChatEvents: (worldId, chatId) =>
+      invokeDesktopChannel(
+        ipcRendererLike,
+        DESKTOP_INVOKE_CHANNELS.CHAT_GET_EVENTS,
+        toWorldChatPayload(worldId, chatId)
+      ),
     sendMessage: (payload) =>
       invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.CHAT_SEND_MESSAGE, payload),
     editMessage: (worldId, messageId, newContent, chatId) =>

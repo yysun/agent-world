@@ -38,6 +38,7 @@ export interface HitlOptionRequest {
   timeoutMs?: number;
   defaultOptionId?: string;
   metadata?: Record<string, unknown>;
+  agentName?: string | null;
 }
 
 export interface HitlOptionResolution {
@@ -228,6 +229,7 @@ export async function requestWorldOption(
         defaultOptionId,
         timeoutMs,
         metadata: request.metadata || null,
+        agentName: request.agentName || null,
       },
     };
     world.eventEmitter.emit('system', event);

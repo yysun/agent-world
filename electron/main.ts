@@ -244,6 +244,7 @@ function registerIpcHandlers() {
     deleteWorldSession: ipcHandlers.deleteWorldSession,
     selectWorldSession: ipcHandlers.selectWorldSession,
     getSessionMessages: ipcHandlers.getSessionMessages,
+    getChatEvents: ipcHandlers.getChatEvents,
     sendChatMessage: ipcHandlers.sendChatMessage,
     editMessageInChat: ipcHandlers.editMessageInChat,
     respondHitlOption: ipcHandlers.respondHitlOption,

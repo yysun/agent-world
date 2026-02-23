@@ -13,6 +13,9 @@
  * - Accepts state setters/callbacks via dependency injection.
  *
  * Recent Changes:
+ * - 2026-02-22: Removed onSessionResponseStateChange, setPendingResponseSessionIds,
+ *   setSessionActivity, setStatusText, setActiveStreamCount as part of status-registry
+ *   migration (Phase 1).
  * - 2026-02-21: Extended tool-stream callback typing with optional command metadata for shell command labeling.
  * - 2026-02-21: Updated realtime stream typing to include optional tool name in tool-stream callbacks.
  * - 2026-02-20: Enforced options-only HITL parsing and queue ingestion.
@@ -25,7 +28,6 @@ import {
   createChatSubscriptionEventHandler,
   createGlobalLogEventHandler,
 } from '../domain/chat-event-handlers';
-import { safeMessage } from '../domain/desktop-api';
 import type { DesktopApi } from '../types/desktop-api';
 import type { MessageLike } from '../domain/message-updates';
 
@@ -69,7 +71,6 @@ type ActivityState = {
   handleToolResult: (toolUseId: string, result: string) => void;
   handleToolError: (toolUseId: string, error: string) => void;
   handleToolProgress: (toolUseId: string, progress: string) => void;
-  resetElapsed?: () => void;
   cleanup: () => void;
 };
 
@@ -81,17 +82,7 @@ type UseChatEventSubscriptionsArgs = {
   chatSubscriptionCounter: MutableRefObject<number>;
   streamingStateRef: MutableRefObject<RealtimeState | null>;
   activityStateRef: MutableRefObject<ActivityState | null>;
-  setActiveStreamCount: Dispatch<SetStateAction<number>>;
-  setPendingResponseSessionIds: Dispatch<SetStateAction<Set<string>>>;
-  setSessionActivity: Dispatch<SetStateAction<{
-    eventType: string;
-    pendingOperations: number;
-    activityId: number;
-    source: string | null;
-    activeSources: string[];
-  }>>;
   refreshSessions: (worldId: string, preferredSessionId?: string | null) => Promise<void>;
-  setStatusText: (text: string, kind?: string) => void;
   resetActivityRuntimeState: () => void;
   setHitlPromptQueue: Dispatch<SetStateAction<HitlPrompt[]>>;
 };
@@ -104,11 +95,7 @@ export function useChatEventSubscriptions({
   chatSubscriptionCounter,
   streamingStateRef,
   activityStateRef,
-  setActiveStreamCount,
-  setPendingResponseSessionIds,
-  setSessionActivity,
   refreshSessions,
-  setStatusText,
   resetActivityRuntimeState,
   setHitlPromptQueue,
 }: UseChatEventSubscriptionsArgs) {
@@ -130,7 +117,6 @@ export function useChatEventSubscriptions({
     }
 
     const subscriptionId = `chat-${Date.now()}-${chatSubscriptionCounter.current++}`;
-    let disposed = false;
     const removeListener = api.onChatEvent(createChatSubscriptionEventHandler({
       subscriptionId,
       loadedWorldId: loadedWorld.id,
@@ -138,22 +124,6 @@ export function useChatEventSubscriptions({
       streamingStateRef,
       activityStateRef,
       setMessages,
-      setActiveStreamCount,
-      onSessionResponseStateChange: (chatId, isActive) => {
-        if (!chatId) return;
-        setPendingResponseSessionIds((existing: Set<string>) => {
-          const next = new Set(existing);
-          if (isActive) {
-            next.add(chatId);
-          } else {
-            next.delete(chatId);
-          }
-          return next;
-        });
-      },
-      onSessionActivityUpdate: (activity) => {
-        setSessionActivity(activity);
-      },
       onSessionSystemEvent: (systemEvent) => {
         if (!loadedWorld?.id) return;
         const eventType = String(systemEvent?.eventType || '').trim();
@@ -214,14 +184,9 @@ export function useChatEventSubscriptions({
       }
     }));
 
-    api.subscribeChatEvents(loadedWorld.id, selectedSessionId, subscriptionId).catch((error: unknown) => {
-      if (!disposed) {
-        setStatusText(safeMessage(error, 'Failed to subscribe to chat updates.'), 'error');
-      }
-    });
+    api.subscribeChatEvents(loadedWorld.id, selectedSessionId, subscriptionId).catch(() => { });
 
     return () => {
-      disposed = true;
       removeListener();
       api.unsubscribeChatEvents(subscriptionId).catch(() => { });
       if (streamingStateRef.current) {
@@ -240,12 +205,8 @@ export function useChatEventSubscriptions({
     refreshSessions,
     resetActivityRuntimeState,
     selectedSessionId,
-    setActiveStreamCount,
     setHitlPromptQueue,
     setMessages,
-    setPendingResponseSessionIds,
-    setSessionActivity,
-    setStatusText,
     streamingStateRef,
   ]);
 }
