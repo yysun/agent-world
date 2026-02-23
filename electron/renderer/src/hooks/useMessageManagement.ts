@@ -24,6 +24,7 @@
 
 import { useCallback, useState } from 'react';
 import { safeMessage } from '../domain/desktop-api';
+import { clearChatAgents, updateRegistry } from '../domain/status-registry';
 import { normalizeStringList, sortSessionsByNewest } from '../utils/data-transform';
 import { getRefreshWarning } from '../utils/formatting';
 import { getMessageIdentity, isTrueAgentResponseMessage } from '../utils/message-utils';
@@ -185,6 +186,7 @@ export function useMessageManagement({
         if (activityStateRef.current) {
           activityStateRef.current.cleanup();
         }
+        updateRegistry(r => clearChatAgents(r, loadedWorldId, selectedSessionId));
       }
 
       if (stopped) {
@@ -290,10 +292,33 @@ export function useMessageManagement({
       console.warn('Failed to save edit backup:', error);
     }
 
+    // Stop any active streaming before trimming so stale SSE chunk/update callbacks
+    // cannot re-insert the messages we are about to remove from the list.
+    if (streamingStateRef.current) {
+      streamingStateRef.current.cleanup();
+    }
+    if (activityStateRef.current) {
+      activityStateRef.current.cleanup();
+    }
+    // Reset registry so stale inFlightSse/inFlightTools counters don't block the
+    // new SSE flow from the resubmitted message.
+    updateRegistry(r => clearChatAgents(r, loadedWorldId, targetChatId));
+
     const targetIdentity = getMessageIdentity(message);
-    const editedIndex = messages.findIndex((entry) => getMessageIdentity(entry) === targetIdentity);
-    const optimisticMessages = editedIndex >= 0 ? messages.slice(0, editedIndex) : messages;
-    setMessages(optimisticMessages);
+    const optimisticEditedMessage = createOptimisticUserMessage({
+      chatId: targetChatId,
+      content: editedText,
+      sender: 'human',
+    });
+    const optimisticEditedMessageId = String(optimisticEditedMessage.messageId || '').trim();
+
+    // Trim to before the edited message and insert the optimistic replacement in a
+    // single functional update so the UI never shows a gap where no user message exists.
+    setMessages((existing) => {
+      const editedIndex = existing.findIndex((entry) => getMessageIdentity(entry) === targetIdentity);
+      const trimmed = editedIndex >= 0 ? existing.slice(0, editedIndex) : existing;
+      return upsertMessageList(trimmed, optimisticEditedMessage);
+    });
     setEditingMessageId(null);
     setEditingText('');
     setHitlPromptQueue?.([]);
@@ -317,6 +342,7 @@ export function useMessageManagement({
           `Messages removed but resubmission failed: ${details}. Please try editing again.`,
           'error'
         );
+        setMessages((existing) => removeOptimisticUserMessage(existing, optimisticEditedMessageId));
         await refreshMessages(loadedWorldId, targetChatId);
         return;
       }
@@ -340,13 +366,13 @@ export function useMessageManagement({
       }
 
       setStatusText(errorMessage, 'error');
+      setMessages((existing) => removeOptimisticUserMessage(existing, optimisticEditedMessageId));
       await refreshMessages(loadedWorldId, targetChatId);
     }
   }, [
     api,
     editingText,
     loadedWorldId,
-    messages,
     refreshMessages,
     resolveMessageTargetChatId,
     setMessages,

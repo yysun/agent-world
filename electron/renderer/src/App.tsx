@@ -78,7 +78,7 @@ import {
   parseOptionalInteger,
 } from './utils/app-helpers';
 import { useChatEventSubscriptions } from './hooks/useChatEventSubscriptions';
-import { clearChatAgents, syncWorldRoster, updateRegistry } from './domain/status-registry';
+import { clearChatAgents, getChatStatus, syncWorldRoster, updateRegistry } from './domain/status-registry';
 import { applyEventToRegistry } from './domain/status-updater';
 import {
   createLeftSidebarProps,
@@ -563,30 +563,48 @@ export default function App() {
     refreshMessages(loadedWorld?.id, selectedSessionId);
   }, [loadedWorld?.id, selectedSessionId, refreshMessages]);
 
-  // Phase 6.2b: Clear registry for the new chat and replay stored events to reconstruct status
+  // Phase 6.2b: Replay stored events to reconstruct status on chat switch.
+  // Clear and replay happen atomically after the fetch so the previous status
+  // remains visible while events are loading (no brief flash to idle).
   useEffect(() => {
     const worldId = loadedWorld?.id;
     const chatId = selectedSessionId;
     if (!worldId || !chatId) return;
 
-    updateRegistry(r => clearChatAgents(r, worldId, chatId));
-
     let cancelled = false;
     (async () => {
       try {
         const events = (await api.getChatEvents(worldId, chatId)) as any[];
-        if (cancelled || !Array.isArray(events)) return;
-        for (const storedEvent of events) {
-          const eventCategory = String(storedEvent?.type || '').trim();
-          const payload = storedEvent?.payload || {};
-          const subtype = String(payload?.type || '').trim();
-          const agentName = String(payload?.agentName || '').trim();
-          if (!agentName || !subtype) continue;
-          if (eventCategory !== 'sse' && eventCategory !== 'tool') continue;
-          updateRegistry(r => applyEventToRegistry(r, worldId, chatId, agentName, eventCategory as any, subtype as any));
-        }
+        if (cancelled) return;
+        // Atomic clear + replay: apply all events in one registry update.
+        // Downgrade guard: if the live registry already has 'complete' for this
+        // chat but the DB-replayed events only reach 'working' (async persistence
+        // lag — 'sse end' not yet saved), keep the live complete status so we
+        // don't regress the indicator back to "working".
+        updateRegistry(r => {
+          const liveStatus = getChatStatus(r, worldId, chatId);
+          let reg = clearChatAgents(r, worldId, chatId);
+          if (!Array.isArray(events)) return reg;
+          for (const storedEvent of events) {
+            const eventCategory = String(storedEvent?.type || '').trim();
+            const payload = storedEvent?.payload || {};
+            const subtype = String(payload?.type || '').trim();
+            const agentName = String(payload?.agentName || '').trim();
+            if (!agentName || !subtype) continue;
+            if (eventCategory !== 'sse' && eventCategory !== 'tool') continue;
+            reg = applyEventToRegistry(reg, worldId, chatId, agentName, eventCategory as any, subtype as any);
+          }
+          // Don't downgrade complete → working (DB persistence lag)
+          if (liveStatus === 'complete' && getChatStatus(reg, worldId, chatId) === 'working') {
+            return r;
+          }
+          return reg;
+        });
       } catch {
-        // event replay failure is non-critical
+        // Clear stale data on fetch failure
+        if (!cancelled) {
+          updateRegistry(r => clearChatAgents(r, worldId, chatId));
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -766,6 +784,22 @@ export default function App() {
   );
   const { chatStatus, agentStatuses } = useWorkingStatus(loadedWorld?.id, selectedSessionId, agentStatusInput);
 
+  const workingStartTimeRef = useRef<number | null>(null);
+  const [inlineElapsedMs, setInlineElapsedMs] = useState(0);
+  useEffect(() => {
+    if (chatStatus === 'working') {
+      if (workingStartTimeRef.current === null) {
+        workingStartTimeRef.current = Date.now();
+      }
+      const id = setInterval(() => {
+        setInlineElapsedMs(Date.now() - (workingStartTimeRef.current ?? Date.now()));
+      }, 250);
+      return () => clearInterval(id);
+    }
+    workingStartTimeRef.current = null;
+    setInlineElapsedMs(0);
+  }, [chatStatus]);
+
   useEffect(() => {
     const textarea = composerTextareaRef.current;
     if (!textarea) return;
@@ -803,6 +837,11 @@ export default function App() {
   const isCurrentSessionPendingResponse = Boolean(selectedSessionId && pendingResponseSessionIds.has(selectedSessionId));
   const canStopCurrentSession = Boolean(selectedSessionId) && !isCurrentSessionSending && !isCurrentSessionStopping && isCurrentSessionPendingResponse;
   const activeHitlPrompt = hitlPromptQueue.length > 0 ? hitlPromptQueue[0] : null;
+  const showInlineWorkingIndicator = chatStatus === 'working' || isCurrentSessionSending;
+  const workingAgentNames = agentStatuses.filter(a => a.status === 'working').map(a => a.name);
+  const inlineWorkingIndicatorState = showInlineWorkingIndicator
+    ? { primaryText: workingAgentNames.length > 0 ? workingAgentNames.join(', ') : 'Agent', elapsedMs: inlineElapsedMs }
+    : null;
   const hasConversationMessages = useMemo(() => {
     return messages.some(isRenderableMessageEntry);
   }, [messages]);
@@ -830,8 +869,8 @@ export default function App() {
     onDeleteMessage,
     onBranchFromMessage,
     onCopyRawMarkdownFromMessage,
-    showInlineWorkingIndicator: false,
-    inlineWorkingIndicatorState: null,
+    showInlineWorkingIndicator,
+    inlineWorkingIndicatorState,
     activeHitlPrompt,
     submittingHitlRequestId,
     onRespondHitlOption: (prompt: HitlPrompt, optionId: string) => respondToHitlPrompt(prompt, optionId),

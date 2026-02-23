@@ -11,7 +11,7 @@
  *
  * Implementation Notes:
  * - Pure functions return new registry objects (no mutation).
- * - Rollup: any child `working` → parent `working`; all `complete` → `complete`; otherwise `idle`.
+ * - Rollup: any child `working` → parent `working`; any `complete` (none `working`) → `complete`; otherwise `idle`.
  * - `syncWorldRoster` is non-destructive: `working`/`complete` agents survive syncs.
  *
  * Recent Changes:
@@ -36,7 +36,7 @@ export function createStatusRegistry(): StatusRegistry {
 
 function rollupStatuses(statuses: WorkingStatus[]): WorkingStatus {
   if (statuses.some((s) => s === 'working')) return 'working';
-  if (statuses.length > 0 && statuses.every((s) => s === 'complete')) return 'complete';
+  if (statuses.some((s) => s === 'complete')) return 'complete';
   return 'idle';
 }
 
