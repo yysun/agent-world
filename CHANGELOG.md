@@ -1,4 +1,113 @@
-v0.9.0 (Unreleased)
+v0.13.0
+
+**Highlights**
+- Clearer inline human-intervention prompts directly in chat
+- New post-create confirmation for `create_agent`
+- Better streaming UX: active-agent animations and stronger main-agent highlighting
+- Smoother message rendering with less flicker during loading/streaming
+
+**Chat & Agent Workflow**
+- Improved @mention formatting for clearer agent references
+- Better support for creating agents while world processing is in progress
+- Electron chat flow now better matches web behavior for optimistic messages and streaming lifecycle updates
+
+**World Reliability**
+- Added a header refresh button to reload world agents/state quickly
+- Improved reliability for agent add/delete operations (race-condition and silent-failure fixes)
+- Switched to structured runtime events for more consistent real-time updates
+
+**CLI & Startup**
+- Added Node.js preflight checks to CLI/server launchers for clearer startup behavior
+
+v0.12.0
+
+**Web App: Settings, Search & Branching**
+- Added a Settings page in the web app
+- Added chat history search so you can quickly find past conversations
+- Added branch-from-message so you can fork a new chat path from an assistant response
+- Improved chat layout, icon actions, and message alignment for a cleaner UI
+- Improved streaming feedback so working status is clearer while responses are in progress
+
+**Agent Creation, Defaults & Approval Flow**
+- Added a built-in `create_agent` tool with approval before execution
+- New agents now inherit world chat model/provider defaults, reducing setup work
+- Agent and world changes now refresh in real time across web and desktop clients
+
+**Tools, Skills & Runtime Safety**
+- Added built-in file tools (`read_file`, `list_files`, `grep`) for easier project exploration
+- Added recursive folder listing to `list_files`
+- Improved file path handling so commands behave more like shell usage
+- Improved safety for shell command execution within trusted project boundaries
+- Improved skill controls with clearer project/global behavior and better script error reporting
+
+**Electron & Desktop Runtime**
+- Added folder-based world import/export in Electron, including validation and overwrite conflict handling
+- Improved desktop chat state handling so active/pending agent activity is clearer
+- Improved reliability of event-driven updates in the desktop app
+
+**Developer Experience & Maintenance**
+- Improved tool call labels and message context so tool activity is easier to follow
+- Updated Azure OpenAI environment variable naming for consistency
+- Updated dependencies and improved `agent-world` CLI entrypoint behavior
+
+v0.11.0
+
+**Desktop & Workspace Experience**
+- Added Electron desktop app workspace flow with recents, folder-based world loading, and improved world info refresh behavior
+- Improved Electron chat UX with markdown rendering, better modal styling, streamlined stream display, and active-agent/working indicators
+- Added full user message edit/delete support in Electron with safer processing guards and resend routing through core
+- Modularized Electron runtime into TypeScript main/preload modules and reorganized related runtime/testing structure
+
+**Chat Sessions, Routing & Runtime Controls**
+- Added concurrent chat session isolation with `chatId`-based event routing and session-scoped stop processing
+- Added world-level `mainAgent` routing and agent-level `autoReply` controls across core, web, and Electron
+- Centralized chat title and edit behavior in core for consistent cross-client behavior
+- Added world variable (`.env` text) support with runtime interpolation and UI integration
+
+**Skills, HITL & Tooling**
+- Added progressive skill loading via `load_skill` with compact prompt summaries and on-demand `SKILL.md` retrieval
+- Added singleton skill registry sync with metadata/front-matter parsing and project-over-user precedence
+- Added HITL option flow for skill script execution across core, web, Electron, and CLI, plus related docs
+- Hardened shell command execution with trusted CWD enforcement, path-scope validation, and lifecycle control APIs
+
+**CLI, Streaming & Reliability**
+- Improved CLI streaming UX with richer status-line feedback and real-time tool stream visibility
+- Extended SSE/tool-stream timeout behavior to reduce premature idle timeouts on long-running commands
+- Improved tool-call/result rendering consistency across web and Electron, including argument parsing and deduplication cleanup
+- Added side-effect-free world deletion behavior and improved subscription refresh warning handling
+
+**Docs & Developer Experience**
+- Expanded architecture and implementation docs for concurrent chat, HITL approval flow, and event channel rules
+- Updated scripts/dependencies for Electron and web development workflow consistency
+
+v0.10.0
+
+**Streaming & Tooling**
+- Added end-to-end tool streaming support across Web, React, and CLI clients
+- Added shell command output streaming via SSE and streaming callback support in tools
+- Added structured `ToolResultData` publishing and explicit `--streaming` control
+- Removed legacy manual tool-intervention request/response handling paths
+
+**Approval/HITL Removal**
+- Removed approval and human-in-the-loop handling from core orchestration and CLI stream processing
+- Completed cleanup of approval/HITL related code paths and aligned docs
+
+**React/Web Experience**
+- Added a responsive React World page with a side settings panel
+- Improved chat components with enhanced styling, search, new input features, and select dropdown support
+- Improved message bubbles with sender avatars/alignment and better auto-scroll behavior
+
+**Reliability & Tests**
+- Improved `FileEventStorage` reliability with atomic writes and recovery for trailing data
+- Prevented duplicate streamed `MESSAGE` events via last-message tracking
+- Added comprehensive tests for orphaned tool-message filtering/formatting and new end-to-end coverage
+
+**Docs & Developer Experience**
+- Added npm usage documentation for the `@agent-world/core` package
+- Updated shell command tool docs for streaming behavior
+- Updated development scripts and dependencies (including React dev/watch workflow improvements)
+
+v0.9.0
 
 **Frontend & Architecture**
 - New React frontend with Vite replacing Next.js and WebSocket migration to REST API + SSE

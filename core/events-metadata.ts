@@ -22,6 +22,23 @@
  */
 
 import type { World, WorldMessageEvent, AgentMessage } from './types.js';
+import { extractParagraphBeginningMentions } from './utils.js';
+
+function resolveRecipientAgentId(world: World, message: WorldMessageEvent): string | null {
+  const mentions = extractParagraphBeginningMentions(message.content || '');
+  if (mentions.length === 0) {
+    return null;
+  }
+
+  const targetMention = mentions[0];
+  const targetAgent = Array.from(world.agents.values()).find(
+    (agent) =>
+      agent.id.toLowerCase() === targetMention ||
+      agent.name.toLowerCase() === targetMention
+  );
+
+  return targetAgent?.id ?? null;
+}
 
 /**
  * Calculate which agents should have this message in their memory
@@ -43,18 +60,11 @@ export function calculateOwnerAgentIds(
     return Array.from(world.agents.keys());
   }
 
-  // Agent message - check for @mention
-  const mentionMatch = message.content.match(/@(\S+)/);
-  if (mentionMatch) {
-    const targetAgentName = mentionMatch[1];
-    const targetAgent = Array.from(world.agents.values()).find(
-      a => a.name.toLowerCase() === targetAgentName.toLowerCase()
-    );
-
-    if (targetAgent) {
-      // Cross-agent message: both sender and recipient
-      return [message.sender, targetAgent.id];
-    }
+  // Agent message - check for paragraph-beginning direct mention
+  const recipientAgentId = resolveRecipientAgentId(world, message);
+  if (recipientAgentId) {
+    // Cross-agent message: both sender and recipient
+    return [message.sender, recipientAgentId];
   }
 
   // Agent broadcast - all agents
@@ -69,15 +79,7 @@ export function calculateRecipientAgentId(
   world: World,
   message: WorldMessageEvent
 ): string | null {
-  const mentionMatch = message.content.match(/@(\S+)/);
-  if (!mentionMatch) return null;
-
-  const targetAgentName = mentionMatch[1];
-  const targetAgent = Array.from(world.agents.values()).find(
-    a => a.name.toLowerCase() === targetAgentName.toLowerCase()
-  );
-
-  return targetAgent?.id ?? null;
+  return resolveRecipientAgentId(world, message);
 }
 
 /**

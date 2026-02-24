@@ -10,6 +10,7 @@
  * - Standardized modal sizing via shared 'edit-modal' class
  *
  * Changes:
+ * - 2026-02-13: Added `mainAgent` field to world create/edit form for main-agent routing control.
  * - New fields: world.chatLLMProvider, world.chatLLMModel (with sensible defaults)
  * - Merge defaults with incoming props to ensure fields are present in edit mode
  * - Use common modal class to match Agent Edit popup size
@@ -37,10 +38,12 @@ const getDefaultWorldData = (): Partial<World> => ({
   name: '',
   description: '',
   turnLimit: 5,
+  mainAgent: null,
   // Defaults aligned with Agent Edit
   chatLLMProvider: 'ollama',
   chatLLMModel: 'llama3.2:3b',
-  mcpConfig: null
+  mcpConfig: null,
+  variables: ''
 });
 
 // Save world function (handles both create and update)
@@ -264,6 +267,19 @@ export default class WorldEdit extends Component<WorldEditState> {
                     />
                   </div>
 
+                  <div className="form-group">
+                    <label htmlFor="world-main-agent">Main Agent</label>
+                    <input
+                      id="world-main-agent"
+                      type="text"
+                      className="form-input"
+                      placeholder="Agent ID or name (optional)"
+                      value={state.world.mainAgent || ''}
+                      $bind="world.mainAgent"
+                      disabled={state.loading}
+                    />
+                  </div>
+
                   {/* Chat LLM Settings - provider and model (parity with Agent Edit) */}
                   <div className="form-row">
                     <div className="form-group">
@@ -314,6 +330,22 @@ export default class WorldEdit extends Component<WorldEditState> {
                   </div>
 
                   <div className="form-section">
+                    <div className="form-group">
+                      <label htmlFor="world-variables">Variables (.env)</label>
+                      <textarea
+                        id="world-variables"
+                        className="form-textarea world-mcp-textarea"
+                        placeholder="working_directory=/path/to/project\nproject_name=agent-world"
+                        rows={8}
+                        value={state.world.variables || ''}
+                        $bind="world.variables"
+                        disabled={state.loading}
+                      />
+                      <small className="form-help-text">
+                        Example: <code>working_directory=/path/to/project</code>
+                      </small>
+                    </div>
+
                     <div className="form-group">
                       <label htmlFor="world-mcp">MCP Servers</label>
                       <textarea

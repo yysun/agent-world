@@ -16,13 +16,125 @@
  * - Consistent parameter validation for both MCP and built-in tools
  *
  * Recent Changes:
- * - 2026-02-06: Removed approval checking and HITL functionality
+ * - 2026-02-20: Enforced JSON-schema `additionalProperties: false` by rejecting unknown tool arguments during validation.
+ * - 2026-02-20: Added `human_intervention_request` parameter alias normalization for `prompt` -> `question` and snake/kebab-case confirmation/input fields.
+ * - 2026-02-20: Added `create_agent` alias normalization for `auto-reply`/`auto_reply` -> `autoReply` and `next agent` variants -> `nextAgent`.
+ * - 2026-02-19: Added parameter alias normalization for `read_file`/`read_files` (`path` -> `filePath`) and `grep` path aliases (`path` -> `directoryPath`) to align with shell-style path handling.
+ * - 2026-02-06: Removed legacy manual tool-intervention functionality
  * - Simplified wrapToolWithValidation to focus on parameter validation only
  * - Initial implementation for empty/missing name validation
  */
 
 import { World, Agent, ChatMessage, WorldSSEEvent } from './types.js';
 import { publishToolEvent } from './events/index.js';
+
+function normalizeKnownParameterAliases(toolName: string, args: any): {
+  normalizedArgs: any;
+  corrections: string[];
+} {
+  if (!args || typeof args !== 'object') {
+    return { normalizedArgs: args, corrections: [] };
+  }
+
+  const normalizedArgs = { ...args };
+  const corrections: string[] = [];
+
+  if (toolName === 'list_files' && normalizedArgs.path === undefined && normalizedArgs.directory !== undefined) {
+    normalizedArgs.path = normalizedArgs.directory;
+    delete normalizedArgs.directory;
+    corrections.push("directory -> path");
+  }
+
+  if (
+    (toolName === 'read_file' || toolName === 'read_files')
+    && normalizedArgs.filePath === undefined
+    && normalizedArgs.path !== undefined
+  ) {
+    normalizedArgs.filePath = normalizedArgs.path;
+    delete normalizedArgs.path;
+    corrections.push("path -> filePath");
+  }
+
+  if (
+    (toolName === 'grep' || toolName === 'grep_search')
+    && normalizedArgs.directoryPath === undefined
+    && normalizedArgs.directory !== undefined
+  ) {
+    normalizedArgs.directoryPath = normalizedArgs.directory;
+    delete normalizedArgs.directory;
+    corrections.push("directory -> directoryPath");
+  }
+
+  if (
+    (toolName === 'grep' || toolName === 'grep_search')
+    && normalizedArgs.directoryPath === undefined
+    && normalizedArgs.path !== undefined
+  ) {
+    normalizedArgs.directoryPath = normalizedArgs.path;
+    delete normalizedArgs.path;
+    corrections.push("path -> directoryPath");
+  }
+
+  if (toolName === 'create_agent') {
+    if (normalizedArgs.autoReply === undefined && normalizedArgs['auto-reply'] !== undefined) {
+      normalizedArgs.autoReply = normalizedArgs['auto-reply'];
+      corrections.push("auto-reply -> autoReply");
+    }
+    if (normalizedArgs.autoReply === undefined && normalizedArgs.auto_reply !== undefined) {
+      normalizedArgs.autoReply = normalizedArgs.auto_reply;
+      corrections.push("auto_reply -> autoReply");
+    }
+    if (normalizedArgs.nextAgent === undefined && normalizedArgs['next agent'] !== undefined) {
+      normalizedArgs.nextAgent = normalizedArgs['next agent'];
+      corrections.push("next agent -> nextAgent");
+    }
+    if (normalizedArgs.nextAgent === undefined && normalizedArgs['next-agent'] !== undefined) {
+      normalizedArgs.nextAgent = normalizedArgs['next-agent'];
+      corrections.push("next-agent -> nextAgent");
+    }
+    if (normalizedArgs.nextAgent === undefined && normalizedArgs.next_agent !== undefined) {
+      normalizedArgs.nextAgent = normalizedArgs.next_agent;
+      corrections.push("next_agent -> nextAgent");
+    }
+
+    delete normalizedArgs['auto-reply'];
+    delete normalizedArgs.auto_reply;
+    delete normalizedArgs['next agent'];
+    delete normalizedArgs['next-agent'];
+    delete normalizedArgs.next_agent;
+  }
+
+  if (toolName === 'human_intervention_request') {
+    if (normalizedArgs.question === undefined && normalizedArgs.prompt !== undefined) {
+      normalizedArgs.question = normalizedArgs.prompt;
+      corrections.push("prompt -> question");
+    }
+    if (normalizedArgs.requireConfirmation === undefined && normalizedArgs.require_confirmation !== undefined) {
+      normalizedArgs.requireConfirmation = normalizedArgs.require_confirmation;
+      corrections.push("require_confirmation -> requireConfirmation");
+    }
+    if (normalizedArgs.requireConfirmation === undefined && normalizedArgs['require-confirmation'] !== undefined) {
+      normalizedArgs.requireConfirmation = normalizedArgs['require-confirmation'];
+      corrections.push("require-confirmation -> requireConfirmation");
+    }
+    if (normalizedArgs.confirmationMessage === undefined && normalizedArgs.confirmation_message !== undefined) {
+      normalizedArgs.confirmationMessage = normalizedArgs.confirmation_message;
+      corrections.push("confirmation_message -> confirmationMessage");
+    }
+    if (normalizedArgs.defaultOption === undefined && normalizedArgs.default_option !== undefined) {
+      normalizedArgs.defaultOption = normalizedArgs.default_option;
+      corrections.push("default_option -> defaultOption");
+    }
+
+    delete normalizedArgs.prompt;
+    delete normalizedArgs.require_confirmation;
+    delete normalizedArgs['require-confirmation'];
+    delete normalizedArgs.confirmation_message;
+    delete normalizedArgs.default_option;
+  }
+
+  return { normalizedArgs, corrections };
+}
 
 /**
  * Minimal fallback ID generator
@@ -127,23 +239,36 @@ export function validateToolParameters(args: any, toolSchema: any, toolName: str
     };
   }
 
+  const aliasNormalization = normalizeKnownParameterAliases(toolName, args);
+  const normalizedArgs = aliasNormalization.normalizedArgs;
+
   const corrected: any = {};
   const corrections: string[] = [];
+  corrections.push(...aliasNormalization.corrections);
   const requiredParams = toolSchema.required || [];
   const errors: string[] = [];
+  const allowsAdditionalProperties = toolSchema.additionalProperties !== false;
 
   // Check required parameters
   for (const requiredParam of requiredParams) {
-    if (args[requiredParam] === undefined || args[requiredParam] === null || args[requiredParam] === '') {
+    if (
+      normalizedArgs[requiredParam] === undefined
+      || normalizedArgs[requiredParam] === null
+      || normalizedArgs[requiredParam] === ''
+    ) {
       errors.push(`Required parameter '${requiredParam}' is missing or empty`);
     }
   }
 
   // Validate and correct parameter types
-  for (const [key, value] of Object.entries(args)) {
+  for (const [key, value] of Object.entries(normalizedArgs)) {
     const propSchema = toolSchema.properties[key];
     if (!propSchema) {
-      // Property not in schema - pass through as-is
+      if (!allowsAdditionalProperties) {
+        errors.push(`Unknown parameter '${key}' is not allowed`);
+        continue;
+      }
+      // Property not in schema - pass through as-is when allowed by schema.
       corrected[key] = value;
       continue;
     }

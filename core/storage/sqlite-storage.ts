@@ -35,6 +35,8 @@
  * - Complete type safety with proper TypeScript interfaces
  *
  * Recent Changes:
+ * - 2026-02-13: Added atomic compare-and-set chat title update helper (`updateChatNameIfCurrent`).
+ * - 2026-02-13: Fixed migration directory resolution so Electron runtimes launched from `electron/` still run root `migrations/`.
  * - 2025-08-01: Added proper TypeScript types for all chat operations
  * - 2025-08-01: Implemented restoreFromSnapshot with atomic transactions
  * - 2025-08-01: Enhanced type safety removing any types
@@ -56,6 +58,8 @@ import {
 } from './sqlite-schema.js';
 import { runMigrations } from './migration-runner.js';
 import * as path from 'path';
+import * as fs from 'fs';
+import { fileURLToPath } from 'url';
 import type { StorageAPI, World, Agent, AgentMessage, Chat, CreateChatParams, UpdateChatParams, WorldChat } from '../types.js';
 import { toKebabCase } from '../utils.js';
 
@@ -131,9 +135,27 @@ export async function createSQLiteStorageContext(config: SQLiteConfig): Promise<
   };
 }
 
+function resolveMigrationsDir(): string {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.join(process.cwd(), 'migrations'),
+    path.resolve(process.cwd(), '..', 'migrations'),
+    path.resolve(moduleDir, '../../migrations'),
+    path.resolve(moduleDir, '../../../migrations')
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return candidates[0];
+}
+
 async function ensureInitialized(ctx: SQLiteStorageContext): Promise<void> {
   if (!ctx.isInitialized) {
-    const migrationsDir = path.join(process.cwd(), 'migrations');
+    const migrationsDir = resolveMigrationsDir();
 
     // Always run migrations - this handles both fresh databases (starting with 0000)
     // and existing databases that need updates
@@ -197,27 +219,31 @@ export async function saveWorld(ctx: SQLiteStorageContext, worldData: World): Pr
   await ensureInitialized(ctx);
   // Use INSERT with ON CONFLICT UPDATE instead of INSERT OR REPLACE to avoid foreign key cascade issues
   await run(ctx, `
-    INSERT INTO worlds (id, name, description, turn_limit, chat_llm_provider, chat_llm_model, current_chat_id, mcp_config, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    INSERT INTO worlds (id, name, description, turn_limit, main_agent, chat_llm_provider, chat_llm_model, current_chat_id, mcp_config, variables, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       description = excluded.description,
       turn_limit = excluded.turn_limit,
+      main_agent = excluded.main_agent,
       chat_llm_provider = excluded.chat_llm_provider,
       chat_llm_model = excluded.chat_llm_model,
       current_chat_id = excluded.current_chat_id,
+      variables = excluded.variables,
       mcp_config = excluded.mcp_config,
       updated_at = CURRENT_TIMESTAMP
   `, worldData.id, worldData.name, worldData.description, worldData.turnLimit,
-    worldData.chatLLMProvider, worldData.chatLLMModel, worldData.currentChatId, worldData.mcpConfig);
+    worldData.mainAgent, worldData.chatLLMProvider, worldData.chatLLMModel, worldData.currentChatId, worldData.mcpConfig, worldData.variables);
 }
 
 export async function loadWorld(ctx: SQLiteStorageContext, worldId: string): Promise<World | null> {
   await ensureInitialized(ctx);
   const result = await get(ctx, `
     SELECT id, name, description, turn_limit as turnLimit,
+           main_agent as mainAgent,
            chat_llm_provider as chatLLMProvider, chat_llm_model as chatLLMModel,
-           current_chat_id as currentChatId, mcp_config as mcpConfig
+           current_chat_id as currentChatId, mcp_config as mcpConfig,
+           variables as variables
     FROM worlds WHERE id = ?
   `, worldId) as World | undefined;
   return result || null;
@@ -237,8 +263,10 @@ export async function listWorlds(ctx: SQLiteStorageContext): Promise<World[]> {
   await ensureInitialized(ctx);
   const results = await all(ctx, `
     SELECT id, name, description, turn_limit as turnLimit,
+           main_agent as mainAgent,
            chat_llm_provider as chatLLMProvider, chat_llm_model as chatLLMModel,
-           current_chat_id as currentChatId, mcp_config as mcpConfig
+           current_chat_id as currentChatId, mcp_config as mcpConfig,
+           variables as variables
     FROM worlds
     ORDER BY name
   `) as World[];
@@ -251,12 +279,12 @@ export async function saveAgent(ctx: SQLiteStorageContext, worldId: string, agen
   await run(ctx, `
     INSERT OR REPLACE INTO agents (
       id, world_id, name, type, status, provider, model, system_prompt,
-      temperature, max_tokens, llm_call_count, last_active, last_llm_call
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      temperature, max_tokens, auto_reply, llm_call_count, last_active, last_llm_call
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
     agent.id, worldId, agent.name, agent.type, agent.status || 'inactive',
     agent.provider, agent.model, agent.systemPrompt,
-    agent.temperature, agent.maxTokens, agent.llmCallCount,
+    agent.temperature, agent.maxTokens, agent.autoReply === false ? 0 : 1, agent.llmCallCount,
     agent.lastActive?.toISOString(), agent.lastLLMCall?.toISOString()
   );
   if (agent.memory && agent.memory.length > 0) {
@@ -268,7 +296,7 @@ export async function loadAgent(ctx: SQLiteStorageContext, worldId: string, agen
   await ensureInitialized(ctx);
   const agentData = await get(ctx, `
     SELECT id, name, type, status, provider, model, system_prompt as systemPrompt,
-           temperature, max_tokens as maxTokens, llm_call_count as llmCallCount,
+           temperature, max_tokens as maxTokens, auto_reply as autoReply, llm_call_count as llmCallCount,
            created_at as createdAt, last_active as lastActive, last_llm_call as lastLLMCall
     FROM agents WHERE id = ? AND world_id = ?
   `, agentId, worldId) as any;
@@ -282,6 +310,7 @@ export async function loadAgent(ctx: SQLiteStorageContext, worldId: string, agen
   `, agentId, worldId) as AgentMessage[];
   const agent: Agent = {
     ...agentData,
+    autoReply: agentData.autoReply === 0 ? false : true,
     createdAt: agentData.createdAt ? new Date(agentData.createdAt) : new Date(),
     lastActive: agentData.lastActive ? new Date(agentData.lastActive) : new Date(),
     lastLLMCall: agentData.lastLLMCall ? new Date(agentData.lastLLMCall) : undefined,
@@ -312,7 +341,7 @@ export async function listAgents(ctx: SQLiteStorageContext, worldId: string): Pr
   await ensureInitialized(ctx);
   const agents = await all(ctx, `
     SELECT id, name, type, status, provider, model, system_prompt as systemPrompt,
-           temperature, max_tokens as maxTokens, llm_call_count as llmCallCount,
+        temperature, max_tokens as maxTokens, auto_reply as autoReply, llm_call_count as llmCallCount,
            created_at as createdAt, last_active as lastActive, last_llm_call as lastLLMCall
     FROM agents WHERE world_id = ?
     ORDER BY name
@@ -328,6 +357,7 @@ export async function listAgents(ctx: SQLiteStorageContext, worldId: string): Pr
     `, agentData.id, worldId) as AgentMessage[];
     const agent: Agent = {
       ...agentData,
+      autoReply: agentData.autoReply === 0 ? false : true,
       createdAt: agentData.createdAt ? new Date(agentData.createdAt) : new Date(),
       lastActive: agentData.lastActive ? new Date(agentData.lastActive) : new Date(),
       lastLLMCall: agentData.lastLLMCall ? new Date(agentData.lastLLMCall) : undefined,
@@ -566,6 +596,22 @@ export async function updateChatData(ctx: SQLiteStorageContext, worldId: string,
   return await loadChatData(ctx, worldId, chatId);
 }
 
+export async function updateChatNameIfCurrent(
+  ctx: SQLiteStorageContext,
+  worldId: string,
+  chatId: string,
+  expectedName: string,
+  nextName: string
+): Promise<boolean> {
+  await ensureInitialized(ctx);
+  const result = await run(ctx, `
+    UPDATE world_chats
+    SET name = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND world_id = ? AND name = ?
+  `, nextName, chatId, worldId, expectedName);
+  return (result.changes || 0) > 0;
+}
+
 // CHAT OPERATIONS
 export async function saveWorldChat(ctx: SQLiteStorageContext, worldId: string, chatId: string, chat: WorldChat): Promise<void> {
   await ensureInitialized(ctx);
@@ -660,10 +706,10 @@ export async function restoreFromWorldChat(ctx: SQLiteStorageContext, worldId: s
     if (chat.world) {
       await run(ctx, `
         UPDATE worlds
-        SET name = ?, description = ?, turn_limit = ?, chat_llm_provider = ?, chat_llm_model = ?
+        SET name = ?, description = ?, turn_limit = ?, main_agent = ?, chat_llm_provider = ?, chat_llm_model = ?
         WHERE id = ?
       `, chat.world.name, chat.world.description, chat.world.turnLimit,
-        chat.world.chatLLMProvider, chat.world.chatLLMModel, worldId);
+        chat.world.mainAgent, chat.world.chatLLMProvider, chat.world.chatLLMModel, worldId);
     }
 
     // Clear existing agents for this world
@@ -675,11 +721,11 @@ export async function restoreFromWorldChat(ctx: SQLiteStorageContext, worldId: s
         await run(ctx, `
           INSERT INTO agents (
             id, world_id, name, type, status, provider, model, system_prompt,
-            temperature, max_tokens, created_at, last_active, llm_call_count, last_llm_call
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            temperature, max_tokens, auto_reply, created_at, last_active, llm_call_count, last_llm_call
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, agent.id, worldId, agent.name, agent.type, agent.status || 'active',
           agent.provider, agent.model, agent.systemPrompt, agent.temperature,
-          agent.maxTokens,
+          agent.maxTokens, agent.autoReply === false ? 0 : 1,
           agent.createdAt instanceof Date ? agent.createdAt.toISOString() : agent.createdAt,
           agent.lastActive instanceof Date ? agent.lastActive.toISOString() : agent.lastActive,
           agent.llmCallCount || 0,

@@ -283,5 +283,27 @@ describe('Pre-Generated Message IDs', () => {
       expect(subscriber1Called).toBe(true);
       expect(subscriber2Called).toBe(true);
     });
+
+    test('publishMessage should throw when chat context is missing', () => {
+      const worldWithoutChat = {
+        ...mockWorld,
+        currentChatId: null,
+      } as any;
+
+      expect(() => publishMessage(worldWithoutChat, 'Test', 'sender')).toThrow(
+        'publishMessage: chatId is required for message events.'
+      );
+    });
+
+    test('publishMessageWithId should throw when chat context is missing', () => {
+      const worldWithoutChat = {
+        ...mockWorld,
+        currentChatId: null,
+      } as any;
+
+      expect(() => publishMessageWithId(worldWithoutChat, 'Test', 'sender', 'msg-1')).toThrow(
+        'publishMessageWithId: chatId is required for message events.'
+      );
+    });
   });
 });

@@ -85,7 +85,7 @@ Agent World isn’t just a dev tool; it’s a petri dish for studying how rules 
 
 ```bash
 mkdir agent-world && cd agent-world
-npx yysun/agent-world@latest        # opens a chat UI with sample prompts
+npx agent-world@latest        # opens the web server UI
 ```
 
 Paste a prompt; agents spring to life. Change a single line; press ↵—they behave differently *instantly*.

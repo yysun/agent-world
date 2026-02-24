@@ -13,21 +13,16 @@
  * - Settings and chat history navigation with modal management
  * - Markdown export functionality with HTML rendering
  * - Smooth streaming indicator management (removed after final message displayed)
- * - Message editing with backend API integration (remove + resubmit)
+ * - Message editing with core-managed backend integration (single edit request)
  * - Memory-only message streaming for agent→agent messages saved without response
- * - Tool call approval request/response detection and display
- * - Agent @mention support in approval responses
  *
- * Message Edit Feature (Frontend-Driven):
+ * Message Edit Feature (Core-Driven):
  * - Uses backend messageId (server-generated) for message identification
- * - Two-phase edit: 1) DELETE removes messages, 2) POST resubmits edited content
- * - Phase 1: Calls DELETE /worlds/:worldName/messages/:messageId (removal only)
- * - Phase 2: Reuses POST /messages with existing SSE streaming (agents respond naturally)
- * - LocalStorage backup before DELETE for recovery if POST fails
- * - Validates session mode BEFORE DELETE (not after)
+ * - Single-phase edit: PUT /worlds/:worldName/messages/:messageId with chatId + newContent
+ * - Core handles removal + resubmission + title-regeneration reset consistently across clients
+ * - LocalStorage backup retained for recovery in case backend edit flow fails
  * - Optimistic UI updates with error rollback
- * - Comprehensive error handling (423 Locked, 404 Not Found, 400 Bad Request)
- * - Recovery mechanism: "Resume Edit" on POST failure
+ * - Handles removal failures and resubmission-status failures from core result payload
  * - User messages updated with backend messageId when message event received
  *
  * Message Deduplication (Multi-Agent):
@@ -48,30 +43,23 @@
  * - Race condition fix: Multiple agents may process same temp message simultaneously
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
- * Tool Call Approval Flow:
- * - Detects client.requestApproval tool calls in SSE message events
- * - Flags messages with isToolCallRequest and toolCallData
- * - Renders ToolCallRequestBox with approval buttons inline in chat
- * - Detects tool result messages as approval responses
- * - Flags responses with isToolCallResponse and approval decision
- * - Renders ToolCallResponseBox showing approval result
- * - Captures agentId from approval requests and includes it in responses
- * - Sends approval responses using enhanced string protocol with agentId in JSON
- * - Enhanced protocol format: JSON.stringify({__type:'tool_result',tool_call_id,agentId,content})
- * - Server automatically prepends @mention based on agentId in JSON
- * - Matches TUI/CLI implementation for OpenAI-compliant agent memory
- *
  * Changes:
+ * - 2026-02-21: Prevented tool output expand/collapse actions from consuming pending auto-scroll state and jumping to transcript bottom.
+ * - 2026-02-21: Switched project-folder selection to browser File API flow and preserved UI-enriched world agent fields after updates.
+ * - 2026-02-21: Added `select-project-folder` handler to persist `working_directory` from composer Project button selection.
+ * - 2026-02-21: Updated composer key handling for textarea parity with Electron (Enter sends, Shift+Enter inserts newline, composition-safe).
+ * - 2026-02-20: Blocked new outbound message sends while HITL prompt queue is non-empty.
+ * - 2026-02-20: Enforced options-only HITL handlers and removed free-text prompt events.
+ * - 2026-02-16: Added no-op edit guard to skip save when message content is unchanged.
+ * - 2026-02-15: Updated init chat selection to prioritize current selected chat ID, with backend currentChatId as fallback.
+ * - 2026-02-14: Added generic HITL option prompt queue handling and response submission event for web approval flows.
+ * - 2026-02-14: Added `stop-message-processing` event handler for chat-scoped processing cancellation from web composer.
+ * - 2026-02-13: Switched web edit flow to core-managed `api.editMessage` and updated system-event handling for structured `chat-title-updated` payloads
+ * - 2026-02-08: Removed legacy manual tool-intervention request detection and response submission flow
  * - 2025-11-11: Fixed createMessageFromMemory to pass through tool_calls and tool_call_id for frontend formatting
  * - 2025-11-11: Simplified spinner control to use pending operations count from world events (pending > 0 = show, pending === 0 = hide)
  * - 2025-11-11: Enhanced handleWorldActivity to support agent IDs without "agent:" prefix (e.g., "g1" instead of "agent:g1")
- * - 2025-11-10: Fixed detectToolCallResponse to properly parse enhanced protocol format
  * - 2025-11-10: Fixed tool result message display - filter out internal protocol messages with __type: tool_result
- * - 2025-11-10: Added SSE streaming support to tool result submission for real-time agent responses
- * - 2025-11-06: Moved agentId into JSON structure (cleaner than @mention prefix)
- * - 2025-11-06: Updated approval response to use enhanced string protocol (OpenAI format)
- * - 2025-11-05: Added agent @mention support for approval responses to match CLI behavior
- * - 2025-11-05: Added tool call request/response detection and inline display
  * - 2025-10-26: Phase 1 - Converted to AppRun native typed events with Update<State, Events> tuple pattern
  * - 2025-10-26: Fixed createMessageFromMemory to swap sender/fromAgentId for incoming agent messages
  * - 2025-10-26: Fixed display to show only first agent (intended recipient), not all recipients
@@ -102,9 +90,13 @@ import * as SSEStreamingDomain from '../domain/sse-streaming';
 import * as AgentManagementDomain from '../domain/agent-management';
 import * as WorldExportDomain from '../domain/world-export';
 import * as MessageDisplayDomain from '../domain/message-display';
+import * as HitlDomain from '../domain/hitl';
+import { resolveActiveChatId } from '../domain/chat-selection';
+import { getEnvValueFromText, upsertEnvVariable } from '../domain/world-variables';
+import { pickProjectFolderPath } from '../domain/project-folder-picker';
 import {
   sendChatMessage,
-  submitToolResult,
+  editChatMessage,
   handleStreamStart,
   handleStreamChunk,
   handleStreamEnd,
@@ -114,9 +106,9 @@ import {
   handleToolStart as handleToolStartBase,
   handleToolProgress as handleToolProgressBase,
   handleToolResult as handleToolResultBase,
-  handleMessageToolCalls,
+  handleToolStream as handleToolStreamBase,
 } from '../utils/sse-client';
-import type { WorldComponentState, Agent, AgentMessage, Message, ApprovalRequest, HITLRequest } from '../types';
+import type { WorldComponentState, Agent, AgentMessage, Message } from '../types';
 import type { WorldEventName, WorldEventPayload } from '../types/events';
 import toKebabCase from '../utils/toKebabCase';
 
@@ -178,26 +170,14 @@ const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): M
     displayFromAgentId = memoryItem.agentId || (isUserMessage ? undefined : agentName);
   }
 
-  // Check for tool call request/response in memory item
   const memoryData = memoryItem as any;
-  const toolCallRequest = detectToolCallRequest(memoryData);
-  const toolCallResponse = detectToolCallResponse(memoryData);
-
-  // Set message text - use placeholder for tool call messages with empty content
-  let messageText = memoryItem.content || '';
-  if (!messageText && (toolCallRequest || toolCallResponse)) {
-    if (toolCallRequest) {
-      messageText = `[Tool approval request: ${toolCallRequest.toolName}]`;
-    } else if (toolCallResponse) {
-      messageText = `[Tool execution result]`;
-    }
-  }
 
   return {
     id: `msg-${Date.now() + Math.random()}`,
     sender: displaySender,
-    text: messageText,
+    text: memoryItem.content || '',
     messageId: memoryItem.messageId,
+    chatId: memoryItem.chatId,
     replyToMessageId: memoryItem.replyToMessageId, // Preserve parent message reference
     createdAt: memoryItem.createdAt || new Date(),
     type: messageType,
@@ -207,150 +187,7 @@ const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): M
     // Pass through tool_calls and tool_call_id for frontend formatting
     tool_calls: memoryData.tool_calls || memoryData.toolCalls,
     tool_call_id: memoryData.tool_call_id || memoryData.toolCallId,
-    // Set tool call flags
-    isToolCallRequest: !!toolCallRequest,
-    isToolCallResponse: !!toolCallResponse,
-    toolCallData: toolCallRequest || toolCallResponse
   } as Message;
-};
-
-/**
- * Detect if message contains tool call approval request
- * @param messageData - Message data from SSE event
- * @returns Tool call data if this is an approval request, null otherwise
- */
-const detectToolCallRequest = (messageData: any): Message['toolCallData'] | null => {
-  // Handle both tool_calls (snake_case from DB) and toolCalls (camelCase from API)
-  const toolCallsField = messageData?.tool_calls || messageData?.toolCalls;
-
-  // If tool_calls/toolCalls is a string, parse it first
-  let toolCalls = toolCallsField;
-  if (typeof toolCallsField === 'string') {
-    try {
-      toolCalls = JSON.parse(toolCallsField);
-    } catch (error) {
-      console.warn('Failed to parse tool_calls JSON string:', error);
-      return null;
-    }
-  }
-
-  if (!toolCalls || !Array.isArray(toolCalls)) {
-    return null;
-  }
-
-  // Find client.requestApproval tool call
-  for (const toolCall of toolCalls) {
-    const toolName = toolCall?.function?.name;
-    if (toolName === 'client.requestApproval') {
-      let parsedArgs: any = {};
-      try {
-        parsedArgs = toolCall.function?.arguments
-          ? JSON.parse(toolCall.function.arguments)
-          : {};
-      } catch (error) {
-        console.warn('Failed to parse approval request arguments:', error);
-      }
-
-      console.log('[detectToolCallRequest] Debug:', {
-        'toolCall.id': toolCall.id,
-        'parsedArgs': parsedArgs,
-        'parsedArgs.originalToolCall': parsedArgs?.originalToolCall
-      });
-      return {
-        toolCallId: toolCall.id || `approval-${Date.now()}`,
-        originalToolCall: parsedArgs?.originalToolCall, // Store complete original tool call (including id)
-        toolName: parsedArgs?.originalToolCall?.name ?? 'Unknown tool',
-        toolArgs: parsedArgs?.originalToolCall?.args ?? {},
-        approvalMessage: parsedArgs?.message ?? 'This tool requires your approval to continue.',
-        approvalOptions: Array.isArray(parsedArgs?.options) && parsedArgs.options.length > 0
-          ? parsedArgs.options
-          : ['deny', 'approve_once', 'approve_session'],
-        agentId: messageData?.sender || messageData?.agentId // Capture agent that made the request
-      } as Message['toolCallData'];
-    }
-  }
-
-  return null;
-};
-
-/**
- * Detect if message is a tool result (approval response)
- * ONLY detects approval responses - regular tool execution results should NOT be detected
- * Approval responses have tool_call_id starting with 'approval_' or contain enhanced protocol
- * Parses enhanced protocol format: {__type: 'tool_result', content: '{"decision":"approve",...}'}
- * @param messageData - Message data from SSE event
- * @returns Tool call data if this is an approval response, null otherwise (including regular tool results)
- */
-const detectToolCallResponse = (messageData: any): Message['toolCallData'] | null => {
-  // Check if this is a tool result message
-  if (messageData.role === 'tool' || messageData.type === 'tool') {
-    const toolCallId = messageData.tool_call_id || 'unknown';
-    const rawContent = messageData.content || messageData.message || '';
-
-    // Try to parse enhanced protocol format
-    try {
-      const outerParsed = JSON.parse(rawContent);
-
-      // Check for __type: 'tool_result' (enhanced protocol for approval responses)
-      if (outerParsed.__type === 'tool_result' && outerParsed.content) {
-        try {
-          const innerContent = JSON.parse(outerParsed.content);
-
-          // Only process if it has decision field (approval response indicator)
-          if (innerContent.decision) {
-            // Extract decision and scope from structured data
-            const approvalDecision: 'approve' | 'deny' = innerContent.decision === 'approve' ? 'approve' : 'deny';
-            const approvalScope: 'once' | 'session' | 'none' =
-              innerContent.scope === 'session' ? 'session' :
-                innerContent.scope === 'once' ? 'once' : 'none';
-
-            return {
-              toolCallId: outerParsed.tool_call_id || toolCallId,
-              toolName: innerContent.toolName || 'Tool Execution',
-              toolArgs: innerContent.toolArgs || {},
-              approvalDecision,
-              approvalScope
-            };
-          }
-          // No decision field - this is a regular tool result, not an approval response
-          return null;
-        } catch (innerError) {
-          console.warn('Failed to parse tool result inner content:', innerError);
-        }
-      }
-    } catch (outerError) {
-      // Not JSON or not enhanced protocol - check if it's an approval by tool_call_id prefix
-    }
-
-    // Only detect as approval response if tool_call_id starts with 'approval_'
-    if (!toolCallId.startsWith('approval_')) {
-      return null; // Regular tool execution result - not an approval response
-    }
-
-    // Legacy approval detection for messages with 'approval_' prefix
-    const content = rawContent.toLowerCase();
-    let approvalDecision: 'approve' | 'deny' = 'deny';
-    let approvalScope: 'once' | 'session' | 'none' = 'none';
-
-    if (content.includes('approved') || content.includes('success')) {
-      approvalDecision = 'approve';
-      if (content.includes('session') || content.includes('always')) {
-        approvalScope = 'session';
-      } else if (content.includes('once')) {
-        approvalScope = 'once';
-      }
-    }
-
-    return {
-      toolCallId,
-      toolName: 'Tool Execution',
-      toolArgs: {},
-      approvalDecision,
-      approvalScope
-    };
-  }
-
-  return null;
 };
 
 /**
@@ -428,200 +265,145 @@ const deduplicateMessages = (messages: Message[], agents: Agent[] = []): Message
     });
 };
 
-const showApprovalRequestDialog = (
-  state: WorldComponentState,
-  request: ApprovalRequest
-): WorldComponentState => {
-  if (state.approvalRequest && state.approvalRequest.toolCallId === request.toolCallId) {
-    return state;
+function mergeUpdatedWorldWithUiState(
+  currentWorld: WorldComponentState['world'],
+  updatedWorld: WorldComponentState['world']
+): WorldComponentState['world'] {
+  if (!updatedWorld) {
+    return currentWorld;
   }
 
-  return {
-    ...state,
-    approvalRequest: request,
-    activeAgent: null,
-    needScroll: true
-  };
-};
-
-const hideApprovalRequestDialog = (state: WorldComponentState): WorldComponentState => {
-  if (!state.approvalRequest) {
-    return state;
+  if (!currentWorld) {
+    return updatedWorld;
   }
 
-  return {
-    ...state,
-    approvalRequest: null
-  };
-};
-
-const submitApprovalDecision = async (
-  state: WorldComponentState,
-  payload: WorldEventPayload<'submit-approval-decision'>
-): Promise<WorldComponentState> => {
-  const { decision, scope, toolCallId } = payload;
-
-  // Check if this is from the approval dialog (state.approvalRequest exists)
-  let request = state.approvalRequest;
-
-  // If not from dialog, find the message with matching toolCallId (inline approval)
-  if (!request || request.toolCallId !== toolCallId) {
-    const message = state.messages?.find(msg =>
-      msg.toolCallData?.toolCallId === toolCallId
-    );
-
-    if (message?.toolCallData) {
-      request = {
-        toolCallId: message.toolCallData.toolCallId,
-        originalToolCall: message.toolCallData.originalToolCall, // Preserve originalToolCall for correct tool_call_id
-        toolName: message.toolCallData.toolName,
-        toolArgs: message.toolCallData.toolArgs,
-        message: message.toolCallData.approvalMessage || '',
-        options: message.toolCallData.approvalOptions || [],
-        agentId: message.toolCallData.agentId // Preserve agentId from toolCallData
-      };
-    } else {
-      // No matching request found
-      return state;
-    }
+  const existingAgentById = new Map<string, Agent>();
+  for (const existingAgent of currentWorld.agents || []) {
+    existingAgentById.set(existingAgent.id, existingAgent);
   }
 
-  const baseState: WorldComponentState = {
-    ...state,
-    approvalRequest: null,
-    needScroll: true
-  };
-
-  // Use structured API for tool result submission with SSE streaming
-  const approvalDecision: 'approve' | 'deny' = decision === 'approve' ? 'approve' : 'deny';
-  const approvalScope: 'session' | 'once' | undefined =
-    decision === 'approve' ? (scope === 'session' ? 'session' : 'once') : undefined;
-
-  try {
-    // Submit using structured API endpoint with streaming enabled
-    const { originalToolCall } = request;
-    // Always use approval request toolCallId - backend will extract originalToolCall.id itself
-    console.log('[submitApprovalDecision] Debug:', {
-      'request.toolCallId': request.toolCallId,
-      'originalToolCall': originalToolCall,
-      'originalToolCall.id': originalToolCall?.id
-    });
-    await submitToolResult(
-      state.worldName,
-      request.agentId,
-      {
-        tool_call_id: request.toolCallId,
-        decision: approvalDecision,
-        scope: approvalScope,
-        toolName: originalToolCall?.name || request.toolName,
-        toolArgs: originalToolCall?.args || request.toolArgs,
-        workingDirectory: originalToolCall?.workingDirectory
-      },
-      true // Enable SSE streaming
-    );
-
-    return baseState;
-  } catch (error) {
+  const mergedAgents = (updatedWorld.agents || []).map((agent, index) => {
+    const existingAgent = existingAgentById.get(agent.id);
     return {
-      ...baseState,
-      error: (error as Error).message || 'Failed to submit approval decision'
+      ...agent,
+      spriteIndex: existingAgent?.spriteIndex ?? (index % 9),
+      messageCount: existingAgent?.messageCount ?? 0,
     };
+  });
+
+  return {
+    ...currentWorld,
+    ...updatedWorld,
+    agents: mergedAgents,
+  };
+}
+
+// ========================================
+// PHASE 2: STREAMING STATE HELPERS (RAF Debouncing)
+// ========================================
+
+/**
+ * Schedule RAF flush for debounced stream updates (60fps)
+ * Returns new state with updated debounceFrameId
+ */
+const scheduleStreamFlush = (state: WorldComponentState): WorldComponentState => {
+  if (state.debounceFrameId !== null) {
+    return state; // Already scheduled
   }
+
+  const frameId = requestAnimationFrame(() => {
+    app.run('flush-stream-updates');
+  });
+
+  return { ...state, debounceFrameId: frameId };
 };
 
-const showHITLRequestDialog = (
-  state: WorldComponentState,
-  request: HITLRequest
-): WorldComponentState => {
-  if (state.hitlRequest && state.hitlRequest.toolCallId === request.toolCallId) {
-    return state;
+/**
+ * Start elapsed timer for activity tracking
+ * Returns new state with timer started
+ */
+const startElapsedTimer = (state: WorldComponentState): WorldComponentState => {
+  if (state.elapsedIntervalId !== null) {
+    return state; // Already running
+  }
+
+  const startTime = Date.now();
+  const intervalId = window.setInterval(() => {
+    app.run('update-elapsed-time');
+  }, 1000); // Update every second
+
+  return {
+    ...state,
+    activityStartTime: startTime,
+    elapsedIntervalId: intervalId,
+    elapsedMs: 0
+  };
+};
+
+/**
+ * Stop elapsed timer
+ * Returns new state with timer stopped
+ */
+const stopElapsedTimer = (state: WorldComponentState): WorldComponentState => {
+  if (state.elapsedIntervalId !== null) {
+    clearInterval(state.elapsedIntervalId);
   }
 
   return {
     ...state,
-    hitlRequest: request,
-    activeAgent: null,
-    needScroll: true
+    elapsedIntervalId: null,
+    activityStartTime: null,
+    elapsedMs: 0
   };
 };
 
-const hideHITLRequestDialog = (state: WorldComponentState): WorldComponentState => {
-  if (!state.hitlRequest) {
-    return state;
-  }
-
-  return {
-    ...state,
-    hitlRequest: null
-  };
+/**
+ * Check if any activity is in progress (tools or streams)
+ */
+const hasActivity = (state: WorldComponentState): boolean => {
+  return state.activeTools.length > 0 || state.pendingStreamUpdates.size > 0;
 };
 
-const submitHITLDecision = async (
-  state: WorldComponentState,
-  payload: WorldEventPayload<'submit-hitl-decision'>
-): Promise<WorldComponentState> => {
-  const { choice, toolCallId } = payload;
+// ========================================
+// STREAM & TOOL HANDLERS (with debouncing)
+// ========================================
 
-  // Check if this is from the HITL dialog (state.hitlRequest exists)
-  let request = state.hitlRequest;
-
-  // If not from dialog, find the message with matching toolCallId (inline HITL)
-  if (!request || request.toolCallId !== toolCallId) {
-    const message = state.messages?.find(msg =>
-      msg.hitlData?.toolCallId === toolCallId
-    );
-
-    if (message?.hitlData) {
-      request = {
-        toolCallId: message.hitlData.toolCallId,
-        originalToolCall: message.hitlData.originalToolCall,
-        prompt: message.hitlData.prompt,
-        options: message.hitlData.options,
-        context: message.hitlData.context,
-        agentId: message.hitlData.agentId
-      };
-    } else {
-      // No matching request found
-      return state;
-    }
-  }
-
-  const baseState: WorldComponentState = {
-    ...state,
-    hitlRequest: null,
-    needScroll: true
-  };
-
-  try {
-    // Submit HITL decision via tool result API
-    await submitToolResult(
-      state.worldName,
-      request.agentId,
-      {
-        tool_call_id: request.toolCallId,
-        choice: choice,
-        toolName: request.originalToolCall?.name || 'client.humanIntervention',
-        toolArgs: request.originalToolCall?.args
-      },
-      true // Enable SSE streaming
-    );
-
-    return baseState;
-  } catch (error) {
-    return {
-      ...baseState,
-      error: (error as Error).message || 'Failed to submit HITL decision'
-    };
-  }
-};
 const handleStreamError = (state: WorldComponentState, data: any): WorldComponentState => {
   return handleStreamErrorBase(state, data);
 };
 
+/**
+ * Handle tool start - track in activeTools and start elapsed timer (Phase 2)
+ */
 const handleToolStart = (state: WorldComponentState, data: any): WorldComponentState => {
-  // Tool events are informational - don't control spinner
-  // Spinner is controlled by world events (pending count)
-  return handleToolStartBase(state, data);
+  // Call base handler for message updates
+  let newState = handleToolStartBase(state, data);
+
+  // Add to activeTools array (Phase 2)
+  const toolEntry: import('../types').ToolEntry = {
+    toolUseId: data.messageId || `tool-${Date.now()}`,
+    toolName: data.toolExecution?.toolName || 'unknown',
+    toolInput: data.toolExecution?.input,
+    status: 'running',
+    result: null,
+    errorMessage: null,
+    progress: null,
+    startedAt: new Date().toISOString(),
+    completedAt: null
+  };
+
+  newState = {
+    ...newState,
+    activeTools: [...newState.activeTools, toolEntry],
+    isBusy: true
+  };
+
+  // Start elapsed timer if not already running
+  if (newState.elapsedIntervalId === null) {
+    newState = startElapsedTimer(newState);
+  }
+
+  return newState;
 };
 
 const handleToolProgress = (state: WorldComponentState, data: any): WorldComponentState => {
@@ -630,16 +412,66 @@ const handleToolProgress = (state: WorldComponentState, data: any): WorldCompone
   return handleToolProgressBase(state, data);
 };
 
+/**
+ * Handle tool result - remove from activeTools and stop timer if idle (Phase 2)
+ */
 const handleToolResult = (state: WorldComponentState, data: any): WorldComponentState => {
-  // Tool events are informational - don't control spinner
-  // Spinner is controlled by world events (pending count)
-  return handleToolResultBase(state, data);
+  // Call base handler for message updates
+  let newState = handleToolResultBase(state, data);
+
+  // Remove from activeTools array (Phase 2)
+  const toolUseId = data.messageId;
+  newState = {
+    ...newState,
+    activeTools: newState.activeTools.filter(tool => tool.toolUseId !== toolUseId)
+  };
+
+  // Update busy state (safe check with optional chaining)
+  const stillBusy = hasActivity(newState);
+  newState = { ...newState, isBusy: stillBusy };
+
+  // Stop elapsed timer if no more activity
+  if (!stillBusy && newState.elapsedIntervalId !== null) {
+    newState = stopElapsedTimer(newState);
+  }
+
+  return newState;
 };
 
 const handleToolError = (state: WorldComponentState, data: any): WorldComponentState => {
   // Tool events are informational - don't control spinner
   // Spinner is controlled by world events (pending count)
   return handleToolErrorBase(state, data);
+};
+
+/**
+ * Handle stream chunk - add to pending updates and schedule RAF flush (Phase 2)
+ */
+const handleStreamChunkDebounced = (state: WorldComponentState, data: any): WorldComponentState => {
+  const { messageId, content } = data;
+
+  // Add to pending updates map
+  const pending = new Map(state.pendingStreamUpdates);
+  pending.set(messageId, content || '');
+
+  let newState = {
+    ...state,
+    pendingStreamUpdates: pending
+  };
+
+  // Schedule RAF flush if not already scheduled
+  newState = scheduleStreamFlush(newState);
+
+  // Also call base handler to ensure message exists in array
+  newState = handleStreamChunk(newState, data);
+
+  return newState;
+};
+
+const handleToolStream = (state: WorldComponentState, data: any): WorldComponentState => {
+  // Tool stream events for real-time shell command output
+  // Spinner is controlled by world events (pending count)
+  return handleToolStreamBase(state, data);
 };
 
 const handleWorldActivity = (state: WorldComponentState, activity: any): WorldComponentState | void => {
@@ -697,9 +529,7 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       throw new Error('World not found: ' + worldName);
     }
 
-    if (!chatId || !(chatId in world.chats)) {
-      chatId = world.currentChatId || undefined;
-    }
+    chatId = resolveActiveChatId(world, chatId) || undefined;
 
     if (world.currentChatId !== chatId && chatId) {
       await api.setChat(worldName, chatId);
@@ -723,16 +553,17 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
     // Apply deduplication to loaded messages (same as SSE streaming path)
     // Pass agents array so user messages get correct seenByAgents
     const messages = deduplicateMessages([...rawMessages], agents);
+    const selectedProjectPath = getEnvValueFromText(world.variables, 'working_directory');
 
     yield {
       ...state,
       world,
       currentChat: world.chats.find(c => c.id === chatId) || null,
+      selectedProjectPath,
       messages,
       rawMessages,
       loading: false,
       needScroll: true,
-      approvalRequest: null,
       lastUserMessageText: null,
     };
 
@@ -742,7 +573,6 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       error: error.message || 'Failed to load world data',
       loading: false,
       needScroll: false,
-      approvalRequest: null,
       lastUserMessageText: state.lastUserMessageText ?? null,
     };
   }
@@ -751,6 +581,15 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
 
 // Event handlers for SSE and system events
 const handleSystemEvent = async (state: WorldComponentState, data: any): Promise<WorldComponentState> => {
+  const envelope = (data && typeof data === 'object') ? (data as Record<string, any>) : null;
+  const contentPayload = envelope && 'content' in envelope ? envelope.content : data;
+  const structuredPayload =
+    contentPayload && typeof contentPayload === 'object' ? contentPayload : null;
+  const eventType =
+    (structuredPayload && typeof structuredPayload.eventType === 'string' && structuredPayload.eventType) ||
+    (typeof contentPayload === 'string' ? contentPayload : null) ||
+    (typeof data === 'string' ? data : null);
+
   // Create a log-style message for system events
   const systemMessage: Message = {
     id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -761,9 +600,13 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
     worldEvent: {
       type: 'system',
       category: 'system',
-      message: typeof data === 'string' ? data : (data.content || data.message || 'System event'),
+      message:
+        (typeof contentPayload === 'string' && contentPayload) ||
+        (typeof eventType === 'string' && eventType) ||
+        (envelope && typeof envelope.message === 'string' ? envelope.message : '') ||
+        'System event',
       timestamp: new Date().toISOString(),
-      data: typeof data === 'object' ? data : undefined,
+      data: envelope || undefined,
       messageId: `system-${Date.now()}`
     },
     isLogExpanded: false
@@ -776,11 +619,32 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
   };
 
   // Handle specific system events
-  if (data.content === 'chat-title-updated' || data === 'chat-title-updated') {
-    const updates = initWorld(newState, newState.worldName, data.chatId);
+  if (eventType === 'chat-title-updated') {
+    // Refresh current chat context to update chat list/title without switching sessions.
+    const activeChatId = newState.currentChat?.id || newState.world?.currentChatId || undefined;
+    const updates = initWorld(newState, newState.worldName, activeChatId);
     for await (const update of updates) {
       return { ...newState, ...update };
     }
+  }
+
+  if (eventType === 'agent-created') {
+    // Re-fetch world to pick up the new agent in the agents list.
+    const activeChatId = newState.currentChat?.id || newState.world?.currentChatId || undefined;
+    const updates = initWorld(newState, newState.worldName, activeChatId);
+    for await (const update of updates) {
+      return { ...newState, ...update };
+    }
+  }
+
+  const hitlPrompt = HitlDomain.parseHitlPromptRequest(data);
+  if (hitlPrompt) {
+    const currentQueue = newState.hitlPromptQueue || [];
+    const nextQueue = HitlDomain.enqueueHitlPrompt(currentQueue, hitlPrompt);
+    return {
+      ...newState,
+      hitlPromptQueue: nextQueue,
+    };
   }
 
   return newState;
@@ -789,6 +653,13 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
 const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any): T => {
 
   const messageData = data || {};
+  const activeChatId = state.currentChat?.id || state.world?.currentChatId || null;
+  const incomingChatId = messageData.chatId ?? null;
+
+  if (activeChatId && (!incomingChatId || incomingChatId !== activeChatId)) {
+    return state;
+  }
+
   const senderName = messageData.sender;
 
   // Filter out internal protocol messages (tool results with __type marker)
@@ -805,12 +676,6 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
     }
   }
 
-  // PHASE 1: Check for tool_calls and handle approval requests (OpenAI protocol)
-  // This must happen before message display to show approval dialog immediately
-  if (messageData.tool_calls) {
-    handleMessageToolCalls(messageData);
-  }
-
   // Find and update agent message count
   let fromAgentId: string | undefined;
   if (state.world?.agents) {
@@ -824,20 +689,7 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
     }
   }
 
-  // Check if this is a tool call approval request or response FIRST
-  const toolCallRequest = detectToolCallRequest(messageData);
-  const toolCallResponse = detectToolCallResponse(messageData);
-
-  // Set message text - use placeholder for tool call messages with empty content
-  let messageText = messageData.content || messageData.message || '';
-  if (!messageText && (toolCallRequest || toolCallResponse)) {
-    // Tool call message with empty content - use placeholder
-    if (toolCallRequest) {
-      messageText = `[Tool approval request: ${toolCallRequest.toolName}]`;
-    } else if (toolCallResponse) {
-      messageText = `[Tool execution result]`;
-    }
-  }
+  const messageText = messageData.content || messageData.message || '';
 
   // Determine message type based on role field
   let messageType: string;
@@ -859,12 +711,9 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
     createdAt: messageData.createdAt || new Date().toISOString(),
     fromAgentId,
     messageId: messageData.messageId,
+    chatId: messageData.chatId,
     replyToMessageId: messageData.replyToMessageId,
     role: messageData.role, // Preserve role for filtering
-    // Set tool call flags
-    isToolCallRequest: !!toolCallRequest,
-    isToolCallResponse: !!toolCallResponse,
-    toolCallData: toolCallRequest || toolCallResponse
   };
 
   const existingMessages = state.messages || [];
@@ -897,6 +746,7 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
           return {
             ...msg,
             messageId: messageData.messageId,
+            chatId: messageData.chatId ?? msg.chatId,
             createdAt: messageData.createdAt || msg.createdAt,
             userEntered: false, // No longer temporary
             seenByAgents: fromAgentId ? [fromAgentId] : [] // Initialize with first agent or empty
@@ -1005,12 +855,26 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     InputDomain.updateInput(state, payload.target.value),
 
   'key-press': (state: WorldComponentState, payload: WorldEventPayload<'key-press'>) => {
-    if (InputDomain.shouldSendOnEnter(payload.key, state.userInput)) {
+    if (payload.nativeEvent?.isComposing || payload.keyCode === 229) {
+      return;
+    }
+    if ((state.hitlPromptQueue || []).length > 0) {
+      return;
+    }
+    if (InputDomain.shouldSendOnEnter(payload.key, payload.shiftKey, state.userInput)) {
+      payload.preventDefault?.();
       app.run('send-message');
     }
   },
 
   'send-message': async (state: WorldComponentState): Promise<WorldComponentState> => {
+    if ((state.hitlPromptQueue || []).length > 0) {
+      return {
+        ...state,
+        error: 'Resolve the pending HITL prompt before sending a new message.'
+      };
+    }
+
     const prepared = InputDomain.validateAndPrepareMessage(state.userInput, state.worldName);
     if (!prepared) return state;
 
@@ -1023,7 +887,8 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     try {
       // Send the message via SSE stream
       await sendChatMessage(state.worldName, prepared.text, {
-        sender: 'HUMAN'
+        sender: 'HUMAN',
+        chatId: state.currentChat?.id || state.world?.currentChatId || undefined
       });
 
       // Note: isWaiting is controlled by world events (pending count), not send/stream events
@@ -1033,38 +898,236 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     }
   },
 
+  'select-project-folder': async (state: WorldComponentState): Promise<WorldComponentState> => {
+    if (!state.world?.name) {
+      return {
+        ...state,
+        error: 'Load a world before selecting a project folder.'
+      };
+    }
+
+    try {
+      const pickerResult = await pickProjectFolderPath(state.selectedProjectPath || null);
+      if (pickerResult?.canceled || !pickerResult?.directoryPath) {
+        return state;
+      }
+
+      const selectedPath = String(pickerResult.directoryPath || '').trim();
+      if (!selectedPath) {
+        return state;
+      }
+
+      const nextVariables = upsertEnvVariable(
+        state.world.variables || '',
+        'working_directory',
+        selectedPath
+      );
+
+      const updatedWorld = await api.updateWorld(state.worldName, { variables: nextVariables });
+      const mergedWorld = mergeUpdatedWorldWithUiState(state.world, updatedWorld);
+      return {
+        ...state,
+        world: mergedWorld,
+        selectedProjectPath: selectedPath,
+        error: null
+      };
+    } catch (error: any) {
+      return {
+        ...state,
+        error: error?.message || 'Failed to select project folder.'
+      };
+    }
+  },
+
+  'stop-message-processing': async function* (state: WorldComponentState): AsyncGenerator<WorldComponentState> {
+    const chatId = state.currentChat?.id || state.world?.currentChatId || null;
+    if (!chatId) {
+      yield {
+        ...state,
+        error: 'No active chat session to stop.'
+      };
+      return;
+    }
+
+    if (state.isStopping) {
+      return;
+    }
+
+    const stoppingState: WorldComponentState = {
+      ...state,
+      isStopping: true,
+      error: null
+    };
+    yield stoppingState;
+
+    try {
+      const result = await api.stopMessageProcessing(state.worldName, chatId);
+      const shouldResetProcessingState = Boolean(result?.stopped) || result?.reason === 'no-active-process';
+
+      if (shouldResetProcessingState) {
+        if (stoppingState.debounceFrameId !== null) {
+          cancelAnimationFrame(stoppingState.debounceFrameId);
+        }
+        if (stoppingState.elapsedIntervalId !== null) {
+          clearInterval(stoppingState.elapsedIntervalId);
+        }
+      }
+
+      yield {
+        ...stoppingState,
+        isStopping: false,
+        isWaiting: shouldResetProcessingState ? false : stoppingState.isWaiting,
+        isBusy: shouldResetProcessingState ? false : stoppingState.isBusy,
+        activeTools: shouldResetProcessingState ? [] : stoppingState.activeTools,
+        pendingStreamUpdates: shouldResetProcessingState ? new Map() : stoppingState.pendingStreamUpdates,
+        debounceFrameId: shouldResetProcessingState ? null : stoppingState.debounceFrameId,
+        elapsedIntervalId: shouldResetProcessingState ? null : stoppingState.elapsedIntervalId,
+        activityStartTime: shouldResetProcessingState ? null : stoppingState.activityStartTime,
+        elapsedMs: shouldResetProcessingState ? 0 : stoppingState.elapsedMs,
+        needScroll: shouldResetProcessingState ? true : stoppingState.needScroll,
+        error: null
+      };
+    } catch (error: any) {
+      yield {
+        ...stoppingState,
+        isStopping: false,
+        error: error?.message || 'Failed to stop message processing.'
+      };
+    }
+  },
+
   // ========================================
   // SSE STREAMING EVENTS
   // ========================================
+  // SSE STREAMING HANDLERS
+  // ========================================
 
   'handleStreamStart': handleStreamStart,
-  'handleStreamChunk': handleStreamChunk,
+  'handleStreamChunk': handleStreamChunkDebounced, // Phase 2: Debounced version
   'handleStreamEnd': handleStreamEnd,
   'handleStreamError': handleStreamError,
   'handleLogEvent': handleLogEvent,
   'handleMessageEvent': handleMessageEvent,
   'handleSystemEvent': handleSystemEvent,
+  'respond-hitl-option': async function* (
+    state: WorldComponentState,
+    payload: WorldEventPayload<'respond-hitl-option'>
+  ): AsyncGenerator<WorldComponentState> {
+    const requestId = String(payload?.requestId || '').trim();
+    const optionId = String(payload?.optionId || '').trim();
+    if (!requestId || !optionId) {
+      yield {
+        ...state,
+        error: 'Invalid HITL response payload.'
+      };
+      return;
+    }
+
+    const prompt = (state.hitlPromptQueue || []).find((entry) => entry.requestId === requestId);
+    if (!prompt) {
+      yield {
+        ...state,
+        error: `HITL request '${requestId}' not found.`
+      };
+      return;
+    }
+
+    yield {
+      ...state,
+      submittingHitlRequestId: requestId,
+      error: null
+    };
+
+    try {
+      const result = await api.respondHitlOption(
+        state.worldName,
+        requestId,
+        optionId,
+        payload?.chatId ?? prompt.chatId ?? null
+      );
+      if (!result?.accepted) {
+        yield {
+          ...state,
+          submittingHitlRequestId: null,
+          error: result?.reason || 'HITL response was not accepted.'
+        };
+        return;
+      }
+      yield {
+        ...state,
+        submittingHitlRequestId: null,
+        hitlPromptQueue: HitlDomain.removeHitlPromptByRequestId(state.hitlPromptQueue || [], requestId)
+      };
+
+      if (prompt?.metadata?.refreshAfterDismiss) {
+        const activeChatId = state.currentChat?.id || state.world?.currentChatId || undefined;
+        const updates = initWorld(state, state.worldName, activeChatId);
+        for await (const update of updates) {
+          yield {
+            ...state,
+            ...update,
+            submittingHitlRequestId: null,
+            hitlPromptQueue: HitlDomain.removeHitlPromptByRequestId((update.hitlPromptQueue || state.hitlPromptQueue || []), requestId)
+          };
+        }
+      }
+    } catch (error: any) {
+      yield {
+        ...state,
+        submittingHitlRequestId: null,
+        error: error?.message || 'Failed to submit HITL response.'
+      };
+    }
+  },
   'handleError': handleError,
   'handleToolError': handleToolError,
   'handleToolStart': handleToolStart,
   'handleToolProgress': handleToolProgress,
   'handleToolResult': handleToolResult,
-  'handleToolResultSubmitted': (state: WorldComponentState, data: any) => {
-    // Tool result submitted confirmation - log for debugging
-    console.log('Tool result submitted successfully:', data);
-  },
+  'handleToolStream': handleToolStream,
   'handleWorldActivity': (state: WorldComponentState, activity: any): WorldComponentState | void => {
     return handleWorldActivity(state, activity);
   },
   // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
 
-  'show-approval-request': showApprovalRequestDialog,
-  'hide-approval-request': hideApprovalRequestDialog,
-  'submit-approval-decision': submitApprovalDecision,
+  // ========================================
+  // PHASE 2: STREAMING STATE UPDATES
+  // ========================================
 
-  'show-hitl-request': showHITLRequestDialog,
-  'hide-hitl-request': hideHITLRequestDialog,
-  'submit-hitl-decision': submitHITLDecision,
+  /**
+   * Flush pending stream updates (called by RAF)
+   */
+  'flush-stream-updates': (state: WorldComponentState): WorldComponentState => {
+    if (state.pendingStreamUpdates.size === 0) {
+      return { ...state, debounceFrameId: null };
+    }
+
+    // Apply all pending updates to messages immutably
+    const messages = state.messages.map(msg => {
+      const pending = state.pendingStreamUpdates.get(msg.messageId);
+      return pending ? { ...msg, text: pending } : msg;
+    });
+
+    return {
+      ...state,
+      messages,
+      pendingStreamUpdates: new Map(),
+      debounceFrameId: null,
+      needScroll: true
+    };
+  },
+
+  /**
+   * Update elapsed time (called by interval timer)
+   */
+  'update-elapsed-time': (state: WorldComponentState): WorldComponentState => {
+    if (state.activityStartTime === null) {
+      return state;
+    }
+
+    const elapsed = Date.now() - state.activityStartTime;
+    return { ...state, elapsedMs: elapsed };
+  },
 
   // ========================================
   // MESSAGE DISPLAY
@@ -1087,6 +1150,25 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
 
   'update-edit-text': (state: WorldComponentState, payload: WorldEventPayload<'update-edit-text'>): WorldComponentState =>
     EditingDomain.updateEditText(state, payload.target.value),
+
+  // Phase 5: Toggle tool output expansion
+  'toggle-tool-output': (state: WorldComponentState, messageId: string): WorldComponentState => {
+    const messages = state.messages.map(msg => {
+      if (msg.id === messageId) {
+        return {
+          ...msg,
+          isToolOutputExpanded: !msg.isToolOutputExpanded
+        };
+      }
+      return msg;
+    });
+
+    return {
+      ...state,
+      messages,
+      needScroll: false
+    };
+  },
 
   // ========================================
   // MESSAGE DELETION
@@ -1169,55 +1251,55 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     }
   },
 
-  'save-edit-message': async (state: WorldComponentState, messageId: WorldEventPayload<'save-edit-message'>): Promise<WorldComponentState> => {
+  'save-edit-message': async function* (state: WorldComponentState, messageId: WorldEventPayload<'save-edit-message'>): AsyncGenerator<WorldComponentState> {
     const editedText = state.editingText?.trim();
-    if (!editedText) return state;
+    if (!editedText) return;
 
     // Find the message by frontend ID
     const message = state.messages.find(msg => msg.id === messageId);
     if (!message) {
-      return {
+      yield {
         ...state,
         error: 'Message not found',
         editingMessageId: null,
         editingText: ''
       };
+      return;
+    }
+
+    const currentText = String(message.text || '').trim();
+    if (editedText === currentText) {
+      return;
     }
 
     // Check if message has backend messageId
     if (!message.messageId) {
-      return {
+      yield {
         ...state,
         error: 'Cannot edit message: missing message ID. Message may not be saved yet.',
         editingMessageId: null,
         editingText: ''
       };
+      return;
     }
 
-    // Check if we have a current chat
-    if (!state.currentChat?.id) {
-      return {
+    const targetChatId = message.chatId || state.currentChat?.id;
+
+    // Check if we have a target chat
+    if (!targetChatId) {
+      yield {
         ...state,
         error: 'Cannot edit message: no active chat session',
         editingMessageId: null,
         editingText: ''
       };
+      return;
     }
 
-    // Check session mode before proceeding
-    if (!state.world?.currentChatId) {
-      return {
-        ...state,
-        error: 'Cannot edit message: session mode is OFF. Please enable session mode first.',
-        editingMessageId: null,
-        editingText: ''
-      };
-    }
-
-    // Store edit backup in localStorage before DELETE
+    // Store edit backup before backend mutation for local recovery.
     const editBackup = {
       messageId: message.messageId,
-      chatId: state.currentChat.id,
+      chatId: targetChatId,
       newContent: editedText,
       timestamp: Date.now(),
       worldName: state.worldName
@@ -1242,57 +1324,37 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
       lastUserMessageText: editedText
     };
 
+    // Yield optimistic state immediately so the editing UI closes right away
+    yield optimisticState;
+
     try {
-      // PHASE 1: Call DELETE to remove messages
-      const deleteResult = await api.deleteMessage(
+      // Use edit streaming endpoint so post-edit responses stream back into the web UI.
+      await editChatMessage(
         state.worldName,
         message.messageId,
-        state.currentChat.id
+        editedText,
+        targetChatId,
+        { awaitCompletion: false }
       );
 
-      // Check DELETE result
-      if (!deleteResult.success) {
-        // Partial failure - some agents failed
-        const failedAgentNames = deleteResult.failedAgents?.map((f: any) => f.agentId).join(', ');
-        return {
-          ...state,
-          isSending: false,
-          error: `Message removal partially failed for agents: ${failedAgentNames}. ${deleteResult.messagesRemovedTotal || 0} messages removed.`
-        };
-      }
-
-      // PHASE 2: Call POST to resubmit edited message (reuses existing SSE streaming)
       try {
-        await sendChatMessage(state.worldName, editedText, {
-          sender: 'human'
-        });
-
-        // Clear localStorage backup on successful resubmission
-        try {
-          localStorage.removeItem('agent-world-edit-backup');
-        } catch (e) {
-          console.warn('Failed to clear edit backup:', e);
-        }
-
-        // Success - message will arrive via SSE
-        return {
-          ...optimisticState,
-          isSending: false
-        };
-      } catch (resubmitError: any) {
-        // POST failed after DELETE succeeded
-        return {
-          ...optimisticState,
-          isSending: false,
-          error: `Messages removed but resubmission failed: ${resubmitError.message || 'Unknown error'}. Please try editing again.`
-        };
+        localStorage.removeItem('agent-world-edit-backup');
+      } catch (e) {
+        console.warn('Failed to clear edit backup from localStorage:', e);
       }
 
+      // SSE events will stream edited message + responses.
+      yield {
+        ...optimisticState,
+        isSending: false,
+        error: null
+      };
     } catch (error: any) {
-      // Handle DELETE errors
+      // Handle backend edit request errors.
       let errorMessage = error.message || 'Failed to edit message';
+      const isWorldLockedError = error.message?.includes('423') || error.message?.includes('WORLD_LOCKED');
 
-      if (error.message?.includes('423')) {
+      if (isWorldLockedError) {
         errorMessage = 'Cannot edit message: world is currently processing. Please try again in a moment.';
       } else if (error.message?.includes('404')) {
         errorMessage = 'Message not found in agent memories. It may have been already deleted.';
@@ -1300,8 +1362,8 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         errorMessage = 'Invalid message: only user messages can be edited.';
       }
 
-      // Restore original messages on DELETE error
-      return {
+      // Restore original messages when edit request fails.
+      yield {
         ...state,
         isSending: false,
         editingMessageId: null,
@@ -1359,11 +1421,32 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
 
   'load-chat-from-history': async function* (state: WorldComponentState, chatId: WorldEventPayload<'load-chat-from-history'>): AsyncGenerator<WorldComponentState> {
     try {
-      yield ChatHistoryDomain.createChatLoadingState(state);
+      // Phase 2: Cleanup streaming state before loading new chat
+      if (state.debounceFrameId !== null) {
+        cancelAnimationFrame(state.debounceFrameId);
+      }
+      if (state.elapsedIntervalId !== null) {
+        clearInterval(state.elapsedIntervalId);
+      }
+
+      const cleanState = {
+        ...state,
+        pendingStreamUpdates: new Map(),
+        debounceFrameId: null,
+        activeTools: [],
+        isBusy: false,
+        elapsedMs: 0,
+        activityStartTime: null,
+        elapsedIntervalId: null,
+        hitlPromptQueue: [],
+        submittingHitlRequestId: null,
+      };
+
+      yield ChatHistoryDomain.createChatLoadingState(cleanState);
 
       const result = await api.setChat(state.worldName, chatId);
       if (!result.success) {
-        yield state;
+        yield cleanState;
       }
       const path = ChatHistoryDomain.buildChatRoutePath(state.worldName, chatId);
       app.route(path);
@@ -1395,5 +1478,3 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'clear-world-messages': async (state: WorldComponentState): Promise<WorldComponentState> =>
     AgentManagementDomain.clearWorldMessages(state, state.worldName),
 };
-
-

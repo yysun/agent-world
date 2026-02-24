@@ -27,6 +27,9 @@
  * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
+ * - 2026-02-16: Fixed streaming tool-call chunk merge to preserve delayed tool `id`/`name` fields across deltas.
+ * - 2026-02-13: Added abort-signal support for streaming and non-streaming calls to enable chat stop cancellation.
+ * - 2026-02-07: Tool definitions now attached for all providers including Ollama
  * - 2025-11-09: Phase 2 - Removed ALL tool execution logic (~200 lines)
  * - Provider is now a pure client - only API calls and data transformation
  * - Returns LLMResponse interface with type discriminator
@@ -146,6 +149,10 @@ function convertMCPToolsToOpenAI(mcpTools: Record<string, any>): OpenAI.Chat.Com
   }));
 }
 
+function shouldAttachTools(_provider: Agent['provider']): boolean {
+  return true;
+}
+
 /**
  * Streaming OpenAI response handler - Pure client (no tool execution)
  * Returns LLMResponse with type='text' or type='tool_calls'
@@ -158,10 +165,14 @@ export async function streamOpenAIResponse(
   mcpTools: Record<string, any>,
   world: World,
   onChunk: (content: string) => void,
-  messageId: string
+  messageId: string,
+  abortSignal?: AbortSignal
 ): Promise<LLMResponse> {
   const openaiMessages = convertMessagesToOpenAI(messages);
-  const openaiTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToOpenAI(mcpTools) : undefined;
+  const openaiTools =
+    shouldAttachTools(agent.provider) && Object.keys(mcpTools).length > 0
+      ? convertMCPToolsToOpenAI(mcpTools)
+      : undefined;
 
   const requestParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
     model,
@@ -178,12 +189,18 @@ export async function streamOpenAIResponse(
     toolCount: openaiTools?.length || 0,
   });
 
-  const stream = await client.chat.completions.create(requestParams);
+  const stream = await client.chat.completions.create(
+    requestParams,
+    abortSignal ? { signal: abortSignal } : undefined
+  );
   let fullResponse = '';
   let functionCalls: any[] = [];
 
   try {
     for await (const chunk of stream) {
+      if (abortSignal?.aborted) {
+        throw new DOMException('OpenAI stream aborted', 'AbortError');
+      }
       const delta = chunk.choices[0]?.delta;
 
       if (delta?.content) {
@@ -201,6 +218,18 @@ export async function streamOpenAIResponse(
                 type: 'function',
                 function: { name: toolCall.function?.name || '', arguments: '' },
               };
+            }
+
+            if (!functionCalls[toolCall.index].id && toolCall.id) {
+              functionCalls[toolCall.index].id = toolCall.id;
+            }
+
+            if (
+              toolCall.function?.name
+              && toolCall.function.name.trim() !== ''
+              && !functionCalls[toolCall.index].function.name
+            ) {
+              functionCalls[toolCall.index].function.name = toolCall.function.name;
             }
 
             if (toolCall.function?.arguments) {
@@ -234,7 +263,7 @@ export async function streamOpenAIResponse(
       });
 
       const toolCallsFormatted = validCalls.map(fc => ({
-        id: fc.id!,
+        id: fc.id || generateFallbackId(),
         type: 'function' as const,
         function: {
           name: fc.function!.name!,
@@ -282,10 +311,14 @@ export async function generateOpenAIResponse(
   messages: ChatMessage[],
   agent: Agent,
   mcpTools: Record<string, any>,
-  world: World
+  world: World,
+  abortSignal?: AbortSignal
 ): Promise<LLMResponse> {
   const openaiMessages = convertMessagesToOpenAI(messages);
-  const openaiTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToOpenAI(mcpTools) : undefined;
+  const openaiTools =
+    shouldAttachTools(agent.provider) && Object.keys(mcpTools).length > 0
+      ? convertMCPToolsToOpenAI(mcpTools)
+      : undefined;
 
   const requestParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
     model,
@@ -302,7 +335,10 @@ export async function generateOpenAIResponse(
   });
 
   try {
-    const response = await client.chat.completions.create(requestParams);
+    const response = await client.chat.completions.create(
+      requestParams,
+      abortSignal ? { signal: abortSignal } : undefined
+    );
     const message = response.choices[0]?.message;
 
     if (!message) {
@@ -336,7 +372,7 @@ export async function generateOpenAIResponse(
       const toolCallsFormatted = validToolCalls.map(tc => {
         const funcCall = tc as OpenAI.Chat.Completions.ChatCompletionMessageFunctionToolCall;
         return {
-          id: tc.id,
+          id: tc.id || generateFallbackId(),
           type: 'function' as const,
           function: {
             name: funcCall.function.name,

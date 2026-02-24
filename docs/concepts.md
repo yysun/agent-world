@@ -116,7 +116,7 @@ World now supports **Session Mode Control** via nullable `currentChatId`:
    - **Mention Extraction:** Uses utility functions to parse mentions and avoid loops.
 
 3. **Processing & Responding**
-   - Incoming message is **saved to agent memory** immediately, ensuring context is always stored.
+   - Incoming message is **saved to agent memory only when the agent will respond** (`shouldAgentRespond === true`).
    - Agent **loads last 10 messages** for context.
    - Messages are prepared for LLM (system prompt + history + current).
    - LLM call count is incremented and **state is auto-saved** after increment.
@@ -326,7 +326,7 @@ sequenceDiagram
 ## Example Use Cases
 
 ### Traditional Use Case
-A user sends a message. The World routes it to the Chat, which dispatches to the Agent. The Agent saves the message, checks filtering/turn/mention logic, processes and replies if allowed. The World auto-saves the chat and agent state after each relevant event. Restoration brings back the full session, including agent memories and chat history.
+A user sends a message. The World routes it to the Chat, which dispatches to the Agent. The Agent checks filtering/turn/mention logic; if it will respond, it saves the incoming message to agent memory and then processes/replies. The World auto-saves chat and agent state after each relevant event. Restoration brings back the full session, including agent memories and chat history.
 
 ### Enhanced Use Cases with Session Management
 

@@ -29,6 +29,11 @@
  * ```
  *
  * Created: 2025-11-10 - Extracted from api.ts for reusability
+ * Updated: 2026-02-20 - Removed stale legacy event-channel SSE forwarding from this handler.
+ * Updated: 2026-02-20 - Keep `hitl-option-request` system events bypassing strict chat scope filtering so HITL prompts are always delivered.
+ * Updated: 2026-02-21 - Refresh fallback timeout on shell assistant-stream SSE activity (`start`/`chunk`/`end` + `toolName='shell_cmd'`) as well as legacy `tool-stream`.
+ * Updated: 2026-02-11 - Extended fallback timeout on tool-stream events to prevent premature timeout
+ * Updated: 2026-02-08 - Removed manual tool-intervention SSE commentary and kept generic tool_call forwarding
  * Updated: 2025-11-10 - Added tool event forwarding to SSE channel
  */
 
@@ -39,13 +44,13 @@ const loggerStream = createCategoryLogger('api.stream');
 
 // Timeout constants for streaming (fallback only)
 const STREAM_TIMEOUT_NO_EVENTS_MS = 15000;
-
 // Event payload types
 interface MessageEventPayload {
   sender: string;
   content: string;
   timestamp?: Date;
   messageId: string;
+  chatId?: string | null;
   replyToMessageId?: string;
   role?: string;
   tool_calls?: any[];
@@ -55,12 +60,14 @@ interface MessageEventPayload {
 interface SSEEventPayload {
   type: string;
   agentName?: string;
+  chatId?: string | null;
   [key: string]: any;
 }
 
 interface SystemEventPayload {
   message?: string;
   content?: string;
+  chatId?: string | null;
   [key: string]: any;
 }
 
@@ -105,7 +112,8 @@ export function createSSEHandler(
   req: Request,
   res: Response,
   world: World,
-  context: string = 'sse'
+  context: string = 'sse',
+  scopedChatId?: string | null
 ): SSEHandler {
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
@@ -177,6 +185,27 @@ export function createSSEHandler(
   };
 
   const listeners = new Map<string, (...args: any[]) => void>();
+  const normalizedScopedChatId = scopedChatId === undefined ? undefined : (scopedChatId === null ? null : String(scopedChatId));
+  const isChatEventInScope = (eventChatId: unknown, includeUnscopedWhenScoped: boolean = false): boolean => {
+    if (normalizedScopedChatId === undefined) return true;
+    if (eventChatId === undefined) return includeUnscopedWhenScoped;
+    const normalizedEventChatId = eventChatId === null ? null : String(eventChatId);
+    return normalizedEventChatId === normalizedScopedChatId;
+  };
+
+  const isHitlRequestEvent = (eventData: SystemEventPayload | undefined): boolean => {
+    if (!eventData) return false;
+    const content = eventData.content;
+    if (content && typeof content === 'object') {
+      const eventType = String((content as any).eventType || '').trim();
+      return eventType === 'hitl-option-request';
+    }
+    if (typeof content === 'string') {
+      const eventType = content.trim();
+      return eventType === 'hitl-option-request';
+    }
+    return false;
+  };
 
   // Attach direct listeners to world.eventEmitter
   const worldListener = (eventData: any) => {
@@ -184,6 +213,9 @@ export function createSSEHandler(
     const isToolEvent = eventData?.type && ['tool-start', 'tool-result', 'tool-error', 'tool-progress'].includes(eventData.type);
 
     if (isToolEvent) {
+      if (!isChatEventInScope(eventData?.chatId, false)) {
+        return;
+      }
       // Forward tool events as SSE events for frontend consumption
       sendSSE({
         type: EventType.SSE,
@@ -191,7 +223,8 @@ export function createSSEHandler(
           type: eventData.type,
           messageId: eventData.messageId,
           agentName: eventData.agentName,
-          toolExecution: eventData.toolExecution
+          toolExecution: eventData.toolExecution,
+          chatId: eventData.chatId
         }
       });
       return;
@@ -217,20 +250,26 @@ export function createSSEHandler(
       return;
     }
 
-    sendSSE({ type: EventType.WORLD, data: eventData });
+    if (isChatEventInScope(eventData?.chatId, true)) {
+      sendSSE({ type: EventType.WORLD, data: eventData });
+    }
   };
   world.eventEmitter.on(EventType.WORLD, worldListener);
   listeners.set(EventType.WORLD, worldListener);
 
   const messageListener = (eventData: MessageEventPayload) => {
+    if (!isChatEventInScope(eventData?.chatId, false)) {
+      return;
+    }
     // Enhance message event data with structured format
     // CRITICAL: replyToMessageId must be included for frontend threading display
-    // CRITICAL: tool_calls must be included for approval request handling (OpenAI protocol)
+    // Include tool_calls to preserve complete assistant tool-call context on the client.
     const messageData = {
       type: 'message',
       sender: eventData.sender,
       content: eventData.content,
       messageId: eventData.messageId,
+      chatId: eventData.chatId,
       replyToMessageId: eventData.replyToMessageId,
       createdAt: eventData.timestamp || new Date().toISOString(),
       role: eventData.role,
@@ -242,12 +281,26 @@ export function createSSEHandler(
   listeners.set(EventType.MESSAGE, messageListener);
 
   const sseListener = (eventData: SSEEventPayload) => {
+    if (!isChatEventInScope(eventData?.chatId, false)) {
+      return;
+    }
+    // Extend fallback timeout for long-running shell stream activity.
+    const isLegacyToolStream = eventData.type === 'tool-stream';
+    const isShellAssistantStream = eventData.toolName === 'shell_cmd' &&
+      (eventData.type === 'start' || eventData.type === 'chunk' || eventData.type === 'end');
+    if (isLegacyToolStream || isShellAssistantStream) {
+      startTimeoutFallback();
+    }
     sendSSE({ type: EventType.SSE, data: eventData });
   };
   world.eventEmitter.on(EventType.SSE, sseListener);
   listeners.set(EventType.SSE, sseListener);
 
   const systemListener = (eventData: SystemEventPayload) => {
+    const isHitlRequest = isHitlRequestEvent(eventData);
+    if (!isHitlRequest && !isChatEventInScope(eventData?.chatId, true)) {
+      return;
+    }
     sendSSE({ type: EventType.SYSTEM, data: eventData });
   };
   world.eventEmitter.on(EventType.SYSTEM, systemListener);

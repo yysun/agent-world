@@ -316,6 +316,43 @@ describe('Message Deletion Feature - Unit Tests', () => {
   });
 
   describe('Multi-Agent Behavior', () => {
+    it('should truncate all agents in chat using target timestamp even if only one agent has target messageId', async () => {
+      const world = createTestWorld({ totalAgents: 2 });
+      const agent1 = createTestAgent({
+        id: 'agent-1',
+        memory: [
+          { role: 'user', content: 'm1', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-1' },
+          { role: 'user', content: 'target', messageId: 'msg-target', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:01:00Z'), agentId: 'agent-1' },
+          { role: 'assistant', content: 'after target', messageId: 'msg-3', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:02:00Z'), agentId: 'agent-1' }
+        ]
+      });
+      const agent2 = createTestAgent({
+        id: 'agent-2',
+        memory: [
+          { role: 'assistant', content: 'before', messageId: 'a-1', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-2' },
+          { role: 'assistant', content: 'same time as target', messageId: 'a-2', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:01:00Z'), agentId: 'agent-2' },
+          { role: 'assistant', content: 'after target', messageId: 'a-3', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:03:00Z'), agentId: 'agent-2' }
+        ]
+      });
+      const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 6, createdAt: new Date(), updatedAt: new Date() };
+
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent1);
+      await getMemoryStorage().saveAgent('test-world', agent2);
+      await getMemoryStorage().saveChatData('test-world', chat);
+
+      const result = await removeMessagesFrom('test-world', 'msg-target', 'chat-1');
+
+      expect(result.success).toBe(true);
+      expect(result.messagesRemovedTotal).toBe(4);
+
+      const updatedAgent1 = await getMemoryStorage().loadAgent('test-world', 'agent-1');
+      const updatedAgent2 = await getMemoryStorage().loadAgent('test-world', 'agent-2');
+
+      expect(updatedAgent1?.memory.map(m => m.messageId)).toEqual(['msg-1']);
+      expect(updatedAgent2?.memory.map(m => m.messageId)).toEqual(['a-1']);
+    });
+
     it('should process all agents in the world', async () => {
       const world = createTestWorld({ totalAgents: 2 });
       const agent1 = createTestAgent({

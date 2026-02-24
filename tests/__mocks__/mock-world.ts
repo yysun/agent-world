@@ -1,15 +1,14 @@
 /**
- * Mock World Factory
- * 
- * Purpose: Create mock world objects for testing
- * 
- * Features:
- * - Provides default world structure for tests
- * - Includes required properties for approval system tests
- * - Supports customization of world properties
- * - Provides mock agents and chats
- * 
- * Created: Phase 7 - Tool approval system integration tests
+ * Purpose: Create reusable mock world/agent/chat fixtures for tests.
+ * Key features:
+ * - Provides default world, agent, and chat structures
+ * - Supports partial override injection for scenario-specific fixtures
+ * - Provides pre-wired world data helper with one agent and one chat
+ * Implementation notes:
+ * - Uses EventEmitter-backed world fixture to match runtime event behavior
+ * - Keeps default fixture values deterministic for repeatable tests
+ * Recent changes:
+ * - Reworded fixture descriptions to remove legacy manual-intervention references
  */
 
 import { EventEmitter } from 'events';
@@ -23,7 +22,7 @@ export function createMockWorld(overrides: Partial<World> = {}): World {
   const defaultWorld: World = {
     id: 'test-world-123',
     name: 'Test World',
-    description: 'A test world for approval system testing',
+    description: 'A test world for integration testing',
     turnLimit: 10,
     chatLLMProvider: 'openai',
     chatLLMModel: 'gpt-4',
@@ -73,7 +72,7 @@ export function createMockChat(overrides: Partial<Chat> = {}): Chat {
     id: 'test-chat-123',
     worldId: 'test-world-123',
     name: 'Test Chat',
-    description: 'A test chat for approval system testing',
+    description: 'A test chat for integration testing',
     createdAt: new Date(),
     updatedAt: new Date(),
     messageCount: 0

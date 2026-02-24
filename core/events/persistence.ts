@@ -8,7 +8,7 @@
  * - Message event persistence with enhanced metadata
  * - SSE event persistence (start/end only, skips chunks)
  * - Tool event persistence with validation
- * - System and CRUD event persistence
+ * - System event persistence
  * - Activity tracking event persistence
  * - Automatic metadata calculation (agent context, threading, tool calls)
  * - Error handling with graceful degradation
@@ -30,10 +30,8 @@ import type {
   World,
   WorldMessageEvent,
   WorldSSEEvent,
-  WorldSystemEvent,
-  WorldCRUDEvent
+  WorldSystemEvent
 } from '../types.js';
-import { EventType } from '../types.js';
 import { createCategoryLogger } from '../logger.js';
 import {
   calculateOwnerAgentIds,
@@ -119,7 +117,7 @@ export function setupEventPersistence(world: World): () => void {
         content: event.content,
         sender: event.sender,
         replyToMessageId: event.replyToMessageId,
-        // Preserve OpenAI protocol fields for tool calls and approvals
+        // Preserve OpenAI protocol fields for tool calls.
         role: (event as any).role,
         tool_calls: (event as any).tool_calls,
         tool_call_id: (event as any).tool_call_id,
@@ -149,14 +147,6 @@ export function setupEventPersistence(world: World): () => void {
         isReply: threadMetadata.isReply,
         hasReplies: false, // Will be updated async in future
 
-        // Tool Approval
-        requiresApproval: (event as any).requiresApproval || false,
-        approvalScope: null, // Set when approval is granted
-        approvedAt: null,
-        approvedBy: null,
-        deniedAt: null,
-        denialReason: null,
-
         // Performance (for agent messages with LLM usage)
         llmTokensInput: (event as any).usage?.inputTokens || null,
         llmTokensOutput: (event as any).usage?.outputTokens || null,
@@ -184,10 +174,11 @@ export function setupEventPersistence(world: World): () => void {
     }
 
     // Persist start/end events for metadata tracking
+    // Use event.chatId for concurrency-safe routing (falls back to null for broadcast)
     const eventData = {
       id: `${event.messageId}-sse-${event.type}`,
       worldId: world.id,
-      chatId: world.currentChatId || null,
+      chatId: event.chatId || null,
       type: 'sse',
       payload: {
         agentName: event.agentName,
@@ -250,7 +241,9 @@ export function setupEventPersistence(world: World): () => void {
     const eventData = {
       id: eventId,
       worldId: world.id,
-      chatId: world.currentChatId || null, // Default to current chat
+      // Activity events (response-start/end, idle) are world-level, use null chatId
+      // Tool events use chatId from event for concurrency-safe routing
+      chatId: isActivityEvent ? null : (event.chatId || null),
       type: isActivityEvent ? 'world' : 'tool',
       payload: isActivityEvent ? {
         activityType: event.type,
@@ -274,8 +267,7 @@ export function setupEventPersistence(world: World): () => void {
         ownerAgentId: event.agentName,
         triggeredByMessageId: event.messageId,
         executionDuration: event.toolExecution?.duration ?? 0,
-        resultSize: event.toolExecution?.resultSize ?? 0,
-        wasApproved: false // Default, should be updated if approval tracking is needed
+        resultSize: event.toolExecution?.resultSize ?? 0
       },
       createdAt: isActivityEvent ? new Date(event.timestamp) : new Date()
     };
@@ -298,37 +290,11 @@ export function setupEventPersistence(world: World): () => void {
     return persistEvent(eventData);
   };
 
-  // CRUD event persistence
-  const crudHandler = (event: WorldCRUDEvent): void | Promise<void> => {
-    const eventData = {
-      id: `crud-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      worldId: world.id,
-      chatId: event.chatId || null,
-      type: 'crud',
-      payload: {
-        operation: event.operation,
-        entityType: event.entityType,
-        entityId: event.entityId,
-        entityData: event.entityData,
-        timestamp: event.timestamp
-      },
-      meta: {
-        operation: event.operation,
-        entityType: event.entityType,
-        entityId: event.entityId
-      },
-      createdAt: event.timestamp
-    };
-
-    return persistEvent(eventData);
-  };
-
   // Attach listeners
   world.eventEmitter.on('message', messageHandler);
   world.eventEmitter.on('sse', sseHandler);
   world.eventEmitter.on('world', toolHandler);
   world.eventEmitter.on('system', systemHandler);
-  world.eventEmitter.on(EventType.CRUD, crudHandler);
 
   loggerPublish.debug('Event persistence setup complete', {
     worldId: world.id
@@ -340,7 +306,6 @@ export function setupEventPersistence(world: World): () => void {
     world.eventEmitter.off('sse', sseHandler);
     world.eventEmitter.off('world', toolHandler);
     world.eventEmitter.off('system', systemHandler);
-    world.eventEmitter.off(EventType.CRUD, crudHandler);
     loggerPublish.debug('Event persistence listeners cleaned up', { worldId: world.id });
   };
 }

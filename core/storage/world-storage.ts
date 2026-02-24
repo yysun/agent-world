@@ -31,6 +31,7 @@
  * - worldExists: Check if world directory exists
  * 
  * Changes:
+ * - 2026-02-13: Added compare-and-set chat title helper (`updateChatNameIfCurrent`) for safer concurrent title commits.
  * - 2025-11-01: Explicitly exclude runtime properties (eventEmitter, agents, chats, eventStorage, _eventPersistenceCleanup) from saveWorld
  * - getWorldDir: Get world directory path
  * - ensureWorldDirectory: Create world directory structure
@@ -293,6 +294,27 @@ export async function updateChatData(rootPath: string, worldId: string, chatId: 
 
   await saveChatData(rootPath, worldId, chatData);
   return chatData;
+}
+
+/**
+ * Compare-and-set chat name on disk.
+ * Updates name only when the current name exactly matches expectedName.
+ */
+export async function updateChatNameIfCurrent(
+  rootPath: string,
+  worldId: string,
+  chatId: string,
+  expectedName: string,
+  nextName: string
+): Promise<boolean> {
+  const chatData = await loadChatData(rootPath, worldId, chatId);
+  if (!chatData) return false;
+  if (chatData.name !== expectedName) return false;
+
+  chatData.name = nextName;
+  chatData.updatedAt = new Date();
+  await saveChatData(rootPath, worldId, chatData);
+  return true;
 }
 
 /**

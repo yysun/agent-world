@@ -98,7 +98,7 @@ describe('shouldAgentRespond', () => {
 
     test('should NOT respond to mid-paragraph mentions', async () => {
       const messageEvent: WorldMessageEvent = {
-        content: 'Hello @test-agent, how are you?',
+        content: 'I think @test-agent can handle this.',
         sender: 'user',
         timestamp: new Date(),
         messageId: 'msg-2'
@@ -178,6 +178,66 @@ describe('shouldAgentRespond', () => {
 
       const result = await shouldAgentRespond(mockWorld, mockAgent, messageEvent);
       expect(result).toBe(true);
+    });
+
+    test('should treat "Hey @<agent>" as direct mention', async () => {
+      const messageEvent: WorldMessageEvent = {
+        content: 'Hey @test-agent, can you take this?',
+        sender: 'user',
+        timestamp: new Date(),
+        messageId: 'msg-8-hey'
+      };
+
+      const result = await shouldAgentRespond(mockWorld, mockAgent, messageEvent);
+      expect(result).toBe(true);
+    });
+
+    test('should treat "Hi @<agent>" as direct mention', async () => {
+      const messageEvent: WorldMessageEvent = {
+        content: 'Hi @test-agent, please help.',
+        sender: 'user',
+        timestamp: new Date(),
+        messageId: 'msg-8-hi'
+      };
+
+      const result = await shouldAgentRespond(mockWorld, mockAgent, messageEvent);
+      expect(result).toBe(true);
+    });
+
+    test('should treat "Hello @<agent>" as direct mention', async () => {
+      const messageEvent: WorldMessageEvent = {
+        content: 'Hello @test-agent, please help.',
+        sender: 'user',
+        timestamp: new Date(),
+        messageId: 'msg-8-hello'
+      };
+
+      const result = await shouldAgentRespond(mockWorld, mockAgent, messageEvent);
+      expect(result).toBe(true);
+    });
+
+    test('should treat "To @<agent>" as direct mention', async () => {
+      const messageEvent: WorldMessageEvent = {
+        content: 'To @test-agent please review this.',
+        sender: 'user',
+        timestamp: new Date(),
+        messageId: 'msg-8-to'
+      };
+
+      const result = await shouldAgentRespond(mockWorld, mockAgent, messageEvent);
+      expect(result).toBe(true);
+    });
+
+    test('should NOT treat mid-sentence polite prefix mention as direct mention', async () => {
+      const messageEvent: WorldMessageEvent = {
+        content: 'Team update first. Hey @test-agent, can you help?',
+        sender: 'user',
+        timestamp: new Date(),
+        messageId: 'msg-8-mid-hey'
+      };
+
+      const result = await shouldAgentRespond(mockWorld, mockAgent, messageEvent);
+      expect(result).toBe(false);
     });
   });
 
@@ -337,6 +397,18 @@ describe('shouldAgentRespond', () => {
         sender: 'other-agent',
         timestamp: new Date(),
         messageId: 'msg-17'
+      };
+
+      const result = await shouldAgentRespond(mockWorld, mockAgent, messageEvent);
+      expect(result).toBe(true);
+    });
+
+    test('should respond to Hello-prefixed direct mentions from other agents', async () => {
+      const messageEvent: WorldMessageEvent = {
+        content: 'Hello @test-agent, please handle this task.',
+        sender: 'other-agent',
+        timestamp: new Date(),
+        messageId: 'msg-17-hello'
       };
 
       const result = await shouldAgentRespond(mockWorld, mockAgent, messageEvent);

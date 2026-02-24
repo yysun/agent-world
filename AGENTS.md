@@ -11,7 +11,7 @@ These rules apply to ALL code you write in this project.  If any user request co
 
 **Tech Stack:** TypeScript, Node.js, vitest, ESLint, Prettier  
 **Monorepo:** `core/` (business logic), `server/` (REST API), `cli/`, `web/` (AppRun frontend)  
-**Frontend Convention:** Follow patterns defined in `prompts/apprun.prompt.md` for all code inside `web/src`.  
+**Frontend Convention:** For web app code inside `web/src`, use the agent skill from yysun/apprun-skills.
 **Default Local Storage:** SQLite → `~/agent-world/database.db`  
 **Debug Tests:** Simple debug tests may be written as `.ts` files and run using `npx tsx`.
 
@@ -29,6 +29,11 @@ These rules override all other testing instructions unless the user explicitly o
    NEVER call a real LLM provider inside a test.
 
 3. Use vitest conventions: `describe`, `it`, `expect`, and mock functions.
+
+4. **Keep web app and Election Separated**
+   Do not create cross-app shared modules between the web app and the electron app.
+
+
 
 ---
 

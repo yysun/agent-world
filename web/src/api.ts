@@ -1,14 +1,16 @@
 /**
  * API Service Module - Complete REST API Client
- * 
+ *
  * Provides comprehensive REST API client for agent-world:
  * - World management (CRUD operations, export)
  * - Agent operations (CRUD, memory management)
  * - Chat history management (create, load, restore state)
- * - Message editing (remove + resubmit with backend memory update)
+ * - Message management:
+ *   - Message deletion (remove from target point forward)
+ *   - Core-managed message editing (remove + resubmit in one backend call)
  * - Error handling with structured responses
  * - TypeScript support with consolidated types
- * 
+ *
  * Simplified API Usage:
  * - Use getWorld() to get complete world data including agents[] and chats[]
  * - Removed redundant getAgents() and getAgent() - use world.agents instead
@@ -16,10 +18,15 @@
  * - Agent memory available via world.agents[].memory instead of separate endpoint
  * - Clear agent memory uses existing DELETE endpoint with clearMemory flag
  * - Chat summarization handled by core, no separate API needed
- * - Message editing uses DELETE /worlds/:worldName/messages/:messageId endpoint
+ * - Message editing uses PUT /worlds/:worldName/messages/:messageId endpoint
+ * - Message deletion uses DELETE /worlds/:worldName/messages/:messageId endpoint
  *
  * Changes:
- * - 2025-10-21: Added editMessage() function for message edit backend integration
+ * - 2026-02-21: Removed server-side project-folder picker call; web now uses browser File API flow.
+ * - 2026-02-20: Enforced options-only HITL response API (`respondHitlOption`).
+ * - 2026-02-14: Added respondHitlOption() API call for generic HITL option approvals.
+ * - 2026-02-14: Added stopMessageProcessing() API call to cancel active chat processing from web UI.
+ * - 2026-02-13: Added core-managed editMessage() API call and separated delete/edit semantics
  */
 
 import type {
@@ -121,9 +128,11 @@ async function createWorld(worldData: Partial<World>): Promise<World> {
     name: worldData.name,
     description: worldData.description || '',
     turnLimit: worldData.turnLimit ?? 5,
+    mainAgent: worldData.mainAgent ?? null,
     chatLLMProvider: worldData.chatLLMProvider,
     chatLLMModel: worldData.chatLLMModel,
     mcpConfig: worldData.mcpConfig,
+    variables: worldData.variables,
     agents: worldData.agents ?? [],
     currentChatId: worldData.currentChatId ?? '',
     chats: worldData.chats ?? [],
@@ -313,7 +322,7 @@ async function newChat(worldName: string): Promise<{
 }
 
 /**
- * Edit a message by removing it and subsequent messages, then resubmitting with new content
+ * Delete a message and all subsequent messages from the target chat.
  */
 async function deleteMessage(
   worldName: string,
@@ -329,6 +338,59 @@ async function deleteMessage(
     {
       method: 'DELETE',
       body: JSON.stringify({ chatId }),
+    }
+  );
+  return response.json();
+}
+
+/**
+ * Edit a user message using core-managed flow:
+ * remove target message chain, resubmit edited content, and trigger downstream responses.
+ */
+async function editMessage(
+  worldName: string,
+  messageId: string,
+  newContent: string,
+  chatId: string
+): Promise<any> {
+  if (!worldName || !messageId || !chatId || !newContent?.trim()) {
+    throw new Error('World name, message ID, chat ID, and new content are required');
+  }
+
+  const response = await apiRequest(
+    `/worlds/${encodeURIComponent(worldName)}/messages/${encodeURIComponent(messageId)}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ chatId, newContent, stream: false }),
+    }
+  );
+  return response.json();
+}
+
+/**
+ * Submit a user-selected HITL option response for a pending world request.
+ */
+async function respondHitlOption(
+  worldName: string,
+  requestId: string,
+  optionId: string,
+  chatId?: string | null
+): Promise<{ accepted: boolean; reason?: string }> {
+  const normalizedRequestId = String(requestId || '').trim();
+  const normalizedOptionId = String(optionId || '').trim();
+  if (!worldName || !normalizedRequestId || !normalizedOptionId) {
+    throw new Error('World name, request ID, and optionId are required');
+  }
+
+  const response = await apiRequest(
+    `/worlds/${encodeURIComponent(worldName)}/hitl/respond`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        requestId: normalizedRequestId,
+        optionId: normalizedOptionId,
+        chatId: chatId ?? null
+      }),
     }
   );
   return response.json();
@@ -352,49 +414,27 @@ async function sendMessage(
   );
 }
 
-/**
- * Send a tool approval/denial decision message
- * @param worldName - World name
- * @param toolCallId - Tool call ID from the approval request
- * @param decision - Approval decision (approve or deny)
- * @param scope - Approval scope (once, session, or none)
- * @param toolName - Tool name being approved/denied
- */
-async function sendApprovalDecision(
+async function stopMessageProcessing(
   worldName: string,
-  toolCallId: string,
-  decision: 'approve' | 'deny',
-  scope: 'once' | 'session' | 'none',
-  toolName: string
-): Promise<void> {
-  if (!worldName || !toolCallId) {
-    throw new Error('World name and tool call ID are required');
+  chatId: string
+): Promise<{
+  success: boolean;
+  stopped: boolean;
+  reason: 'stopped' | 'no-active-process';
+  stoppedOperations: number;
+}> {
+  if (!worldName || !chatId) {
+    throw new Error('World name and chat ID are required');
   }
 
-  const approvalMessage = {
-    role: 'tool',
-    tool_call_id: toolCallId,
-    content: JSON.stringify({
-      decision,
-      scope,
-      toolName
-    })
-  };
-
-  const requestPayload = {
-    message: ' ',
-    sender: 'system',
-    stream: false,
-    messages: [approvalMessage]
-  };
-
-  await apiRequest(`/worlds/${encodeURIComponent(worldName)}/messages`, {
-    method: 'POST',
-    body: JSON.stringify(requestPayload),
-    headers: {
-      'Content-Type': 'application/json'
+  const response = await apiRequest(
+    `/worlds/${encodeURIComponent(worldName)}/messages/stop`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ chatId }),
     }
-  });
+  );
+  return response.json();
 }
 
 // Export the API functions
@@ -426,12 +466,8 @@ export default {
 
   // Message management
   deleteMessage,
+  editMessage,
+  respondHitlOption,
+  stopMessageProcessing,
   sendMessage,
-  sendApprovalDecision,
 };
-
-
-
-
-
-

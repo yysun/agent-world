@@ -9,6 +9,9 @@
  * - Support for sequence-based ordering within world/chat contexts
  * - Pagination and filtering capabilities
  * - Multiple backend implementations (SQLite, in-memory, file-backed)
+ *
+ * Recent Changes:
+ * - 2026-02-08: Removed legacy manual tool-intervention metadata fields from message/tool event metadata
  * 
  * Event Structure:
  * - id: Unique identifier (UUID)
@@ -59,14 +62,6 @@ export interface MessageEventMetadata {
   isReply: boolean;                // Has replyToMessageId
   hasReplies: boolean;             // Other messages reply to this (updated async)
 
-  // Tool Approval (REQUIRED for tool calls)
-  requiresApproval: boolean;
-  approvalScope: 'once' | 'session' | 'always' | null;
-  approvedAt: string | null;       // ISO timestamp
-  approvedBy: string | null;
-  deniedAt: string | null;         // ISO timestamp
-  denialReason: string | null;
-
   // Performance (REQUIRED for agent messages, null for human)
   llmTokensInput: number | null;
   llmTokensOutput: number | null;
@@ -93,7 +88,6 @@ export interface ToolEventMetadata {
   // Performance (REQUIRED)
   executionDuration: number;       // milliseconds
   resultSize: number;              // bytes
-  wasApproved: boolean;
 }
 
 /**
@@ -111,7 +105,6 @@ export function validateMessageEventMetadata(meta: any): meta is MessageEventMet
     typeof meta.threadDepth === 'number' &&
     typeof meta.isReply === 'boolean' &&
     typeof meta.hasReplies === 'boolean' &&
-    typeof meta.requiresApproval === 'boolean' &&
     typeof meta.hasToolCalls === 'boolean' &&
     typeof meta.toolCallCount === 'number'
   );

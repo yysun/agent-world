@@ -1,9 +1,17 @@
-/*
- * core/subscription.ts
- * 
- * World subscription management and event forwarding.
- * Manages world lifecycle, agent subscriptions (messages + tool results), and event listeners.
- * Sets up forwarding listeners only when client provides callbacks (onWorldEvent/onLog).
+/**
+ * World Subscription Runtime
+ *
+ * Features:
+ * - Manages world lifecycle subscriptions and realtime event forwarding.
+ * - Registers message/world/sse/system listeners for subscribed clients.
+ * - Tracks active world runtimes for core operations that need the live emitter.
+ *
+ * Implementation Notes:
+ * - Keeps forwarding listeners optional based on client callback capabilities.
+ * - Uses world-id keyed runtime tracking with safe register/unregister semantics.
+ *
+ * Recent Changes:
+ * - 2026-02-14: Added active runtime world tracking and `getActiveSubscribedWorld()` for core edit-message resubmission to publish on live emitters.
  */
 
 import { World } from './types.js';
@@ -17,6 +25,7 @@ function toKebabCase(name: string): string {
 
 // Create subscription category logger (part of core functionality)
 const logger = createCategoryLogger('world.subscription');
+const activeSubscribedWorlds = new Map<string, Set<World>>();
 
 // Log streaming event data structure
 export interface LogStreamEvent {
@@ -44,6 +53,41 @@ export interface WorldSubscription {
   destroy: () => Promise<void>;
 }
 
+function registerActiveSubscribedWorld(world: World): void {
+  const worldId = String(world?.id || '').trim();
+  if (!worldId) return;
+
+  const existing = activeSubscribedWorlds.get(worldId) ?? new Set<World>();
+  existing.add(world);
+  activeSubscribedWorlds.set(worldId, existing);
+}
+
+function unregisterActiveSubscribedWorld(world: World): void {
+  const worldId = String(world?.id || '').trim();
+  if (!worldId) return;
+
+  const existing = activeSubscribedWorlds.get(worldId);
+  if (!existing) return;
+
+  existing.delete(world);
+  if (existing.size === 0) {
+    activeSubscribedWorlds.delete(worldId);
+  }
+}
+
+export function getActiveSubscribedWorld(worldIdentifier: string): World | null {
+  const resolvedWorldId = toKebabCase(String(worldIdentifier || '').trim());
+  if (!resolvedWorldId) return null;
+
+  const activeWorldSet = activeSubscribedWorlds.get(resolvedWorldId);
+  if (!activeWorldSet || activeWorldSet.size === 0) return null;
+
+  for (const world of activeWorldSet.values()) {
+    return world;
+  }
+  return null;
+}
+
 // Start world with event listeners - extracted from subscribeWorld
 export async function startWorld(world: World, client: ClientConnection): Promise<WorldSubscription> {
   // Only set up forwarding listeners when the client actually wants them.
@@ -53,6 +97,7 @@ export async function startWorld(world: World, client: ClientConnection): Promis
   }
 
   let currentWorld: World | null = world;
+  registerActiveSubscribedWorld(currentWorld);
 
   // Subscribe all loaded agents to world messages (moved from getFullWorld)
   for (const agent of currentWorld.agents.values()) {
@@ -64,6 +109,8 @@ export async function startWorld(world: World, client: ClientConnection): Promis
   // Helper function to destroy current world instance
   const destroyCurrentWorld = async () => {
     if (currentWorld) {
+      unregisterActiveSubscribedWorld(currentWorld);
+
       // Clean up all event listeners
       await cleanupWorldSubscription(currentWorld, worldEventListeners);
 
@@ -108,6 +155,7 @@ export async function startWorld(world: World, client: ClientConnection): Promis
 
       // Update current references
       currentWorld = refreshedWorld;
+      registerActiveSubscribedWorld(currentWorld);
 
       // Set up new event listeners on the fresh world only if client wants forwarding
       if (client && (client.onWorldEvent || client.onLog)) {

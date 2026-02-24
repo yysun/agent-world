@@ -25,10 +25,17 @@
  * ```
  * 
  * Changes:
+ * - 2026-02-22: Added responsive right-panel events (`open-right-panel`, `close-right-panel`, `toggle-right-panel`, `switch-right-panel-tab`, `sync-right-panel-viewport`).
+ * - 2026-02-21: Added `select-project-folder` event variant for web composer project picker integration.
+ * - 2026-02-21: Extended `key-press` payload typing with keyboard modifier/preventDefault fields for textarea Enter/Shift+Enter composer behavior.
+ * - 2026-02-20: Enforced options-only HITL event set.
+ * - 2026-02-14: Added HITL option-response event variant for web approval prompts.
+ * - 2026-02-14: Added `stop-message-processing` event variant for chat-scoped stop controls.
+ * - 2026-02-08: Removed legacy manual tool-intervention event variants
  * - 2025-10-26: Initial creation with 40+ typed events for World component
  */
 
-import type { Agent, ApprovalRequest, HITLRequest, Message, StreamStartData, StreamChunkData, StreamEndData, StreamErrorData } from './index';
+import type { Agent, Message, StreamStartData, StreamChunkData, StreamEndData, StreamErrorData, ToolStreamData } from './index';
 
 /**
  * World Component Events - Discriminated Union Type
@@ -54,11 +61,40 @@ export type WorldEvents =
   /** Update user input field value */
   | { name: 'update-input'; payload: { target: { value: string } } }
 
-  /** Handle key press in input field */
-  | { name: 'key-press'; payload: { key: string } }
+  /** Handle key press in message composer */
+  | {
+    name: 'key-press'; payload: {
+      key: string;
+      shiftKey?: boolean;
+      keyCode?: number;
+      preventDefault?: () => void;
+      nativeEvent?: { isComposing?: boolean };
+    }
+  }
 
   /** Send message to agents */
   | { name: 'send-message'; payload: void }
+
+  /** Stop active message processing for current chat */
+  | { name: 'stop-message-processing'; payload: void }
+
+  /** Open project-folder picker and persist world `working_directory` */
+  | { name: 'select-project-folder'; payload: void }
+
+  /** Open right panel with optional tab selection */
+  | { name: 'open-right-panel'; payload: 'chats' | 'world' | void }
+
+  /** Close right panel */
+  | { name: 'close-right-panel'; payload: void }
+
+  /** Toggle right panel with optional tab selection */
+  | { name: 'toggle-right-panel'; payload: 'chats' | 'world' | void }
+
+  /** Switch active right-panel tab */
+  | { name: 'switch-right-panel-tab'; payload: 'chats' | 'world' }
+
+  /** Sync viewport mode/panel defaults on resize/orientation change */
+  | { name: 'sync-right-panel-viewport'; payload: { width: number } }
 
   // ========================================
   // MESSAGE EDITING EVENTS
@@ -166,11 +202,17 @@ export type WorldEvents =
   /** Handle stream error event */
   | { name: 'handleStreamError'; payload: StreamErrorData }
 
+  /** Handle tool stream event */
+  | { name: 'handleToolStream'; payload: ToolStreamData }
+
   /** Handle message event from SSE */
   | { name: 'handleMessageEvent'; payload: any }
 
   /** Handle system event from SSE */
   | { name: 'handleSystemEvent'; payload: any }
+
+  /** Submit selected HITL option response */
+  | { name: 'respond-hitl-option'; payload: { requestId: string; optionId: string; chatId?: string | null } }
 
   /** Handle general error */
   | { name: 'handleError'; payload: any }
@@ -192,32 +234,6 @@ export type WorldEvents =
 
   /** Handle world activity event */
   | { name: 'handleWorldActivity'; payload: any }
-
-  // ========================================
-  // APPROVAL FLOW EVENTS
-  // ========================================
-
-  /** Display approval request dialog */
-  | { name: 'show-approval-request'; payload: ApprovalRequest }
-
-  /** Hide approval request dialog */
-  | { name: 'hide-approval-request'; payload: void }
-
-  /** Submit approval decision */
-  | { name: 'submit-approval-decision'; payload: { decision: 'approve' | 'deny'; scope: 'once' | 'session' | 'none'; toolCallId: string } }
-
-  // ========================================
-  // HITL (HUMAN-IN-THE-LOOP) EVENTS
-  // ========================================
-
-  /** Display HITL request dialog */
-  | { name: 'show-hitl-request'; payload: HITLRequest }
-
-  /** Hide HITL request dialog */
-  | { name: 'hide-hitl-request'; payload: void }
-
-  /** Submit HITL decision */
-  | { name: 'submit-hitl-decision'; payload: { toolCallId: string; choice: string } }
 
   // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
 

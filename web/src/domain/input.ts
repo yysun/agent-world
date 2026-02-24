@@ -12,6 +12,7 @@
  * Pure functions for testability and reusability.
  * 
  * Created: 2025-10-26 - Phase 2: Domain Module Extraction
+ * Updated: 2026-02-21 - Added Shift+Enter bypass for textarea composer parity with Electron.
  * Updated: 2025-11-11 - Removed isWaiting control from send flow
  */
 
@@ -45,9 +46,10 @@ export function updateInput(
  */
 export function shouldSendOnEnter(
   key: string,
+  shiftKey: boolean | undefined,
   userInput: string | undefined
 ): boolean {
-  return key === 'Enter' && Boolean(userInput?.trim());
+  return key === 'Enter' && !shiftKey && Boolean(userInput?.trim());
 }
 
 /**

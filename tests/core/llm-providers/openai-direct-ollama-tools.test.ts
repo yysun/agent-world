@@ -1,0 +1,207 @@
+/**
+ * OpenAI Direct Ollama Tool Attachment Tests
+ *
+ * Features:
+ * - Verifies OpenAI provider requests include converted MCP tool definitions
+ * - Verifies Ollama provider requests include tool definitions
+ * - Covers both non-streaming and streaming request paths
+ *
+ * Implementation Notes:
+ * - Uses local fake OpenAI clients to inspect outbound request params
+ * - Unmocks openai-direct module to validate real request construction logic
+ * - Avoids filesystem and network usage
+ */
+
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+function createFakeNonStreamingClient() {
+  const create = vi.fn().mockResolvedValue({
+    choices: [{ message: { content: 'ok' } }],
+    usage: { prompt_tokens: 1, completion_tokens: 1 },
+  });
+
+  return {
+    client: { chat: { completions: { create } } } as any,
+    create,
+  };
+}
+
+function createFakeStreamingClient() {
+  const stream = (async function* () {
+    yield { choices: [{ delta: { content: 'ok' } }] };
+  })();
+  const create = vi.fn().mockResolvedValue(stream);
+
+  return {
+    client: { chat: { completions: { create } } } as any,
+    create,
+  };
+}
+
+const mcpTools = {
+  weather_lookup: {
+    description: 'Look up weather',
+    parameters: {
+      type: 'object',
+      properties: {
+        city: { type: 'string' },
+      },
+      required: ['city'],
+    },
+  },
+};
+
+describe('openai-direct tool attachment by provider', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('attaches tools for non-Ollama providers', async () => {
+    vi.doUnmock('../../../core/openai-direct');
+    vi.doUnmock('../../../core/openai-direct.js');
+    const openaiDirect = await import('../../../core/openai-direct.js');
+    const { client, create } = createFakeNonStreamingClient();
+
+    await openaiDirect.generateOpenAIResponse(
+      client,
+      'gpt-4o-mini',
+      [{ role: 'user', content: 'hello' }],
+      { id: 'agent-openai', provider: 'openai', temperature: 0.1, maxTokens: 1000 } as any,
+      mcpTools as any,
+      { id: 'world-1' } as any
+    );
+
+    const requestParams = create.mock.calls[0][0];
+    expect(requestParams.tools).toBeDefined();
+    expect(requestParams.tools).toHaveLength(1);
+    expect(requestParams.tools[0].function.name).toBe('weather_lookup');
+  });
+
+  it('attaches tools for Ollama in non-streaming requests', async () => {
+    vi.doUnmock('../../../core/openai-direct');
+    vi.doUnmock('../../../core/openai-direct.js');
+    const openaiDirect = await import('../../../core/openai-direct.js');
+    const { client, create } = createFakeNonStreamingClient();
+
+    await openaiDirect.generateOpenAIResponse(
+      client,
+      'llama3.2',
+      [{ role: 'user', content: 'hello' }],
+      { id: 'agent-ollama', provider: 'ollama', temperature: 0.1, maxTokens: 1000 } as any,
+      mcpTools as any,
+      { id: 'world-1' } as any
+    );
+
+    const requestParams = create.mock.calls[0][0];
+    expect(requestParams.tools).toBeDefined();
+    expect(requestParams.tools).toHaveLength(1);
+    expect(requestParams.tools[0].function.name).toBe('weather_lookup');
+  });
+
+  it('attaches tools for Ollama in streaming requests', async () => {
+    vi.doUnmock('../../../core/openai-direct');
+    vi.doUnmock('../../../core/openai-direct.js');
+    const openaiDirect = await import('../../../core/openai-direct.js');
+    const { client, create } = createFakeStreamingClient();
+    const onChunk = vi.fn();
+
+    await openaiDirect.streamOpenAIResponse(
+      client,
+      'llama3.2',
+      [{ role: 'user', content: 'hello' }],
+      { id: 'agent-ollama', provider: 'ollama', temperature: 0.1, maxTokens: 1000 } as any,
+      mcpTools as any,
+      { id: 'world-1' } as any,
+      onChunk,
+      'message-1'
+    );
+
+    const requestParams = create.mock.calls[0][0];
+    expect(requestParams.tools).toBeDefined();
+    expect(requestParams.tools).toHaveLength(1);
+    expect(requestParams.tools[0].function.name).toBe('weather_lookup');
+  });
+
+  it('keeps tool_calls shape when all non-streaming tool calls are invalid', async () => {
+    vi.doUnmock('../../../core/openai-direct');
+    vi.doUnmock('../../../core/openai-direct.js');
+    const openaiDirect = await import('../../../core/openai-direct.js');
+
+    const create = vi.fn().mockResolvedValue({
+      choices: [{
+        message: {
+          content: 'final text after invalid tool call',
+          tool_calls: [{
+            id: 'tc-invalid',
+            type: 'function',
+            function: { name: '', arguments: '{}' },
+          }],
+        }
+      }],
+      usage: { prompt_tokens: 1, completion_tokens: 1 },
+    });
+
+    const fakeClient = { chat: { completions: { create } } } as any;
+    const response = await openaiDirect.generateOpenAIResponse(
+      fakeClient,
+      'gpt-4o-mini',
+      [{ role: 'user', content: 'hello' }],
+      { id: 'agent-openai', provider: 'openai', temperature: 0.1, maxTokens: 1000 } as any,
+      mcpTools as any,
+      { id: 'world-1' } as any
+    );
+
+    expect(response.type).toBe('tool_calls');
+    expect(Array.isArray(response.tool_calls)).toBe(true);
+    expect(response.tool_calls).toHaveLength(0);
+  });
+
+  it('reconstructs delayed streaming tool call name across chunks', async () => {
+    vi.doUnmock('../../../core/openai-direct');
+    vi.doUnmock('../../../core/openai-direct.js');
+    const openaiDirect = await import('../../../core/openai-direct.js');
+
+    const stream = (async function* () {
+      yield {
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id: 'tc-1',
+              function: { arguments: '{"path":"' },
+            }],
+          },
+        }],
+      };
+      yield {
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              function: { name: 'read_file', arguments: 'README.md"}' },
+            }],
+          },
+        }],
+      };
+    })();
+
+    const create = vi.fn().mockResolvedValue(stream);
+    const fakeClient = { chat: { completions: { create } } } as any;
+
+    const response = await openaiDirect.streamOpenAIResponse(
+      fakeClient,
+      'gpt-4o-mini',
+      [{ role: 'user', content: 'hello' }],
+      { id: 'agent-openai', provider: 'openai', temperature: 0.1, maxTokens: 1000 } as any,
+      mcpTools as any,
+      { id: 'world-1' } as any,
+      vi.fn(),
+      'message-1'
+    );
+
+    expect(response.type).toBe('tool_calls');
+    expect(response.tool_calls).toHaveLength(1);
+    expect(response.tool_calls?.[0]?.function?.name).toBe('read_file');
+    expect(response.tool_calls?.[0]?.function?.arguments).toContain('README.md');
+  });
+});

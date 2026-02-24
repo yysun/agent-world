@@ -95,12 +95,3 @@ These manual end-to-end scenarios validate the Agent World runtime rules using t
 **Expected result:** After at most **five** agent turns, the world automatically halts additional agent replies and yields control to the human, indicating the turn limit has been reached.
 
 ---
-
-## Scenario 9 — Tool Approval (shell_cmd)
-
-1. Create a new chat.
-2. Send `@a1 Please list the files in the '~/tmp' directory.`
-3. Wait for the tool approval dialog for the `shell_cmd` invocation.
-4. Approve the tool execution.
-
-**Expected result:** The tool approval modal appears, the request requires manual confirmation, and the command result is streamed back into the chat after approval.

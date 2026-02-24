@@ -4,22 +4,48 @@
  * 
  * Features tested:
  * - shell_cmd tool availability in all worlds
+ * - load_skill built-in tool availability in all worlds
+ * - create_agent built-in tool availability in all worlds
+ * - read_file/list_files/grep built-in tool availability in all worlds
  * - Tool schema and parameter validation
  * - Command execution through tool interface
  * - Error handling and reporting
  * - Execution history persistence
+ *
+ * Implementation notes:
+ * - Uses setupTestWorld helper for consistent world fixture setup.
+ * - Executes real local shell commands and validates formatted tool output.
  * 
  * Changes:
+ * - 2026-02-21: Added `list_files` bounding/filtering coverage (`maxEntries`, `includePattern`) to prevent oversized tool results from inflating continuation tokens.
+ * - 2026-02-21: Added LLM minimal-result mode coverage for `shell_cmd` (status-only result contract).
+ * - 2026-02-20: Added assertion that built-in `create_agent` is registered alongside other always-on tools.
+ * - 2026-02-16: Added recursive `list_files` integration coverage (`recursive=true`) with nested entry assertions.
+ * - 2026-02-16: Added explicit empty-directory `list_files` coverage (`found=false` + message).
+ * - 2026-02-16: Added integration assertions for built-in `read_file`, `list_files`, and `grep` tools.
+ * - 2026-02-15: Added `output_format=json` integration coverage and artifact hashing metadata assertions.
+ * - 2026-02-14: Added assertion that built-in `load_skill` tool is registered alongside `shell_cmd`.
+ * - 2026-02-14: Updated unresolved-cwd fallback test to reflect core default working directory behavior (user home fallback) instead of `./`.
+ * - 2026-02-14: Added hard-fail coverage for inline script execution (`sh -c`) and short-option path prefixes (`-I/path`) outside world working_directory.
+ * - 2026-02-14: Added hard-fail coverage for path-escape argument forms (`./../../...` and `--flag=/...`) against world working_directory.
  * - 2025-11-07: Refactored to use setupTestWorld helper (test deduplication initiative)
+ * - 2026-02-13: Updated mismatch coverage: mismatched LLM `directory` and out-of-scope path arguments now hard-fail against world `working_directory`.
  */
 
 import { describe, test, expect } from 'vitest';
+import { fileURLToPath } from 'url';
+import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import * as path from 'path';
 import { getWorld } from '../../core/managers.js';
 import { getMCPToolsForWorld } from '../../core/mcp-server-registry.js';
 import { LLMProvider } from '../../core/types.js';
 import { setupTestWorld } from '../helpers/world-test-setup.js';
+import { clearExecutionHistory, getExecutionHistory } from '../../core/shell-cmd-tool.js';
 
 describe('shell_cmd integration with worlds', () => {
+  const workspaceRoot = fileURLToPath(new URL('../../', import.meta.url));
+
   const { worldId, getWorld: getTestWorld } = setupTestWorld({
     name: 'test-world-shell-cmd',
     description: 'Test world for shell_cmd tool',
@@ -37,6 +63,275 @@ describe('shell_cmd integration with worlds', () => {
     expect(tools.shell_cmd.description).toBeDefined();
     expect(tools.shell_cmd.parameters).toBeDefined();
     expect(tools.shell_cmd.execute).toBeInstanceOf(Function);
+
+    expect(tools).toHaveProperty('load_skill');
+    expect(tools.load_skill).toBeDefined();
+    expect(tools.load_skill.parameters).toBeDefined();
+    expect(tools.load_skill.execute).toBeInstanceOf(Function);
+
+    expect(tools).toHaveProperty('create_agent');
+    expect(tools.create_agent).toBeDefined();
+    expect(tools.create_agent.parameters).toBeDefined();
+    expect(tools.create_agent.execute).toBeInstanceOf(Function);
+
+    expect(tools).toHaveProperty('read_file');
+    expect(tools.read_file).toBeDefined();
+    expect(tools.read_file.parameters).toBeDefined();
+    expect(tools.read_file.execute).toBeInstanceOf(Function);
+
+    expect(tools).toHaveProperty('list_files');
+    expect(tools.list_files).toBeDefined();
+    expect(tools.list_files.parameters).toBeDefined();
+    expect(tools.list_files.execute).toBeInstanceOf(Function);
+
+    expect(tools).toHaveProperty('grep');
+    expect(tools.grep).toBeDefined();
+    expect(tools.grep.parameters).toBeDefined();
+    expect(tools.grep.execute).toBeInstanceOf(Function);
+
+    // Backward compatibility alias
+    expect(tools).toHaveProperty('grep_search');
+    expect(tools.grep_search).toBeDefined();
+  });
+
+  test('should execute read_file, list_files, and grep tools through tool interface', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const testWorkingDirectory = process.cwd();
+
+    const readResultRaw = await tools.read_file.execute({
+      filePath: 'package.json',
+      offset: 1,
+      limit: 5,
+    }, undefined, undefined, { workingDirectory: testWorkingDirectory });
+    if (typeof readResultRaw === 'string' && readResultRaw.startsWith('Error:')) {
+      throw new Error(readResultRaw);
+    }
+    const readResult = JSON.parse(readResultRaw);
+    expect(readResult).toHaveProperty('filePath');
+    expect(readResult).toHaveProperty('content');
+    expect(typeof readResult.content).toBe('string');
+    expect(readResult).toHaveProperty('offset', 1);
+    expect(readResult).toHaveProperty('limit', 5);
+
+    const listResultRaw = await tools.list_files.execute({
+      path: 'core',
+    }, undefined, undefined, { workingDirectory: testWorkingDirectory });
+    if (typeof listResultRaw === 'string' && listResultRaw.startsWith('Error:')) {
+      throw new Error(listResultRaw);
+    }
+    const listResult = JSON.parse(listResultRaw);
+    expect(listResult).toHaveProperty('entries');
+    expect(Array.isArray(listResult.entries)).toBe(true);
+    expect(listResult).toHaveProperty('path');
+
+    const listAliasResultRaw = await tools.list_files.execute({
+      directory: 'core',
+    }, undefined, undefined, { workingDirectory: testWorkingDirectory });
+    if (typeof listAliasResultRaw === 'string' && listAliasResultRaw.startsWith('Error:')) {
+      throw new Error(listAliasResultRaw);
+    }
+    const listAliasResult = JSON.parse(listAliasResultRaw);
+    expect(Array.isArray(listAliasResult.entries)).toBe(true);
+    expect(listAliasResult).toHaveProperty('path');
+
+    const grepResultRaw = await tools.grep.execute({
+      query: 'createShellCmdToolDefinition',
+      isRegexp: false,
+      directoryPath: 'core',
+      includePattern: '**/*.ts',
+      maxResults: 10,
+    }, undefined, undefined, { workingDirectory: testWorkingDirectory });
+    if (typeof grepResultRaw === 'string' && grepResultRaw.startsWith('Error:')) {
+      throw new Error(grepResultRaw);
+    }
+    const grepResult = JSON.parse(grepResultRaw);
+    expect(grepResult).toHaveProperty('matches');
+    expect(Array.isArray(grepResult.matches)).toBe(true);
+    expect(grepResult).toHaveProperty('query', 'createShellCmdToolDefinition');
+  });
+
+  test('should reject file tool paths outside world working_directory', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const restrictedContext = {
+      world: {
+        id: worldId(),
+        variables: 'working_directory=/tmp/project',
+      },
+    };
+
+    const readResultRaw = await tools.read_file.execute(
+      { filePath: '../../etc/passwd', offset: 1, limit: 1 },
+      undefined,
+      undefined,
+      restrictedContext,
+    );
+    expect(readResultRaw).toContain('Working directory mismatch');
+
+    const listResultRaw = await tools.list_files.execute(
+      { path: '../../etc' },
+      undefined,
+      undefined,
+      restrictedContext,
+    );
+    expect(listResultRaw).toContain('Working directory mismatch');
+
+    const grepResultRaw = await tools.grep.execute(
+      { query: 'root', directoryPath: '../../etc', isRegexp: false },
+      undefined,
+      undefined,
+      restrictedContext,
+    );
+    expect(grepResultRaw).toContain('Working directory mismatch');
+  });
+
+  test('should report empty list_files results explicitly for LLMs', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const tempRoot = await mkdtemp(path.join(tmpdir(), 'agent-world-list-files-'));
+    const emptyDirName = 'empty';
+    const emptyDirPath = path.join(tempRoot, emptyDirName);
+
+    try {
+      await mkdir(emptyDirPath);
+
+      const listResultRaw = await tools.list_files.execute(
+        { path: emptyDirName },
+        undefined,
+        undefined,
+        { workingDirectory: tempRoot },
+      );
+
+      if (typeof listResultRaw === 'string' && listResultRaw.startsWith('Error:')) {
+        throw new Error(listResultRaw);
+      }
+
+      const listResult = JSON.parse(listResultRaw);
+      expect(listResult).toHaveProperty('total', 0);
+      expect(listResult).toHaveProperty('entries');
+      expect(Array.isArray(listResult.entries)).toBe(true);
+      expect(listResult.entries).toEqual([]);
+      expect(listResult).toHaveProperty('found', false);
+      expect(typeof listResult.message).toBe('string');
+      expect(listResult.message).toContain('No files or directories found');
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('should support recursive list_files traversal when requested', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const tempRoot = await mkdtemp(path.join(tmpdir(), 'agent-world-list-files-recursive-'));
+
+    try {
+      await mkdir(path.join(tempRoot, 'nested', 'child'), { recursive: true });
+      await mkdir(path.join(tempRoot, 'flat'));
+      await writeFile(path.join(tempRoot, 'top.txt'), 'top');
+      await writeFile(path.join(tempRoot, 'nested', 'child', 'deep.txt'), 'deep');
+
+      const nonRecursiveRaw = await tools.list_files.execute(
+        { path: '.', recursive: false },
+        undefined,
+        undefined,
+        { workingDirectory: tempRoot },
+      );
+
+      if (typeof nonRecursiveRaw === 'string' && nonRecursiveRaw.startsWith('Error:')) {
+        throw new Error(nonRecursiveRaw);
+      }
+
+      const nonRecursive = JSON.parse(nonRecursiveRaw);
+      expect(nonRecursive).toHaveProperty('recursive', false);
+      expect(nonRecursive.entries).toContain('nested/');
+      expect(nonRecursive.entries).toContain('top.txt');
+      expect(nonRecursive.entries).not.toContain('nested/child/');
+      expect(nonRecursive.entries).not.toContain('nested/child/deep.txt');
+
+      const recursiveRaw = await tools.list_files.execute(
+        { path: '.', recursive: true },
+        undefined,
+        undefined,
+        { workingDirectory: tempRoot },
+      );
+
+      if (typeof recursiveRaw === 'string' && recursiveRaw.startsWith('Error:')) {
+        throw new Error(recursiveRaw);
+      }
+
+      const recursiveResult = JSON.parse(recursiveRaw);
+      expect(recursiveResult).toHaveProperty('recursive', true);
+      expect(recursiveResult.entries).toContain('nested/child/');
+      expect(recursiveResult.entries).toContain('nested/child/deep.txt');
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('should bound list_files output and support includePattern filtering', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const tempRoot = await mkdtemp(path.join(tmpdir(), 'agent-world-list-files-bounded-'));
+
+    try {
+      for (let index = 0; index < 240; index += 1) {
+        const extension = index % 2 === 0 ? 'md' : 'txt';
+        await writeFile(path.join(tempRoot, `file-${index}.${extension}`), `content-${index}`);
+      }
+
+      const defaultBoundedRaw = await tools.list_files.execute(
+        { path: '.', recursive: false },
+        undefined,
+        undefined,
+        { workingDirectory: tempRoot },
+      );
+
+      if (typeof defaultBoundedRaw === 'string' && defaultBoundedRaw.startsWith('Error:')) {
+        throw new Error(defaultBoundedRaw);
+      }
+
+      const defaultBounded = JSON.parse(defaultBoundedRaw);
+      expect(defaultBounded).toHaveProperty('total', 240);
+      expect(defaultBounded).toHaveProperty('maxEntries', 200);
+      expect(defaultBounded).toHaveProperty('returned', 200);
+      expect(defaultBounded).toHaveProperty('truncated', true);
+      expect(Array.isArray(defaultBounded.entries)).toBe(true);
+      expect(defaultBounded.entries.length).toBe(200);
+      expect(typeof defaultBounded.message).toBe('string');
+      expect(defaultBounded.message).toContain('Result truncated');
+
+      const markdownOnlyRaw = await tools.list_files.execute(
+        {
+          path: '.',
+          recursive: false,
+          includePattern: '**/*.md',
+          maxEntries: 500,
+        },
+        undefined,
+        undefined,
+        { workingDirectory: tempRoot },
+      );
+
+      if (typeof markdownOnlyRaw === 'string' && markdownOnlyRaw.startsWith('Error:')) {
+        throw new Error(markdownOnlyRaw);
+      }
+
+      const markdownOnly = JSON.parse(markdownOnlyRaw);
+      expect(markdownOnly).toHaveProperty('total', 120);
+      expect(markdownOnly).toHaveProperty('truncated', false);
+      expect(markdownOnly).toHaveProperty('returned', 120);
+      expect(markdownOnly.entries.every((entry: string) => entry.endsWith('.md'))).toBe(true);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('should execute load_skill tool through tool interface', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const loadSkillTool = tools.load_skill;
+
+    const result = await loadSkillTool.execute({
+      skill_id: '__missing_skill_for_integration_test__'
+    });
+
+    expect(result).toContain('<skill_context id="__missing_skill_for_integration_test__">');
+    expect(result).toContain('not found');
   });
 
   test('should have correct tool schema', async () => {
@@ -49,8 +344,98 @@ describe('shell_cmd integration with worlds', () => {
     expect(shellCmdTool.parameters.properties).toHaveProperty('parameters');
     expect(shellCmdTool.parameters.properties).toHaveProperty('directory');
     expect(shellCmdTool.parameters.properties).toHaveProperty('timeout');
+    expect(shellCmdTool.parameters.properties).toHaveProperty('output_format');
+    expect(shellCmdTool.parameters.properties).toHaveProperty('output_detail');
+    expect(shellCmdTool.parameters.properties).toHaveProperty('artifact_paths');
     expect(shellCmdTool.parameters.required).toContain('command');
-    expect(shellCmdTool.parameters.required).toContain('directory');
+    expect(shellCmdTool.parameters.required).not.toContain('directory');
+  });
+
+  test('should return structured json result when output_format is json', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    const rawResult = await shellCmdTool.execute(
+      {
+        command: 'echo',
+        parameters: ['json-output-test'],
+        output_format: 'json'
+      },
+      undefined,
+      undefined,
+      {
+        world: {
+          id: worldId(),
+          variables: `working_directory=${workspaceRoot}`
+        }
+      }
+    );
+
+    const parsed = JSON.parse(rawResult);
+    expect(parsed).toHaveProperty('exit_code');
+    expect(typeof parsed.exit_code === 'number' || parsed.exit_code === null).toBe(true);
+    expect(parsed).toHaveProperty('stdout');
+    expect(parsed.stderr).toBeTypeOf('string');
+    expect(parsed.timed_out).toBe(false);
+    expect(parsed.duration_ms).toBeTypeOf('number');
+    expect(Array.isArray(parsed.artifacts)).toBe(true);
+  });
+
+  test('should include artifact metadata in structured json output', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    const artifactTarget = 'artifact-test-output.txt';
+    const absoluteArtifactPath = fileURLToPath(new URL(`../../${artifactTarget}`, import.meta.url));
+
+    const rawResult = await shellCmdTool.execute(
+      {
+        command: 'echo',
+        parameters: ['artifact-test'],
+        output_format: 'json',
+        artifact_paths: [absoluteArtifactPath]
+      },
+      undefined,
+      undefined,
+      {
+        world: {
+          id: worldId(),
+          variables: `working_directory=${workspaceRoot}`
+        }
+      }
+    );
+
+    const parsed = JSON.parse(rawResult);
+    expect(parsed.artifacts.length).toBeGreaterThanOrEqual(1);
+    const artifact = parsed.artifacts.find((item: any) => String(item.path).endsWith(artifactTarget));
+    expect(artifact).toBeDefined();
+    expect(artifact.sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(typeof artifact.bytes).toBe('number');
+    expect(artifact.bytes).toBeGreaterThanOrEqual(0);
+  });
+
+  test('should reject artifact paths outside world working_directory', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    await expect(
+      shellCmdTool.execute(
+        {
+          command: 'echo',
+          parameters: ['artifact-scope-test'],
+          output_format: 'json',
+          artifact_paths: ['/etc/passwd']
+        },
+        undefined,
+        undefined,
+        {
+          world: {
+            id: worldId(),
+            variables: `working_directory=${workspaceRoot}`
+          }
+        }
+      )
+    ).rejects.toThrow('Working directory mismatch');
   });
 
   test('should execute shell_cmd tool through tool interface', async () => {
@@ -60,8 +445,7 @@ describe('shell_cmd integration with worlds', () => {
     // Execute a simple command through the tool
     const result = await shellCmdTool.execute({
       command: 'echo',
-      parameters: ['Hello from test'],
-      directory: '/tmp'
+      parameters: ['Hello from test']
     });
 
     // Verify result format
@@ -70,9 +454,270 @@ describe('shell_cmd integration with worlds', () => {
     expect(result).toContain('Hello from test');
   });
 
+  test('should return status-only shell result in llm minimal mode', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    const result = await shellCmdTool.execute(
+      {
+        command: 'echo',
+        parameters: ['llm-minimal-mode-output']
+      },
+      undefined,
+      undefined,
+      {
+        llmResultMode: 'minimal',
+        world: {
+          id: worldId(),
+          variables: `working_directory=${workspaceRoot}`
+        }
+      }
+    );
+
+    expect(result).toContain('status: success');
+    expect(result).toContain('exit_code: 0');
+    expect(result).not.toContain('llm-minimal-mode-output');
+    expect(result).not.toContain('### Standard Output');
+  });
+
+  test('should stream stdout as assistant message, stream stderr as tool-stream, and persist only finalized stdout', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+    const world = await getTestWorld();
+    if (!world) {
+      throw new Error('Test world not initialized');
+    }
+
+    const sseEvents: any[] = [];
+    const messageEvents: any[] = [];
+    const contextMessages: any[] = [];
+    const toolCallId = 'shell-stream-split-test';
+    const stdoutMessageId = `${toolCallId}-stdout`;
+
+    const sseListener = (event: any) => sseEvents.push(event);
+    const messageListener = (event: any) => messageEvents.push(event);
+    world.eventEmitter.on('sse', sseListener);
+    world.eventEmitter.on('message', messageListener);
+
+    try {
+      await shellCmdTool.execute(
+        {
+          command: 'ls',
+          parameters: ['.', './__shell_stream_missing_path__']
+        },
+        undefined,
+        undefined,
+        {
+          llmResultMode: 'minimal',
+          world,
+          toolCallId,
+          chatId: 'shell-stream-chat',
+          agentName: 'stream-agent',
+          messages: contextMessages,
+          workingDirectory: workspaceRoot
+        }
+      );
+    } finally {
+      world.eventEmitter.off('sse', sseListener);
+      world.eventEmitter.off('message', messageListener);
+    }
+
+    const streamStarts = sseEvents.filter((event) => event.type === 'start' && event.toolName === 'shell_cmd');
+    const streamChunks = sseEvents.filter((event) => event.type === 'chunk' && event.toolName === 'shell_cmd');
+    const streamEnds = sseEvents.filter((event) => event.type === 'end' && event.toolName === 'shell_cmd');
+    const toolStreamEvents = sseEvents.filter((event) => event.type === 'tool-stream' && event.toolName === 'shell_cmd');
+
+    expect(streamStarts.some((event) => event.messageId === stdoutMessageId)).toBe(true);
+    expect(streamChunks.some((event) => event.messageId === stdoutMessageId && event.stream === 'stdout')).toBe(true);
+    expect(streamEnds.some((event) => event.messageId === stdoutMessageId)).toBe(true);
+    expect(toolStreamEvents.some((event) => event.messageId === toolCallId && event.stream === 'stderr')).toBe(true);
+
+    expect(messageEvents.some((event) => event.messageId === stdoutMessageId && event.sender === 'stream-agent')).toBe(true);
+    expect(messageEvents.some((event) => event.messageId === toolCallId)).toBe(false);
+    expect(contextMessages.some((message) => message.messageId === stdoutMessageId && message.role === 'assistant' && message.sender === 'stream-agent')).toBe(true);
+    expect(contextMessages.some((message) => message.messageId === toolCallId)).toBe(false);
+  });
+
+  test('should use world working_directory when directory parameter is omitted', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    const result = await shellCmdTool.execute(
+      {
+        command: 'echo',
+        parameters: ['fallback-directory-test']
+      },
+      undefined,
+      undefined,
+      {
+        world: {
+          id: worldId(),
+          variables: 'working_directory=/tmp'
+        }
+      }
+    );
+
+    expect(result).toContain('fallback-directory-test');
+    expect(result).toContain('Exit code 0');
+  });
+
+  test('should fail when model-provided directory differs from world working_directory', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    await expect(
+      shellCmdTool.execute(
+        {
+          command: 'pwd',
+          directory: '/'
+        },
+        undefined,
+        undefined,
+        {
+          world: {
+            id: worldId(),
+            variables: 'working_directory=/tmp'
+          }
+        }
+      )
+    ).rejects.toThrow('Working directory mismatch');
+  });
+
+  test('should fail when parameters target path outside world working_directory', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    await expect(
+      shellCmdTool.execute(
+        {
+          command: 'ls',
+          parameters: ['-la', '~/']
+        },
+        undefined,
+        undefined,
+        {
+          world: {
+            id: worldId(),
+            variables: 'working_directory=/tmp'
+          }
+        }
+      )
+    ).rejects.toThrow('Working directory mismatch');
+  });
+
+  test('should fail when relative escape path parameters resolve outside world working_directory', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    await expect(
+      shellCmdTool.execute(
+        {
+          command: 'ls',
+          parameters: ['./../../etc']
+        },
+        undefined,
+        undefined,
+        {
+          world: {
+            id: worldId(),
+            variables: 'working_directory=/tmp/project'
+          }
+        }
+      )
+    ).rejects.toThrow('Working directory mismatch');
+  });
+
+  test('should fail when option assignment paths target outside world working_directory', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    await expect(
+      shellCmdTool.execute(
+        {
+          command: 'echo',
+          parameters: ['--output=/tmp/outside']
+        },
+        undefined,
+        undefined,
+        {
+          world: {
+            id: worldId(),
+            variables: 'working_directory=/tmp/project'
+          }
+        }
+      )
+    ).rejects.toThrow('Working directory mismatch');
+  });
+
+  test('should fail when short-option path prefixes target outside world working_directory', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    await expect(
+      shellCmdTool.execute(
+        {
+          command: 'clang',
+          parameters: ['-I/tmp/outside']
+        },
+        undefined,
+        undefined,
+        {
+          world: {
+            id: worldId(),
+            variables: 'working_directory=/tmp/project'
+          }
+        }
+      )
+    ).rejects.toThrow('Working directory mismatch');
+  });
+
+  test('should fail when inline script execution is requested', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    await expect(
+      shellCmdTool.execute(
+        {
+          command: 'sh',
+          parameters: ['-c', 'cat /etc/passwd']
+        },
+        undefined,
+        undefined,
+        {
+          world: {
+            id: worldId(),
+            variables: 'working_directory=/tmp/project'
+          }
+        }
+      )
+    ).rejects.toThrow('inline script execution');
+  });
+
+  test('should use core default working directory when directory is unresolved', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    clearExecutionHistory();
+    const beforeCount = getExecutionHistory(1000).length;
+
+    const result = await shellCmdTool.execute({
+      command: 'echo',
+      parameters: ['fallback-current-directory']
+    });
+
+    const afterCount = getExecutionHistory(1000).length;
+    expect(result).toContain('fallback-current-directory');
+    expect(result).toContain('Exit code 0');
+    expect(afterCount).toBeGreaterThan(beforeCount);
+  });
+
   test('should be available even without MCP config', async () => {
     // Verify world has no MCP config
     const world = await getTestWorld();
+    expect(world).not.toBeNull();
+    if (!world) {
+      throw new Error('Expected test world to exist');
+    }
     expect(world.mcpConfig).toBeUndefined();
 
     // shell_cmd should still be available
@@ -98,12 +743,11 @@ describe('shell_cmd integration with worlds', () => {
     // Execute a command that will fail
     const result = await shellCmdTool.execute({
       command: 'ls',
-      parameters: ['/this-directory-does-not-exist-xyz'],
-      directory: '/tmp'
+      parameters: ['./this-directory-does-not-exist-xyz']
     });
 
     // Verify error is captured in result
-    expect(result).toContain('**Command:** `ls /this-directory-does-not-exist-xyz`');
+    expect(result).toContain('**Command:** `ls ./this-directory-does-not-exist-xyz`');
     expect(result).toContain('Error:');
     expect(result.toLowerCase()).toContain('no such file');
   });
@@ -115,14 +759,12 @@ describe('shell_cmd integration with worlds', () => {
     // Execute multiple commands
     await shellCmdTool.execute({
       command: 'echo',
-      parameters: ['test1'],
-      directory: '/tmp'
+      parameters: ['test1']
     });
 
     await shellCmdTool.execute({
       command: 'echo',
-      parameters: ['test2'],
-      directory: '/tmp'
+      parameters: ['test2']
     });
 
     // History should be available via the API

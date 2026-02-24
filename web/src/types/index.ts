@@ -18,6 +18,14 @@
  * - SSE event data structures for real-time updates
  * 
  * Changes:
+ * - 2026-02-22: Added responsive right-panel UI state typings (`rightPanelTab`, `isRightPanelOpen`, `viewportMode`) for World page mobile/tablet behavior.
+ * - 2026-02-21: Added project-folder selection props/state (`selectedProjectPath`) for web composer parity with Electron.
+ * - 2026-02-20: Added inline HITL card props to `WorldChatProps` for in-flow prompt rendering (replacing popup-only HITL UI).
+ * - 2026-02-20: Enforced options-only HITL prompt typing.
+ * - 2026-02-14: Added HITL prompt state/types for generic option-list approvals in web chat flows.
+ * - 2026-02-14: Added stop-processing UI state and currentChatId prop support for send/stop composer toggle.
+ * - 2026-02-08: Removed legacy manual tool-intervention message and state types
+ * - 2026-02-08: Added WorldChatProps.agents for avatar sprite resolution in chat messages
  * - 2025-10-26: Aligned seenByAgents calculation with export.ts - incremental from actual data
  * - 2025-10-26: Clarified seenByAgents is CALCULATED (not persisted) - populated with all agent IDs
  * - 2025-10-25: Added seenByAgents?: string[] to Message interface for multi-agent deduplication
@@ -61,6 +69,26 @@ export interface WorldEvent {
   messageId: string;
 }
 
+export interface HitlPromptOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface HitlPromptRequest {
+  requestId: string;
+  chatId: string | null;
+  title: string;
+  message: string;
+  mode: 'option';
+  options: HitlPromptOption[];
+  defaultOptionId?: string;
+  metadata?: {
+    refreshAfterDismiss?: boolean;
+    kind?: string;
+  };
+}
+
 // Web UI Message Interface - extends core with streaming states
 export interface Message {
   id: string;
@@ -74,6 +102,7 @@ export interface Message {
   hasError?: boolean;
   errorMessage?: string;
   messageId?: string;
+  chatId?: string;
   replyToMessageId?: string; // Parent message reference for threading
   role?: string; // Backend role field preserved for sorting
   userEntered?: boolean;
@@ -87,6 +116,8 @@ export interface Message {
   isToolEvent?: boolean;
   isLogExpanded?: boolean;
   toolEventType?: 'start' | 'progress' | 'result' | 'error';
+  isToolStreaming?: boolean; // Flag for actively streaming tool output
+  streamType?: 'stdout' | 'stderr'; // Stream type for styling
   toolExecution?: {
     toolName: string;
     toolCallId: string;
@@ -106,33 +137,9 @@ export interface Message {
   expandable?: boolean;
   resultPreview?: string;
 
-  // Tool call approval request/response properties
-  isToolCallRequest?: boolean;  // This is a tool call approval request message
-  isToolCallResponse?: boolean; // This is a tool call approval response message
-  toolCallData?: {
-    toolCallId: string;
-    originalToolCall?: any; // Store complete original tool call (including id) to match CLI
-    toolName: string;
-    toolArgs: Record<string, unknown>;
-    approvalMessage?: string;
-    approvalOptions?: string[];
-    approvalDecision?: 'approve' | 'deny';
-    approvalScope?: 'once' | 'session' | 'none';
-    agentId?: string; // Agent that requested the approval
-  };
+  // Phase 5: Collapsible tool output
+  isToolOutputExpanded?: boolean;
 
-  // HITL (Human-in-the-Loop) request/response properties
-  isHITLRequest?: boolean;  // This is a HITL request message
-  isHITLResponse?: boolean; // This is a HITL response message
-  hitlData?: {
-    toolCallId: string;
-    originalToolCall?: any;
-    prompt: string;
-    options: string[];
-    context?: Record<string, unknown>;
-    choice?: string; // The selected option
-    agentId?: string;
-  };
 }
 
 // Web UI Agent Interface - matches server serialization with UI extensions
@@ -140,6 +147,7 @@ export interface Agent {
   id: string;
   name: string;
   type: string;
+  autoReply?: boolean;
   status?: 'active' | 'inactive' | 'error';
   provider: LLMProvider;
   model: string;
@@ -162,10 +170,12 @@ export interface World {
   name: string;
   description?: string;
   turnLimit: number;
+  mainAgent?: string | null;
   chatLLMProvider?: string;
   chatLLMModel?: string;
   currentChatId: string | null;
   mcpConfig?: string | null;
+  variables?: string;
   agents: Agent[];
   chats: Chat[];
   llmCallLimit?: number;  // For UI display
@@ -184,35 +194,24 @@ export interface Chat {
 }
 
 // ========================================
-// WORLD ACTIVITY STATUS
+// ACTIVITY STATE TYPES (Phase 1)
 // ========================================
 
-export interface ApprovalRequest {
-  toolCallId: string;
-  originalToolCall?: any;
+// Tool Entry - tracks tool execution state
+export interface ToolEntry {
+  toolUseId: string;
   toolName: string;
-  toolArgs: Record<string, unknown>;
-  message: string;
-  options: string[];
-  agentId?: string;
-}
-
-// HITL Request Interface
-export interface HITLRequest {
-  toolCallId: string;
-  originalToolCall?: {
-    id: string;
-    name: string;
-    args: any;
-  };
-  prompt: string;
-  options: string[];
-  context?: Record<string, unknown>;
-  agentId: string;
+  toolInput?: any;
+  status: 'running' | 'completed' | 'error';
+  result: string | null;
+  errorMessage: string | null;
+  progress: string | null;
+  startedAt: string;
+  completedAt: string | null;
 }
 
 // ========================================
-// COMPONENT PROP INTERFACES  
+// COMPONENT PROP INTERFACES
 // ========================================
 
 // World Chat Component Props
@@ -226,13 +225,26 @@ export interface WorldChatProps {
   isWaiting: boolean;
   needScroll?: boolean;
   activeAgent?: { spriteIndex: number; name: string } | null;
+  agents?: Agent[];
   selectedAgent?: { id?: string; name: string } | null;
   currentChat?: string;
+  currentChatId?: string | null;
+  selectedProjectPath?: string | null;
   editingMessageId?: string | null;
   editingText?: string;
   agentFilters?: string[];  // Agent IDs to filter messages by
-  approvalRequest?: ApprovalRequest | null;
-  hitlRequest?: HITLRequest | null;
+  isStopping?: boolean;
+
+  // Phase 3: Activity state props
+  isBusy?: boolean;
+  elapsedMs?: number;
+
+  // Phase 4: Tool execution status
+  activeTools?: ToolEntry[];
+
+  // HITL inline prompt card
+  activeHitlPrompt?: HitlPromptRequest | null;
+  submittingHitlRequestId?: string | null;
 }
 
 // World Settings Component Props
@@ -291,6 +303,9 @@ export interface WorldChatHistoryProps {
   world: World | null;
 }
 
+export type RightPanelTab = 'chats' | 'world';
+export type WorldViewportMode = 'desktop' | 'tablet' | 'mobile';
+
 // ========================================
 // COMPONENT STATE INTERFACES
 // ========================================
@@ -315,6 +330,7 @@ export interface WorldComponentState extends SSEComponentState {
   error: string | null;
   messagesLoading: boolean;
   isSending: boolean;
+  isStopping: boolean;
   isWaiting: boolean;
   selectedSettingsTarget: 'world' | 'agent' | 'chat' | null;
   selectedAgent: Agent | null;
@@ -332,6 +348,7 @@ export interface WorldComponentState extends SSEComponentState {
 
   // Chat management state
   currentChat: Chat | null;
+  selectedProjectPath: string | null;
   chatToDelete: Chat | null;
 
   // Message edit state
@@ -347,9 +364,27 @@ export interface WorldComponentState extends SSEComponentState {
   // SSE state (required overrides)
   connectionStatus: string;
   needScroll: boolean;
-  approvalRequest: ApprovalRequest | null;
-  hitlRequest: HITLRequest | null;
   lastUserMessageText?: string | null;
+
+  // Streaming state (Phase 1 - merged into World.tsx)
+  pendingStreamUpdates: Map<string, string>;  // messageId -> accumulated content
+  debounceFrameId: number | null;             // RAF ID for debouncing
+
+  // Activity state (Phase 1 - tool tracking and elapsed time)
+  activeTools: ToolEntry[];                   // Currently executing tools
+  isBusy: boolean;                            // Any activity in progress
+  elapsedMs: number;                          // Elapsed time in milliseconds
+  activityStartTime: number | null;           // Activity start timestamp
+  elapsedIntervalId: number | null;           // Interval ID for elapsed updates
+
+  // HITL option prompts
+  hitlPromptQueue: HitlPromptRequest[];
+  submittingHitlRequestId: string | null;
+
+  // Responsive right-panel state
+  rightPanelTab: RightPanelTab;
+  isRightPanelOpen: boolean;
+  viewportMode: WorldViewportMode;
 }
 
 // ========================================
@@ -388,6 +423,15 @@ export interface StreamErrorData {
   messageId: string;
   sender: string;
   error: string;
+  worldName?: string;
+}
+
+export interface ToolStreamData {
+  messageId: string;
+  agentName: string;
+  content: string;
+  stream: 'stdout' | 'stderr';
+  accumulatedContent?: string;
   worldName?: string;
 }
 

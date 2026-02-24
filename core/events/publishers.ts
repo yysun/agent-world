@@ -4,18 +4,26 @@
  * Purpose: Functions that emit events to World.eventEmitter
  * Features:
  * - Message publishing with chat session management
- * - Tool result publishing with structured API
  * - SSE event publishing for streaming
  * - Tool event publishing for agent behaviors
- * - CRUD event publishing for configuration changes
- * - Approval request publishing (legacy)
+ *
+ * Implementation Notes:
+ * - Uses parseMessageContent to preserve enhanced tool-result protocol support
+ * - Emits events synchronously through world-scoped EventEmitter channels
+ *
+ * Recent Changes:
+ * - 2026-02-13: Added optional explicit `chatId` override for `publishEvent` to preserve session context across async flows.
+ * - 2026-02-13: Added chat-scoped tool-event propagation (`chatId`) so realtime tool updates remain session-isolated.
+ * - 2026-02-11: Fixed publishSSE to include toolName and stream fields for tool-stream events
+ * - 2026-02-08: Added core-level sender normalization for consistent user-role detection
+ * - 2026-02-08: Removed legacy manual tool-result publishing helper from event API
  *
  * All functions emit events synchronously and return immediately
  */
 
 import {
-  World, WorldMessageEvent, WorldSSEEvent, WorldToolEvent, WorldSystemEvent, WorldCRUDEvent,
-  EventType, ToolResultData
+  World, WorldMessageEvent, WorldSSEEvent, WorldToolEvent, WorldSystemEvent,
+  EventType
 } from '../types.js';
 import { generateId } from '../utils.js';
 import { parseMessageContent } from '../message-prep.js';
@@ -31,44 +39,47 @@ export function disableStreaming(): void { globalStreamingEnabled = false; }
 export function isStreamingEnabled(): boolean { return globalStreamingEnabled; }
 
 /**
- * Publish CRUD event for agent, chat, or world configuration changes
- * Allows subscribed clients to receive real-time updates for all CRUD operations
+ * Normalize sender values so role/persistence logic remains consistent across clients.
+ * Examples:
+ * - "HUMAN", "user", "User42" => "human"
+ * - "SYSTEM" => "system"
+ * - Agent IDs remain unchanged.
  */
-export function publishCRUDEvent(
+export function normalizeSender(sender: string): string {
+  const trimmed = String(sender ?? '').trim();
+  if (!trimmed) return 'human';
+
+  const lower = trimmed.toLowerCase();
+  if (lower === 'human' || lower.startsWith('user')) return 'human';
+  if (lower === 'system') return 'system';
+  if (lower === 'world') return 'world';
+  return trimmed;
+}
+
+function resolveRequiredChatId(
   world: World,
-  operation: 'create' | 'update' | 'delete',
-  entityType: 'agent' | 'chat' | 'world',
-  entityId: string,
-  entityData?: any
-): void {
-  const event: WorldCRUDEvent = {
-    operation,
-    entityType,
-    entityId,
-    entityData: operation === 'delete' ? null : entityData,
-    timestamp: new Date(),
-    chatId: world.currentChatId ?? null
-  };
+  chatId: string | null | undefined,
+  callsite: 'publishMessage' | 'publishMessageWithId'
+) {
+  const explicitChatId = typeof chatId === 'string' ? chatId.trim() : '';
+  if (explicitChatId) return explicitChatId;
 
-  world.eventEmitter.emit(EventType.CRUD, event);
+  const currentChatId = typeof world?.currentChatId === 'string' ? world.currentChatId.trim() : '';
+  if (currentChatId) return currentChatId;
 
-  loggerPublish.debug('CRUD event published', {
-    worldId: world.id,
-    operation,
-    entityType,
-    entityId
-  });
+  throw new Error(`${callsite}: chatId is required for message events.`);
 }
 
 /**
  * Publish event to a specific channel using World.eventEmitter
  */
-export function publishEvent(world: World, type: string, content: any): void {
+export function publishEvent(world: World, type: string, content: any, chatId?: string | null): void {
+  const targetChatId = chatId !== undefined ? chatId : (world.currentChatId || null);
   const event: WorldSystemEvent = {
     content,
     timestamp: new Date(),
     messageId: generateId(),
-    chatId: world.currentChatId || null
+    chatId: targetChatId
   };
   world.eventEmitter.emit(type, event);
 }
@@ -83,10 +94,12 @@ export function publishEvent(world: World, type: string, content: any): void {
  */
 export function publishMessage(world: World, content: string, sender: string, chatId?: string | null, replyToMessageId?: string): WorldMessageEvent {
   const messageId = generateId();
-  const targetChatId = chatId !== undefined ? chatId : world.currentChatId;
+  const targetChatId = resolveRequiredChatId(world, chatId, 'publishMessage');
+  const normalizedSender = normalizeSender(sender);
 
   loggerMemory.debug('[publishMessage] ENTRY', {
     sender,
+    normalizedSender,
     chatId,
     contentPreview: content.substring(0, 200),
     messageId
@@ -124,7 +137,7 @@ export function publishMessage(world: World, content: string, sender: string, ch
   let role: string;
   if (parsedMsg.role === 'tool') {
     role = 'tool';
-  } else if (sender === 'human' || sender.startsWith('user')) {
+  } else if (normalizedSender === 'human' || normalizedSender.startsWith('user')) {
     role = 'user';
   } else {
     // Agent senders get role 'assistant'
@@ -133,7 +146,7 @@ export function publishMessage(world: World, content: string, sender: string, ch
 
   const messageEvent: WorldMessageEvent & { role?: string; tool_calls?: any } = {
     content: finalContent,
-    sender,
+    sender: normalizedSender,
     role,
     timestamp: new Date(),
     messageId,
@@ -143,7 +156,7 @@ export function publishMessage(world: World, content: string, sender: string, ch
 
   loggerMemory.debug('[publishMessage] Generated messageId', {
     messageId,
-    sender,
+    sender: normalizedSender,
     role,
     worldId: world.id,
     chatId: targetChatId,
@@ -153,7 +166,7 @@ export function publishMessage(world: World, content: string, sender: string, ch
 
   loggerMemory.debug('[publishMessage] Emitting message event', {
     messageId,
-    sender,
+    sender: normalizedSender,
     role,
     chatId: targetChatId,
     contentPreview: finalContent.substring(0, 100)
@@ -174,10 +187,11 @@ export function publishMessage(world: World, content: string, sender: string, ch
  * @param replyToMessageId - Optional parent message ID for threading
  */
 export function publishMessageWithId(world: World, content: string, sender: string, messageId: string, chatId?: string | null, replyToMessageId?: string): WorldMessageEvent {
-  const targetChatId = chatId !== undefined ? chatId : world.currentChatId;
+  const targetChatId = resolveRequiredChatId(world, chatId, 'publishMessageWithId');
+  const normalizedSender = normalizeSender(sender);
   const messageEvent: WorldMessageEvent = {
     content,
-    sender,
+    sender: normalizedSender,
     timestamp: new Date(),
     messageId,
     chatId: targetChatId,
@@ -185,46 +199,6 @@ export function publishMessageWithId(world: World, content: string, sender: stri
   };
   world.eventEmitter.emit('message', messageEvent);
   return messageEvent;
-}
-
-/**
- * Publish a tool result message using structured API
- * Constructs a proper role='tool' message using enhanced string protocol and publishes via publishMessage()
- * 
- * This is the primary API for approval responses and tool results.
- * Uses the __type: 'tool_result' enhanced protocol which is automatically parsed by parseMessageContent()
- * and converted to OpenAI role='tool' format.
- * 
- * @param world - World instance
- * @param agentId - Target agent ID
- * @param data - Tool result data (decision, scope, tool_call_id, etc.)
- * @returns WorldMessageEvent with generated messageId
- * 
- * @example
- * publishToolResult(world, 'assistant-1', {
- *   tool_call_id: 'call_123',
- *   decision: 'approve',
- *   scope: 'session',
- *   toolName: 'shell_cmd',
- *   toolArgs: { command: 'ls -la' },
- *   workingDirectory: '/home/user'
- * });
- */
-export function publishToolResult(world: World, agentId: string, data: ToolResultData): WorldMessageEvent {
-  const enhancedMessage = JSON.stringify({
-    __type: 'tool_result',
-    tool_call_id: data.tool_call_id,
-    agentId: agentId,
-    content: JSON.stringify({
-      decision: data.decision,
-      scope: data.scope,
-      choice: data.choice,
-      toolName: data.toolName,
-      toolArgs: data.toolArgs,
-      workingDirectory: data.workingDirectory
-    })
-  });
-  return publishMessage(world, enhancedMessage, 'human');
 }
 
 /**
@@ -274,8 +248,12 @@ export function publishSSE(world: World, data: Partial<WorldSSEEvent>): void {
     content: data.content,
     error: data.error,
     messageId: data.messageId || generateId(),
+    chatId: data.chatId !== undefined ? data.chatId : (world.currentChatId ?? null),
     usage: data.usage,
-    logEvent: data.logEvent
+    logEvent: data.logEvent,
+    tool_calls: data.tool_calls,
+    toolName: data.toolName,
+    stream: data.stream
   };
   world.eventEmitter.emit('sse', sseEvent);
 }
@@ -288,6 +266,7 @@ export function publishToolEvent(world: World, data: Partial<WorldToolEvent>): v
     agentName: data.agentName!,
     type: data.type!,
     messageId: data.messageId || generateId(),
+    chatId: data.chatId !== undefined ? data.chatId : (world.currentChatId ?? null),
     toolExecution: data.toolExecution!
   };
   world.eventEmitter.emit('world', toolEvent);

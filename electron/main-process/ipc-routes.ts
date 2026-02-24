@@ -1,0 +1,169 @@
+/**
+ * Electron Main IPC Route Definitions
+ *
+ * Features:
+ * - Defines canonical IPC channel-to-handler mappings.
+ * - Centralizes route construction for deterministic registration.
+ *
+ * Implementation Notes:
+ * - Each route delegates directly to injected handler dependencies.
+ * - Keeps channel naming and payload routing in one module.
+ *
+ * Recent Changes:
+ * - 2026-02-19: Added `world:export` route wiring for desktop world save/export flows.
+ * - 2026-02-16: Added `session:branchFromMessage` route wiring for creating branch sessions from assistant messages.
+ * - 2026-02-14: Added `hitl:respond` route wiring for world HITL option responses from renderer.
+ * - 2026-02-14: Added `skill:list` route wiring for renderer welcome-screen skill registry hydration.
+ * - 2026-02-13: Added `message:edit` route wiring for core-driven message edit/resubmission.
+ * - 2026-02-13: Added `chat:stopMessage` route wiring for session-scoped stop requests.
+ * - 2026-02-12: Switched route channel strings to shared IPC constants and typed payload contracts.
+ * - 2026-02-12: Added extracted IPC route builder for main-process modularization.
+ */
+
+import type { MainIpcRoute } from './ipc-registration.js';
+import {
+  DESKTOP_INVOKE_CHANNELS,
+  type BranchSessionFromMessagePayload,
+  type ChatSubscribePayload,
+  type ChatUnsubscribePayload,
+  type HitlResponsePayload,
+  type MessageEditPayload,
+  type MessageDeletePayload,
+  type WorldExportPayload,
+  type WorldChatPayload,
+  type WorldIdPayload
+} from '../shared/ipc-contracts.js';
+
+export interface MainIpcHandlers {
+  getWorkspaceState: () => Promise<unknown> | unknown;
+  openWorkspaceDialog: (payload?: unknown) => Promise<unknown> | unknown;
+  pickDirectoryDialog: () => Promise<unknown> | unknown;
+  loadWorldsFromWorkspace: () => Promise<unknown> | unknown;
+  loadSpecificWorld: (worldId: unknown) => Promise<unknown> | unknown;
+  importWorld: () => Promise<unknown> | unknown;
+  exportWorld: (payload: unknown) => Promise<unknown> | unknown;
+  listWorkspaceWorlds: () => Promise<unknown> | unknown;
+  listSkillRegistry: (payload?: unknown) => Promise<unknown> | unknown;
+  createWorkspaceWorld: (payload: unknown) => Promise<unknown> | unknown;
+  updateWorkspaceWorld: (payload: unknown) => Promise<unknown> | unknown;
+  deleteWorkspaceWorld: (payload: unknown) => Promise<unknown> | unknown;
+  createWorldAgent: (payload: unknown) => Promise<unknown> | unknown;
+  updateWorldAgent: (payload: unknown) => Promise<unknown> | unknown;
+  deleteWorldAgent: (payload: unknown) => Promise<unknown> | unknown;
+  readWorldPreference: () => Promise<unknown> | unknown;
+  writeWorldPreference: (worldId: unknown) => Promise<unknown> | unknown;
+  listWorldSessions: (worldId: unknown) => Promise<unknown> | unknown;
+  createWorldSession: (worldId: unknown) => Promise<unknown> | unknown;
+  branchWorldSessionFromMessage: (payload: unknown) => Promise<unknown> | unknown;
+  deleteWorldSession: (worldId: unknown, chatId: unknown) => Promise<unknown> | unknown;
+  selectWorldSession: (worldId: unknown, chatId: unknown) => Promise<unknown> | unknown;
+  getSessionMessages: (worldId: unknown, chatId: unknown) => Promise<unknown> | unknown;
+  getChatEvents: (worldId: unknown, chatId: unknown) => Promise<unknown> | unknown;
+  sendChatMessage: (payload: unknown) => Promise<unknown> | unknown;
+  editMessageInChat: (payload: unknown) => Promise<unknown> | unknown;
+  respondHitlOption: (payload: unknown) => Promise<unknown> | unknown;
+  stopChatMessage: (payload: unknown) => Promise<unknown> | unknown;
+  deleteMessageFromChat: (payload: unknown) => Promise<unknown> | unknown;
+  subscribeChatEvents: (payload: unknown) => Promise<unknown> | unknown;
+  unsubscribeChatEvents: (payload: unknown) => Promise<unknown> | unknown;
+  getSystemSettings: () => Promise<unknown> | unknown;
+  saveSystemSettings: (payload: unknown) => Promise<unknown> | unknown;
+  openFileDialog: () => Promise<unknown> | unknown;
+}
+
+export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
+  return [
+    { channel: DESKTOP_INVOKE_CHANNELS.WORKSPACE_GET, handler: async () => handlers.getWorkspaceState() },
+    { channel: DESKTOP_INVOKE_CHANNELS.WORKSPACE_OPEN, handler: async (_event, payload) => handlers.openWorkspaceDialog(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_DIRECTORY, handler: async () => handlers.pickDirectoryDialog() },
+    { channel: DESKTOP_INVOKE_CHANNELS.WORLD_LOAD_FROM_FOLDER, handler: async () => handlers.loadWorldsFromWorkspace() },
+    { channel: DESKTOP_INVOKE_CHANNELS.WORLD_LOAD, handler: async (_event, worldId) => handlers.loadSpecificWorld(worldId) },
+    { channel: DESKTOP_INVOKE_CHANNELS.WORLD_IMPORT, handler: async () => handlers.importWorld() },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.WORLD_EXPORT,
+      handler: async (_event, payload) => handlers.exportWorld(payload as WorldExportPayload)
+    },
+    { channel: DESKTOP_INVOKE_CHANNELS.WORLD_LIST, handler: async () => handlers.listWorkspaceWorlds() },
+    { channel: DESKTOP_INVOKE_CHANNELS.SKILL_LIST, handler: async (_event, payload) => handlers.listSkillRegistry(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.WORLD_CREATE, handler: async (_event, payload) => handlers.createWorkspaceWorld(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.WORLD_UPDATE, handler: async (_event, payload) => handlers.updateWorkspaceWorld(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.WORLD_DELETE, handler: async (_event, payload) => handlers.deleteWorkspaceWorld(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.AGENT_CREATE, handler: async (_event, payload) => handlers.createWorldAgent(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.AGENT_UPDATE, handler: async (_event, payload) => handlers.updateWorldAgent(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.AGENT_DELETE, handler: async (_event, payload) => handlers.deleteWorldAgent(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.WORLD_GET_LAST_SELECTED, handler: async () => handlers.readWorldPreference() },
+    { channel: DESKTOP_INVOKE_CHANNELS.WORLD_SAVE_LAST_SELECTED, handler: async (_event, worldId) => handlers.writeWorldPreference(worldId) },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.SESSION_LIST,
+      handler: async (_event, payload) => handlers.listWorldSessions((payload as WorldIdPayload | undefined)?.worldId)
+    },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.SESSION_CREATE,
+      handler: async (_event, payload) => handlers.createWorldSession((payload as WorldIdPayload | undefined)?.worldId)
+    },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.SESSION_BRANCH_FROM_MESSAGE,
+      handler: async (_event, payload) => handlers.branchWorldSessionFromMessage(payload as BranchSessionFromMessagePayload)
+    },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.CHAT_DELETE,
+      handler: async (_event, payload) => {
+        const normalized = payload as WorldChatPayload | undefined;
+        return handlers.deleteWorldSession(normalized?.worldId, normalized?.chatId);
+      }
+    },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.SESSION_DELETE,
+      handler: async (_event, payload) => {
+        const normalized = payload as WorldChatPayload | undefined;
+        return handlers.deleteWorldSession(normalized?.worldId, normalized?.chatId);
+      }
+    },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.SESSION_SELECT,
+      handler: async (_event, payload) => {
+        const normalized = payload as WorldChatPayload | undefined;
+        return handlers.selectWorldSession(normalized?.worldId, normalized?.chatId);
+      }
+    },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.CHAT_GET_MESSAGES,
+      handler: async (_event, payload) => {
+        const normalized = payload as WorldChatPayload | undefined;
+        return handlers.getSessionMessages(normalized?.worldId, normalized?.chatId);
+      }
+    },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.CHAT_GET_EVENTS,
+      handler: async (_event, payload) => {
+        const normalized = payload as WorldChatPayload | undefined;
+        return handlers.getChatEvents(normalized?.worldId, normalized?.chatId);
+      }
+    },
+    { channel: DESKTOP_INVOKE_CHANNELS.CHAT_SEND_MESSAGE, handler: async (_event, payload) => handlers.sendChatMessage(payload) },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.MESSAGE_EDIT,
+      handler: async (_event, payload) => handlers.editMessageInChat(payload as MessageEditPayload)
+    },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.HITL_RESPOND,
+      handler: async (_event, payload) => handlers.respondHitlOption(payload as HitlResponsePayload)
+    },
+    { channel: DESKTOP_INVOKE_CHANNELS.CHAT_STOP_MESSAGE, handler: async (_event, payload) => handlers.stopChatMessage(payload) },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.MESSAGE_DELETE,
+      handler: async (_event, payload) => handlers.deleteMessageFromChat(payload as MessageDeletePayload)
+    },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.CHAT_SUBSCRIBE_EVENTS,
+      handler: async (_event, payload) => handlers.subscribeChatEvents(payload as ChatSubscribePayload)
+    },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.CHAT_UNSUBSCRIBE_EVENTS,
+      handler: async (_event, payload) => handlers.unsubscribeChatEvents(payload as ChatUnsubscribePayload)
+    },
+    { channel: DESKTOP_INVOKE_CHANNELS.SETTINGS_GET, handler: async () => handlers.getSystemSettings() },
+    { channel: DESKTOP_INVOKE_CHANNELS.SETTINGS_SAVE, handler: async (_event, payload) => handlers.saveSystemSettings(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_FILE, handler: async () => handlers.openFileDialog() }
+  ];
+}

@@ -1,0 +1,36 @@
+{
+  "name": "@agent-world/electron",
+  "productName": "Agent World",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "check": "npx tsc --noEmit --project tsconfig.electron.json",
+    "main:build": "npx tsc --project tsconfig.electron.json",
+    "main:watch": "npx tsc --project tsconfig.electron.json --watch --preserveWatchOutput",
+    "renderer:dev": "vite --config vite.config.js",
+    "renderer:build": "vite build --config vite.config.js",
+    "electron:dev": "wait-on http://127.0.0.1:5181 file:dist/main.js && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5181 electron .",
+    "dev": "npm-run-all --parallel main:watch renderer:dev electron:dev",
+    "start": "npm run main:build && npm run renderer:build && electron ."
+  },
+  "dependencies": {
+    "dompurify": "^3.3.1",
+    "dotenv": "^16.4.5",
+    "marked": "^17.0.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.18",
+    "@types/dompurify": "^3.0.5",
+    "@types/marked": "^5.0.2",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^35.0.0",
+    "electron-rebuild": "^3.2.9"
+  }
+}

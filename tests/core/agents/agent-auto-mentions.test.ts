@@ -29,10 +29,11 @@ describe('Agent Auto-Mention Utilities', () => {
       expect(hasAnyMentionAtBeginning('@human hello')).toBe(true);
       expect(hasAnyMentionAtBeginning('@gm hello')).toBe(true);
       expect(hasAnyMentionAtBeginning('@pro hello')).toBe(true);
+      expect(hasAnyMentionAtBeginning('Hello @human')).toBe(true);
     });
 
     test('should not detect mentions in middle', () => {
-      expect(hasAnyMentionAtBeginning('hello @human')).toBe(false);
+      expect(hasAnyMentionAtBeginning('Well, hello @human')).toBe(false);
       expect(hasAnyMentionAtBeginning('I think @gm should help')).toBe(false);
     });
 
