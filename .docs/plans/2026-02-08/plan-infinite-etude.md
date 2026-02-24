@@ -19,7 +19,7 @@ This plan outlines the steps to build the "Generative Sight-Reading Trainer" PoC
 - [x] **Stream Handling**: Ensure streaming updates pass the partial JSON data correctly to the component (optional for PoC, can render on completion).
 
 ## Phase 3: Agent Configuration (The Composers' Room)
-- [x] **Create Setup Script**: Create `scripts/setup-infinite-etude.ts`.
+- [x] **Create Setup Script**: Use `data/worlds/the-infinite-etude/setup-agents.ts` as canonical setup entrypoint.
     - [x] Use `OpikTracer` for observability.
     - [x] **Agent A (Composer)**: System prompt to generate ABC/MusicXML-like JSON structure.
     - [x] **Agent B (Pedagogue)**: System prompt to critique and "fix" the JSON.

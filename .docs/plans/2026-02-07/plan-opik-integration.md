@@ -63,7 +63,7 @@ graph TD
 ### Manual Verification
 1. Build all workspaces: `npm run build`.
 2. Run `agent-world` with `OPIK_ENABLED=true`.
-3. **Run a Complex Scenario**: Use an external User Agent configuration (e.g., `data/setup-infinite-etude.ts`) to generate multi-turn, multi-agent traffic. This ensures rich traces (LLM spans, tool calls) are captured for evaluation.
+3. **Run a Complex Scenario**: Use an external User Agent configuration (e.g., `data/worlds/the-infinite-etude/setup-agents.ts`) to generate multi-turn, multi-agent traffic. This ensures rich traces (LLM spans, tool calls) are captured for evaluation.
 4. Check Opik Dashboard for traces.
 
 ### Automated Tests

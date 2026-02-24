@@ -15,7 +15,7 @@ Demo components are:
 VexFlow integration for "The Infinite Étude" music generation world.
 
 **Related:**
-- World: `data/worlds/infinite-etude/`
+- World: `data/worlds/the-infinite-etude/`
 - Agents: Maestro Composer, Madame Pedagogue, Monsieur Engraver
 
 ## Storage Migration for Demos

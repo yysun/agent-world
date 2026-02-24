@@ -12,7 +12,7 @@ Demo components showcase specific agent worlds with custom UI integrations.
 VexFlow integration for "The Infinite Étude" music generation world.
 
 **Related:**
-- World: `data/worlds/infinite-etude/`
+- World: `data/worlds/the-infinite-etude/`
 - Agents: Maestro Composer, Madame Pedagogue, Monsieur Engraver
 - AppRun version: `web/src/components/demos/sheet-music.tsx`
 

@@ -83,6 +83,8 @@ export function toKebabCase(str: string): string {
   if (!str) return '';
 
   return str
+    .normalize("NFD")               // Decompose combined graphemes
+    .replace(/[\u0300-\u036f]/g, "") // Remove diacritics (accents)
     .replace(/\s+/g, '-')           // Replace spaces with hyphens
     .replace(/([a-z])([A-Z])/g, '$1-$2')  // Insert hyphen between camelCase
     .replace(/[^a-zA-Z0-9-]/g, '-') // Replace special characters with hyphens
