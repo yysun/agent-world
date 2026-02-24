@@ -626,6 +626,7 @@ h2 {
   width: auto;
   max-width: none;
   height: 100%;
+  overflow: hidden;
 }
 
 /* Settings Column - takes up less space */
@@ -1048,6 +1049,7 @@ legend {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  min-width: 0;
   width: 100%;
   max-width: 100% !important;
 }
@@ -1058,6 +1060,7 @@ legend {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   width: auto;
   max-width: none;
   height: 100%;
@@ -1070,6 +1073,13 @@ legend {
 .chat-fieldset .composer-shell,
 .chat-fieldset .message-row,
 .chat-fieldset .message-row .message {
+  max-width: 100%;
+}
+
+/* Override doodle.css "fieldset *" max-width for ALL content inside messages.
+   doodle.css sets max-width: calc(100vw - 100px) on fieldset descendants,
+   which at zoom: 0.75 can exceed the actual container width and break layout. */
+.chat-fieldset .message * {
   max-width: 100%;
 }
 
@@ -1130,6 +1140,7 @@ legend {
   width: 100%;
   position: relative;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .message-row {
@@ -1313,12 +1324,13 @@ legend {
 .message-content {
   font-size: 1rem;
   line-height: 1.48;
-  white-space: pre-wrap;
+  white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
   word-wrap: break-word;
   min-width: 0;
   max-width: 100%;
+  overflow-x: auto;
 }
 
 /* Markdown content styles within messages */
@@ -1393,6 +1405,7 @@ legend {
   overflow-x: auto;
   max-width: 100%;
   margin: 0.5rem 0;
+  white-space: pre;
 }
 
 .message-content pre code {
