@@ -33,17 +33,64 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-02-21: Added `list_files` prompt guidance to prefer `includePattern` and bounded `maxEntries` for file-type searches to reduce oversized tool results and continuation churn.
+ * - 2026-02-21: Excluded persisted shell stdout stream assistant messages (messageId suffix `-stdout`) from LLM-history relevance filtering to prevent tool-continuation token amplification loops.
+ * - 2026-02-20: Updated HITL tool system-prompt guidance to enforce options-only HITL usage.
+ * - 2026-02-20: Added `buildToolUsagePromptSection()` for centralized, tool-aware system-prompt guidance (including HITL usage guidance when available).
+ * - 2026-02-19: Replaced raw `working directory: <value>` system-prompt suffix with explicit `shell_cmd` scope instructions and a no-echo directive.
+ * - 2026-02-16: Added env-driven global/project skill-scope filtering for the `## Agent Skills` system prompt section.
+ * - 2026-02-15: prepareMessagesForLLM now appends a concise, strict cross-agent addressing rule requiring `@<agent_id>, <message>` when targeting a specific agent.
+ * - 2026-02-14: prepareMessagesForLLM now injects an `## Agent Skills` section with registry-backed `<available_skills>` entries and `load_skill` guidance.
+ * - 2026-02-14: Added shared default working-directory resolver (env override -> user home -> `./`) and switched missing world `working_directory` fallback from `./` to user home.
+ * - 2026-02-13: prepareMessagesForLLM began appending execution-directory context from world `working_directory`.
+ * - 2026-02-08: Fixed wouldAgentHaveRespondedToHistoricalMessage to include assistant messages with tool_calls
+ *   (prevents OpenAI error: "messages with role 'tool' must be a response to a preceeding message with 'tool_calls'")
  * - Enhanced comment documentation with detailed feature descriptions
  * - Improved function descriptions with implementation details
  * - Added details about world-aware operations and LLM integration
  * - Added nanoid support for chat ID generation
  * - Added wouldAgentHaveRespondedToHistoricalMessage for LLM context filtering
  * - Updated prepareMessagesForLLM to filter irrelevant conversation history
- * - Consolidated with message-prep.ts filtering (client.* tools, approval_ results)
+ * - Consolidated with message-prep.ts filtering for client-side tool calls
  */
 
 import { nanoid } from 'nanoid';
+import { homedir } from 'os';
 import { filterClientSideMessages } from './message-prep.js';
+import { getSkillSourceScope, getSkillsForSystemPrompt, waitForInitialSkillSync } from './skill-registry.js';
+import { parseSkillIdListFromEnv } from './skill-settings.js';
+import { createCategoryLogger } from './logger.js';
+
+const logger = createCategoryLogger('core.utils');
+
+/**
+ * Resolve default working directory when world variable is not configured.
+ * Priority:
+ * 1) AGENT_WORLD_DEFAULT_WORKING_DIRECTORY (runtime override)
+ * 2) OS user home directory
+ * 3) "./" hard fallback
+ */
+export function getDefaultWorkingDirectory(): string {
+  const envValue = typeof process !== 'undefined'
+    ? process.env?.AGENT_WORLD_DEFAULT_WORKING_DIRECTORY
+    : undefined;
+  const trimmedEnvValue = typeof envValue === 'string' ? envValue.trim() : '';
+  if (trimmedEnvValue) {
+    return trimmedEnvValue;
+  }
+
+  try {
+    const homePath = homedir();
+    const trimmedHomePath = typeof homePath === 'string' ? homePath.trim() : '';
+    if (trimmedHomePath) {
+      return trimmedHomePath;
+    }
+  } catch {
+    // Fall through to final static fallback.
+  }
+
+  return './';
+}
 
 /**
  * Generate unique ID for messages and events
@@ -83,14 +130,190 @@ export function toKebabCase(str: string): string {
   if (!str) return '';
 
   return str
-    .normalize("NFD")               // Decompose combined graphemes
-    .replace(/[\u0300-\u036f]/g, "") // Remove diacritics (accents)
     .replace(/\s+/g, '-')           // Replace spaces with hyphens
     .replace(/([a-z])([A-Z])/g, '$1-$2')  // Insert hyphen between camelCase
     .replace(/[^a-zA-Z0-9-]/g, '-') // Replace special characters with hyphens
     .replace(/-+/g, '-')            // Replace multiple hyphens with single
     .replace(/^-|-$/g, '')          // Remove leading/trailing hyphens
     .toLowerCase();                 // Convert to lowercase
+}
+
+/**
+ * Parse .env-style text into key-value map.
+ * Supported:
+ * - Comments: # comment
+ * - Blank lines
+ * - KEY=value entries (optional whitespace around '=')
+ * Invalid lines are ignored.
+ */
+export function parseEnvText(variablesText?: string): Record<string, string> {
+  const envMap: Record<string, string> = {};
+  if (!variablesText || typeof variablesText !== 'string') {
+    return envMap;
+  }
+
+  const lines = variablesText.split(/\r?\n/);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) {
+      continue;
+    }
+
+    const separatorIndex = line.indexOf('=');
+    if (separatorIndex <= 0) {
+      logger.debug('Ignoring invalid env line', { line: rawLine });
+      continue;
+    }
+
+    const key = line.slice(0, separatorIndex).trim();
+    const value = line.slice(separatorIndex + 1).trim();
+
+    if (!key) {
+      logger.debug('Ignoring env line with empty key', { line: rawLine });
+      continue;
+    }
+
+    envMap[key] = value;
+  }
+
+  return envMap;
+}
+
+/**
+ * Get a single env value from .env-style text
+ */
+export function getEnvValueFromText(variablesText: string | undefined, key: string): string | undefined {
+  if (!key) {
+    return undefined;
+  }
+  const envMap = parseEnvText(variablesText);
+  if (Object.prototype.hasOwnProperty.call(envMap, key)) {
+    return envMap[key];
+  }
+  if (key === 'working_directory') {
+    return getDefaultWorkingDirectory();
+  }
+  return undefined;
+}
+
+function buildAgentMentionFormatRule(): string {
+  return [
+    'Only use @mentions when handing off to another agent; for normal user replies, do not mention agents.',
+    'Place each @<agent> at the start of a paragraph.',
+    'For multiple agents, use one paragraph-beginning mention per target.'
+  ].join('\n');
+}
+
+/**
+ * Build tool-usage guidance section for the system prompt.
+ * Guidance is tool-aware and only includes HITL instructions when HITL tool names are present.
+ */
+export function buildToolUsagePromptSection(options: { toolNames: string[] }): string {
+  const toolNames = Array.isArray(options?.toolNames)
+    ? options.toolNames.map((toolName) => String(toolName || '').trim()).filter(Boolean)
+    : [];
+  if (toolNames.length === 0) {
+    return '';
+  }
+
+  const normalizedToolNames = new Set(toolNames.map((toolName) => toolName.toLowerCase()));
+  const hasHitlTool = normalizedToolNames.has('human_intervention_request');
+  const hasListFilesTool = normalizedToolNames.has('list_files');
+
+  const lines = [
+    'You have access to tools.',
+    'Use tools when the user requests an action that requires tool execution.',
+  ];
+
+  if (hasHitlTool) {
+    lines.push(
+      'If you need to ask the human a clarifying question, request an option choice, or request confirmation, call human_intervention_request instead of asking directly in plain assistant text.'
+    );
+    lines.push(
+      'Use multiple-choice options only; do not request free-text HITL input.'
+    );
+  }
+
+  if (hasListFilesTool) {
+    lines.push(
+      'When using list_files for file-type searches, always narrow with includePattern (for example, **/*.md) and keep maxEntries small to avoid oversized results.'
+    );
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Interpolate template variables in form {{ variable }} from env map.
+ * Missing variables are replaced with empty string.
+ */
+export function interpolateTemplateVariables(template: string, envMap: Record<string, string>): string {
+  if (!template) {
+    return '';
+  }
+
+  return template.replace(/\{\{\s*([A-Za-z0-9_\-]+)\s*\}\}/g, (_match, variableName: string) => {
+    if (Object.prototype.hasOwnProperty.call(envMap, variableName)) {
+      return envMap[variableName] ?? '';
+    }
+    return '';
+  });
+}
+
+function escapeXmlText(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+async function buildAgentSkillsPromptSection(): Promise<string> {
+  await waitForInitialSkillSync();
+
+  const includeGlobalSkills = String(process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS ?? 'true').toLowerCase() !== 'false';
+  const includeProjectSkills = String(process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS ?? 'true').toLowerCase() !== 'false';
+
+  const availableSkills = getSkillsForSystemPrompt({
+    includeGlobal: includeGlobalSkills,
+    includeProject: includeProjectSkills,
+  });
+
+  const disabledGlobalSkillIds = parseSkillIdListFromEnv(process.env.AGENT_WORLD_DISABLED_GLOBAL_SKILLS);
+  const disabledProjectSkillIds = parseSkillIdListFromEnv(process.env.AGENT_WORLD_DISABLED_PROJECT_SKILLS);
+
+  const filteredAvailableSkills = availableSkills.filter((skill) => {
+    const skillId = String(skill?.skill_id || '').trim();
+    if (!skillId) {
+      return false;
+    }
+
+    const sourceScope = getSkillSourceScope(skillId);
+    if (sourceScope === 'project') {
+      return !disabledProjectSkillIds.has(skillId);
+    }
+
+    return !disabledGlobalSkillIds.has(skillId);
+  });
+
+  const lines: string[] = [
+    '## Agent Skills',
+    'You have access to a library of agent skills. Find skill by:',
+    '1. Review the <available_skills> list below.',
+    "2. If the user's request matches a skill's purpose, use the load_skill with skill id tool",
+    '   to fetch the full instructions.',
+    '',
+    '<available_skills>',
+  ];
+
+  for (const skill of filteredAvailableSkills) {
+    lines.push('  <skill>');
+    lines.push(`    <id>${escapeXmlText(skill.skill_id)}</id>`);
+    lines.push(`    <description>${escapeXmlText(skill.description)}</description>`);
+    lines.push('  </skill>');
+  }
+
+  lines.push('</available_skills>');
+  return lines.join('\n');
 }
 
 // Import types for utility functions
@@ -103,25 +326,6 @@ export function getWorldTurnLimit(world: World): number {
   return world.turnLimit || 5; // Default to 5 if not configured
 }
 
-// Helper to generate prefix candidates for multi-word mentions
-function generateMentionCandidates(rawMention: string): string[] {
-  const parts = rawMention.split(/[- ]+/);
-  const candidates: string[] = [];
-  
-  for (let i = 0; i < parts.length; i++) {
-      const candidateParts = parts.slice(0, i + 1);
-      let candidate = toKebabCase(candidateParts.join('-'));
-      
-      // Fuzzy Fix for "Pedagogu" -> "pedagogue"
-      if (candidate.endsWith('pedagogu')) {
-         candidate = candidate + 'e';
-      }
-      
-      candidates.push(candidate);
-  }
-  return candidates;
-}
-
 /**
  * Extract @mentions from message content - returns only first valid mention
  * Implements first-mention-only logic to prevent multiple agent responses
@@ -129,23 +333,26 @@ function generateMentionCandidates(rawMention: string): string[] {
 export function extractMentions(content: string): string[] {
   if (!content) return [];
 
-  // Robust regex to capture full multi-word names (e.g. "Madame Pedagogue")
-  // Matches @ followed by words, allowing spaces between them, until end of line or puctuation
-  const mentionRegex = /@([a-zA-Z0-9]+(?:[- ][a-zA-Z0-9]+)*)/g;
-  
-  const allCandidates: string[] = [];
+  const mentionRegex = /@(\w+(?:[-_]\w+)*)/g;
+  const allMentions: string[] = [];
+  let firstValidMention: string | null = null;
   let match;
 
-  // We only care about the FIRST mention found in the text
-  if ((match = mentionRegex.exec(content)) !== null) {
-      const mention = match[1];
-      if (mention && mention.length > 0) {
-          const candidates = generateMentionCandidates(mention);
-          allCandidates.push(...candidates);
+  while ((match = mentionRegex.exec(content)) !== null) {
+    const mention = match[1];
+    if (mention && mention.length > 0) {
+      const lowerMention = mention.toLowerCase();
+      allMentions.push(lowerMention);
+
+      // Only keep the first valid mention
+      if (firstValidMention === null) {
+        firstValidMention = lowerMention;
       }
+    }
   }
 
-  return allCandidates;
+  // Return array with first mention only
+  return firstValidMention ? [firstValidMention] : [];
 }
 
 /**
@@ -159,18 +366,16 @@ export function extractParagraphBeginningMentions(content: string): string[] {
   if (!content) return [];
 
   const validMentions: string[] = [];
-  // Updated regex to support spaces in names at start of line
-  const mentionPattern = /^@([a-zA-Z0-9]+(?:[- ][a-zA-Z0-9]+)*)/;
+  const mentionPattern = /^(?:hey|hi|hello|to)\s+@(\w+(?:[-_]\w+)*)\b|^@(\w+(?:[-_]\w+)*)\b/i;
   const lines = content.split(/\n/);
 
   for (const line of lines) {
     const trimmed = line.trimStart();
-    // Only match if @ is the very first character after trimming
-    if (trimmed.startsWith('@')) {
-      const match = trimmed.match(mentionPattern);
-      if (match && match[1]) {
-        const candidates = generateMentionCandidates(match[1]);
-        validMentions.push(...candidates);
+    const match = mentionPattern.exec(trimmed);
+    if (match) {
+      const mention = match[1] || match[2];
+      if (mention) {
+        validMentions.push(mention.toLowerCase());
       }
     }
   }
@@ -210,6 +415,16 @@ export function wouldAgentHaveRespondedToHistoricalMessage(
   agent: Agent,
   message: AgentMessage
 ): boolean {
+  const shellStdoutStreamMessage = message.role === 'assistant'
+    && typeof message.messageId === 'string'
+    && message.messageId.endsWith('-stdout');
+
+  // Persisted shell stdout stream messages are UI/history artifacts.
+  // Excluding them prevents large transcript echoes from inflating continuation context.
+  if (shellStdoutStreamMessage) {
+    return false;
+  }
+
   // Always include own messages (by agentId or sender)
   if (message.agentId === agent.id || message.sender?.toLowerCase() === agent.id.toLowerCase()) {
     return true;
@@ -229,6 +444,11 @@ export function wouldAgentHaveRespondedToHistoricalMessage(
 
   // Always include tool messages (they are results from previous interactions)
   if (message.role === 'tool' || message.sender === 'tool') {
+    return true;
+  }
+
+  // Always include assistant messages with tool_calls (required for tool result context)
+  if (message.role === 'assistant' && (message as ChatMessage).tool_calls?.length) {
     return true;
   }
 
@@ -285,6 +505,8 @@ export async function prepareMessagesForLLM(
   includeCurrentMessage?: MessageData
 ): Promise<AgentMessage[]> {
   const messages: AgentMessage[] = [];
+  let worldEnvMap: Record<string, string> = {};
+  let worldVariablesText = '';
 
   // Load FRESH agent from storage to get original system prompt (not patched)
   // This ensures we always use the clean system prompt from storage
@@ -294,6 +516,9 @@ export async function prepareMessagesForLLM(
     const storage = await createStorageWithWrappers();
     const freshAgent = await storage.loadAgent(worldId, agent.id);
     freshSystemPrompt = freshAgent?.systemPrompt;
+    const world = await storage.loadWorld(worldId);
+    worldVariablesText = world?.variables || '';
+    worldEnvMap = parseEnvText(worldVariablesText);
   } catch (error) {
     const { logger } = await import('./logger.js');
     logger.error('Could not load agent from storage for system prompt', {
@@ -305,15 +530,30 @@ export async function prepareMessagesForLLM(
     freshSystemPrompt = agent.systemPrompt;
   }
 
-  // IDEMPOTENCE: Always add system message first (if available)
-  // System messages are NEVER saved to storage
-  if (freshSystemPrompt) {
-    messages.push({
-      role: 'system',
-      content: freshSystemPrompt,
-      createdAt: new Date()
-    });
-  }
+  // IDEMPOTENCE: Always add a system message first.
+  // System messages are NEVER saved to storage.
+  const interpolatedPrompt = interpolateTemplateVariables(freshSystemPrompt || '', worldEnvMap);
+  const workingDirectory = getEnvValueFromText(worldVariablesText, 'working_directory') || getDefaultWorkingDirectory();
+  const shellExecutionRule = 'When using `shell_cmd`, execute commands only within this trusted working directory scope: ' + workingDirectory;
+  const promptWithShellExecutionRule = interpolatedPrompt.trim().length > 0
+    ? (interpolatedPrompt.endsWith('\n')
+      ? `${interpolatedPrompt}${shellExecutionRule}`
+      : `${interpolatedPrompt}\n${shellExecutionRule}`)
+    : shellExecutionRule;
+  const agentSkillsPromptSection = await buildAgentSkillsPromptSection();
+  const promptWithSkills = promptWithShellExecutionRule.endsWith('\n')
+    ? `${promptWithShellExecutionRule}\n${agentSkillsPromptSection}`
+    : `${promptWithShellExecutionRule}\n\n${agentSkillsPromptSection}`;
+  const mentionFormatRule = buildAgentMentionFormatRule();
+  const promptWithMentionRule = promptWithSkills.endsWith('\n')
+    ? `${promptWithSkills}\n${mentionFormatRule}`
+    : `${promptWithSkills}\n\n${mentionFormatRule}`;
+
+  messages.push({
+    role: 'system',
+    content: promptWithMentionRule,
+    createdAt: new Date()
+  });
 
   // Load FRESH conversation history from storage (not from in-memory agent)
   // This ensures we always have the latest messages
@@ -354,7 +594,7 @@ export async function prepareMessagesForLLM(
     messages.push(messageDataToAgentMessage(includeCurrentMessage));
   }
 
-  // Filter out client-side tool calls and approval results
+  // Filter out client-side tool calls and orphaned tool results.
   const { filterClientSideMessages } = await import('./message-prep.js');
   return filterClientSideMessages(messages);
 }

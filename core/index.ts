@@ -30,7 +30,14 @@
  * - Storage implementation: StorageAPI, storage factory functions
  * - Internal utilities: initializeLogger, getCategoryLogLevel
  *
- * Version: 3.0.0
+ * Recent Changes:
+ * - 2026-02-20: Enforced options-only HITL exports by removing input-mode helpers from public core surface.
+ * - 2026-02-14: Exported generic HITL option request/response APIs for world-scoped user approval flows.
+ * - 2026-02-14: Exported `waitForInitialSkillSync` to allow callers to await startup skill-registry auto-sync completion.
+ * - 2026-02-13: Exported chat-scoped stop-message processing controls for Electron IPC stop action.
+ * - 2026-02-08: Exported LLM provider configuration helpers for npm core library consumers
+ *
+ * Version: 3.1.0
  */
 
 // === WORLD MANAGEMENT ===
@@ -38,6 +45,10 @@ export {
   createWorld,
   getWorld,
   updateWorld,
+  setWorldVariablesText,
+  getWorldVariablesText,
+  getWorldEnvMap,
+  getWorldEnvValue,
   deleteWorld,
   listWorlds,
   getMemory,
@@ -68,17 +79,57 @@ export {
   clearToolsCache
 } from './mcp-server-registry.js';
 
+export {
+  skillRegistry,
+  syncSkills,
+  waitForInitialSkillSync,
+  getSkills,
+  getSkillsForSystemPrompt,
+  getSkill,
+  getSkillSourceScope,
+  clearSkillsForTests,
+  type SkillRegistryEntry,
+  type SkillSourceScope,
+  type SkillScopeFilterOptions,
+  type SyncSkillsOptions,
+  type SyncSkillsResult,
+} from './skill-registry.js';
+
+export {
+  requestWorldOption,
+  submitWorldHitlResponse,
+  submitWorldOptionResponse,
+  clearHitlStateForTests,
+  type HitlOption,
+  type HitlOptionRequest,
+  type HitlOptionResolution,
+  type HitlResponseResolution,
+} from './hitl.js';
+
 // === SHELL COMMAND TOOL ===
 export {
   executeShellCommand,
   getExecutionHistory,
   clearExecutionHistory,
+  stopShellCommandsForChat,
+  getProcessExecution,
+  listProcessExecutions,
+  cancelProcessExecution,
+  deleteProcessExecution,
+  subscribeProcessExecutionStatus,
+  clearProcessExecutionStateForTests,
   type CommandExecutionResult
 } from './shell-cmd-tool.js';
+
+export {
+  stopMessageProcessing,
+  type StopMessageProcessingResult
+} from './message-processing-control.js';
 
 // === CHAT MANAGEMENT ===
 export {
   newChat,
+  branchChatFromMessage,
   listChats,
   updateChat,
   deleteChat,
@@ -91,23 +142,42 @@ export {
   disableStreaming,
   publishMessage,
   publishMessageWithId,
-  publishToolResult,
-  setUsePiAgentCore,
-  isPiAgentCoreEnabled,
 } from './events/index.js';
 
 export {
   beginWorldActivity,
   trackWorldActivity,
+  getActiveProcessingChatIds,
+  isChatProcessing,
   type WorldActivityEventPayload,
   type WorldActivityEventType,
 } from './activity-tracker.js';
 
 // LLM Provider enum (needed for agent configuration)
-export { type World, type Agent, type Chat, type AgentMessage, type RemovalResult, type EditErrorLog, LLMProvider, EventType, type LLMResponse, type ToolResultData } from './types.js';
+export { type World, type Agent, type Chat, type AgentMessage, type RemovalResult, type EditErrorLog, LLMProvider, EventType, type LLMResponse } from './types.js';
+
+// === LLM PROVIDER CONFIGURATION ===
+export {
+  configureLLMProvider,
+  validateProviderConfig,
+  isProviderConfigured,
+  getConfiguredProviders,
+  clearAllConfiguration,
+  getConfigurationStatus,
+  type BaseLLMConfig,
+  type OpenAIConfig,
+  type AnthropicConfig,
+  type GoogleConfig,
+  type AzureConfig,
+  type XAIConfig,
+  type OpenAICompatibleConfig,
+  type OllamaConfig,
+  type ProviderConfigMap,
+  type ProviderConfig,
+} from './llm-config.js';
 
 // === LOGGER ===
-export { type LoggerConfig, type LogLevel, logger, createCategoryLogger, loggers } from './logger.js';
+export { type LoggerConfig, type LogLevel, logger, createCategoryLogger, loggers, addLogStreamCallback } from './logger.js';
 
 // === SUBSCRIPTION SYSTEM ===
 export { type ClientConnection, subscribeWorld } from './subscription.js';

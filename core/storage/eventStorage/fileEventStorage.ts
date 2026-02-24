@@ -11,15 +11,9 @@
  * - Support for time-based and sequence-based pagination
  * - Event type filtering
  * - Duplicate event ID handling (silently ignores duplicates)
+ * - Write locking to prevent concurrent write corruption
  * - No database dependencies
  * - Suitable for serverless and file-based deployments
- * - In-memory file locking to prevent concurrent write corruption
- * - Automatic backup and recovery for corrupted JSON files
- * 
- * File Locking Limitations:
- * - In-memory locking only prevents concurrent writes within same process
- * - Does NOT protect against concurrent writes from multiple processes/servers
- * - For multi-process deployments, use SQLite storage or external locking mechanism
  * 
  * Implementation:
  * - Uses JSON format for human-readable event storage
@@ -27,16 +21,17 @@
  * - File structure: baseDir/worldId/events/chatId.json
  * - World-scoped storage: events stored within each world's directory
  * - Checks for duplicate IDs before insertion (matches SQLite INSERT OR IGNORE behavior)
- * - FileLockManager ensures atomic read-modify-write operations
- * - Corrupted files are backed up with .corrupted.{timestamp} suffix
+ * - Write lock manager ensures atomic file operations per file path
  * 
  * Cascade Delete Behavior:
  * - Deleting a world directory removes all events for that world
  * - Deleting a chat file removes all events for that chat
  * 
  * Changes:
- * - 2026-02-03: Added file locking to prevent race conditions and JSON corruption
- * - 2026-02-03: Added automatic backup and recovery for corrupted JSON files
+ * - 2026-02-08: Fixed write lock queueing bug that allowed concurrent writes after first waiter
+ * - 2026-02-08: Switched event file writes to atomic temp-file + rename to avoid partial read/write races
+ * - 2026-02-08: Added recovery for valid JSON arrays with trailing corruption bytes and auto-rewrite repair
+ * - 2026-02-06: Added write lock manager to prevent concurrent write corruption during rapid event saves
  * - 2025-11-09: Fixed file paths to be world-scoped (baseDir/worldId/events/) instead of storage root
  * - 2025-11-03: Added duplicate event ID detection to prevent constraint violations
  */
@@ -46,46 +41,12 @@ import * as path from 'path';
 import { existsSync } from 'fs';
 import type { EventStorage, StoredEvent, GetEventsOptions } from './types.js';
 import { validateEventForPersistence } from './validation.js';
-import { createCategoryLogger } from '../../logger.js';
 
 /**
  * File storage configuration
  */
 export interface FileEventStorageConfig {
   baseDir: string;  // Base directory for event files
-}
-
-/**
- * Simple in-memory lock manager to prevent concurrent writes to the same file
- */
-class FileLockManager {
-  private locks = new Map<string, Promise<void>>();
-
-  /**
-   * Acquire a lock for a file path and execute the operation
-   */
-  async withLock<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
-    // Wait for any existing lock on this file
-    while (this.locks.has(filePath)) {
-      await this.locks.get(filePath);
-    }
-
-    // Create a new lock
-    let releaseLock: () => void;
-    const lockPromise = new Promise<void>(resolve => {
-      releaseLock = resolve;
-    });
-    this.locks.set(filePath, lockPromise);
-
-    try {
-      // Execute the operation
-      return await operation();
-    } finally {
-      // Release the lock
-      this.locks.delete(filePath);
-      releaseLock!();
-    }
-  }
 }
 
 /**
@@ -117,9 +78,103 @@ async function ensureDir(dir: string): Promise<void> {
   }
 }
 
+interface ParsedEventFile {
+  events: StoredEvent[];
+  recoveredFromTrailingData: boolean;
+}
+
+/**
+ * Extract first complete JSON array from content.
+ * Returns null if no complete array exists.
+ */
+function extractFirstJsonArray(content: string): string | null {
+  const start = content.indexOf('[');
+  if (start !== 0) {
+    return null;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let isEscaped = false;
+
+  for (let i = start; i < content.length; i++) {
+    const ch = content[i];
+
+    if (inString) {
+      if (isEscaped) {
+        isEscaped = false;
+        continue;
+      }
+
+      if (ch === '\\') {
+        isEscaped = true;
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (ch === '[') {
+      depth += 1;
+      continue;
+    }
+
+    if (ch === ']') {
+      depth -= 1;
+      if (depth === 0) {
+        return content.slice(start, i + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Parse event file content, allowing recovery when valid JSON has trailing bytes.
+ */
+function parseEventFileContent(content: string): ParsedEventFile {
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return { events: [], recoveredFromTrailingData: false };
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!Array.isArray(parsed)) {
+      throw new Error('Expected JSON array');
+    }
+    return { events: parsed as StoredEvent[], recoveredFromTrailingData: false };
+  } catch (error) {
+    const recoveredJson = extractFirstJsonArray(trimmed);
+    if (!recoveredJson) {
+      throw error;
+    }
+
+    const trailing = trimmed.slice(recoveredJson.length).trim();
+    if (!trailing) {
+      throw error;
+    }
+
+    const parsed = JSON.parse(recoveredJson);
+    if (!Array.isArray(parsed)) {
+      throw error;
+    }
+
+    return { events: parsed as StoredEvent[], recoveredFromTrailingData: true };
+  }
+}
+
 /**
  * Read all events from a JSON file
- * Includes error recovery for corrupted files
  */
 async function readEventsFromFile(filePath: string): Promise<StoredEvent[]> {
   if (!existsSync(filePath)) {
@@ -132,36 +187,82 @@ async function readEventsFromFile(filePath: string): Promise<StoredEvent[]> {
       return [];
     }
 
-    const events = JSON.parse(content) as StoredEvent[];
-    // Parse dates
-    return events.map(event => ({
+    const parsed = parseEventFileContent(content);
+    const events = parsed.events.map(event => ({
       ...event,
       createdAt: new Date(event.createdAt)
     }));
-  } catch (error) {
-    const logger = createCategoryLogger('file-event-storage');
-    logger.error('Failed to read events from file', { filePath, error });
 
-    // Attempt recovery: create backup and return empty array
-    try {
-      const backupPath = `${filePath}.corrupted.${Date.now()}`;
-      await fs.copyFile(filePath, backupPath);
-      logger.warn('Created backup of corrupted file', { backupPath });
-    } catch (backupError) {
-      logger.error('Failed to create backup', { backupError });
+    if (parsed.recoveredFromTrailingData) {
+      console.warn('[FileEventStorage] Recovered event file with trailing data:', filePath);
+      try {
+        await writeEventsToFile(filePath, events);
+      } catch (rewriteError) {
+        console.error('[FileEventStorage] Failed to rewrite recovered event file:', filePath, rewriteError);
+      }
     }
 
+    return events;
+  } catch (error) {
+    console.error('[FileEventStorage] Failed to read events from file:', filePath, error);
     return [];
   }
 }
 
 /**
- * Write events to a JSON file (overwrites existing file)
+ * Write events to a JSON file atomically
  */
 async function writeEventsToFile(filePath: string, events: StoredEvent[]): Promise<void> {
   const content = JSON.stringify(events, null, 2);
-  await fs.writeFile(filePath, content, 'utf-8');
+  const tempFilePath = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  try {
+    await fs.writeFile(tempFilePath, content, 'utf-8');
+    await fs.rename(tempFilePath, filePath);
+  } catch (error) {
+    try {
+      await fs.unlink(tempFilePath);
+    } catch {
+      // Ignore cleanup failures for temp files
+    }
+    throw error;
+  }
 }
+
+/**
+ * File write lock manager to prevent concurrent writes to the same file
+ */
+class WriteLockManager {
+  private locks = new Map<string, Promise<void>>();
+
+  /**
+   * Execute a write operation with exclusive file lock
+   */
+  async withLock<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
+    const previousTail = this.locks.get(filePath) ?? Promise.resolve();
+
+    let releaseCurrent!: () => void;
+    const currentLock = new Promise<void>((resolve) => {
+      releaseCurrent = resolve;
+    });
+
+    const queueTail = previousTail.then(() => currentLock);
+    this.locks.set(filePath, queueTail);
+
+    await previousTail;
+
+    try {
+      return await operation();
+    } finally {
+      releaseCurrent();
+      if (this.locks.get(filePath) === queueTail) {
+        this.locks.delete(filePath);
+      }
+    }
+  }
+}
+
+const writeLockManager = new WriteLockManager();
 
 /**
  * File-backed event storage implementation
@@ -169,7 +270,6 @@ async function writeEventsToFile(filePath: string, events: StoredEvent[]): Promi
 export class FileEventStorage implements EventStorage {
   private baseDir: string;
   private seqCounters = new Map<string, number>();
-  private lockManager = new FileLockManager();
 
   constructor(config: FileEventStorageConfig) {
     this.baseDir = config.baseDir;
@@ -217,8 +317,8 @@ export class FileEventStorage implements EventStorage {
 
     const filePath = getEventFilePath(this.baseDir, event.worldId, event.chatId);
 
-    // Use lock to prevent concurrent writes
-    await this.lockManager.withLock(filePath, async () => {
+    // Use lock to prevent concurrent writes to the same file
+    await writeLockManager.withLock(filePath, async () => {
       // Read existing events
       const existingEvents = await readEventsFromFile(filePath);
 
@@ -268,8 +368,8 @@ export class FileEventStorage implements EventStorage {
 
       const filePath = getEventFilePath(this.baseDir, worldId, chatId);
 
-      // Use lock to prevent concurrent writes
-      await this.lockManager.withLock(filePath, async () => {
+      // Use lock to prevent concurrent writes to the same file
+      await writeLockManager.withLock(filePath, async () => {
         // Read existing events
         const existingEvents = await readEventsFromFile(filePath);
         const existingIds = new Set(existingEvents.map(e => e.id));
@@ -483,14 +583,11 @@ export class FileEventStorage implements EventStorage {
       return;
     }
 
-    // Use lock to prevent concurrent access during compaction
-    await this.lockManager.withLock(filePath, async () => {
-      // Read all events
-      const events = await readEventsFromFile(filePath);
+    // Read all events
+    const events = await readEventsFromFile(filePath);
 
-      // Write them back (this removes any gaps or corruption)
-      await writeEventsToFile(filePath, events);
-    });
+    // Write them back (this removes any gaps or corruption)
+    await writeEventsToFile(filePath, events);
   }
 }
 

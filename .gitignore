@@ -33,7 +33,6 @@ coverage/
 # Temporary files
 tmp/
 temp/
-*.bak
 
 .playwright-mcp/
 docs/plan/
