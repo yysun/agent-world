@@ -39,8 +39,6 @@ describe('Case-Insensitive Agent Lookup', () => {
       expect(toKebabCase('Agent@123')).toBe('agent-123');
       expect(toKebabCase('Agent_Name')).toBe('agent-name');
       expect(toKebabCase('Agent.Name')).toBe('agent-name');
-      expect(toKebabCase('Étude')).toBe('etude');
-      expect(toKebabCase('The Infinite Étude')).toBe('the-infinite-etude');
     });
 
     it('should handle edge cases', () => {

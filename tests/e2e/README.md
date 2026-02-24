@@ -36,49 +36,19 @@ This directory contains E2E tests that make actual LLM API calls to validate rea
 ```bash
 # Auto mode (runs continuously)
 npx tsx tests/e2e/test-agent-response-rules.ts
+# OR use npm script
+npm run test:e2e
 
 # Interactive mode (pause at each step)
 npx tsx tests/e2e/test-agent-response-rules.ts -i
-
-# Create temporary test world instead of using Default World
-npx tsx tests/e2e/test-agent-response-rules.ts --create-world
+# OR use npm script
+npm run test:e2e:interactive
 
 # Specify model and provider
-TEST_PROVIDER=anthropic TEST_MODEL=claude-3-5-sonnet-20241022 npx tsx tests/e2e/test-agent-response-rules.ts --create-world
+TEST_PROVIDER=anthropic TEST_MODEL=claude-3-5-sonnet-20241022 npm run test:e2e
 ```
 
-**Expected Results**: All 5 tests should pass when agent response rules are working correctly.
-
-### 2. Tool Approval Flow (`test-approval-flow.ts`)
-
-Tests DENY, APPROVE_ONCE, and APPROVE_SESSION approval scenarios.
-
-**Run:**
-```bash
-npx tsx tests/e2e/test-approval-flow.ts
-```
-
-### 3. No Approval Required (`test-approval-none.ts`)
-
-Tests that tools execute directly when approval is disabled.
-
-**Run:**
-```bash
-# Auto mode
-npx tsx tests/e2e/test-approval-none.ts
-
-# Interactive mode
-npx tsx tests/e2e/test-approval-none.ts -i
-```
-
-### 4. Single Approval (`test-approve-once.ts`)
-
-Tests APPROVE_ONCE approval behavior.
-
-**Run:**
-```bash
-npx tsx tests/e2e/test-approve-once.ts
-```
+**Expected Results**: All tests should pass when agent response rules are working correctly.
 
 ### 2. Concurrent Chat Sessions (`test-concurrent-chats.ts`)
 
@@ -128,8 +98,8 @@ Example output:
 ```
 ═══════════════════════════════════════════════════════════════════
   Test Results Summary
-═══════════════════════════════════════════════════════════════════
-Total Tests: 5
+═════════════7
+Passed: 7ts: 5
 Passed: 5 ✅
 Failed: 0 ❌
 Pass Rate: 100.0%
@@ -140,9 +110,10 @@ Pass Rate: 100.0%
 ```
 
 ## Troubleshooting
-
-### "Failed to load Default World"
-- Ensure Default World exists with agents a1, a2, a3
+create test world"
+- Ensure your database is accessible
+- Check that the LLM provider (Ollama) is running
+- Verify TEST_MODEL environment variable matches an available model
 - Or use `--create-world` flag to create a temporary test world
 
 ### "API key not found" or 401 errors

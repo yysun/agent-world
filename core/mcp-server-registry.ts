@@ -102,7 +102,11 @@
  * Enhanced debug logging: Complete MCP data flow visibility (August 2025)
  * Scenario-based logging: Split into lifecycle, connection, tools, execution (October 2025)
  * Lifecycle management: Connection resilience and automatic reconnection (November 2025)
- * Explicit approval system: Replaced heuristic detection with structured metadata (November 2025)
+ * Explicit execution safety system: Replaced heuristic detection with structured metadata (November 2025)
+ * 2026-02-20: Added built-in `human_intervention_request` tool registration for generic human-in-the-loop prompts.
+ * 2026-02-20: Added built-in `create_agent` tool registration for approval-gated agent creation.
+ * 2026-02-14: Added built-in `load_skill` tool registration for progressive skill instruction loading.
+ * 2026-02-19: Added built-in `create_agent` tool registration with approval-gated agent creation.
  */
 
 import { createHash } from 'crypto';
@@ -114,6 +118,14 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getWorld } from './managers.js';
 import { createCategoryLogger } from './logger.js';
 import { createShellCmdToolDefinition } from './shell-cmd-tool.js';
+import { createLoadSkillToolDefinition } from './load-skill-tool.js';
+import { createCreateAgentToolDefinition } from './create-agent-tool.js';
+import { createHitlToolDefinition } from './hitl-tool.js';
+import {
+  createReadFileToolDefinition,
+  createListFilesToolDefinition,
+  createGrepToolDefinition,
+} from './file-tools.js';
 import { wrapToolWithValidation } from './tool-utils.js';
 import { type World } from './types.js';
 
@@ -140,7 +152,7 @@ export function sanitizeArgs(args: any): any {
     return args;
   }
 
-  const sensitiveKeys = ['key', 'password', 'token', 'secret', 'auth', 'apikey', 'api_key', 'authorization'];
+  const sensitiveKeys = ['key', 'password', 'token', 'secret', 'apikey', 'api_key'];
   const sanitized = { ...args };
 
   for (const key in sanitized) {
@@ -954,7 +966,7 @@ export async function mcpToolsToAiTools(
     let enhancedDescription = t.description ?? '';
     if (t.name === 'execute_command') {
       const originalDesc = t.description ?? '';
-      enhancedDescription = 'Execute a shell command ONLY when explicitly requested by keywords like: "run", "execute", "list files", "check directory", "show files", "ls", "cat file". DO NOT use for: greetings (hi, hello), questions (how are you, what is), or general conversation. User must explicitly indicate they want to run a shell command.';
+      enhancedDescription = 'Execute a user-requested shell command only when the user explicitly asks to run one. Do not use for greetings, general Q&A, or normal conversation. Contract: command must be a single executable token and arguments must be passed as separate argv tokens (no mini scripts). Keep execution inside the trusted working directory/scope configured by runtime guardrails. Reject out-of-scope path requests, shell control syntax (`&&`, `||`, pipes, redirects, substitution, backgrounding), and inline eval/script modes such as `sh -c`, `node -e`, `python -c`, or `powershell -Command`. Because commands run through an OS shell, do not execute untrusted command text.';
 
       logger.debug(`Enhanced tool description for execute_command`, {
         toolName: t.name,
@@ -993,8 +1005,8 @@ export async function mcpToolsToAiTools(
           agentId
         });
 
-        // NOTE: Approval now handled in tool-utils.ts wrapToolWithValidation()
-        // This ensures consistent approval flow for all tools (MCP and built-in)
+        // NOTE: Tool safety checks are handled in tool-utils.ts wrapToolWithValidation().
+        // This ensures consistent execution guardrails for all tools (MCP and built-in).
 
         // Debug log: Request data being sent to MCP server
         // OLLAMA BUG FIX: Translate "$" arguments to proper parameter names
@@ -1592,44 +1604,33 @@ export async function updateMCPServersForWorld(worldId: string, newMcpConfig: st
  * These tools don't require MCP server configuration
  * Built-in tools:
  * - shell_cmd: Execute shell commands
+ * - load_skill: Load full SKILL.md instructions by registry skill_id
+ * - create_agent: Create a new agent after explicit user approval
+ * - human_intervention_request: Ask a human question with options and optional confirmation
+ * - read_file: Read file contents with pagination controls
+ * - list_files: List directory entries
+ * - grep: Recursive text search across files
  * 
  * @returns Record of built-in tool definitions
  */
 function getBuiltInTools(): Record<string, any> {
   const shellCmdTool = createShellCmdToolDefinition();
-
-  const renderSheetMusicTool = {
-    name: 'render_sheet_music',
-    description: 'Render musical notes as sheet music on the frontend using VexFlow notation. Use this tool to visualize musical compositions.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        clef: { type: 'string', description: 'Clef type (e.g., treble, bass)' },
-        keySignature: { type: 'string', description: 'Key signature (e.g., C, G, Am)' },
-        timeSignature: { type: 'string', description: 'Time signature (e.g., 4/4, 3/4)' },
-        notes: { 
-          type: 'array', 
-          items: { type: 'object', additionalProperties: true },
-          description: 'Array of note objects with keys and duration' 
-        }
-      },
-      required: ['notes'],
-      additionalProperties: false
-    },
-    execute: async (args: any) => {
-      // Logic for backend execution (none needed, just ack)
-      return {
-        content: [{ 
-          type: 'text', 
-          text: `Sheet music rendered for ${args.notes?.length || 0} notes. Key: ${args.keySignature || 'N/A'}` 
-        }]
-      };
-    }
-  };
+  const loadSkillTool = createLoadSkillToolDefinition();
+  const createAgentTool = createCreateAgentToolDefinition();
+  const hitlTool = createHitlToolDefinition();
+  const readFileTool = createReadFileToolDefinition();
+  const listFilesTool = createListFilesToolDefinition();
+  const grepTool = createGrepToolDefinition();
 
   return {
     'shell_cmd': wrapToolWithValidation(shellCmdTool, 'shell_cmd'),
-    'render_sheet_music': wrapToolWithValidation(renderSheetMusicTool, 'render_sheet_music')
+    'load_skill': wrapToolWithValidation(loadSkillTool, 'load_skill'),
+    'create_agent': wrapToolWithValidation(createAgentTool, 'create_agent'),
+    'human_intervention_request': wrapToolWithValidation(hitlTool, 'human_intervention_request'),
+    'read_file': wrapToolWithValidation(readFileTool, 'read_file'),
+    'list_files': wrapToolWithValidation(listFilesTool, 'list_files'),
+    'grep': wrapToolWithValidation(grepTool, 'grep'),
+    'grep_search': wrapToolWithValidation(grepTool, 'grep_search'),
   };
 }
 
@@ -1639,7 +1640,7 @@ function getBuiltInTools(): Record<string, any> {
 /**
  * Get MCP tools available for a world with registry-level caching
  * Uses cache-first strategy to avoid repeated tool fetching during ephemeral connections
- * Includes built-in tools (shell_cmd) in addition to MCP server tools
+ * Includes built-in tools (`shell_cmd`, `load_skill`, `create_agent`) in addition to MCP server tools
  */
 export async function getMCPToolsForWorld(worldId: string): Promise<Record<string, any>> {
   const startTime = performance.now();

@@ -1,5 +1,11 @@
 # Agent World
 
+[![Latest Release](https://img.shields.io/github/v/release/yysun/agent-world?label=release)](https://github.com/yysun/agent-world/releases)
+
+<p align="center">
+	<img src="electron/assets/icons/agent-world-icon.svg" alt="Agent World Logo" width="120" />
+</p>
+
 *Build AI agent teams with just words—no coding required.*
 
 ## Why Agent World?
@@ -29,8 +35,28 @@ Paste that prompt. Agents come alive instantly.
 - ✅ No Code Required - Agents are defined entirely in natural language
 - ✅ Natural Communication - Agents understand context and conversations
 - ✅ Built-in Rules for Messages - Turn limits to prevent loops
+- ✅ Concurrent Chat Sessions - Isolated `chatId` routing enables parallel conversations
+- ✅ Progressive Agent Skills - Skills are discovered and loaded on demand via `load_skill`
+- ✅ Cross-Client HITL Approval - Option-based approvals in CLI, Web, and Electron
+- ✅ Runtime Controls - Session-scoped send/stop flows and tool lifecycle visibility
+- ✅ Safer Tool Execution - Trusted-CWD and argument-scope guards for `shell_cmd`
 - ✅ Multiple AI Providers - Use different models for different agents
-- ✅ Modern Web Interface - React + Next.js frontend with real-time chat
+- ✅ Web + CLI + Electron - Modern interfaces with real-time streaming and status feedback
+
+## Latest Highlights (since v0.11.1)
+
+- Web app now includes a Settings page, chat-history search, and branch-from-message workflow
+- Built-in `create_agent` tool now supports approval-first creation and inherits world chat defaults
+- File exploration is easier with built-in `read_file`, `list_files` (including recursive mode), and `grep`
+- Electron now supports folder-based world import/export with validation and conflict handling
+- Chat UX is smoother with clearer inline working status, better streaming feedback, and UI refinements
+- Real-time refresh behavior is improved across web and desktop when agents/world data changes
+
+## Release Notes
+
+- **v0.12.0** - Web settings/search/branching, built-in `create_agent`, new file tools, Electron folder import/export, and chat/status UX improvements
+- **v0.11.0** - Electron desktop workflow, concurrent chat sessions, main-agent routing, progressive skills + HITL, and runtime safety hardening
+- Full history: [CHANGELOG.md](CHANGELOG.md)
 
 ## What You Can Build
 
@@ -81,7 +107,7 @@ Each Agent World has a collection of agents that can communicate through a share
 | **Human message** | `Hello everyone!` | All active agents |
 | **Direct mention** | `@alice Can you help?` | Only @alice |
 | **Paragraph mention** | `Please review this:\n@alice` | Only @alice |
-| **Mid-text mention** | `I think @alice should help` | Nobody (saved to memory) |
+| **Mid-text mention** | `I think @alice should help` | Nobody (event is persisted; no agent-memory save) |
 | **Stop World** | `<world>pass</world>` | No agents |
 
 ### Agent Behavior
@@ -93,8 +119,12 @@ Each Agent World has a collection of agents that can communicate through a share
 
 **Agents never respond to:**
 - Their own messages
-- Other agents (unless @mentioned), but will save message to memory
-- Mid-text mentions (will save message to memory)
+- Other agents (unless @mentioned at paragraph start)
+- Mid-text mentions (not at paragraph start)
+
+**When messages are saved to agent memory:**
+- Incoming messages are saved only for agents that will respond
+- Non-responding agents skip agent-memory save (message events are still persisted)
 
 **Turn limits prevent loops:**
 - Default: 5 responses per conversation thread
@@ -110,82 +140,102 @@ Each Agent World has a collection of agents that can communicate through a share
 
 ### Quick Start
 
+Use npm package invocations (shown below). GitHub shorthand commands such as
+`npx agent-world/agent-world` are not supported entrypoints.
+
 **Option 1: Web Interface**
 ```bash
-npx agent-world-server
+npx agent-world@latest
 ```
 
 **Option 2: CLI Interface**
 1. Interactive Mode
 ```bash
-npx agent-world
+npx -p agent-world@latest agent-world-cli
 ```
 2. Command Mode
 ```bash
-npx agent-world -w default-world "hi" 
+npx -p agent-world@latest agent-world-cli -w default-world "hi" 
 ```
 3. Pipeline Mode
 ```bash
-echo "hi" | npx agent-world -w default-world
+echo "hi" | npx -p agent-world@latest agent-world-cli -w default-world
+```
+
+**Option 3: Electron Desktop App (repo)**
+```bash
+npm run electron:dev
 ```
 
 ## Project Structure
 
 See [Project Structure Documentation](project.md)
 
-## Development Scripts Convention
+## Development Scripts
 
-Agent World follows a consistent naming convention for all npm scripts:
+Agent World provides simple, consistent npm scripts for three main applications:
 
-| Script Pattern | Description | Example |
-|---------------|-------------|---------|
-| `<module>` | Shorthand for `<module>:start` | `npm run server` |
-| `<module>:start` | Run compiled code from `dist/` | `npm run server:start` |
-| `<module>:dev` | Run with tsx (no build needed) | `npm run server:dev` |
-| `<module>:watch` | Run with tsx in watch mode | `npm run server:watch` |
-
-**Available modules:** `server`, `cli`, `ws`, `tui`
-
-**Module Dependencies:**
-- `web:dev` / `web:watch` → Depends on `server` (waits for server to be ready)
-- `tui:dev` / `tui:watch` → Depends on `ws` (waits for WebSocket server)
-
-**Examples:**
+### Development (hot reload)
 ```bash
-# Production execution (requires build)
-npm run server        # Runs: node dist/server/index.js
-npm run cli           # Runs: node dist/cli/index.js
+npm run dev              # Web app with server (default)
+npm run web:dev          # Web app with server (explicit)
+npm run cli:dev          # CLI with watch mode
+npm run electron:dev     # Electron app
+```
 
-# Development (no build needed)
-npm run server:dev    # Runs: npx tsx server/index.ts
-npm run ws:dev        # Runs: npx tsx ws/index.ts
+### Production
+```bash
+npm start                # Web server (default)
+npm run web:start        # Web server (explicit)
+npm run cli:start        # CLI (built)
+npm run electron:start   # Electron app
+```
 
-# Watch mode (auto-restart on changes)
-npm run server:watch  # Runs: npx tsx --watch server/index.ts
-npm run cli:watch     # Runs: npx tsx --watch cli/index.ts
+### Behind the Scenes
+The scripts handle dependencies automatically:
+- **Web**: Builds core, starts server in watch mode, launches Vite dev server
+- **CLI**: Runs with tsx watch mode for instant feedback
+- **Electron**: Builds core, launches Electron with Vite HMR
 
-# With dependencies (auto-start required services)
-npm run web:dev       # Waits for server, then starts web
-npm run web:watch     # Runs server:watch + web in parallel
-npm run tui:dev       # Waits for ws, then starts tui
-npm run tui:watch     # Runs ws:watch + tui in parallel
+### Other Useful Scripts
+```bash
+npm run build            # Build all (core + root + web)
+npm run check            # TypeScript type checking
+npm test                 # Run unit tests
+npm run test:watch       # Watch mode
 ```
 
 ### Environment Setup
 
 Export your API keys as environment variables 
+For Azure OpenAI, all four `AZURE_OPENAI_*` variables are required together.
 
 ```bash
 # Required if Choose one or more
 export OPENAI_API_KEY="your-key-here"
 export ANTHROPIC_API_KEY="your-key-here"  
 export GOOGLE_API_KEY="your-key-here"
+export AZURE_OPENAI_API_KEY="your-key-here"
+export AZURE_OPENAI_RESOURCE_NAME="your-resource-name"
+export AZURE_OPENAI_DEPLOYMENT_NAME="your-deployment-name"
+export AZURE_OPENAI_API_VERSION="2024-10-21-preview"
 
 # Default: For local models
 export OLLAMA_BASE_URL="http://localhost:11434"
 ```
 
 Or create a `.env` file in your working directory with:
+
+```bash
+OPENAI_API_KEY=your-key-here
+ANTHROPIC_API_KEY=your-key-here
+GOOGLE_API_KEY=your-key-here
+AZURE_OPENAI_API_KEY=your-key-here
+AZURE_OPENAI_RESOURCE_NAME=your-resource-name
+AZURE_OPENAI_DEPLOYMENT_NAME=your-deployment-name
+AZURE_OPENAI_API_VERSION=2024-10-21-preview
+OLLAMA_BASE_URL=http://localhost:11434
+```
 
 ## Testing
 
@@ -218,37 +268,18 @@ Agent World uses **scenario-based logging** to help you debug specific issues wi
 
 ```bash
 # Database migration issues
-LOG_STORAGE_MIGRATION=info npm run server
+LOG_STORAGE_MIGRATION=info npm run web:dev
 
 # MCP server problems  
-LOG_MCP=debug npm run server
+LOG_MCP=debug npm run web:dev
 
 # Agent response debugging
-LOG_EVENTS_AGENT=debug LOG_LLM=debug npm run server
+LOG_EVENTS_AGENT=debug LOG_LLM=debug npm run web:dev
 ```
 
 **For complete logging documentation**, see [Logging Guide](docs/logging-guide.md).
 
-## Opik Integration (Observability)
-
-Agent World integrates with [Opik](https://www.comet.com/opik) to provide detailed tracing of agent executions, LLM calls, and tool usage.
-
-### Setup
-
-1.  **Sign Up**: Create an account at [Comet Opik](https://www.comet.com/signup).
-2.  **Get API Key**: Navigate to your Opik settings to generate an API Key.
-3.  **Configure Environment**:
-    Add the following to your `.env` file or export them in your shell:
-
-    ```bash
-    export OPIK_API_KEY="your-api-key"
-    export OPIK_WORKSPACE="your-workspace-name"  # Optional (default: default)
-    export OPIK_PROJECT="agent-world"            # Optional (default: agent-world-default)
-    ```
-
-Once configured, the CLI will automatically detect the key and start tracing your sessions. You can view traces in your Opik dashboard to debug agent reasoning and performance.
-
-## Learn More
+## Storage Configuration
 
 ### World Database Setup
 
@@ -264,8 +295,13 @@ export AGENT_WORLD_DATA_PATH=./data/worlds
 
 ## Learn More
 
+- **[Docs Home](docs/docs-home.md)** - Central navigation page for all major documentation
 - **[Building Agents with Just Words](docs/Building%20Agents%20with%20Just%20Words.md)** - Complete guide with examples
 - **[Shell Command Tool (shell_cmd)](docs/shell-cmd-tool.md)** - Built-in tool for executing shell commands
+- **[HITL Approval Flow](docs/hitl-approval-flow.md)** - Option-based approval flow across Core/Electron/Web/CLI
+- **[API Reference](openapi.yaml)** - OpenAPI 3.1 spec for the REST API
+- **[Using Core from npm](docs/core-npm-usage.md)** - Integration guide for server and browser apps
+- **[Electron Desktop App](docs/electron-desktop.md)** - Open-folder workflow and local world creation
 
 
 ## Built-in Tools
@@ -275,15 +311,65 @@ Agent World includes built-in tools that are automatically available to all agen
 ### shell_cmd
 Execute shell commands with full output capture and execution history. Perfect for file operations, system information, and automation tasks.
 
+- Enforces trusted working-directory scope from world/tool context
+- Validates command/path arguments to prevent out-of-scope traversal patterns
+- Supports lifecycle tracking and session-scoped cancellation in active runtimes
+
 ```typescript
 // Available to LLMs as 'shell_cmd' tool
 {
   "command": "ls",
-  "parameters": ["-la", "/tmp"]
+	"parameters": ["-la", "./"]
 }
 ```
 
 See [Shell Command Tool Documentation](docs/shell-cmd-tool.md) for complete details.
+
+### load_skill (Agent Skills)
+
+Agent World includes progressive skill loading through the `load_skill` built-in tool.
+
+- Skills are discovered from `SKILL.md` files in:
+  - Project roots: `.agents/skills`, `skills`
+  - User roots: `~/.agents/skills`, `~/.codex/skills`
+- The model receives compact skill summaries first, then calls `load_skill` only when full instructions are needed.
+- Skill activation in interactive runtimes is HITL-gated.
+
+Minimal `SKILL.md` example:
+
+```md
+---
+name: sql-review
+description: Review SQL migrations for safety and rollback compatibility.
+---
+
+# SQL Review Skill
+
+1. Check for destructive DDL.
+2. Verify index and lock impact.
+3. Validate rollback path.
+```
+
+HITL options for skill activation:
+
+- `yes_once`: approve this call only
+- `yes_in_session`: approve this `skill_id` in the current world/chat session
+- `no`: decline
+
+### human_intervention_request (Generic Human Input)
+
+`human_intervention_request` lets the model ask a human question, present options, and optionally require explicit confirmation.
+The tool is options-only (no free-text mode).
+
+Option example:
+
+```json
+{
+  "question": "Choose deployment strategy",
+  "options": ["Blue/Green", "Canary", "Rolling"],
+  "requireConfirmation": true
+}
+```
 
 ## Experimental Features
 
@@ -326,5 +412,3 @@ Agent World thrives on community examples and improvements:
 MIT License - Build amazing things and share them with the world!
 
 Copyright © 2025 Yiyi Sun
-
-
