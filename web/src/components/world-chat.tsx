@@ -489,6 +489,7 @@ export default function WorldChat(props: WorldChatProps) {
               } else if (message.toolCallData?.toolName === 'render_sheet_music') {
                   sheetMusicData = message.toolCallData.toolArgs;
               }
+                const sheetMusicJson = sheetMusicData ? JSON.stringify(sheetMusicData, null, 2) : null;
 
               return (
                 <div key={message.id || 'msg-' + index} className={messageClasses}>
@@ -522,6 +523,7 @@ export default function WorldChat(props: WorldChatProps) {
                   ) : (
                     <>
                       {sheetMusicData && <SheetMusic data={sheetMusicData} />}
+                      {sheetMusicJson && <pre className="log-details">{sheetMusicJson}</pre>}
                       {/* Render tool call request box for approval requests */}
                       {message.isToolCallRequest && message.toolCallData ? (
                         <ToolCallRequestBox message={message} />

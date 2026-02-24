@@ -99,16 +99,22 @@ const loggerValidation = createCategoryLogger('api.validation');
 const loggerMcp = createCategoryLogger('api.mcp');
 const loggerExport = createCategoryLogger('api.export');
 const DEFAULT_WORLD_NAME = 'Default World';
+const opikAttachedWorlds = new WeakSet<World>();
 
 /**
  * Helper to optionally attach Opik tracing to a World instance
  */
 function tryAttachOpik(world: World): void {
+  if (opikAttachedWorlds.has(world)) {
+    return;
+  }
+
   // Check if Opik is enabled via ENV or manual flag
   if ((process.env.OPIK_API_KEY || process.env.OPIK_ENABLED === 'true') && process.env.OPIK_ENABLED !== 'false') {
     try {
       const tracer = new OpikTracer();
       tracer.attachToWorld(world);
+      opikAttachedWorlds.add(world);
     } catch (error) {
       console.warn('Failed to attach Opik tracer in API:', error);
     }
@@ -203,7 +209,15 @@ function sendError(res: Response, status: number, message: string, code?: string
 }
 
 function toKebabCase(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/([a-z])([A-Z])/g, '$1-$2')
+    .replace(/[^a-zA-Z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase();
 }
 
 async function isAgentNameUnique(worldCtx: ReturnType<typeof createWorldContext>, agentName: string, excludeAgent?: string): Promise<boolean> {
@@ -686,6 +700,7 @@ async function handleNonStreamingToolResult(
           }
           subscription = sub;
           const activeWorld = subscription.world as World;
+          tryAttachOpik(activeWorld);
 
           // Listen to world activity events to detect when all processing is complete
           const worldActivityListener = (eventData: WorldActivityEventPayload) => {
@@ -785,6 +800,7 @@ async function handleStreamingToolResult(
   }
 
   const activeWorld = subscription.world as World;
+  tryAttachOpik(activeWorld);
 
   // Create SSE handler - automatically sets up headers, listeners, and cleanup
   const sseHandler = createSSEHandler(req, res, activeWorld, 'tool-result');
@@ -848,6 +864,7 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
         }
         subscription = sub;
         const world = subscription.world;
+        tryAttachOpik(world);
 
         // Listen to world activity events to detect when all processing is complete
         const worldActivityListener = (eventData: WorldActivityEventPayload) => {
@@ -948,6 +965,7 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
   }
 
   const world = subscription.world;
+  tryAttachOpik(world);
 
   // Create SSE handler - automatically sets up headers, listeners, and cleanup
   const sseHandler = createSSEHandler(req, res, world, 'chat');

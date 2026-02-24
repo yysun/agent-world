@@ -35,13 +35,15 @@ import * as path from 'path';
 // Parse command line arguments
 const worldName = process.argv[2];
 const mode = (process.argv[3] as 'replace' | 'merge') || 'replace';
+const newWorldName = process.argv[4]; // Optional new name for destination
 
 if (!worldName) {
   console.error('❌ Error: World name is required');
-  console.log('\nUsage: npx tsx scripts/migrate-storage.ts <world-name> [replace|merge]');
+  console.log('\nUsage: npx tsx scripts/migrate-storage.ts <world-name> [replace|merge] [new-world-name]');
   console.log('\nExamples:');
   console.log('  npx tsx scripts/migrate-storage.ts "The Infinite Étude" replace');
-  console.log('  AGENT_WORLD_STORAGE_TYPE=file npx tsx scripts/migrate-storage.ts "The Infinite Étude" merge');
+  console.log('  # Rename during migration:');
+  console.log('  AGENT_WORLD_STORAGE_TYPE=file npx tsx scripts/migrate-storage.ts "The Infinite Étude" replace "Infinite Étude"');
   process.exit(1);
 }
 
@@ -64,8 +66,7 @@ async function migrate() {
   console.log(`   Mode: ${mode.toUpperCase()}\n`);
 
   // Get root path
-  const rootPath = process.env.AGENT_WORLD_ROOT_PATH || 
-                   (process.env.HOME ? path.join(process.env.HOME, 'agent-world') : './agent-world');
+  const rootPath = process.env.AGENT_WORLD_DATA_PATH || './data';
 
   // Create source storage config
   const sourceConfig: StorageConfig = {
@@ -111,6 +112,13 @@ async function migrate() {
       process.exit(1);
     }
     
+    // Handle renaming if newWorldName provided
+    if (newWorldName) {
+        console.log(`\n✏️  Renaming world: "${worldData.name}" → "${newWorldName}"`);
+        worldData.name = newWorldName;
+        worldData.id = toKebabCase(newWorldName);
+    }
+    
     console.log(`   ✅ World loaded: ${worldData.name}`);
     console.log(`   Agents: ${worldData.agents?.size || 0}`);
 
@@ -132,11 +140,13 @@ async function migrate() {
     // Step 4: Handle destination based on mode
     console.log(`\n4️⃣  Preparing destination (${mode} mode)...`);
     
-    const destExists = await destStorage.worldExists(worldId);
+    // Use new world ID if renamed
+    const destWorldId = newWorldName ? toKebabCase(newWorldName) : worldId;
+    const destExists = await destStorage.worldExists(destWorldId);
     
     if (mode === 'replace' && destExists) {
       console.log(`   🗑️  Deleting existing world in ${destType}...`);
-      await destStorage.deleteWorld(worldId);
+      await destStorage.deleteWorld(destWorldId);
       console.log(`   ✅ Existing data cleared`);
     } else if (mode === 'merge' && destExists) {
       console.log(`   🔀 Merge mode: will preserve existing destination data`);
@@ -153,13 +163,13 @@ async function migrate() {
     console.log(`\n6️⃣  Saving agents to ${destType}...`);
     for (const agent of agents) {
       if (mode === 'merge') {
-        const exists = await destStorage.agentExists(worldId, agent.id);
+        const exists = await destStorage.agentExists(destWorldId, agent.id);
         if (exists) {
           console.log(`   ⏭️  Skipping ${agent.name} (already exists)`);
           continue;
         }
       }
-      await destStorage.saveAgent(worldId, agent);
+      await destStorage.saveAgent(destWorldId, agent);
       console.log(`   ✅ Saved: ${agent.name}`);
     }
 
@@ -169,27 +179,27 @@ async function migrate() {
       for (const chat of chats) {
         if (mode === 'merge') {
           // In merge mode, check if chat exists
-          const existingChats = await (destStorage as any).listChats(worldId);
+          const existingChats = await (destStorage as any).listChats(destWorldId);
           if (existingChats.some((c: any) => c.id === chat.id)) {
             console.log(`   ⏭️  Skipping chat ${chat.id} (already exists)`);
             continue;
           }
         }
-        await (destStorage as any).saveChat(worldId, chat);
+        await (destStorage as any).saveChat(destWorldId, chat);
         console.log(`   ✅ Saved chat: ${chat.id}`);
       }
     }
 
     console.log(`\n✨ Migration completed successfully!`);
     console.log(`\n📊 Summary:`);
-    console.log(`   World: ${worldName}`);
+    console.log(`   World: ${newWorldName || worldName}`);
     console.log(`   Agents migrated: ${agents.length}`);
     console.log(`   Chats migrated: ${chats.length}`);
     console.log(`   ${sourceType.toUpperCase()} → ${destType.toUpperCase()}`);
     console.log(`   Mode: ${mode}`);
     
     if (destType === 'file') {
-      console.log(`\n📁 File location: ${rootPath}/worlds/${worldId}/`);
+      console.log(`\n📁 File location: ${rootPath}/${destWorldId}/`);
     } else {
       console.log(`\n💾 Database: ${destConfig.sqlite?.database}`);
     }

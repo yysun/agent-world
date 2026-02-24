@@ -19,13 +19,13 @@ This document tracks the reorganization to improve isolation between Agent World
 #### 2. User Agent Data → `data/worlds/{world-name}/`
 **Before:**
 - `scripts/setup-infinite-etude.ts` (hardcoded prompts)
-- `data/infinite-etude/setup-agents.ts`
+- `data/worlds/the-infinite-etude/setup-agents.ts` (now canonical)
 
 **After:**
-- `data/worlds/infinite-etude/config.json` (agent configuration)
-- `data/worlds/infinite-etude/prompts/*.md` (individual prompt files)
-- `data/worlds/infinite-etude/setup-agents.ts` (reads from config)
-- `data/worlds/infinite-etude/README.md`
+- `data/worlds/the-infinite-etude/config.json` (agent configuration)
+- `data/worlds/the-infinite-etude/prompts/*.md` (individual prompt files)
+- `data/worlds/the-infinite-etude/setup-agents.ts` (reads from config)
+- `data/worlds/the-infinite-etude/README.md`
 
 **Rationale:** 
 - Follows same pattern as `data/worlds/default-world/`
@@ -49,7 +49,7 @@ This document tracks the reorganization to improve isolation between Agent World
 ### Remaining Global Scripts
 
 Scripts that stayed in `scripts/` directory:
-- `setup-infinite-etude.ts` - **DEPRECATED** (use `data/worlds/infinite-etude/setup-agents.ts`)
+- (none)
 
 Scripts moved to `tests/opik/`:
 - `eval-robustness.ts` - Opik safety regression testing (Phase 2 & 3)
@@ -75,8 +75,8 @@ agent-world.opik/
 ### Migration Notes
 
 - ✅ Opik verification script now runs from: `npx tsx packages/opik/scripts/verify-web-integration.ts`
-- ✅ Infinite Étude setup now runs from: `npx tsx data/worlds/infinite-etude/setup-agents.ts`
-- ⚠️ Old `scripts/setup-infinite-etude.ts` should be removed after confirming new setup works
+- ✅ Infinite Étude setup now runs from: `npx tsx data/worlds/the-infinite-etude/setup-agents.ts`
+- ✅ Legacy `scripts/setup-infinite-etude.ts` removed
 - ✅ Import path updated: `import SheetMusic from './demos/sheet-music'`
 
 ### Benefits

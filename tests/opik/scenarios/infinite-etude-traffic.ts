@@ -1,7 +1,7 @@
 
 import 'dotenv/config'; // Load env vars before anything else
-import { getWorld } from '../../../core/managers';
-import { processAgentMessage } from '../../../core/events/orchestrator';
+import { getWorld, newChat, clearAgentMemory } from '../../../core/managers';
+import { setUsePiAgentCore } from '../../../core/events/orchestrator';
 import { publishMessage } from '../../../core/events/publishers';
 import { subscribeAgentToMessages } from '../../../core/events/subscribers';
 import { toKebabCase } from '../../../core/utils';
@@ -19,6 +19,9 @@ function wait(ms: number) {
 }
 
 async function runTest() {
+  // Force classic orchestrator path for deterministic debugging runs
+  setUsePiAgentCore(false);
+
   // Configure Google Provider
   if (process.env.GOOGLE_API_KEY) {
       console.log("Configuring Google LLM Provider...");
@@ -32,11 +35,24 @@ async function runTest() {
   const worldId = toKebabCase(worldName);
   
   console.log(`Loading world: ${worldId}...`);
-  const world = await getWorld(worldId);
+  let world = await getWorld(worldId);
   
   if (!world) {
-    console.error("World not found. Run 'npx tsx data/infinite-etude/setup-agents.ts' first.");
+    console.error("World not found. Run 'npx tsx data/worlds/the-infinite-etude/setup-agents.ts' first.");
     process.exit(1);
+  }
+
+  console.log('Resetting to a fresh chat for deterministic scenario run...');
+  await newChat(worldId);
+  world = await getWorld(worldId);
+  if (!world) {
+    console.error('Failed to reload world after creating a fresh chat.');
+    process.exit(1);
+  }
+
+  console.log('Clearing agent memory and counters...');
+  for (const agent of world.agents.values()) {
+    await clearAgentMemory(worldId, agent.id);
   }
 
   // DEBUG: Inspect Agents
