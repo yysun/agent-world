@@ -50,8 +50,13 @@ export function invokeDesktopChannel<TResponse = unknown>(
   if (!isAllowedDesktopChannel(channel)) {
     throw new Error(`Blocked unsupported IPC channel: ${channel}`);
   }
-  if (typeof payload === 'undefined') {
-    return ipcRendererLike.invoke(channel) as Promise<TResponse>;
-  }
-  return ipcRendererLike.invoke(channel, payload) as Promise<TResponse>;
+  const promise = typeof payload === 'undefined'
+    ? ipcRendererLike.invoke(channel)
+    : ipcRendererLike.invoke(channel, payload);
+  return promise.then((result) => {
+    if (result !== null && typeof result === 'object' && '__ipcError' in (result as object)) {
+      throw new Error((result as { __ipcError: string }).__ipcError);
+    }
+    return result as TResponse;
+  });
 }

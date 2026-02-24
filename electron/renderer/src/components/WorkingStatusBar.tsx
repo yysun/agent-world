@@ -26,9 +26,26 @@ import ThinkingIndicator from './ThinkingIndicator';
 export interface WorkingStatusBarProps {
   chatStatus: WorkingStatus;
   agentStatuses: { id: string; name: string; status: WorkingStatus }[];
+  notification?: { text: string; kind: 'error' | 'success' | 'info' } | null;
 }
 
-export default function WorkingStatusBar({ chatStatus, agentStatuses }: WorkingStatusBarProps) {
+const notificationTextClass: Record<string, string> = {
+  error: 'text-destructive',
+  success: 'text-green-500',
+  info: 'text-muted-foreground',
+};
+
+export default function WorkingStatusBar({ chatStatus, agentStatuses, notification }: WorkingStatusBarProps) {
+  if (notification) {
+    return (
+      <div className="px-4 pb-1">
+        <div className={`mx-auto flex w-full max-w-[750px] items-center gap-1.5 text-xs ${notificationTextClass[notification.kind] ?? 'text-muted-foreground'}`}>
+          <span>{notification.text}</span>
+        </div>
+      </div>
+    );
+  }
+
   if (chatStatus === 'idle') {
     return null;
   }

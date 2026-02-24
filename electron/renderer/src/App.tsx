@@ -162,8 +162,27 @@ export default function App() {
   const [submittingHitlRequestId, setSubmittingHitlRequestId] = useState<string | null>(null);
   const hasActiveHitlPrompt = hitlPromptQueue.length > 0;
 
-  const setStatusText = useCallback((_text: string, _kind: string = 'info') => {
-    // Status notifications to be wired in Phase 7
+  const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [notification, setNotification] = useState<{ text: string; kind: 'error' | 'success' | 'info' } | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (notificationTimerRef.current !== null) {
+        clearTimeout(notificationTimerRef.current);
+      }
+    };
+  }, []);
+
+  const setStatusText = useCallback((text: string, kind: string = 'info') => {
+    const safeKind = (kind === 'error' || kind === 'success') ? kind : 'info';
+    setNotification({ text, kind: safeKind });
+    if (notificationTimerRef.current !== null) {
+      clearTimeout(notificationTimerRef.current);
+    }
+    notificationTimerRef.current = setTimeout(() => {
+      setNotification(null);
+      notificationTimerRef.current = null;
+    }, 5000);
   }, []);
 
   const {
@@ -1000,7 +1019,7 @@ export default function App() {
             rightPanelShellProps: mainContentRightPanelShellProps,
             rightPanelContentProps: mainContentRightPanelContentProps,
           }}
-          statusBar={<WorkingStatusBar chatStatus={chatStatus} agentStatuses={agentStatuses} />}
+          statusBar={<WorkingStatusBar chatStatus={chatStatus} agentStatuses={agentStatuses} notification={notification} />}
         />
       )}
       overlays={(
