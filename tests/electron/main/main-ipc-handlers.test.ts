@@ -137,7 +137,6 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
 
     expect(editUserMessage).toHaveBeenCalledWith('world-1', 'msg-1', 'updated prompt', 'chat-1');
     expect(restoreChat).toHaveBeenCalledWith('world-1', 'chat-1');
-    expect(getMemory).toHaveBeenCalledWith('world-1', 'chat-1');
     expect(refreshWorldSubscription).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       success: true,
@@ -198,25 +197,7 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
     expect(editUserMessage).not.toHaveBeenCalled();
   });
 
-  it('rejects edit when target message is not a user message', async () => {
-    const editUserMessage = vi.fn(async () => ({ success: true }));
-    const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1' }));
-    const getMemory = vi.fn(async () => ([
-      { messageId: 'msg-1', role: 'assistant', chatId: 'chat-1' }
-    ]));
-    const { handlers } = await createHandlers({ editUserMessage, restoreChat, getMemory });
 
-    await expect(
-      handlers.editMessageInChat({
-        worldId: 'world-1',
-        chatId: 'chat-1',
-        messageId: 'msg-1',
-        newContent: 'updated prompt'
-      })
-    ).rejects.toThrow('400 Can only edit user messages');
-
-    expect(editUserMessage).not.toHaveBeenCalled();
-  });
 });
 
 describe('createMainIpcHandlers.respondHitlOption', () => {

@@ -73,7 +73,7 @@ import { homedir } from 'os';
 import { realpathSync, promises as fsPromises } from 'fs';
 import { createCategoryLogger } from './logger.js';
 import { validateToolParameters } from './tool-utils.js';
-import { publishSSE } from './events/publishers.js';
+import { publishMessageWithId, publishSSE } from './events/publishers.js';
 import { getDefaultWorkingDirectory, getEnvValueFromText } from './utils.js';
 import {
   createShellProcessExecution,
@@ -1435,12 +1435,23 @@ export function createShellCmdToolDefinition() {
         throw new Error(scopeValidation.error);
       }
 
+      let stdoutStartEmitted = false;
       const emitStdoutToolStreamChunk = (chunk: string) => {
         if (!hasToolStreamContext) return;
         if (!chunk) return;
         if (!stdoutMessageId) return;
+        if (!stdoutStartEmitted) {
+          publishSSE(world, {
+            type: 'start',
+            toolName: 'shell_cmd',
+            messageId: stdoutMessageId,
+            agentName: streamAgentName,
+            chatId
+          });
+          stdoutStartEmitted = true;
+        }
         publishSSE(world, {
-          type: 'tool-stream',
+          type: 'chunk',
           toolName: 'shell_cmd',
           content: chunk,
           stream: 'stdout',
@@ -1480,6 +1491,30 @@ export function createShellCmdToolDefinition() {
 
       if (isCommandExecutionCanceled(result)) {
         throw new DOMException('Shell command execution canceled by user', 'AbortError');
+      }
+
+      // Emit SSE end and persist finalized stdout as an assistant message
+      if (hasToolStreamContext && stdoutMessageId && stdoutStartEmitted) {
+        publishSSE(world, {
+          type: 'end',
+          toolName: 'shell_cmd',
+          messageId: stdoutMessageId,
+          agentName: streamAgentName,
+          chatId
+        });
+        if (result.stdout) {
+          publishMessageWithId(world, result.stdout, streamAgentName, stdoutMessageId, chatId);
+          const ctxMessages = context?.messages;
+          if (Array.isArray(ctxMessages)) {
+            ctxMessages.push({
+              role: 'assistant',
+              sender: streamAgentName,
+              content: result.stdout,
+              messageId: stdoutMessageId,
+              chatId
+            });
+          }
+        }
       }
 
       if (llmResultMode === 'minimal') {
