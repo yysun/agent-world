@@ -335,7 +335,7 @@ async function executeSkillScripts(options: {
 
   const worldId = String(options.context?.world?.id || '').trim();
   const chatId = options.context?.chatId ?? options.context?.world?.currentChatId ?? null;
-  const executionDirectory = options.skillRoot;
+  const executionDirectory = options.context?.workingDirectory || options.skillRoot;
 
   if (!worldId || !options.context?.world) {
     return [{
@@ -437,11 +437,13 @@ async function executeSkillScripts(options: {
 function buildSuccessResult(options: {
   skillId: string;
   skillName: string;
+  skillRoot: string;
   markdown: string;
   scriptOutputs: Array<{ source: string; output: string }>;
   referenceFiles: string[];
+  scriptPaths: string[];
 }): string {
-  const { skillId, skillName, markdown, scriptOutputs, referenceFiles } = options;
+  const { skillId, skillName, skillRoot, markdown, scriptOutputs, referenceFiles, scriptPaths } = options;
   const escapedSkillId = escapeXmlText(skillId);
   const escapedSkillName = escapeXmlText(skillName);
   const hasActiveResources = scriptOutputs.length > 0;
@@ -465,6 +467,7 @@ function buildSuccessResult(options: {
     ]
     : [];
 
+  const hasReferencedScripts = scriptPaths.length > 0;
   const executionDirective = [
     '  <execution_directive>',
     `    You are now operating under the specialized ${escapedSkillName} protocol.`,
@@ -473,6 +476,9 @@ function buildSuccessResult(options: {
       ? '    2. Use the data in <active_resources> to complete the user\'s specific request.'
       : '    2. Use the skill instructions to complete the user\'s specific request.',
     '    3. If the workflow is multi-step, explicitly state your plan before executing.',
+    ...(hasReferencedScripts
+      ? [`    4. Scripts referenced in <instructions> are located at skill root: ${escapeXmlText(skillRoot)}. When invoking them via shell commands, construct the absolute path (e.g., ${escapeXmlText(skillRoot)}/scripts/example.py) since they may not be accessible via relative paths from the project directory.`]
+      : []),
     '  </execution_directive>',
   ];
 
@@ -543,9 +549,11 @@ export function createLoadSkillToolDefinition() {
         return buildSuccessResult({
           skillId: requestedSkillId,
           skillName: entry.skill_id,
+          skillRoot,
           markdown: instructionsMarkdown,
           scriptOutputs,
           referenceFiles,
+          scriptPaths,
         });
       } catch (error) {
         if (error instanceof SkillScriptExecutionError) {

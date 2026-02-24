@@ -485,23 +485,57 @@ describe('core/load-skill-tool', () => {
       },
     );
 
-    // Scope validation must use the skill-root-relative path ('scripts/setup.sh')
-    // and skillRoot as the trusted boundary — never the cwd-relative path
+    // Scope validation uses skill-root-relative path with skillRoot as the trusted boundary
     expect(mockedValidateShellCommandScope).toHaveBeenCalledWith(
       'bash',
       ['scripts/setup.sh'],
       '/projects/myapp/skills/my-skill',
     );
-    // Execution must use the fully-resolved absolute path for parameters
-    // and skillRoot as cwd — never the project working directory
+    // Execution uses absolute path for the script parameter
+    // and project working directory as cwd — not skillRoot
     expect(mockedExecuteShellCommand).toHaveBeenCalledWith(
       'bash',
       ['/projects/myapp/skills/my-skill/scripts/setup.sh'],
-      '/projects/myapp/skills/my-skill',
+      '/projects/myapp',
       expect.objectContaining({ timeout: 120000 }),
     );
     expect(result).toContain('<active_resources>');
     expect(result).toContain('formatted script output');
+    // Skill root injected into execution directive so LLM uses absolute paths for global skills
+    expect(result).toContain('skill root: /projects/myapp/skills/my-skill');
+  });
+
+  it('omits skill root directive from execution_directive when skill has no referenced scripts', async () => {
+    mockedGetSkill.mockReturnValue({
+      skill_id: 'pdf-extract',
+      description: 'Extract PDF content',
+      hash: 'e99a18ad',
+      lastUpdated: '2026-02-14T12:00:00.000Z',
+    });
+    mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
+    vi.mocked(fs.readFile).mockResolvedValue('# Skill Instructions\nDo analysis only.' as any);
+    mockedRequestWorldOption.mockResolvedValue({
+      worldId: 'world-1',
+      requestId: 'req-1',
+      chatId: 'chat-1',
+      optionId: 'yes_once',
+      source: 'user',
+    });
+
+    const tool = createLoadSkillToolDefinition();
+    const result = await tool.execute(
+      { skill_id: 'pdf-extract' },
+      undefined,
+      undefined,
+      {
+        world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+        chatId: 'chat-1',
+        workingDirectory: '/projects/myapp',
+      },
+    );
+
+    expect(result).toContain('<instructions>');
+    expect(result).not.toContain('skill root:');
   });
 
 });
