@@ -15,6 +15,8 @@
  * - `syncWorldRoster` is non-destructive: `working`/`complete` agents survive syncs.
  *
  * Recent Changes:
+ * - 2026-02-24: Added `completeWorkingChatAgents` to mark lingering `working`
+ *   agents as `complete` when HITL prompts arrive without an agent name.
  * - 2026-02-22: Created as part of status-registry migration (Phase 2).
  */
 
@@ -100,6 +102,36 @@ export function clearChatAgents(
  * because the session was interrupted before it could be persisted).
  */
 export function finalizeReplayedChat(
+  registry: StatusRegistry,
+  worldId: string,
+  chatId: string,
+): StatusRegistry {
+  const world = registry.worlds.get(worldId);
+  const chat = world?.chats.get(chatId);
+  if (!chat) return registry;
+
+  let changed = false;
+  const agents = new Map(chat.agents);
+  for (const [id, agent] of agents) {
+    if (agent.status === 'working') {
+      agents.set(id, { ...agent, status: 'complete' });
+      changed = true;
+    }
+  }
+  if (!changed) return registry;
+
+  const chats = new Map(world!.chats);
+  chats.set(chatId, { chatId, agents });
+  const worlds = new Map(registry.worlds);
+  worlds.set(worldId, { worldId, chats });
+  return { worlds };
+}
+
+/**
+ * Mark only currently-working agents in a chat as complete.
+ * Used for HITL pause events that may not include a specific agent identity.
+ */
+export function completeWorkingChatAgents(
   registry: StatusRegistry,
   worldId: string,
   chatId: string,

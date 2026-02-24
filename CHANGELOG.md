@@ -15,6 +15,7 @@ v0.13.0
 - Added a header refresh button to reload world agents/state quickly
 - Improved reliability for agent add/delete operations (race-condition and silent-failure fixes)
 - Switched to structured runtime events for more consistent real-time updates
+- Removed HITL timeout auto-resolution and added chat-load replay for unresolved HITL prompts so blocked approvals reappear with original request IDs
 
 **CLI & Startup**
 - Added Node.js preflight checks to CLI/server launchers for clearer startup behavior

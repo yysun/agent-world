@@ -884,7 +884,7 @@ describe('createChatSubscriptionEventHandler', () => {
     expect(onSessionSystemEvent).not.toHaveBeenCalled();
   });
 
-  it('forwards hitl-option-request system events even when chatId differs', () => {
+  it('ignores hitl-option-request system events when chatId differs', () => {
     const harness = createMessageStateHarness();
     const onSessionSystemEvent = vi.fn();
 
@@ -915,10 +915,43 @@ describe('createChatSubscriptionEventHandler', () => {
       }
     });
 
+    expect(onSessionSystemEvent).not.toHaveBeenCalled();
+  });
+
+  it('forwards unscoped hitl-option-request system events to selected session', () => {
+    const harness = createMessageStateHarness();
+    const onSessionSystemEvent = vi.fn();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
+      onSessionSystemEvent
+    });
+
+    handler({
+      type: 'system',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      system: {
+        eventType: 'hitl-option-request',
+        messageId: 'sys-hitl-unscoped',
+        content: {
+          eventType: 'hitl-option-request',
+          requestId: 'req-1',
+          title: 'Approval required',
+          options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }]
+        }
+      }
+    });
+
     expect(onSessionSystemEvent).toHaveBeenCalledWith(expect.objectContaining({
       eventType: 'hitl-option-request',
-      chatId: 'chat-2',
-      messageId: 'sys-hitl'
+      chatId: null,
+      messageId: 'sys-hitl-unscoped'
     }));
   });
 });

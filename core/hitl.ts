@@ -7,15 +7,17 @@
  * Key Features:
  * - Emits structured system events for option prompts (`hitl-option-request`).
  * - Resolves pending requests when renderer/API submits an option response.
- * - Supports deterministic timeout fallback for option requests.
+ * - Replays unresolved option prompts on chat load to recover prompt visibility.
  * - Maintains pending request map for validation and lifecycle cleanup.
  *
  * Implementation Notes:
  * - Requests are keyed by `(worldId, requestId)` to avoid cross-world collisions.
- * - Timeout fallback defaults to `no` when available, otherwise first option.
+ * - Replay is deterministic and scoped by `(worldId, chatId)`.
  * - Runtime is in-memory and process-local by design.
  *
  * Recent Changes:
+ * - 2026-02-24: Added `listPendingHitlPromptEvents` to expose scoped pending HITL prompt payloads for web chat-switch replay.
+ * - 2026-02-24: Removed timeout auto-resolution and added deterministic replay helpers for unresolved HITL requests.
  * - 2026-02-20: Enforced global options-only HITL runtime by removing input-mode request/response paths.
  * - 2026-02-14: Added initial generic HITL option request/response runtime.
  */
@@ -62,14 +64,24 @@ interface PendingHitlOptionRequest {
   requestId: string;
   chatId: string | null;
   optionIds: Set<string>;
-  defaultOptionId: string;
+  sequence: number;
+  eventContent: {
+    eventType: 'hitl-option-request';
+    requestId: string;
+    title: string;
+    message: string;
+    options: HitlOption[];
+    defaultOptionId: string;
+    metadata: Record<string, unknown> | null;
+    agentName: string | null;
+    replay?: true;
+  };
   metadata: Record<string, unknown> | null;
   resolve: (resolution: HitlResponseResolution) => void;
-  timeoutHandle: NodeJS.Timeout | null;
 }
 
-const DEFAULT_TIMEOUT_MS = 120_000;
 const pendingHitlRequests = new Map<string, PendingHitlOptionRequest>();
+let pendingRequestSequence = 0;
 
 function getPendingKey(worldId: string, requestId: string): string {
   return `${worldId}::${requestId}`;
@@ -117,13 +129,6 @@ function normalizeWorldChatId(world: World, chatId: string | null | undefined): 
   return world.currentChatId ?? null;
 }
 
-function normalizeTimeoutMs(timeoutMs: unknown): number {
-  const timeoutMsRaw = Number(timeoutMs ?? DEFAULT_TIMEOUT_MS);
-  return Number.isFinite(timeoutMsRaw) && timeoutMsRaw > 0
-    ? Math.floor(timeoutMsRaw)
-    : DEFAULT_TIMEOUT_MS;
-}
-
 function resolvePendingRequest(params: {
   pendingKey: string;
   pending: PendingHitlOptionRequest;
@@ -131,10 +136,58 @@ function resolvePendingRequest(params: {
 }): void {
   const { pendingKey, pending, resolution } = params;
   pendingHitlRequests.delete(pendingKey);
-  if (pending.timeoutHandle) {
-    clearTimeout(pending.timeoutHandle);
-  }
   pending.resolve(resolution);
+}
+
+function normalizeChatId(chatId: string | null | undefined): string | null {
+  if (chatId === undefined || chatId === null) {
+    return null;
+  }
+  const normalized = String(chatId).trim();
+  return normalized || null;
+}
+
+function resolveHitlAgentName(world: World, requestedAgentName: string | null | undefined): string | null {
+  const explicit = String(requestedAgentName || '').trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  const worldMainAgent = String(world?.mainAgent || '').trim();
+  if (worldMainAgent) {
+    return worldMainAgent;
+  }
+
+  return null;
+}
+
+function emitPendingRequest(world: World, pending: PendingHitlOptionRequest, replay: boolean): void {
+  const eventContent = replay
+    ? { ...pending.eventContent, replay: true as const }
+    : pending.eventContent;
+  const event: WorldSystemEvent = {
+    messageId: generateId(),
+    timestamp: new Date(),
+    chatId: pending.chatId,
+    content: eventContent,
+  };
+  world.eventEmitter.emit('system', event);
+}
+
+function getSortedPendingRequestsForScope(worldId: string, chatId?: string | null): PendingHitlOptionRequest[] {
+  const normalizedChatId = normalizeChatId(chatId);
+  const scoped = [...pendingHitlRequests.values()].filter((pending) => {
+    if (pending.worldId !== worldId) {
+      return false;
+    }
+    if (normalizedChatId === null) {
+      return true;
+    }
+    return pending.chatId === normalizedChatId;
+  });
+
+  scoped.sort((left, right) => left.sequence - right.sequence);
+  return scoped;
 }
 
 function validateResponseScope(
@@ -172,9 +225,20 @@ export async function requestWorldOption(
 
   const requestId = String(request.requestId || '').trim() || generateId();
   const chatId = normalizeWorldChatId(world, request.chatId);
-  const timeoutMs = normalizeTimeoutMs(request.timeoutMs);
   const defaultOptionId = resolveDefaultOptionId(normalizedOptions, request.defaultOptionId);
   const pendingKey = getPendingKey(worldId, requestId);
+  const sequence = ++pendingRequestSequence;
+
+  const eventContent: PendingHitlOptionRequest['eventContent'] = {
+    eventType: 'hitl-option-request',
+    requestId,
+    title: String(request.title || '').trim(),
+    message: String(request.message || '').trim(),
+    options: normalizedOptions,
+    defaultOptionId,
+    metadata: request.metadata || null,
+    agentName: resolveHitlAgentName(world, request.agentName),
+  };
 
   return await new Promise<HitlOptionResolution>((resolve) => {
     const pending: PendingHitlOptionRequest = {
@@ -182,9 +246,9 @@ export async function requestWorldOption(
       requestId,
       chatId,
       optionIds: new Set(normalizedOptions.map((option) => option.id)),
-      defaultOptionId,
+      sequence,
+      eventContent,
       metadata: request.metadata || null,
-      timeoutHandle: null,
       resolve: (resolution) => {
         resolve({
           requestId: resolution.requestId,
@@ -196,44 +260,38 @@ export async function requestWorldOption(
       },
     };
 
-    pending.timeoutHandle = setTimeout(() => {
-      const timeoutPending = pendingHitlRequests.get(pendingKey);
-      if (!timeoutPending) {
-        return;
-      }
-      resolvePendingRequest({
-        pendingKey,
-        pending: timeoutPending,
-        resolution: {
-          requestId,
-          worldId,
-          chatId,
-          optionId: timeoutPending.defaultOptionId,
-          source: 'timeout',
-        },
-      });
-    }, timeoutMs);
-
     pendingHitlRequests.set(pendingKey, pending);
-
-    const event: WorldSystemEvent = {
-      messageId: generateId(),
-      timestamp: new Date(),
-      chatId,
-      content: {
-        eventType: 'hitl-option-request',
-        requestId,
-        title: String(request.title || '').trim(),
-        message: String(request.message || '').trim(),
-        options: normalizedOptions,
-        defaultOptionId,
-        timeoutMs,
-        metadata: request.metadata || null,
-        agentName: request.agentName || null,
-      },
-    };
-    world.eventEmitter.emit('system', event);
+    emitPendingRequest(world, pending, false);
   });
+}
+
+export function replayPendingHitlRequests(world: World, chatId?: string | null): number {
+  const worldId = String(world?.id || '').trim();
+  if (!worldId) {
+    return 0;
+  }
+
+  const pendingForScope = getSortedPendingRequestsForScope(worldId, chatId);
+  for (const pending of pendingForScope) {
+    emitPendingRequest(world, pending, true);
+  }
+  return pendingForScope.length;
+}
+
+export function listPendingHitlPromptEvents(
+  world: World,
+  chatId?: string | null,
+): Array<{ chatId: string | null; content: PendingHitlOptionRequest['eventContent'] }> {
+  const worldId = String(world?.id || '').trim();
+  if (!worldId) {
+    return [];
+  }
+
+  const pendingForScope = getSortedPendingRequestsForScope(worldId, chatId);
+  return pendingForScope.map((pending) => ({
+    chatId: pending.chatId,
+    content: pending.eventContent,
+  }));
 }
 
 export function submitWorldOptionResponse(params: {
@@ -290,10 +348,6 @@ export function submitWorldHitlResponse(params: {
 }
 
 export function clearHitlStateForTests(): void {
-  for (const pending of pendingHitlRequests.values()) {
-    if (pending.timeoutHandle) {
-      clearTimeout(pending.timeoutHandle);
-    }
-  }
   pendingHitlRequests.clear();
+  pendingRequestSequence = 0;
 }

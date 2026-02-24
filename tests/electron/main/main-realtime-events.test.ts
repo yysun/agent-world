@@ -499,7 +499,7 @@ describe('createRealtimeEventsRuntime', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('forwards hitl-option-request system events even when scoped to a different chat', async () => {
+  it('does not forward hitl-option-request system events scoped to a different chat', async () => {
     const send = vi.fn();
     const worldSubscription = createWorldSubscription();
 
@@ -532,13 +532,100 @@ describe('createRealtimeEventsRuntime', () => {
       timestamp: new Date('2026-02-20T00:00:00.000Z')
     });
 
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('forwards unscoped hitl-option-request system events to chat-scoped subscriptions', async () => {
+    const send = vi.fn();
+    const worldSubscription = createWorldSubscription();
+
+    const runtime = createRealtimeEventsRuntime({
+      getMainWindow: () => ({
+        isDestroyed: () => false,
+        webContents: { send }
+      }),
+      chatEventChannel: 'chat:event',
+      addLogStreamCallback: () => () => { },
+      subscribeWorld: async () => worldSubscription,
+      ensureCoreReady: async () => { }
+    });
+
+    await runtime.subscribeChatEvents({
+      subscriptionId: 'sub-hitl-unscoped',
+      worldId: 'world-1',
+      chatId: 'chat-1'
+    });
+
+    worldSubscription.world.eventEmitter.emit('system', {
+      content: {
+        eventType: 'hitl-option-request',
+        requestId: 'req-1',
+        title: 'Approval required',
+        options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }]
+      },
+      messageId: 'sys-hitl-unscoped',
+      timestamp: new Date('2026-02-20T00:00:00.000Z')
+    });
+
     expect(send).toHaveBeenCalledWith(
       'chat:event',
       expect.objectContaining({
         type: 'system',
-        subscriptionId: 'sub-hitl',
+        subscriptionId: 'sub-hitl-unscoped',
         worldId: 'world-1',
-        chatId: 'chat-2',
+        chatId: 'chat-1',
+        system: expect.objectContaining({
+          eventType: 'hitl-option-request'
+        })
+      })
+    );
+  });
+
+  it('replays pending HITL requests after chat subscription is attached', async () => {
+    const send = vi.fn();
+    const worldSubscription = createWorldSubscription();
+    const replayPendingHitlRequests = vi.fn((world: any, chatId: string) => {
+      world.eventEmitter.emit('system', {
+        chatId,
+        content: {
+          eventType: 'hitl-option-request',
+          requestId: 'req-replay-1',
+          title: 'Approval required',
+          options: [{ id: 'yes', label: 'Yes' }],
+          replay: true,
+        },
+        messageId: 'sys-replay-1',
+        timestamp: new Date('2026-02-24T00:00:00.000Z')
+      });
+      return 1;
+    });
+
+    const runtime = createRealtimeEventsRuntime({
+      getMainWindow: () => ({
+        isDestroyed: () => false,
+        webContents: { send }
+      }),
+      chatEventChannel: 'chat:event',
+      addLogStreamCallback: () => () => { },
+      subscribeWorld: async () => worldSubscription,
+      ensureCoreReady: async () => { },
+      replayPendingHitlRequests,
+    });
+
+    await runtime.subscribeChatEvents({
+      subscriptionId: 'sub-replay',
+      worldId: 'world-1',
+      chatId: 'chat-1'
+    });
+
+    expect(replayPendingHitlRequests).toHaveBeenCalledWith(worldSubscription.world, 'chat-1');
+    expect(send).toHaveBeenCalledWith(
+      'chat:event',
+      expect.objectContaining({
+        type: 'system',
+        subscriptionId: 'sub-replay',
+        worldId: 'world-1',
+        chatId: 'chat-1',
         system: expect.objectContaining({
           eventType: 'hitl-option-request'
         })

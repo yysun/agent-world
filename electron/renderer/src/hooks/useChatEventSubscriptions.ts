@@ -13,6 +13,11 @@
  * - Accepts state setters/callbacks via dependency injection.
  *
  * Recent Changes:
+ * - 2026-02-24: Fixed subscription cycling: changed loadedWorld dependency to loadedWorld?.id
+ *   so world metadata refreshes (HITL response, chat switch) no longer tear down and
+ *   recreate the subscription, losing realtime events and working indicator state.
+ * - 2026-02-24: Added exported HITL queue-ingestion helper for deterministic replay dedupe testing.
+ *   Deferred HITL enqueue uses batched flush to avoid dropping prompts on multi-replay.
  * - 2026-02-24: Removed activityStateRef — activity-state.ts deleted as part of
  *   working-status simplification.
  * - 2026-02-22: Removed onSessionResponseStateChange, setPendingResponseSessionIds,
@@ -25,7 +30,7 @@
  * - 2026-02-17: Extracted from App.tsx during CC pass.
  */
 
-import { Dispatch, MutableRefObject, SetStateAction, useEffect } from 'react';
+import { Dispatch, MutableRefObject, SetStateAction, useEffect, useRef } from 'react';
 import {
   createChatSubscriptionEventHandler,
   createGlobalLogEventHandler,
@@ -79,6 +84,69 @@ type UseChatEventSubscriptionsArgs = {
   setHitlPromptQueue: Dispatch<SetStateAction<HitlPrompt[]>>;
 };
 
+type SessionSystemEventPayload = {
+  eventType?: string | null;
+  chatId?: string | null;
+  content?: unknown;
+};
+
+export function enqueueHitlPromptFromSystemEvent(
+  existing: HitlPrompt[],
+  systemEvent: SessionSystemEventPayload,
+  fallbackChatId: string | null
+): HitlPrompt[] {
+  const eventType = String(systemEvent?.eventType || '').trim();
+  if (eventType !== 'hitl-option-request') {
+    return existing;
+  }
+
+  const content = systemEvent?.content && typeof systemEvent.content === 'object'
+    ? (systemEvent.content as Record<string, unknown>)
+    : null;
+  const requestId = String(content?.requestId || '').trim();
+  if (!requestId) {
+    return existing;
+  }
+
+  if (existing.some((entry) => entry.requestId === requestId)) {
+    return existing;
+  }
+
+  const options = Array.isArray(content?.options)
+    ? content.options
+      .map((option) => ({
+        id: String(option?.id || '').trim(),
+        label: String(option?.label || '').trim(),
+        description: option?.description ? String(option.description) : ''
+      }))
+      .filter((option) => option.id && option.label)
+    : [];
+  if (options.length === 0) {
+    return existing;
+  }
+
+  const metadata = content?.metadata && typeof content.metadata === 'object'
+    ? (content.metadata as Record<string, unknown>)
+    : null;
+
+  return [
+    ...existing,
+    {
+      requestId,
+      chatId: systemEvent?.chatId || fallbackChatId || null,
+      title: String(content?.title || 'Approval required').trim() || 'Approval required',
+      message: String(content?.message || '').trim(),
+      mode: 'option',
+      options,
+      ...(typeof content?.defaultOptionId === 'string' ? { defaultOptionId: String(content.defaultOptionId) } : {}),
+      metadata: {
+        refreshAfterDismiss: metadata?.refreshAfterDismiss === true,
+        kind: typeof metadata?.kind === 'string' ? metadata.kind : undefined,
+      },
+    }
+  ];
+}
+
 export function useChatEventSubscriptions({
   api,
   loadedWorld,
@@ -90,6 +158,9 @@ export function useChatEventSubscriptions({
   resetActivityRuntimeState,
   setHitlPromptQueue,
 }: UseChatEventSubscriptionsArgs) {
+  const pendingHitlEventsRef = useRef<Array<{ systemEvent: any; fallbackChatId: string | null }>>([]);
+  const pendingHitlFlushTimerRef = useRef<number | null>(null);
+
   useEffect(() => {
     const removeListener = api.onChatEvent(createGlobalLogEventHandler({
       loadedWorldId: loadedWorld?.id,
@@ -102,79 +173,52 @@ export function useChatEventSubscriptions({
     };
   }, [api, loadedWorld?.id, selectedSessionId, setMessages]);
 
+  const loadedWorldId = loadedWorld?.id;
+
   useEffect(() => {
-    if (!loadedWorld?.id || !selectedSessionId) {
+    if (!loadedWorldId || !selectedSessionId) {
       return undefined;
     }
 
     const subscriptionId = `chat-${Date.now()}-${chatSubscriptionCounter.current++}`;
     const removeListener = api.onChatEvent(createChatSubscriptionEventHandler({
       subscriptionId,
-      loadedWorldId: loadedWorld.id,
+      loadedWorldId,
       selectedSessionId,
       streamingStateRef,
       setMessages,
       onSessionSystemEvent: (systemEvent) => {
-        if (!loadedWorld?.id) return;
+        if (!loadedWorldId) return;
         const eventType = String(systemEvent?.eventType || '').trim();
         if (eventType === 'chat-title-updated') {
           const targetChatId = String(systemEvent?.chatId || selectedSessionId || '').trim() || null;
-          refreshSessions(loadedWorld.id, targetChatId).catch(() => { });
+          refreshSessions(loadedWorldId, targetChatId).catch(() => { });
           return;
         }
         if (eventType !== 'hitl-option-request') {
           return;
         }
 
-        const content = systemEvent?.content && typeof systemEvent.content === 'object'
-          ? (systemEvent.content as Record<string, unknown>)
-          : null;
-        const requestId = String(content?.requestId || '').trim();
-        if (!requestId) {
-          return;
-        }
+        pendingHitlEventsRef.current.push({ systemEvent, fallbackChatId: selectedSessionId });
 
-        const options = Array.isArray(content?.options)
-          ? content.options
-            .map((option) => ({
-              id: String(option?.id || '').trim(),
-              label: String(option?.label || '').trim(),
-              description: option?.description ? String(option.description) : ''
-            }))
-            .filter((option) => option.id && option.label)
-          : [];
-        if (options.length === 0) {
-          return;
+        if (pendingHitlFlushTimerRef.current === null) {
+          pendingHitlFlushTimerRef.current = window.setTimeout(() => {
+            const batch = pendingHitlEventsRef.current.splice(0);
+            pendingHitlFlushTimerRef.current = null;
+            if (batch.length === 0) return;
+            setHitlPromptQueue((existing) => {
+              let queue = existing;
+              for (const entry of batch) {
+                queue = enqueueHitlPromptFromSystemEvent(queue, entry.systemEvent, entry.fallbackChatId);
+              }
+              return queue;
+            });
+          }, 0);
         }
-
-        setHitlPromptQueue((existing) => {
-          if (existing.some((entry) => entry.requestId === requestId)) {
-            return existing;
-          }
-          const metadata = content?.metadata && typeof content.metadata === 'object'
-            ? (content.metadata as Record<string, unknown>)
-            : null;
-          return [
-            ...existing,
-            {
-              requestId,
-              chatId: systemEvent?.chatId || selectedSessionId || null,
-              title: String(content?.title || 'Approval required').trim() || 'Approval required',
-              message: String(content?.message || '').trim(),
-              mode: 'option',
-              options,
-              ...(typeof content?.defaultOptionId === 'string' ? { defaultOptionId: String(content.defaultOptionId) } : {}),
-              metadata: {
-                refreshAfterDismiss: metadata?.refreshAfterDismiss === true,
-                kind: typeof metadata?.kind === 'string' ? metadata.kind : undefined,
-              },
-            }
-          ];
-        });
       }
     }));
 
-    api.subscribeChatEvents(loadedWorld.id, selectedSessionId, subscriptionId).catch(() => { });
+    api.subscribeChatEvents(loadedWorldId, selectedSessionId, subscriptionId).catch(() => { });
 
     return () => {
       removeListener();
@@ -182,12 +226,17 @@ export function useChatEventSubscriptions({
       if (streamingStateRef.current) {
         streamingStateRef.current.cleanup();
       }
+      if (pendingHitlFlushTimerRef.current !== null) {
+        clearTimeout(pendingHitlFlushTimerRef.current);
+        pendingHitlFlushTimerRef.current = null;
+      }
+      pendingHitlEventsRef.current = [];
       resetActivityRuntimeState();
     };
   }, [
     api,
     chatSubscriptionCounter,
-    loadedWorld,
+    loadedWorldId,
     refreshSessions,
     resetActivityRuntimeState,
     selectedSessionId,

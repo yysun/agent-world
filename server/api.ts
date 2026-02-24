@@ -5,6 +5,7 @@
  * Supports world/agent/chat management with optimized serialization and error handling.
  *
  * Changes:
+ * - 2026-02-24: Added `hitlPrompts` payload to `POST /worlds/:worldName/setChat/:chatId` responses so web chat switches can render replayed pending HITL prompts.
  * - 2026-02-21: Removed temporary server-side folder-picker endpoint in favor of web File API based selection.
  * - 2026-02-20: Enforced options-only HITL response endpoint `POST /worlds/:worldName/hitl/respond` (`optionId` required).
  * - 2026-02-14: Added HITL option response endpoint `POST /worlds/:worldName/hitl/respond` for web/CLI approval submissions.
@@ -69,6 +70,7 @@ import {
   listChats,
   newChat,
   restoreChat,
+  listPendingHitlPromptEvents,
   deleteChat as deleteChatCore,
   clearAgentMemory,
   listAgents as listAgentsCore,
@@ -1201,17 +1203,22 @@ router.post('/worlds/:worldName/setChat/:chatId', validateWorld, async (req: Req
 
     const updatedWorld = await worldCtx.setChat(chatId);
     if (!updatedWorld) {
+      const pendingHitlPrompts = listPendingHitlPromptEvents(currentWorld, currentWorld.currentChatId || null);
       res.json({
         world: serializeWorld(currentWorld),
         chatId: currentWorld.currentChatId,
+        hitlPrompts: pendingHitlPrompts,
         success: false
       });
       return;
     }
 
+    const pendingHitlPrompts = listPendingHitlPromptEvents(updatedWorld, updatedWorld.currentChatId || null);
+
     res.json({
       world: serializeWorld(updatedWorld),
       chatId: updatedWorld.currentChatId,
+      hitlPrompts: pendingHitlPrompts,
       success: true
     });
   } catch (error) {

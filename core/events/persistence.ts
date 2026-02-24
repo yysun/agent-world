@@ -22,6 +22,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-24: Skip persistence for replay-only HITL system events (`eventType='hitl-option-request'` with `replay=true`).
  * - 2025-11-09: Fixed event persistence - use world.eventStorage directly instead of creating separate instance
  * - 2025-01-09: Extracted from events.ts for modular architecture
  */
@@ -277,6 +278,12 @@ export function setupEventPersistence(world: World): () => void {
 
   // System event persistence
   const systemHandler = (event: WorldSystemEvent): void | Promise<void> => {
+    const payload = event.content as Record<string, unknown> | null;
+    const isReplayHitl = payload?.eventType === 'hitl-option-request' && payload?.replay === true;
+    if (isReplayHitl) {
+      return;
+    }
+
     const eventData = {
       id: event.messageId,
       worldId: world.id,

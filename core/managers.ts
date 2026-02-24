@@ -25,6 +25,7 @@
  * - Error log persistence with 100-entry retention policy
  *
  * Recent Changes:
+ * - 2026-02-24: Replays unresolved HITL prompts during `restoreChat` so blocked requests become visible again on chat load.
  * - 2026-02-20: Added `claimAgentCreationSlot` to allow `create_agent` tool to hold the TOCTOU slot before showing approval dialog, preventing duplicate-approval race conditions.
  * - 2026-02-20: Added `createAgent` option `allowWhileWorldProcessing` so approval-gated in-flight tool calls can create agents without disabling default processing guards.
  * - 2026-02-16: Added `branchChatFromMessage` to create a new chat branched from an assistant message and copy source-chat history up to the target message.
@@ -80,6 +81,7 @@ import { getWorldDir } from './storage/world-storage.js';
 import { getDefaultRootPath } from './storage/storage-factory.js';
 import { NEW_CHAT_TITLE, isDefaultChatTitle } from './chat-constants.js';
 import { hasActiveChatMessageProcessing, stopMessageProcessing } from './message-processing-control.js';
+import { replayPendingHitlRequests } from './hitl.js';
 
 // Type imports
 import type {
@@ -1123,6 +1125,7 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
   }
 
   if (world.currentChatId === chatId) {
+    replayPendingHitlRequests(world, chatId);
     return world;
   }
 
@@ -1138,6 +1141,9 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
   world = await updateWorld(resolvedWorldId, {
     currentChatId: chatId
   });
+  if (world) {
+    replayPendingHitlRequests(world, chatId);
+  }
   return world;
 }
 

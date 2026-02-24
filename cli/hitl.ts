@@ -8,6 +8,7 @@
  * - Parse `hitl-option-request` system payloads into normalized structures.
  * - Resolve user input into option IDs (by number or option id).
  * - Provide deterministic fallback option resolution.
+ * - Guard duplicate replayed requests via requestId-tracking helper.
  *
  * Implementation Notes:
  * - Parser accepts generic event payloads and rejects incomplete requests.
@@ -56,17 +57,17 @@ export function parseHitlPromptRequest(eventData: unknown): HitlPromptRequestPay
 
   const options: HitlOptionPayload[] = Array.isArray(content.options)
     ? content.options
-        .map((option): HitlOptionPayload => {
-          const optionRecord = option && typeof option === 'object'
-            ? (option as Record<string, unknown>)
-            : null;
-          return {
-            id: String(optionRecord?.id || '').trim(),
-            label: String(optionRecord?.label || '').trim(),
-            description: optionRecord?.description ? String(optionRecord.description) : undefined
-          };
-        })
-        .filter((option) => option.id.length > 0 && option.label.length > 0)
+      .map((option): HitlOptionPayload => {
+        const optionRecord = option && typeof option === 'object'
+          ? (option as Record<string, unknown>)
+          : null;
+        return {
+          id: String(optionRecord?.id || '').trim(),
+          label: String(optionRecord?.label || '').trim(),
+          description: optionRecord?.description ? String(optionRecord.description) : undefined
+        };
+      })
+      .filter((option) => option.id.length > 0 && option.label.length > 0)
     : [];
 
   if (options.length === 0) {
@@ -116,4 +117,19 @@ export function resolveHitlOptionSelectionInput(
     return byId.id;
   }
   return null;
+}
+
+export function markHitlRequestHandled(
+  handledRequestIds: Set<string>,
+  requestId: string
+): boolean {
+  const normalizedRequestId = String(requestId || '').trim();
+  if (!normalizedRequestId) {
+    return false;
+  }
+  if (handledRequestIds.has(normalizedRequestId)) {
+    return false;
+  }
+  handledRequestIds.add(normalizedRequestId);
+  return true;
 }

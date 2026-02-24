@@ -274,7 +274,28 @@ export default function App() {
 
     setSubmittingHitlRequestId(requestId);
     try {
-      await api.respondHitlOption(worldId, requestId, normalizedOptionId, prompt.chatId || null);
+      const normalizeHitlResponse = (value: unknown): { accepted: boolean; reason: string } => {
+        const payload = (value && typeof value === 'object') ? (value as Record<string, unknown>) : null;
+        return {
+          accepted: payload?.accepted === true,
+          reason: String(payload?.reason || '').trim(),
+        };
+      };
+
+      const responseChatId = prompt.chatId || selectedSessionId || null;
+      const response = normalizeHitlResponse(
+        await api.respondHitlOption(worldId, requestId, normalizedOptionId, responseChatId)
+      );
+
+      if (!response.accepted) {
+        if (response.reason.includes('No pending HITL request found')) {
+          setHitlPromptQueue((existing: HitlPrompt[]) => existing.filter((entry) => entry.requestId !== requestId));
+          setStatusText('HITL request was already resolved.', 'info');
+          return;
+        }
+        throw new Error(response.reason || 'HITL response was not accepted.');
+      }
+
       setHitlPromptQueue((existing: HitlPrompt[]) => existing.filter((entry) => entry.requestId !== requestId));
 
       if (prompt?.metadata?.refreshAfterDismiss) {
@@ -852,7 +873,7 @@ export default function App() {
   const isCurrentSessionPendingResponse = Boolean(selectedSessionId && pendingResponseSessionIds.has(selectedSessionId));
   const canStopCurrentSession = Boolean(selectedSessionId) && !isCurrentSessionSending && !isCurrentSessionStopping && isCurrentSessionPendingResponse;
   const activeHitlPrompt = hitlPromptQueue.length > 0 ? hitlPromptQueue[0] : null;
-  const showInlineWorkingIndicator = chatStatus === 'working' || isCurrentSessionSending;
+  const showInlineWorkingIndicator = !activeHitlPrompt && (chatStatus === 'working' || isCurrentSessionSending);
   const workingAgentNames = agentStatuses.filter(a => a.status === 'working').map(a => a.name);
   const inlineWorkingIndicatorState = showInlineWorkingIndicator
     ? { primaryText: workingAgentNames.length > 0 ? workingAgentNames.join(', ') : 'Agent', elapsedMs: inlineElapsedMs }

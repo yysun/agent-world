@@ -97,6 +97,8 @@ export {
 
 export {
   requestWorldOption,
+  replayPendingHitlRequests,
+  listPendingHitlPromptEvents,
   submitWorldHitlResponse,
   submitWorldOptionResponse,
   clearHitlStateForTests,

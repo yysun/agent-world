@@ -12,6 +12,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  markHitlRequestHandled,
   parseHitlOptionRequest,
   resolveHitlOptionSelectionInput,
 } from '../../cli/hitl.js';
@@ -85,5 +86,21 @@ describe('cli/hitl', () => {
     ];
     expect(resolveHitlOptionSelectionInput(options, '', 'no')).toBe('no');
     expect(resolveHitlOptionSelectionInput(options, '999', 'no')).toBeNull();
+  });
+
+  it('marks replayed request IDs as duplicates after first handling', () => {
+    const handled = new Set<string>();
+
+    expect(markHitlRequestHandled(handled, 'req-1')).toBe(true);
+    expect(markHitlRequestHandled(handled, 'req-1')).toBe(false);
+    expect(markHitlRequestHandled(handled, '  req-1  ')).toBe(false);
+    expect(markHitlRequestHandled(handled, 'req-2')).toBe(true);
+  });
+
+  it('rejects empty request IDs in duplicate handler helper', () => {
+    const handled = new Set<string>();
+    expect(markHitlRequestHandled(handled, '')).toBe(false);
+    expect(markHitlRequestHandled(handled, '   ')).toBe(false);
+    expect(handled.size).toBe(0);
   });
 });

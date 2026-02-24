@@ -113,6 +113,7 @@ import {
   log as statusLog,
 } from './display.js';
 import {
+  markHitlRequestHandled,
   parseHitlPromptRequest,
   resolveHitlOptionSelectionInput,
   type HitlOptionRequestPayload,
@@ -542,6 +543,7 @@ function attachCLIListeners(
 ): Map<string, (...args: any[]) => void> {
   const listeners = new Map<string, (...args: any[]) => void>();
   let hitlPromptChain: Promise<void> = Promise.resolve();
+  const handledHitlRequestIds = new Set<string>();
 
   // World activity events
   const worldListener = (eventData: WorldActivityEventPayload) => {
@@ -611,6 +613,9 @@ function attachCLIListeners(
   const systemListener = (eventData: SystemEventPayload) => {
     const hitlRequest = parseHitlPromptRequest(eventData);
     if (hitlRequest) {
+      if (!markHitlRequestHandled(handledHitlRequestIds, hitlRequest.requestId)) {
+        return;
+      }
       hitlPromptChain = hitlPromptChain
         .then(async () => {
           if (streaming && globalState && rl && statusLine) {

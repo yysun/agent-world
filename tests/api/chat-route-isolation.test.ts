@@ -18,6 +18,7 @@ const getWorld = vi.fn();
 const restoreChat = vi.fn();
 const editUserMessage = vi.fn();
 const listChatsMock = vi.fn();
+const listPendingHitlPromptEvents = vi.fn();
 
 vi.mock('../../core/index.js', () => {
   const logger = {
@@ -44,6 +45,7 @@ vi.mock('../../core/index.js', () => {
     listChats: listChatsMock,
     newChat: vi.fn(),
     restoreChat,
+    listPendingHitlPromptEvents,
     deleteChat: vi.fn(),
     clearAgentMemory: vi.fn(),
     listAgents: vi.fn(),
@@ -153,6 +155,7 @@ describe('API chat route isolation', () => {
       chats: new Map([['chat-1', { id: 'chat-1', name: 'Chat 1', messageCount: 0 }]])
     });
     restoreChat.mockResolvedValue(null);
+    listPendingHitlPromptEvents.mockReturnValue([]);
   });
 
   it('rejects message send when requested chatId does not exist', async () => {
@@ -223,6 +226,90 @@ describe('API chat route isolation', () => {
     expect(res.body).toMatchObject({
       success: false,
       chatId: 'chat-1'
+    });
+  });
+
+  it('returns success and switched chat when setChat target is valid', async () => {
+    const { default: router } = await import('../../server/api.js');
+    const [validateWorld, routeHandler] = getRouteHandlers(router, 'post', '/worlds/:worldName/setChat/:chatId');
+
+    restoreChat.mockResolvedValueOnce({
+      id: 'world-1',
+      name: 'World 1',
+      currentChatId: 'chat-2',
+      agents: new Map(),
+      chats: new Map([
+        ['chat-1', { id: 'chat-1', name: 'Chat 1', messageCount: 0 }],
+        ['chat-2', { id: 'chat-2', name: 'Chat 2', messageCount: 0 }],
+      ])
+    });
+
+    const req: any = {
+      params: { worldName: 'world-1', chatId: 'chat-2' },
+      body: {}
+    };
+    const res = createMockResponse();
+
+    await runMiddleware(validateWorld, req, res);
+    await routeHandler(req, res);
+
+    expect(restoreChat).toHaveBeenCalledWith('world-1', 'chat-2');
+    expect(listPendingHitlPromptEvents).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-1' }), 'chat-2');
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      chatId: 'chat-2',
+    });
+  });
+
+  it('returns pending HITL prompts in setChat response payload', async () => {
+    const { default: router } = await import('../../server/api.js');
+    const [validateWorld, routeHandler] = getRouteHandlers(router, 'post', '/worlds/:worldName/setChat/:chatId');
+
+    const pendingPrompt = {
+      chatId: 'chat-2',
+      content: {
+        eventType: 'hitl-option-request',
+        requestId: 'req-1',
+        title: 'Approval required',
+        options: [{ id: 'yes', label: 'Yes' }],
+      },
+    };
+
+    restoreChat.mockResolvedValueOnce({
+      id: 'world-1',
+      name: 'World 1',
+      currentChatId: 'chat-2',
+      agents: new Map(),
+      chats: new Map([
+        ['chat-1', { id: 'chat-1', name: 'Chat 1', messageCount: 0 }],
+        ['chat-2', { id: 'chat-2', name: 'Chat 2', messageCount: 0 }],
+      ])
+    });
+    listPendingHitlPromptEvents.mockReturnValueOnce([pendingPrompt]);
+
+    const req: any = {
+      params: { worldName: 'world-1', chatId: 'chat-2' },
+      body: {}
+    };
+    const res = createMockResponse();
+
+    await runMiddleware(validateWorld, req, res);
+    await routeHandler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      chatId: 'chat-2',
+      hitlPrompts: [
+        expect.objectContaining({
+          chatId: 'chat-2',
+          content: expect.objectContaining({
+            eventType: 'hitl-option-request',
+            requestId: 'req-1',
+          }),
+        }),
+      ],
     });
   });
 });

@@ -44,6 +44,7 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2026-02-24: Fixed chat-switch HITL replay by deferring set-chat side effects to `initWorld()` and ingesting replay payloads from `api.setChat` response.
  * - 2026-02-21: Prevented tool output expand/collapse actions from consuming pending auto-scroll state and jumping to transcript bottom.
  * - 2026-02-21: Switched project-folder selection to browser File API flow and preserved UI-enriched world agent fields after updates.
  * - 2026-02-21: Added `select-project-folder` handler to persist `working_directory` from composer Project button selection.
@@ -531,8 +532,19 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
 
     chatId = resolveActiveChatId(world, chatId) || undefined;
 
+    let replayedHitlQueue = state.hitlPromptQueue || [];
     if (world.currentChatId !== chatId && chatId) {
-      await api.setChat(worldName, chatId);
+      const setChatResult = await api.setChat(worldName, chatId);
+      const pendingHitlPrompts = Array.isArray(setChatResult?.hitlPrompts) ? setChatResult.hitlPrompts : [];
+      if (pendingHitlPrompts.length > 0) {
+        replayedHitlQueue = pendingHitlPrompts.reduce((queue, promptEnvelope) => {
+          const prompt = HitlDomain.parseHitlPromptRequest(promptEnvelope);
+          if (!prompt) {
+            return queue;
+          }
+          return HitlDomain.enqueueHitlPrompt(queue, prompt);
+        }, [] as typeof replayedHitlQueue);
+      }
     }
 
     let rawMessages: any[] = [];
@@ -562,6 +574,7 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       selectedProjectPath,
       messages,
       rawMessages,
+      hitlPromptQueue: replayedHitlQueue,
       loading: false,
       needScroll: true,
       lastUserMessageText: null,
@@ -639,10 +652,26 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
 
   const hitlPrompt = HitlDomain.parseHitlPromptRequest(data);
   if (hitlPrompt) {
-    const currentQueue = newState.hitlPromptQueue || [];
+    let pausedState = newState;
+    if (pausedState.debounceFrameId !== null) {
+      cancelAnimationFrame(pausedState.debounceFrameId);
+    }
+    pausedState = {
+      ...pausedState,
+      isWaiting: false,
+      isBusy: false,
+      activeTools: [],
+      pendingStreamUpdates: new Map(),
+      debounceFrameId: null
+    };
+    if (pausedState.elapsedIntervalId !== null) {
+      pausedState = stopElapsedTimer(pausedState);
+    }
+
+    const currentQueue = pausedState.hitlPromptQueue || [];
     const nextQueue = HitlDomain.enqueueHitlPrompt(currentQueue, hitlPrompt);
     return {
-      ...newState,
+      ...pausedState,
       hitlPromptQueue: nextQueue,
     };
   }
@@ -1444,10 +1473,6 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
 
       yield ChatHistoryDomain.createChatLoadingState(cleanState);
 
-      const result = await api.setChat(state.worldName, chatId);
-      if (!result.success) {
-        yield cleanState;
-      }
       const path = ChatHistoryDomain.buildChatRoutePath(state.worldName, chatId);
       app.route(path);
       history.pushState(null, '', path);

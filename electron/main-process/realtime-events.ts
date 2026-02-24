@@ -58,6 +58,7 @@ interface CreateRealtimeEventsRuntimeDependencies {
   addLogStreamCallback: (callback: (logEvent: unknown) => void) => () => void;
   subscribeWorld: (worldId: string, options: Record<string, unknown>) => Promise<WorldSubscriptionLike | null>;
   ensureCoreReady: () => Promise<void> | void;
+  replayPendingHitlRequests?: (world: unknown, chatId?: string | null) => number;
 }
 
 interface ChatEventSubscription {
@@ -100,7 +101,8 @@ export function createRealtimeEventsRuntime(
     chatEventChannel,
     addLogStreamCallback,
     subscribeWorld,
-    ensureCoreReady
+    ensureCoreReady,
+    replayPendingHitlRequests,
   } = dependencies;
 
   const chatEventSubscriptions = new Map<string, ChatEventSubscription>();
@@ -285,7 +287,13 @@ export function createRealtimeEventsRuntime(
     const systemHandler = (event: any) => {
       const eventChatId = event?.chatId ? String(event.chatId) : null;
       const isHitlRequest = isHitlRequestSystemEvent(event);
-      if (!isHitlRequest && chatId && eventChatId !== chatId) return;
+      if (chatId) {
+        if (isHitlRequest) {
+          if (eventChatId && eventChatId !== chatId) return;
+        } else if (eventChatId !== chatId) {
+          return;
+        }
+      }
       sendRealtimeEventToRenderer({
         ...serializeRealtimeSystemEvent(worldId, eventChatId || chatId, event),
         subscriptionId
@@ -315,6 +323,15 @@ export function createRealtimeEventsRuntime(
     ) {
       removeChatEventSubscriptionIfCurrent(subscriptionId, subscription);
       return { subscribed: false, canceled: true, stale: true, subscriptionId, worldId, chatId };
+    }
+
+    if (chatId && typeof replayPendingHitlRequests === 'function') {
+      try {
+        replayPendingHitlRequests(world, chatId);
+      } catch (error) {
+        const warningMessage = `Failed to replay pending HITL requests for world '${worldId}' chat '${chatId}': ${error instanceof Error ? error.message : String(error)}`;
+        console.warn(warningMessage);
+      }
     }
 
     return { subscribed: true, subscriptionId, worldId, chatId };

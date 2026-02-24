@@ -35,7 +35,7 @@
  */
 
 import { createLogMessage, upsertMessageList, type MessageLike } from './message-updates';
-import { clearChatAgents, updateRegistry } from './status-registry';
+import { clearChatAgents, completeWorkingChatAgents, updateRegistry } from './status-registry';
 import { applyEventToRegistry } from './status-updater';
 
 interface BasePayload {
@@ -437,7 +437,13 @@ export function createChatSubscriptionEventHandler({
 
       const systemChatId = String(payload.chatId || systemPayload.chatId || '').trim() || null;
       const isHitlRequest = isHitlRequestPayload(systemPayload);
-      if (!isHitlRequest && selectedSessionId && systemChatId !== selectedSessionId) return;
+      if (selectedSessionId) {
+        if (isHitlRequest) {
+          if (systemChatId && systemChatId !== selectedSessionId) return;
+        } else if (systemChatId !== selectedSessionId) {
+          return;
+        }
+      }
 
       if (typeof onSessionSystemEvent === 'function') {
         onSessionSystemEvent({
@@ -452,16 +458,20 @@ export function createChatSubscriptionEventHandler({
       if (isHitlRequest) {
         const hitlAgentName = String(systemPayload.agentName || '').trim() || null;
         const hitlChatId = systemChatId || selectedSessionId || null;
-        if (hitlAgentName && loadedWorldId && hitlChatId) {
-          updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, hitlChatId, hitlAgentName, 'system', 'hitl-option-request'));
+        if (loadedWorldId && hitlChatId) {
+          if (hitlAgentName) {
+            updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, hitlChatId, hitlAgentName, 'system', 'hitl-option-request'));
+          } else {
+            updateRegistry((r) => completeWorkingChatAgents(r, loadedWorldId, hitlChatId));
+          }
         }
       }
     }
 
-    // Activity events (response-end, idle) are the backend's authoritative "all done"
-    // signal. Use them to clean up any stale streaming state and reset the working
-    // status registry so the indicator doesn't stay stuck when SSE end events are
-    // missing or out-of-order.
+    // Activity events drive the working indicator, mirroring the web app's
+    // pendingOperations-based approach:
+    // - response-start with pending > 0 → set agents to working
+    // - response-end with pending === 0 / idle → clear agents (all done)
     if (payload.type === 'activity') {
       const activityPayload = payload.activity as Record<string, unknown> | undefined;
       if (!activityPayload) return;
@@ -472,9 +482,38 @@ export function createChatSubscriptionEventHandler({
 
       const activityEventType = String(activityPayload.eventType || '').toLowerCase();
       const pendingOps = Number(activityPayload.pendingOperations ?? -1);
-      const isResponseEnd = activityEventType === 'response-end' && pendingOps === 0;
-      const isIdle = activityEventType === 'idle';
-      if (!isResponseEnd && !isIdle) return;
+      const isAllDone = (activityEventType === 'response-end' && pendingOps === 0)
+        || activityEventType === 'idle';
+      const isResponseStart = activityEventType === 'response-start' && pendingOps > 0;
+
+      if (isResponseStart) {
+        // Agent(s) started working — set registry to working so the indicator shows.
+        // Use activeSources (agent names) or fall back to source (single agent name).
+        if (!loadedWorldId) return;
+        const targetChatId = activityChatId || selectedSessionId || null;
+        if (!targetChatId) return;
+
+        const activeSources = Array.isArray(activityPayload.activeSources)
+          ? (activityPayload.activeSources as unknown[])
+            .map((s) => String(s || '').trim())
+            .filter(Boolean)
+          : [];
+        const source = String(activityPayload.source || '').trim();
+        const agentNames = activeSources.length > 0 ? activeSources : source ? [source] : [];
+
+        if (agentNames.length > 0) {
+          updateRegistry((r) => {
+            let reg = r;
+            for (const name of agentNames) {
+              reg = applyEventToRegistry(reg, loadedWorldId, targetChatId, name, 'sse', 'start');
+            }
+            return reg;
+          });
+        }
+        return;
+      }
+
+      if (!isAllDone) return;
 
       // Flush and clear all active streams without firing per-stream callbacks that
       // might re-tag a just-upserted final message as streaming.

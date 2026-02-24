@@ -29,7 +29,7 @@ import { createDesktopApi, exposeDesktopApi } from '../../../electron/preload/br
 
 function createBridgeMocks() {
   return {
-    invoke: vi.fn(),
+    invoke: vi.fn().mockResolvedValue(undefined),
     on: vi.fn(),
     removeListener: vi.fn(),
     exposeInMainWorld: vi.fn()

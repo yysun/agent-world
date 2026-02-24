@@ -8,7 +8,7 @@ HITL provides world-scoped human interaction gates for actions that require user
 The runtime is options-only, so features request selectable choices and block until:
 
 - a user selects an option, or
-- the request times out and uses a deterministic default option.
+- the request is explicitly canceled/denied by user action.
 
 Current policy:
 
@@ -38,7 +38,7 @@ Both routes resolve through the same response API (`submitWorldHitlResponse`) an
 - Response API (shared): `submitWorldHitlResponse({ worldId, requestId, optionId })`
 - Pending requests are stored in-memory in a process-local map:
   - key: `worldId::requestId`
-  - value includes allowed option IDs, resolver, timeout handle, and chat scope.
+  - value includes allowed option IDs, resolver, replay payload, and chat scope.
 
 ### Request Lifecycle
 
@@ -54,8 +54,8 @@ When `requestWorldOption()` is called:
 5. Pending entry is inserted into the map.
 6. A world `system` event is emitted with payload:
    - `eventType: "hitl-option-request"`
-   - request metadata (`requestId`, title, message, options, defaultOptionId, timeoutMs, metadata).
-7. The Promise remains pending until response or timeout.
+  - request metadata (`requestId`, title, message, options, defaultOptionId, metadata).
+7. The Promise remains pending until an explicit response is submitted.
 
 ### Resolution Lifecycle
 
@@ -64,13 +64,14 @@ When `submitWorldOptionResponse()` or `submitWorldHitlResponse()` is called:
 1. Validates `worldId`, `requestId`, `optionId`.
 2. Looks up pending request by `worldId::requestId`.
 3. Validates selected option against pending request option set.
-4. Clears timeout, removes pending map entry.
+4. Removes pending map entry.
 5. Resolves requester promise with `{ source: "user", optionId, ... }`.
 
-If request times out:
+### Replay on Chat Load
 
-- pending entry is removed,
-- promise resolves with `{ source: "timeout", optionId: defaultOptionId, ... }`.
+- When a chat is restored/loaded, unresolved HITL requests for that world/chat scope are replayed as `hitl-option-request` system events.
+- Replay preserves original `requestId` so frontend responses resolve the original pending request.
+- Replay is deterministic (stable order) and replay-only events are not re-persisted.
 
 ## Where HITL Is Triggered Today
 
@@ -186,7 +187,7 @@ sequenceDiagram
 
 - Option IDs are validated against pending request option set.
 - Responses for unknown/expired `requestId` are rejected (`accepted: false`).
-- Timeout fallback is deterministic (no hanging waits).
+- Pending requests are durable in-process until explicit resolution.
 - Scope is world-specific (`worldId::requestId`) to avoid cross-world collisions.
 - Runtime is in-memory and process-local (not persisted across process restarts).
 

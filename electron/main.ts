@@ -121,6 +121,7 @@ const {
   submitWorldHitlResponse,
   stopMessageProcessing,
   restoreChat,
+  replayPendingHitlRequests,
   syncSkills,
   editUserMessage,
   subscribeWorld,
@@ -153,7 +154,8 @@ const realtimeEventsRuntime = createRealtimeEventsRuntime({
   chatEventChannel: CHAT_EVENT_CHANNEL,
   addLogStreamCallback,
   subscribeWorld,
-  ensureCoreReady: () => ensureCoreReady()
+  ensureCoreReady: () => ensureCoreReady(),
+  replayPendingHitlRequests,
 });
 
 const workspaceRuntime = createWorkspaceRuntime({

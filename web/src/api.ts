@@ -22,6 +22,7 @@
  * - Message deletion uses DELETE /worlds/:worldName/messages/:messageId endpoint
  *
  * Changes:
+ * - 2026-02-24: Extended `setChat()` response type with `hitlPrompts` replay payload for chat-switch HITL restoration.
  * - 2026-02-21: Removed server-side project-folder picker call; web now uses browser File API flow.
  * - 2026-02-20: Enforced options-only HITL response API (`respondHitlOption`).
  * - 2026-02-14: Added respondHitlOption() API call for generic HITL option approvals.
@@ -285,6 +286,7 @@ async function getWorldMarkdown(worldName: string): Promise<string> {
 export async function setChat(worldName: string, chatId: string): Promise<{
   world: any;
   chatId: string;
+  hitlPrompts?: Array<{ chatId: string | null; content: Record<string, unknown> }>;
   success: boolean;
 }> {
   const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/setChat/${encodeURIComponent(chatId)}`, {
