@@ -11,6 +11,7 @@
  * - Avoids Electron runtime and filesystem dependencies.
  *
  * Recent Changes:
+ * - 2026-02-24: Reinstated strict chat-scope filtering coverage for unscoped SSE/tool events after source-side chatId streaming guarantees.
  * - 2026-02-20: Added coverage that `hitl-option-request` system events bypass chatId filtering for chat-scoped subscriptions.
  * - 2026-02-16: Added coverage for world-level activity events forwarded to chat-scoped subscriptions.
  * - 2026-02-13: Updated system-event forwarding coverage to structured payload content.

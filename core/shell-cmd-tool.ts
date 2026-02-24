@@ -27,6 +27,7 @@
  * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - 2026-02-24: Required explicit chatId context for stdout/stderr streaming event emission to preserve chat isolation under strict frontend filtering.
  * - 2026-02-21: Streamed stderr via legacy `tool-stream` events while streaming stdout as assistant SSE; persisted only finalized stdout assistant message after execution completes.
  * - 2026-02-21: Added assistant-style SSE start/chunk/end streaming for shell runtime output so command chunks are delivered as assistant stream events instead of `tool-stream` messages.
  * - 2026-02-21: Added minimal LLM shell-result mode (`status` + `exit_code` semantics) for tool-call continuations, excluding stdout/stderr transcript bodies.
@@ -1365,7 +1366,7 @@ export function createShellCmdToolDefinition() {
 
       const llmResultMode = context?.llmResultMode === 'minimal' ? 'minimal'
         : context?.llmResultMode === 'smart' ? 'smart'
-        : 'verbose';
+          : 'verbose';
 
       const validation = validateToolParameters(args, toolSchema, 'shell_cmd');
       if (!validation.valid) {
@@ -1410,12 +1411,18 @@ export function createShellCmdToolDefinition() {
       // Extract world and messageId from context for streaming
       const world = context?.world;
       const currentMessageId = context?.toolCallId;
-      const chatId = context?.chatId ? String(context.chatId) : undefined;
+      const chatIdRaw = typeof context?.chatId === 'string' ? context.chatId.trim() : '';
+      const chatId = chatIdRaw || undefined;
       const abortSignal = context?.abortSignal as AbortSignal | undefined;
       const streamAgentName = typeof context?.agentName === 'string' && context.agentName.trim()
         ? context.agentName.trim()
         : 'assistant';
-      const hasToolStreamContext = Boolean(world && typeof currentMessageId === 'string' && currentMessageId.trim());
+      const hasToolStreamContext = Boolean(
+        world
+        && chatId
+        && typeof currentMessageId === 'string'
+        && currentMessageId.trim()
+      );
       const streamBaseMessageId = hasToolStreamContext ? String(currentMessageId).trim() : '';
       const stdoutMessageId = streamBaseMessageId ? `${streamBaseMessageId}-stdout` : '';
       const resolvedDirectory = resolveTrustedShellWorkingDirectory(context);
@@ -1462,7 +1469,7 @@ export function createShellCmdToolDefinition() {
       };
 
       const emitStderrToolStreamChunk = (chunk: string) => {
-        if (!world || !chunk) return;
+        if (!world || !chatId || !chunk) return;
         publishSSE(world, {
           type: 'tool-stream',
           toolName: 'shell_cmd',

@@ -94,6 +94,7 @@
  * - Queue-based serialization prevents API rate limits and resource conflicts
  *
  * Recent Changes:
+ * - 2026-02-24: Required explicit chatId for streaming SSE emission and propagated chatId through start/chunk/end/error events for strict chat-scoped frontend filtering.
  * - 2026-02-20: Switched injected tool-usage guidance to shared `buildToolUsagePromptSection()` so HITL and other tool rules are centralized in one utility.
  * - 2026-02-20: Updated injected tool-usage guidance to direct LLMs to use `human_intervention_request` for human clarifications and confirmations.
  * - 2026-02-13: Reclassified stop-triggered aborts as cancellation/info logs (not errors) in queue and non-streaming paths.
@@ -493,14 +494,21 @@ export async function streamAgentResponse(
     throw new DOMException(`LLM call aborted before queue for agent ${agent.id}`, 'AbortError');
   }
 
+  const normalizedChatId = typeof chatId === 'string' ? chatId.trim() : '';
+  const fallbackChatId = typeof world?.currentChatId === 'string' ? world.currentChatId.trim() : '';
+  const resolvedChatId = normalizedChatId || fallbackChatId || null;
+  if (!resolvedChatId) {
+    throw new Error(`streamAgentResponse: chatId is required for agent ${agent.id}`);
+  }
+
   // Queue the LLM call to ensure serialized execution
-  return llmQueue.add(agent.id, world.id, chatId, async (queueAbortSignal) => {
+  return llmQueue.add(agent.id, world.id, resolvedChatId, async (queueAbortSignal) => {
     const { signal: mergedAbortSignal, dispose } = createCombinedAbortSignal(queueAbortSignal, abortSignal);
     try {
       if (mergedAbortSignal?.aborted) {
         throw new DOMException(`LLM call aborted before execution for agent ${agent.id}`, 'AbortError');
       }
-      return await executeStreamAgentResponse(world, agent, messages, publishSSE, mergedAbortSignal);
+      return await executeStreamAgentResponse(world, agent, messages, publishSSE, resolvedChatId, mergedAbortSignal);
     } finally {
       dispose();
     }
@@ -515,6 +523,7 @@ async function executeStreamAgentResponse(
   agent: Agent,
   messages: AgentMessage[],
   publishSSE: (world: World, data: Partial<WorldSSEEvent>) => void,
+  chatId: string,
   abortSignal?: AbortSignal
 ): Promise<{ response: LLMResponse; messageId: string }> {
   const messageId = generateId();
@@ -528,7 +537,8 @@ async function executeStreamAgentResponse(
     publishSSE(world, {
       agentName: agent.id,
       type: 'start',
-      messageId
+      messageId,
+      chatId
     });
 
     loggerStreaming.debug(`LLM: Starting streaming response for agent=${agent.id}, world=${world.id}, messageId=${messageId}`);
@@ -569,13 +579,13 @@ async function executeStreamAgentResponse(
         agent,
         mcpTools,
         world,
-        (content: string) => publishSSE(world, { agentName: agent.id, type: 'chunk', content, messageId }),
+        (content: string) => publishSSE(world, { agentName: agent.id, type: 'chunk', content, messageId, chatId }),
         messageId,
         abortSignal
       );
 
       // Emit end event after streaming completes
-      publishSSE(world, { agentName: agent.id, type: 'end', messageId });
+      publishSSE(world, { agentName: agent.id, type: 'end', messageId, chatId });
 
       return { response, messageId };
     }
@@ -590,13 +600,13 @@ async function executeStreamAgentResponse(
         agent,
         mcpTools,
         world,
-        (content: string) => publishSSE(world, { agentName: agent.id, type: 'chunk', content, messageId }),
+        (content: string) => publishSSE(world, { agentName: agent.id, type: 'chunk', content, messageId, chatId }),
         messageId,
         abortSignal
       );
 
       // Emit end event after streaming completes
-      publishSSE(world, { agentName: agent.id, type: 'end', messageId });
+      publishSSE(world, { agentName: agent.id, type: 'end', messageId, chatId });
 
       return { response, messageId };
     }
@@ -611,13 +621,13 @@ async function executeStreamAgentResponse(
         agent,
         mcpTools,
         world,
-        (content: string) => publishSSE(world, { agentName: agent.id, type: 'chunk', content, messageId }),
+        (content: string) => publishSSE(world, { agentName: agent.id, type: 'chunk', content, messageId, chatId }),
         messageId,
         abortSignal
       );
 
       // Emit end event after streaming completes
-      publishSSE(world, { agentName: agent.id, type: 'end', messageId });
+      publishSSE(world, { agentName: agent.id, type: 'end', messageId, chatId });
 
       return { response, messageId };
     }
@@ -630,7 +640,8 @@ async function executeStreamAgentResponse(
       publishSSE(world, {
         agentName: agent.id,
         type: 'end',
-        messageId
+        messageId,
+        chatId
       });
 
       loggerStreaming.info(
@@ -644,7 +655,8 @@ async function executeStreamAgentResponse(
       agentName: agent.id,
       type: 'error',
       error: (error as Error).message,
-      messageId
+      messageId,
+      chatId
     });
 
     loggerStreaming.error(`LLM: Error during streaming response for agent=${agent.id}, world=${world.id}, messageId=${messageId}, error=${(error as Error).message}`);

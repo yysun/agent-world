@@ -77,6 +77,20 @@ interface ChatHandlerOptions {
   }) => void;
 }
 
+function toToolContent(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (value == null) {
+    return '';
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 function isAssistantLikeMessage(message: Record<string, unknown> | null | undefined) {
   if (!message) return false;
 
@@ -139,6 +153,29 @@ export function createChatSubscriptionEventHandler({
   onSessionSystemEvent,
 }: ChatHandlerOptions) {
   const toolCommandByUseId = new Map<string, string>();
+
+  const ensureToolStreamMessageChatId = (messageId: string, chatId: string | null) => {
+    const normalizedMessageId = String(messageId || '').trim();
+    const normalizedChatId = String(chatId || '').trim();
+    if (!normalizedMessageId || !normalizedChatId) return;
+
+    setMessages((existing) => {
+      const index = existing.findIndex(
+        (message) => String(message?.messageId || '').trim() === normalizedMessageId
+      );
+      if (index < 0) return existing;
+
+      const currentChatId = String(existing[index]?.chatId || '').trim();
+      if (currentChatId === normalizedChatId) return existing;
+
+      const next = [...existing];
+      next[index] = {
+        ...next[index],
+        chatId: normalizedChatId,
+      };
+      return next;
+    });
+  };
 
   const endAllToolStreams = () => {
     const streaming = streamingStateRef.current;
@@ -210,6 +247,16 @@ export function createChatSubscriptionEventHandler({
       const messageId = streamPayload.messageId ? String(streamPayload.messageId) : '';
       const streaming = streamingStateRef.current;
       if (!streaming) return;
+      const toolName = String(streamPayload.toolName || '').trim() || 'shell_cmd';
+      const isShellStdoutSSE = (
+        toolName === 'shell_cmd'
+        && messageId.endsWith('-stdout')
+        && (eventType === 'start' || eventType === 'chunk' || eventType === 'end')
+      );
+      const shellStdoutToolUseId = isShellStdoutSSE
+        ? messageId.slice(0, -'-stdout'.length)
+        : '';
+      const shellCommand = toolCommandByUseId.get(shellStdoutToolUseId || messageId);
 
       const sseAgentName = String(streamPayload.agentName || '').trim() || null;
       const sseChatId = streamChatId || selectedSessionId || null;
@@ -225,15 +272,46 @@ export function createChatSubscriptionEventHandler({
       }
 
       if (eventType === 'start') {
-        endAllToolStreams();
-        streaming.handleStart(messageId, String(streamPayload.agentName || 'assistant'));
+        if (isShellStdoutSSE) {
+          streaming.handleToolStreamStart(
+            messageId,
+            String(streamPayload.agentName || 'shell_cmd'),
+            'stdout',
+            'shell_cmd',
+            shellCommand,
+          );
+          ensureToolStreamMessageChatId(messageId, sseChatId);
+        } else {
+          endAllToolStreams();
+          streaming.handleStart(messageId, String(streamPayload.agentName || 'assistant'));
+        }
         if (sseAgentName && loadedWorldId && sseChatId) {
           updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', 'start'));
         }
       } else if (eventType === 'chunk') {
-        streaming.handleChunk(messageId, String(streamPayload.content || ''));
+        if (isShellStdoutSSE) {
+          const content = String(streamPayload.content || '');
+          if (!streaming.isActive(messageId)) {
+            streaming.handleToolStreamStart(
+              messageId,
+              String(streamPayload.agentName || 'shell_cmd'),
+              'stdout',
+              'shell_cmd',
+              shellCommand,
+            );
+            ensureToolStreamMessageChatId(messageId, sseChatId);
+          }
+          streaming.handleToolStreamChunk(messageId, content, 'stdout', 'shell_cmd', shellCommand);
+          ensureToolStreamMessageChatId(messageId, sseChatId);
+        } else {
+          streaming.handleChunk(messageId, String(streamPayload.content || ''));
+        }
       } else if (eventType === 'end') {
-        streaming.handleEnd(messageId);
+        if (isShellStdoutSSE) {
+          streaming.handleToolStreamEnd(messageId);
+        } else {
+          streaming.handleEnd(messageId);
+        }
         if (sseAgentName && loadedWorldId && sseChatId) {
           updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', 'end'));
         }
@@ -255,8 +333,10 @@ export function createChatSubscriptionEventHandler({
             toolName,
             command,
           );
+          ensureToolStreamMessageChatId(messageId, sseChatId);
         }
         streaming.handleToolStreamChunk(messageId, content, stream, toolName, command);
+        ensureToolStreamMessageChatId(messageId, sseChatId);
       }
       return;
     }
@@ -301,6 +381,20 @@ export function createChatSubscriptionEventHandler({
           updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, toolChatIdResolved, toolAgentName, 'tool', 'tool-start'));
         }
       } else if (toolEventType === 'tool-result') {
+        const toolName = String(toolPayload.toolName || 'unknown').trim() || 'unknown';
+        const content = toToolContent(toolPayload.result);
+        setMessages((existing) => upsertMessageList(existing, {
+          id: toolUseId,
+          messageId: toolUseId,
+          role: 'tool',
+          sender: String(toolPayload.agentName || toolPayload.agentId || toolName || 'tool').trim() || 'tool',
+          toolName,
+          content,
+          chatId: toolChatIdResolved,
+          createdAt: String(toolPayload.createdAt || new Date().toISOString()),
+          isToolStreaming: false,
+          streamType: undefined,
+        }));
         toolCommandByUseId.delete(toolUseId);
         const streaming = streamingStateRef.current;
         if (streaming?.isActive(toolUseId)) {
@@ -311,6 +405,20 @@ export function createChatSubscriptionEventHandler({
           updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, toolChatIdResolved, toolAgentName, 'tool', 'tool-result'));
         }
       } else if (toolEventType === 'tool-error') {
+        const toolName = String(toolPayload.toolName || 'unknown').trim() || 'unknown';
+        const content = toToolContent(toolPayload.error || 'Tool execution failed');
+        setMessages((existing) => upsertMessageList(existing, {
+          id: toolUseId,
+          messageId: toolUseId,
+          role: 'tool',
+          sender: String(toolPayload.agentName || toolPayload.agentId || toolName || 'tool').trim() || 'tool',
+          toolName,
+          content,
+          chatId: toolChatIdResolved,
+          createdAt: String(toolPayload.createdAt || new Date().toISOString()),
+          isToolStreaming: false,
+          streamType: 'stderr',
+        }));
         toolCommandByUseId.delete(toolUseId);
         const streaming = streamingStateRef.current;
         if (streaming?.isActive(toolUseId)) {

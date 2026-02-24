@@ -11,6 +11,7 @@
  * - Uses dependency injection for window lookup and world subscription API.
  *
  * Recent Changes:
+ * - 2026-02-24: Restored strict chat-scoped SSE/tool filtering after source-side chatId guarantees were added to streaming emitters.
  * - 2026-02-20: Allow `hitl-option-request` system events to bypass strict chatId filtering so approval prompts are not dropped by chat-scope mismatch.
  * - 2026-02-16: Fixed activity events (response-start, idle) being filtered out when subscription has a chatId — activity events are world-level and carry no chatId.
  * - 2026-02-13: Added system-event forwarding for chat-title update notifications to renderer subscribers.

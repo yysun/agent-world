@@ -13,6 +13,7 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-24: Tool-related cards now default to collapsed with explicit per-message collapse overrides so users can reliably expand/re-collapse items.
  * - 2026-02-21: Added assistant-message action button to copy raw markdown beside branch action.
  * - 2026-02-20: Added inline message-flow HITL prompt card rendering for option prompts, replacing overlay-only HITL UX.
  * - 2026-02-20: Added message-loading guard so session switches render loading state instead of welcome-card flicker.
@@ -78,14 +79,20 @@ export default function MessageListPanel({
   const inlineElapsedMs = Number(inlineWorkingIndicatorState?.elapsedMs || 0);
   const renderableMessages = messages.filter(isRenderableMessageEntry);
   const shouldShowLoading = messagesLoading && renderableMessages.length === 0;
-  const [collapsedMessageIds, setCollapsedMessageIds] = useState<Set<string>>(new Set());
-  const toggleMessageCollapsed = (messageId: string) => {
-    setCollapsedMessageIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(messageId)) next.delete(messageId);
-      else next.add(messageId);
-      return next;
-    });
+  const [messageCollapseOverrides, setMessageCollapseOverrides] = useState<Record<string, boolean>>({});
+  const toggleMessageCollapsed = (messageId: string, currentCollapsed: boolean) => {
+    setMessageCollapseOverrides((prev) => ({
+      ...prev,
+      [messageId]: !currentCollapsed,
+    }));
+  };
+
+  const isMessageCollapsed = (message, messageKey: string | null, isCollapsible: boolean) => {
+    if (!isCollapsible || !messageKey) return false;
+    if (Object.prototype.hasOwnProperty.call(messageCollapseOverrides, messageKey)) {
+      return Boolean(messageCollapseOverrides[messageKey]);
+    }
+    return isToolRelatedMessage(message);
   };
   const shouldShowWelcome = !messagesLoading && !hasConversationMessages;
 
@@ -186,6 +193,8 @@ export default function MessageListPanel({
             const messageRole = String(message?.role || '').toLowerCase();
             const shouldRightAlignMessage = isHuman || isToolRelatedMessage(message) || messageRole === 'assistant';
             const isBranchableAgentMessage = !isHuman && isTrueAgentResponseMessage(message) && Boolean(message.messageId);
+            const isCollapsible = isBranchableAgentMessage || isToolRelatedMessage(message);
+            const isCollapsed = isMessageCollapsed(message, messageKey, isCollapsible);
             const normalizedEditedText = editingText.trim();
             const normalizedOriginalText = String(message?.content || '').trim();
             const isEditChanged = Boolean(normalizedEditedText) && normalizedEditedText !== normalizedOriginalText;
@@ -209,15 +218,15 @@ export default function MessageListPanel({
                     <span>{senderLabel}</span>
                     <div className="flex items-center gap-1">
                       <span>{formatTime(message.createdAt)}</span>
-                      {(isBranchableAgentMessage || isToolRelatedMessage(message)) && messageKey ? (
+                      {isCollapsible && messageKey ? (
                         <button
                           type="button"
-                          onClick={() => toggleMessageCollapsed(messageKey)}
+                          onClick={() => toggleMessageCollapsed(messageKey, isCollapsed)}
                           className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
-                          title={collapsedMessageIds.has(messageKey) ? 'Expand' : 'Collapse'}
-                          aria-label={collapsedMessageIds.has(messageKey) ? 'Expand' : 'Collapse'}
+                          title={isCollapsed ? 'Expand' : 'Collapse'}
+                          aria-label={isCollapsed ? 'Expand' : 'Collapse'}
                         >
-                          {collapsedMessageIds.has(messageKey) ? (
+                          {isCollapsed ? (
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3" aria-hidden="true">
                               <path d="m6 9 6 6 6-6" />
                             </svg>
@@ -265,7 +274,10 @@ export default function MessageListPanel({
                       </div>
                     </div>
                   ) : (
-                    <MessageContent message={message} collapsed={(isBranchableAgentMessage || isToolRelatedMessage(message)) && Boolean(messageKey) && collapsedMessageIds.has(messageKey)} />
+                    <MessageContent
+                      message={message}
+                      collapsed={isCollapsed}
+                    />
                   )}
 
                   {isHumanMessage(message) && message.messageId && !isPendingOptimisticUserMessage && editingMessageId !== getMessageIdentity(message) ? (

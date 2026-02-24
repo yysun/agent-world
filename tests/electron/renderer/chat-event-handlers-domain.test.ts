@@ -471,6 +471,132 @@ describe('createChatSubscriptionEventHandler', () => {
     );
   });
 
+  it('normalizes shell stdout start/chunk/end SSE events to tool-stream handlers', () => {
+    const harness = createMessageStateHarness();
+    const streamingStateRef = makeFullStreamingRef();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef,
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
+    });
+
+    handler({
+      type: 'tool',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      tool: {
+        eventType: 'tool-start',
+        toolUseId: 'tool-1',
+        toolName: 'shell_cmd',
+        toolInput: { command: 'npm test' }
+      }
+    });
+
+    handler({
+      type: 'sse',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      sse: {
+        eventType: 'start',
+        messageId: 'tool-1-stdout',
+        toolName: 'shell_cmd',
+        agentName: 'assistant-1',
+        chatId: 'chat-1'
+      }
+    });
+
+    handler({
+      type: 'sse',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      sse: {
+        eventType: 'chunk',
+        messageId: 'tool-1-stdout',
+        toolName: 'shell_cmd',
+        content: 'ok\n',
+        agentName: 'assistant-1',
+        chatId: 'chat-1'
+      }
+    });
+
+    handler({
+      type: 'sse',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      sse: {
+        eventType: 'end',
+        messageId: 'tool-1-stdout',
+        toolName: 'shell_cmd',
+        agentName: 'assistant-1',
+        chatId: 'chat-1'
+      }
+    });
+
+    expect(streamingStateRef.current.handleStart).not.toHaveBeenCalledWith('tool-1-stdout', expect.any(String));
+    expect(streamingStateRef.current.handleChunk).not.toHaveBeenCalledWith('tool-1-stdout', expect.any(String));
+    expect(streamingStateRef.current.handleEnd).not.toHaveBeenCalledWith('tool-1-stdout');
+
+    expect(streamingStateRef.current.handleToolStreamStart).toHaveBeenCalledWith(
+      'tool-1-stdout',
+      'assistant-1',
+      'stdout',
+      'shell_cmd',
+      'npm test'
+    );
+    expect(streamingStateRef.current.handleToolStreamChunk).toHaveBeenCalledWith(
+      'tool-1-stdout',
+      'ok\n',
+      'stdout',
+      'shell_cmd',
+      'npm test'
+    );
+    expect(streamingStateRef.current.handleToolStreamEnd).toHaveBeenCalledWith('tool-1-stdout');
+  });
+
+  it('stamps tool-stream rows with selected chatId during live streaming', () => {
+    const harness = createMessageStateHarness([{
+      messageId: 'tool-1',
+      role: 'tool',
+      sender: 'shell_cmd',
+      content: '',
+      isToolStreaming: true,
+    }]);
+
+    const streamingStateRef = makeFullStreamingRef();
+    (streamingStateRef.current.isActive as ReturnType<typeof vi.fn>).mockReturnValue(true);
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef,
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
+    });
+
+    handler({
+      type: 'sse',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      sse: {
+        eventType: 'tool-stream',
+        messageId: 'tool-1',
+        content: 'ok\n',
+        stream: 'stderr',
+        toolName: 'shell_cmd',
+        agentName: 'assistant-1',
+        chatId: 'chat-1'
+      }
+    });
+
+    const msgs = harness.getMessages() as Record<string, unknown>[];
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].chatId).toBe('chat-1');
+  });
+
   it('backfills tool-start command onto pre-existing tool-stream row', () => {
     const harness = createMessageStateHarness([{
       messageId: 'tool-1',
@@ -584,6 +710,80 @@ describe('createChatSubscriptionEventHandler', () => {
     })).not.toThrow();
 
     expect(streamingStateRef.current.endAllToolStreams).toHaveBeenCalled();
+  });
+
+  it('upserts a live tool message for tool-result events', () => {
+    const harness = createMessageStateHarness();
+    const streamingStateRef = makeFullStreamingRef();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef,
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
+    });
+
+    handler({
+      type: 'tool',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      tool: {
+        eventType: 'tool-result',
+        toolUseId: 'tool-r1',
+        toolName: 'read_file',
+        agentName: 'assistant-1',
+        result: { ok: true },
+        createdAt: '2026-02-24T00:00:00.000Z'
+      }
+    });
+
+    const messages = harness.getMessages() as Record<string, unknown>[];
+    expect(messages).toHaveLength(1);
+    expect(messages[0].messageId).toBe('tool-r1');
+    expect(messages[0].role).toBe('tool');
+    expect(messages[0].toolName).toBe('read_file');
+    expect(String(messages[0].content || '')).toContain('"ok": true');
+    expect(messages[0].chatId).toBe('chat-1');
+    expect(messages[0].isToolStreaming).toBe(false);
+  });
+
+  it('upserts a live tool message for tool-error events', () => {
+    const harness = createMessageStateHarness();
+    const streamingStateRef = makeFullStreamingRef();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef,
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
+    });
+
+    handler({
+      type: 'tool',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      tool: {
+        eventType: 'tool-error',
+        toolUseId: 'tool-e1',
+        toolName: 'read_file',
+        agentName: 'assistant-1',
+        error: 'File not found',
+        createdAt: '2026-02-24T00:00:00.000Z'
+      }
+    });
+
+    const messages = harness.getMessages() as Record<string, unknown>[];
+    expect(messages).toHaveLength(1);
+    expect(messages[0].messageId).toBe('tool-e1');
+    expect(messages[0].role).toBe('tool');
+    expect(messages[0].toolName).toBe('read_file');
+    expect(messages[0].content).toBe('File not found');
+    expect(messages[0].chatId).toBe('chat-1');
+    expect(messages[0].streamType).toBe('stderr');
   });
 
   it('forwards system events to session system callback', () => {
