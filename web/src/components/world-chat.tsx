@@ -1,98 +1,54 @@
 /**
- * Purpose:
- * - Render the world chat transcript and composer with AppRun-compatible events.
+ * World Chat Component - Real-time chat interface with agent message filtering
  *
- * Key Features:
- * - Real-time message streaming with filtering, deduplication, and role-based rendering.
- * - Chat composer with send/stop controls, HITL safety gating, and Electron-style toolbar layout.
- * - Agent activity/queue indicators and message-level tooling/edit/delete affordances.
+ * Features:
+ * - Real-time message streaming with agent selection filtering
+ * - Cross-agent message detection and system message display
+ * - Memory-only message styling (agent messages saved to other agents' memory)
+ * - User input handling with send functionality and loading states
+ * - Message editing with frontend-driven DELETE → POST flow
+ * - Message deletion with confirmation dialog (deletes message and all after it)
+ * - Message deduplication by messageId for multi-agent scenarios
+ * - Displays only the first/intended recipient agent, not all who received it
+ * - Agent activity display for world events (response-start, tool-start)
+ * - Tool call approval request/response rendering with inline action buttons
+ * - Tool result message filtering (hides non-approval tool results, shows approval via ToolCallResponseBox)
+ * - Detailed tool call display: "Calling tool: shell_cmd (command: x, params: y)" format
+ * - Detailed tool result display: "Tool result: shell_cmd (command: x, params: y)" format
+ * - AppRun JSX with props-based state management
  *
- * Notes on Implementation:
- * - Stateless functional component that derives UI directly from props.
- * - Message body rendering is delegated to domain helpers to keep this file focused on view composition.
- *
- * Summary of Recent Changes:
- * - 2026-02-21: Wired `Project` button to web project-folder selection flow and dynamic folder tooltip text.
- * - 2026-02-21: Matched web composer toolbar structure to Electron (plus icon + project pill + round arrow action).
- * - 2026-02-21: Aligned web composer UI/behavior with Electron (textarea composer shell, icon action button, and Enter/Shift+Enter semantics).
- * - 2026-02-20: Disabled new-message sending while a HITL prompt is pending; users must resolve HITL first.
+ * Changes:
+ * - 2025-11-11: Fixed tool call display to prioritize tool_calls data over pre-saved text (upgrades old messages)
+ * - 2025-11-11: Updated tool call/result display to show full argument details without truncation
+ * - 2025-11-11: Enhanced tool call request preview to show tool name and arguments
+ * - 2025-11-11: Enhanced tool result preview to show tool name and arguments instead of just tool_call_id
+ * - 2025-11-11: Updated shouldHideMessage() to filter non-approval tool results while preserving approval flow
+ * - 2025-01-08: Added shouldHideMessage() to filter approval tool result messages from display
+ * - 2025-11-05: Added tool call request/response box rendering for inline approval flow
+ * - 2025-11-03: Display agent activities (response-start, tool-start) instead of waiting dots
+ * - 2025-10-27: Fixed message labeling to match export format - consistent reply detection
+ * - 2025-10-27: Removed confusing '[in-memory, no reply]' labels from display
+ * - 2025-10-26: Fixed agent filter to check sender first (whose memory) for in-memory messages
+ * - 2025-10-26: Fixed cross-agent message display - sender=recipient, fromAgentId=original author
+ * - 2025-10-26: Fixed 'To: unknown' bug - empty seenByAgents handled gracefully
+ * - 2025-10-26: Added comment explaining empty seenByAgents will be populated by duplicates
+ * - 2025-10-26: Added message delete button with confirmation dialog
+ * - 2025-10-25: Added memory-only message styling with gray left border for agent→agent messages
+ * - 2025-10-25: Added delivery status badge showing seenByAgents (📨 o1, a1, o3)
+ * - 2025-10-25: Edit button disabled until messageId confirmed from backend
+ * - 2025-10-21: Integrated message edit functionality with remove-and-resubmit flow
  */
 
-import { app } from 'apprun';
+import { app, safeHTML } from 'apprun';
 import type { WorldChatProps, Message } from '../types';
 import toKebabCase from '../utils/toKebabCase';
 import { SenderType, getSenderType } from '../utils/sender-type.js';
-import { isToolResultMessage, renderMessageContent } from '../domain/message-content';
-import { ActivityPulse, ElapsedTimeCounter } from './activity-indicators';
-import { AgentQueueDisplay } from './agent-queue-display';
+import { renderMarkdown } from '../utils/markdown';
+import ToolCallRequestBox from './tool-call-request-box';
+import ToolCallResponseBox from './tool-call-response-box';
+import SheetMusic from './demos/sheet-music';
 
 const debug = false;
-const SYSTEM_AVATAR_SPRITE_INDEX = 4;
-
-export interface ComposerActionState {
-  canStopCurrentSession: boolean;
-  composerDisabled: boolean;
-  actionButtonDisabled: boolean;
-  actionButtonClass: string;
-  actionButtonLabel: string;
-}
-
-export function isBranchableAgentMessage(message: Message): boolean {
-  if (!message || message.role !== 'assistant') return false;
-
-  const sender = String(message.sender || '').toLowerCase().trim();
-  if (!sender || sender === 'system' || sender === 'tool' || sender === 'human' || sender === 'user') {
-    return false;
-  }
-
-  const text = String(message.text || '').trim();
-  if (!text || /^error\s*:/i.test(text)) {
-    return false;
-  }
-
-  const anyMessage = message as any;
-  if (Array.isArray(anyMessage.tool_calls) && anyMessage.tool_calls.length > 0) return false;
-  if (anyMessage.tool_call_id) return false;
-  if (anyMessage.toolCallStatus) return false;
-
-  return true;
-}
-
-export function getComposerActionState(params: {
-  currentChatId: string | null;
-  isWaiting: boolean;
-  isBusy: boolean;
-  isStopping: boolean;
-  isSending: boolean;
-  hasActiveHitlPrompt: boolean;
-  userInput: string;
-}): ComposerActionState {
-  const {
-    currentChatId,
-    isWaiting,
-    isBusy,
-    isStopping,
-    isSending,
-    hasActiveHitlPrompt,
-    userInput,
-  } = params;
-
-  const canStopCurrentSession = Boolean(currentChatId) && (isWaiting || isBusy);
-  const composerDisabled = hasActiveHitlPrompt && !canStopCurrentSession;
-  const actionButtonDisabled = canStopCurrentSession
-    ? isStopping
-    : (isSending || !userInput.trim() || composerDisabled);
-  const actionButtonClass = canStopCurrentSession ? 'composer-submit-button stop-button' : 'composer-submit-button';
-  const actionButtonLabel = canStopCurrentSession ? 'Stop message processing' : 'Send message';
-
-  return {
-    canStopCurrentSession,
-    composerDisabled,
-    actionButtonDisabled,
-    actionButtonClass,
-    actionButtonLabel,
-  };
-}
 
 export default function WorldChat(props: WorldChatProps) {
   const {
@@ -105,73 +61,23 @@ export default function WorldChat(props: WorldChatProps) {
     isWaiting,
     needScroll = false,
     activeAgent,
-    agents = [],
     currentChat,
-    currentChatId = null,
-    selectedProjectPath = null,
     editingMessageId = null,
     editingText = '',
-    agentFilters = [],  // Agent IDs to filter by
-    isBusy = false,
-    elapsedMs = 0,
-    isStopping = false,
-    activeHitlPrompt = null,
-    submittingHitlRequestId = null,
+    agentFilters = []  // Agent IDs to filter by
   } = props;
 
-  const { canStopCurrentSession, composerDisabled, actionButtonDisabled, actionButtonClass, actionButtonLabel } = getComposerActionState({
-    currentChatId,
-    isWaiting,
-    isBusy,
-    isStopping,
-    isSending,
-    hasActiveHitlPrompt: Boolean(activeHitlPrompt),
-    userInput,
-  });
-  const inputPlaceholder = composerDisabled
-    ? 'Resolve pending HITL prompt before sending a new message...'
-    : 'Send a message...';
-  const projectButtonTitle = selectedProjectPath
-    ? `Project folder: ${selectedProjectPath}`
-    : 'Select project folder for context';
-  const waitingAgentName = activeAgent?.name?.trim() || agents[0]?.name?.trim() || 'Agent';
-  const agentSpriteByName = new Map<string, number>();
-  const agentSpriteById = new Map<string, number>();
-
-  for (const agent of agents) {
-    const normalizedName = toKebabCase(agent.name);
-    const normalizedId = toKebabCase(agent.id);
-    agentSpriteByName.set(normalizedName, agent.spriteIndex);
-    agentSpriteById.set(normalizedId, agent.spriteIndex);
-  }
-
-  const queuedAgents = agents
-    .filter((agent) => agent.name !== activeAgent?.name)
-    .map((agent) => ({ name: agent.name, spriteIndex: agent.spriteIndex }));
+  const promptReady = !isWaiting;
+  const promptIndicator = promptReady ? '>' : '…';
+  const inputPlaceholder = promptReady ? 'Type your message...' : 'Waiting for agents...';
+  const inputDisabled = isSending || isWaiting;
+  const disableSend = !userInput.trim() || isSending || isWaiting;
 
   // Helper function to determine if a message has sender/agent mismatch
   const hasSenderAgentMismatch = (message: Message): boolean => {
     const senderLower = toKebabCase(message.sender);
     const agentIdLower = toKebabCase(message.fromAgentId);
     return senderLower !== agentIdLower && !message.isStreaming;
-  };
-
-  const isSenderAutoReplyDisabled = (message: Message): boolean => {
-    const fromAgentId = toKebabCase(message.fromAgentId || '');
-    if (fromAgentId) {
-      const fromAgent = agents.find(agent => toKebabCase(agent.id) === fromAgentId);
-      if (fromAgent) {
-        return fromAgent.autoReply === false;
-      }
-    }
-
-    const normalizedSender = toKebabCase(message.sender || '');
-    if (!normalizedSender) return false;
-
-    const senderAgent = agents.find(
-      agent => toKebabCase(agent.id) === normalizedSender || toKebabCase(agent.name) === normalizedSender
-    );
-    return senderAgent?.autoReply === false;
   };
 
   // Helper function to resolve reply target from replyToMessageId
@@ -231,16 +137,29 @@ export default function WorldChat(props: WorldChatProps) {
     })()
     : messages;  // No filters = use pre-deduplicated messages
 
-  // Helper function to check if message should be hidden from display.
-  // Internal tool result protocol messages are not shown in the chat UI.
-  // Phase 5: Tool messages are now visible with collapsible output.
+  // Helper function to check if message should be hidden from display
+  // Filters out tool result messages that are NOT approval responses (client-side display filtering)
+  // Approval responses have isToolCallResponse=true and are displayed via ToolCallResponseBox
   const shouldHideMessage = (message: Message): boolean => {
-    if (message.isToolEvent && !message.isToolStreaming) {
+    // Don't hide if this is an approval response (has toolCallData for ToolCallResponseBox)
+    if (message.isToolCallResponse && message.toolCallData) {
+      return false;
+    }
+
+    // Check if this is a non-approval tool result message
+    // These are identified by:
+    // 1. Type 'tool' without toolCallData (regular tool execution results)
+    // 2. Type 'user'/'human' with JSON containing {__type: 'tool_result'} without decision field
+
+    // Case 1: OpenAI format - type='tool' without toolCallData
+    if (message.type === 'tool') {
       return true;
     }
 
+    // Case 2: Enhanced string protocol - JSON in message.text
     try {
       const text = message.text.trim();
+      // Strip @mention if present
       const jsonText = text.startsWith('@') ? text.substring(text.indexOf(',') + 1).trim() : text;
 
       if (jsonText.startsWith('{') && jsonText.endsWith('}')) {
@@ -256,40 +175,142 @@ export default function WorldChat(props: WorldChatProps) {
     return false;
   };
 
-  const getMessageRowAlignmentClass = (senderType: SenderType, isCrossAgentMessage: boolean): string => {
-    if (senderType === SenderType.HUMAN || isCrossAgentMessage) {
-      return 'message-row-left';
-    }
-    return 'message-row-right';
-  };
+  // Helper function to detect and format tool calls (3-tier detection matching export logic)
+  const formatMessageText = (message: Message): string => {
+    // Tier 1: Check for tool_calls array FIRST (prioritize regenerating from data over using pre-saved text)
+    // This allows old messages with simple "Calling tool: name" to be upgraded to detailed format
+    if ((message as any).tool_calls) {
+      // Parse tool_calls if it's a JSON string (from database)
+      let toolCalls = (message as any).tool_calls;
+      if (typeof toolCalls === 'string') {
+        try {
+          toolCalls = JSON.parse(toolCalls);
+        } catch {
+          toolCalls = [];
+        }
+      }
 
-  const getMessageAvatarSpriteIndex = (message: Message): number => {
-    const senderType = getSenderType(message.sender);
-    if (senderType === SenderType.HUMAN) {
-      // Human messages render an empty avatar slot, so sprite index is unused.
-      return SYSTEM_AVATAR_SPRITE_INDEX;
-    }
-    if (senderType === SenderType.SYSTEM || senderType === SenderType.WORLD) {
-      return SYSTEM_AVATAR_SPRITE_INDEX;
+      if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+        // Format tool calls with details
+        const toolCallDetails = toolCalls.map((tc: any) => {
+          const toolName = tc.function?.name || 'unknown';
+          let toolArgs = '';
+          try {
+            const args = JSON.parse(tc.function?.arguments || '{}');
+            const argKeys = Object.keys(args);
+            if (argKeys.length > 0) {
+              // Show all arguments without truncation for better visibility
+              const argSummary = argKeys.map((key: string) => {
+                const val = args[key];
+                const strVal = typeof val === 'string' ? val : JSON.stringify(val);
+                return `${key}: ${strVal}`;
+              }).join(', ');
+              toolArgs = ` (${argSummary})`;
+            }
+          } catch {
+            toolArgs = '';
+          }
+          return `${toolName}${toolArgs}`;
+        });
+
+        if (toolCalls.length === 1) {
+          return `Calling tool: ${toolCallDetails[0]}`;
+        } else {
+          return `Calling tools:\n${toolCallDetails.map((td, i) => `${i + 1}. ${td}`).join('\n')}`;
+        }
+      }
     }
 
-    const normalizedSender = toKebabCase(message.sender || '');
-    const normalizedFromAgentId = toKebabCase(message.fromAgentId || '');
+    const text = message.text;
 
-    if (agentSpriteByName.has(normalizedSender)) {
-      return agentSpriteByName.get(normalizedSender)!;
-    }
-    if (agentSpriteById.has(normalizedSender)) {
-      return agentSpriteById.get(normalizedSender)!;
-    }
-    if (agentSpriteById.has(normalizedFromAgentId)) {
-      return agentSpriteById.get(normalizedFromAgentId)!;
-    }
-    if (agentSpriteByName.has(normalizedFromAgentId)) {
-      return agentSpriteByName.get(normalizedFromAgentId)!;
+    // Tier 2: Check if this is a tool result message
+    if (message.type === 'tool') {
+      const toolCallId = (message as any).tool_call_id || 'unknown';
+
+      // Find the tool call details from previous assistant messages
+      let toolName = 'unknown';
+      let toolArgs = '';
+      const currentIndex = this.state.messages.findIndex(m => m.messageId === message.messageId);
+      if (currentIndex >= 0) {
+        for (let i = currentIndex - 1; i >= 0; i--) {
+          const prevMsg = this.state.messages[i];
+          if (prevMsg.type === 'assistant' && (prevMsg as any).tool_calls) {
+            // Parse tool_calls if it's a JSON string (from database)
+            let prevToolCalls = (prevMsg as any).tool_calls;
+            if (typeof prevToolCalls === 'string') {
+              try {
+                prevToolCalls = JSON.parse(prevToolCalls);
+              } catch {
+                prevToolCalls = [];
+              }
+            }
+            if (!Array.isArray(prevToolCalls)) continue;
+
+            const toolCall = prevToolCalls.find((tc: any) => tc.id === toolCallId);
+            if (toolCall) {
+              toolName = toolCall.function?.name || 'unknown';
+              try {
+                const args = JSON.parse(toolCall.function?.arguments || '{}');
+                const argKeys = Object.keys(args);
+                if (argKeys.length > 0) {
+                  // Show all arguments without truncation
+                  const argSummary = argKeys.map((key: string) => {
+                    const val = args[key];
+                    const strVal = typeof val === 'string' ? val : JSON.stringify(val);
+                    return `${key}: ${strVal}`;
+                  }).join(', ');
+                  toolArgs = ` (${argSummary})`;
+                }
+              } catch {
+                toolArgs = '';
+              }
+              break;
+            }
+          }
+        }
+      }
+
+      return `Tool result: ${toolName}${toolArgs}`;
     }
 
-    return SYSTEM_AVATAR_SPRITE_INDEX;
+    // Tier 3: Fallback - check if message content is all JSON tool call objects
+    const lines = text.trim().split('\n');
+    const jsonLines = lines.filter(line => line.trim().startsWith('{') && line.trim().endsWith('}'));
+
+    if (jsonLines.length > 0 && jsonLines.length === lines.length) {
+      // All lines are JSON objects - check if they're tool calls
+      const validToolCalls = jsonLines.filter(line => {
+        try {
+          const parsed = JSON.parse(line.trim());
+          return parsed.hasOwnProperty('name') || parsed.hasOwnProperty('parameters') ||
+            parsed.hasOwnProperty('arguments') || parsed.hasOwnProperty('function');
+        } catch {
+          return false;
+        }
+      });
+
+      if (validToolCalls.length > 0) {
+        // Extract tool names
+        const toolNames = validToolCalls
+          .map(line => {
+            try {
+              const parsed = JSON.parse(line.trim());
+              return parsed.function?.name || parsed.name || '';
+            } catch {
+              return '';
+            }
+          })
+          .filter(name => name !== '');
+
+        if (toolNames.length > 0) {
+          return `[${toolNames.length} tool call${toolNames.length > 1 ? 's' : ''}: ${toolNames.join(', ')}]`;
+        } else {
+          return `[${validToolCalls.length} tool call${validToolCalls.length > 1 ? 's' : ''}]`;
+        }
+      }
+    }
+
+    return text;
   };
 
   return (
@@ -298,12 +319,6 @@ export default function WorldChat(props: WorldChatProps) {
         {worldName} {
           currentChat ? ` - ${currentChat}` :
             <span className="unsaved-indicator" title="Unsaved chat"> ●</span>}
-        <AgentQueueDisplay
-          activeAgent={activeAgent ? { name: activeAgent.name, spriteIndex: activeAgent.spriteIndex } : null}
-          queuedAgents={queuedAgents}
-        />
-        <ActivityPulse isBusy={isBusy || false} />
-        {(isBusy || elapsedMs > 0) && <ElapsedTimeCounter elapsedMs={elapsedMs || 0} />}
       </legend>
       <div className="chat-container">
         {/* Conversation Area */}
@@ -327,7 +342,7 @@ export default function WorldChat(props: WorldChatProps) {
             <div className="no-messages">No messages yet. Start a conversation!</div>
           ) : (
             filteredMessages.map((message, index) => {
-              // Skip messages that should be hidden (internal tool result messages)
+              // Skip messages that should be hidden (non-approval tool result messages)
               if (shouldHideMessage(message)) {
                 return null;
               }
@@ -418,20 +433,12 @@ export default function WorldChat(props: WorldChatProps) {
 
               const baseMessageClass = senderType === SenderType.HUMAN ? 'user-message' : 'agent-message';
               const systemClass = senderType === SenderType.SYSTEM ? 'system-message' : '';
-              const crossAgentClass = isCrossAgentMessage && !isMemoryOnlyMessage && senderType !== SenderType.HUMAN ? 'cross-agent-message' : '';
+              const crossAgentClass = isCrossAgentMessage && !isMemoryOnlyMessage ? 'cross-agent-message' : '';
               const memoryOnlyClass = isMemoryOnlyMessage ? 'memory-only-message' : '';
-              const toolClass = isToolResultMessage(message) ? 'tool-message' : '';
-              const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass} ${memoryOnlyClass} ${toolClass}`.trim();
-              const rowAlignmentClass = getMessageRowAlignmentClass(senderType, isCrossAgentMessage);
-              const isHumanAvatar = senderType === SenderType.HUMAN;
-              const avatarSpriteIndex = getMessageAvatarSpriteIndex(message);
-              const avatarTitle = senderType === SenderType.HUMAN ? 'HUMAN' : message.sender || 'Agent';
+              const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass} ${memoryOnlyClass}`.trim();
 
               const isUserMessage = senderType === SenderType.HUMAN;
               const isEditing = editingMessageId === message.id;
-              const normalizedEditedText = editingText.trim();
-              const normalizedOriginalText = String(message.text || '').trim();
-              const isEditChanged = Boolean(normalizedEditedText) && normalizedEditedText !== normalizedOriginalText;
 
               // Build display label matching export format
               let displayLabel = '';
@@ -442,33 +449,29 @@ export default function WorldChat(props: WorldChatProps) {
                 }
                 // Note: If seenByAgents is empty, don't show 'To:' line (will be populated by duplicates)
               } else if (senderType === SenderType.AGENT) {
-                if (isSenderAutoReplyDisabled(message)) {
-                  displayLabel = message.sender;
-                } else {
-                  // Check if this is a reply message (has replyToMessageId) or incoming message
-                  if (isReplyMessage) {
-                    // Cross-agent reply: user message with replyToMessageId from another agent
-                    const replyTarget = getReplyTarget(message, filteredMessages);
-                    if (replyTarget) {
-                      displayLabel = `Agent: ${message.sender} (reply to ${replyTarget})`;
-                    } else {
-                      displayLabel = `Agent: ${message.sender} (reply)`;
-                    }
-                  } else if (message.type === 'assistant' || message.type === 'agent') {
-                    // Regular assistant/agent message
-                    const replyTarget = getReplyTarget(message, filteredMessages);
-                    if (replyTarget) {
-                      displayLabel = `Agent: ${message.sender} (reply to ${replyTarget})`;
-                    } else {
-                      displayLabel = `Agent: ${message.sender} (reply)`;
-                    }
-                  } else if (isCrossAgentMessage && isIncomingMessage) {
-                    // Non-reply cross-agent message (rare - most should have replyToMessageId)
-                    displayLabel = `Agent: ${message.sender} (message from ${message.fromAgentId || message.sender})`;
+                // Check if this is a reply message (has replyToMessageId) or incoming message
+                if (isReplyMessage) {
+                  // Cross-agent reply: user message with replyToMessageId from another agent
+                  const replyTarget = getReplyTarget(message, filteredMessages);
+                  if (replyTarget) {
+                    displayLabel = `Agent: ${message.sender} (reply to ${replyTarget})`;
                   } else {
-                    // Fallback
-                    displayLabel = `Agent: ${message.sender}`;
+                    displayLabel = `Agent: ${message.sender} (reply)`;
                   }
+                } else if (message.type === 'assistant' || message.type === 'agent') {
+                  // Regular assistant/agent message
+                  const replyTarget = getReplyTarget(message, filteredMessages);
+                  if (replyTarget) {
+                    displayLabel = `Agent: ${message.sender} (reply to ${replyTarget})`;
+                  } else {
+                    displayLabel = `Agent: ${message.sender} (reply)`;
+                  }
+                } else if (isCrossAgentMessage && isIncomingMessage) {
+                  // Non-reply cross-agent message (rare - most should have replyToMessageId)
+                  displayLabel = `Agent: ${message.sender} (message from ${message.fromAgentId || message.sender})`;
+                } else {
+                  // Fallback
+                  displayLabel = `Agent: ${message.sender}`;
                 }
               } else if (senderType === SenderType.SYSTEM) {
                 displayLabel = message.sender;
@@ -476,95 +479,110 @@ export default function WorldChat(props: WorldChatProps) {
                 displayLabel = message.sender;
               }
 
+              // Detect Render Sheet Music Tool Call
+              let sheetMusicData = null;
+              if (message.tool_calls) {
+                  const call = message.tool_calls.find((tc: any) => tc.function.name === 'render_sheet_music');
+                  if (call) {
+                      try { sheetMusicData = JSON.parse(call.function.arguments); } catch (e) {}
+                  }
+              } else if (message.toolCallData?.toolName === 'render_sheet_music') {
+                  sheetMusicData = message.toolCallData.toolArgs;
+              }
+                const sheetMusicJson = sheetMusicData ? JSON.stringify(sheetMusicData, null, 2) : null;
+
               return (
-                <div key={message.id || 'msg-' + index} className={`message-row ${rowAlignmentClass}`}>
-                  <div className="message-avatar-container" title={avatarTitle}>
-                    <div className={isHumanAvatar ? 'message-avatar message-avatar-empty' : `message-avatar agent-sprite sprite-${avatarSpriteIndex}`}></div>
+                <div key={message.id || 'msg-' + index} className={messageClasses}>
+                  <div className="message-sender" style={{ whiteSpace: 'pre-line' }}>
+                    {displayLabel}
                   </div>
-                  <div className={messageClasses}>
-                    <div className="message-sender" style={{ whiteSpace: 'pre-line' }}>
-                      {displayLabel}
+                  {isEditing ? (
+                    <div className="message-edit-container">
+                      <textarea
+                        className="message-edit-input"
+                        value={editingText}
+                        $oninput='update-edit-text'
+                        rows={3}
+                        autoFocus
+                      />
+                      <div className="message-edit-actions">
+                        <button
+                          className="btn-primary"
+                          $onclick={['save-edit-message', message.id]}
+                        >
+                          Update
+                        </button>
+                        <button
+                          className="btn-secondary"
+                          $onclick='cancel-edit-message'
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     </div>
-                    {isEditing ? (
-                      <div className="message-edit-container">
-                        <textarea
-                          className="message-edit-input"
-                          value={editingText}
-                          $oninput='update-edit-text'
-                          rows={3}
-                          autoFocus
-                        />
-                        <div className="message-edit-actions">
+                  ) : (
+                    <>
+                      {sheetMusicData && <SheetMusic data={sheetMusicData} />}
+                      {sheetMusicJson && <pre className="log-details">{sheetMusicJson}</pre>}
+                      {/* Render tool call request box for approval requests */}
+                      {message.isToolCallRequest && message.toolCallData ? (
+                        <ToolCallRequestBox message={message} />
+                      ) : message.isToolCallResponse && message.toolCallData ? (
+                        /* Render tool call response box for approval results */
+                        <ToolCallResponseBox message={message} />
+                      ) : (
+                        /* Regular message content */
+                        <div className="message-content">
+                          {safeHTML(renderMarkdown(formatMessageText(message)))}
+                        </div>
+                      )}
+                      {isUserMessage && !message.isStreaming && (
+                        <div className="message-actions">
                           <button
-                            className="btn-primary"
-                            $onclick={['save-edit-message', message.id]}
-                            disabled={!isEditChanged}
+                            className="message-edit-btn"
+                            $onclick={['start-edit-message', { messageId: message.id, text: message.text }]}
+                            title="Edit message"
+                            disabled={!message.messageId || message.userEntered}
                           >
-                            Update
+                            ✏️
                           </button>
                           <button
-                            className="btn-secondary"
-                            $onclick='cancel-edit-message'
+                            className="message-delete-btn"
+                            $onclick={['show-delete-message-confirm', {
+                              messageId: message.id,
+                              backendMessageId: message.messageId,
+                              messageText: message.text,
+                              userEntered: message.userEntered
+                            }]}
+                            title="Delete message and all after it"
+                            disabled={!message.messageId || message.userEntered}
                           >
-                            Cancel
+                            🗑️
                           </button>
                         </div>
-                      </div>
-                    ) : (
-                      <>
-                        {renderMessageContent(message)}
-                        {isUserMessage && !message.isStreaming && (
-                          <div className="message-actions">
-                            <button
-                              className="message-edit-btn"
-                              $onclick={['start-edit-message', { messageId: message.id, text: message.text }]}
-                              title="Edit message"
-                              disabled={!message.messageId || message.userEntered}
-                            >
-                              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm2.92 2.33H5v-.92l9.06-9.06.92.92L5.92 19.58zM20.71 7.04a1.003 1.003 0 0 0 0-1.42L18.37 3.29a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.83z" />
-                              </svg>
-                            </button>
-                            <button
-                              className="message-delete-btn"
-                              $onclick={['show-delete-message-confirm', {
-                                messageId: message.id,
-                                backendMessageId: message.messageId,
-                                messageText: message.text,
-                                userEntered: message.userEntered
-                              }]}
-                              title="Delete message and all after it"
-                              disabled={!message.messageId || message.userEntered}
-                            >
-                              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                <path fill="currentColor" d="M6 7h12l-1 14H7L6 7zm3-4h6l1 2h4v2H4V5h4l1-2z" />
-                              </svg>
-                            </button>
-                          </div>
-                        )}
-                      </>
-                    )}
-                    <div className="message-timestamp">
-                      {message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : 'Now'}
-                    </div>
-                    {message.isStreaming && (
-                      <div className="streaming-indicator">
-                        <div className="streaming-content">
-                          <div className={`agent-sprite sprite-${activeAgent?.spriteIndex ?? 0}`}></div>
-                          <span>responding ...</span>
-                        </div>
-                      </div>
-                    )}
-                    {message.hasError && <div className="error-indicator">Error: {message.errorMessage}</div>}
-                    {debug && <div className="message-debug-info">{JSON.stringify({
-                      id: message.id,
-                      type: message.type,
-                      sender: message.sender,
-                      fromAgentId: message.fromAgentId,
-                      messageId: message.messageId || 'undefined',
-                      hasMessageId: !!message.messageId,
-                    })}</div>}
+                      )}
+                    </>
+                  )}
+                  <div className="message-timestamp">
+                    {message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : 'Now'}
                   </div>
+                  {message.isStreaming && (
+                    <div className="streaming-indicator">
+                      <div className="streaming-content">
+                        <div className={`agent-sprite sprite-${activeAgent?.spriteIndex ?? 0}`}></div>
+                        <span>responding ...</span>
+                      </div>
+                    </div>
+                  )}
+                  {message.hasError && <div className="error-indicator">Error: {message.errorMessage}</div>}
+                  {debug && <div className="message-debug-info">{JSON.stringify({
+                    id: message.id,
+                    type: message.type,
+                    sender: message.sender,
+                    fromAgentId: message.fromAgentId,
+                    messageId: message.messageId || 'undefined',
+                    hasMessageId: !!message.messageId,
+                  })}</div>}
                 </div>
               );
             })
@@ -572,149 +590,37 @@ export default function WorldChat(props: WorldChatProps) {
 
           {/* Show waiting dots when processing */}
           {isWaiting && (
-            <div className="message-row message-row-left">
-              <div className="message-avatar-container" title="HUMAN">
-                <div className="message-avatar message-avatar-empty"></div>
-              </div>
-              <div className="message user-message waiting-message">
-                <div className="message-content">
-                  <div className="waiting-inline-status">
-                    <span className="waiting-inline-dot" aria-hidden="true"></span>
-                    <span>{waitingAgentName} is working...</span>
-                  </div>
+            <div className="message user-message waiting-message">
+              <div className="message-content">
+                <div className="waiting-dots">
+                  <span>.</span>
+                  <span>.</span>
+                  <span>.</span>
                 </div>
               </div>
             </div>
           )}
-
-          {activeHitlPrompt ? (
-            <div className="message-row message-row-left">
-              <div className="message-avatar-container" title="Human input required">
-                <div className="message-avatar sprite-4"></div>
-              </div>
-              <div className="message system-message hitl-inline-message">
-                <div className="message-sender">
-                  {activeHitlPrompt.title || 'Human input required'}
-                </div>
-                <div className="message-content">
-                  {(activeHitlPrompt.message || 'Please choose an option to continue.').replace(/\n\s*\n+/g, '\n')}
-                </div>
-                <div className="hitl-inline-actions hitl-inline-option-actions">
-                  {activeHitlPrompt.options.map((option) => {
-                    const isSubmitting = submittingHitlRequestId === activeHitlPrompt.requestId;
-                    return (
-                      <button
-                        key={option.id}
-                        className="btn-secondary px-4 py-2 rounded shrink-0"
-                        disabled={isSubmitting}
-                        $onclick={['respond-hitl-option', {
-                          requestId: activeHitlPrompt.requestId,
-                          optionId: option.id,
-                          chatId: activeHitlPrompt.chatId
-                        }]}
-                      >
-                        <div className="font-bold">{option.label}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          ) : null}
         </div>
 
         {/* User Input Area */}
         <div className="input-area">
-          <div className="composer-shell">
-            <textarea
-              className="composer-textarea"
+          <div className="input-container">
+            <input
+              type="text"
+              className="message-input"
               placeholder={inputPlaceholder}
               value={userInput || ''}
               $oninput='update-input'
-              $onkeydown='key-press'
-              rows={1}
-              aria-label="Message input"
-              disabled={composerDisabled}
+              $onkeypress='key-press'
+              disabled={inputDisabled}
             />
-            <div className="composer-toolbar">
-              <div className="composer-toolbar-left">
-                <button
-                  type="button"
-                  className="composer-action-icon-button"
-                  aria-label="Attach file"
-                  title="Attach file"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="composer-toolbar-icon"
-                    aria-hidden="true"
-                  >
-                    <path d="M12 5v14M5 12h14" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  className="composer-project-button"
-                  $onclick='select-project-folder'
-                  aria-label="Select project folder"
-                  title={projectButtonTitle}
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="composer-project-icon"
-                    aria-hidden="true"
-                  >
-                    <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
-                  </svg>
-                  <span>Project</span>
-                </button>
-              </div>
-              <button
-                className={actionButtonClass}
-                $onclick={canStopCurrentSession ? 'stop-message-processing' : 'send-message'}
-                disabled={actionButtonDisabled}
-                title={actionButtonLabel}
-                aria-label={actionButtonLabel}
-              >
-                {canStopCurrentSession ? (
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                    className="composer-submit-icon"
-                    aria-hidden="true"
-                  >
-                    <rect x="6" y="6" width="12" height="12" rx="1.5" />
-                  </svg>
-                ) : (
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="composer-submit-icon"
-                    aria-hidden="true"
-                  >
-                    <path d="M12 19V5M5 12l7-7 7 7" />
-                  </svg>
-                )}
-              </button>
-            </div>
+            <button
+              className="send-button"
+              $onclick="send-message"
+              disabled={disableSend}
+            >
+              {isSending ? 'Sending...' : 'Send'}
+            </button>
           </div>
         </div>
       </div>

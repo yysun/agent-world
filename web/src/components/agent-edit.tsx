@@ -7,14 +7,6 @@
  * - Success messaging with auto-close and parent component integration
  * - Global event publishing for coordinated modal management
  * - Standardized modal sizing via shared 'edit-modal' class (parity with World Edit)
- *
- * Implementation Notes:
- * - Agent create/update payloads are normalized in this component before API submission.
- * - The UI no longer submits `type`; backend defaults/retained values handle compatibility.
- *
- * Recent Changes:
- * - 2026-02-19: Moved auto-reply checkbox to sit directly beside the "Auto Reply" label text; help text now renders on a separate line.
- * - 2026-02-13: Removed implicit `type` submission from web agent create/update UI payloads.
  */
 
 import { app, Component } from 'apprun';
@@ -37,7 +29,6 @@ const getStateFromProps = (props: AgentEditProps): AgentEditState => ({
 export const defaultAgentData: Partial<Agent> = {
   name: '',
   description: '',
-  autoReply: true,
   provider: 'ollama' as LLMProvider,
   model: 'llama3.2:3b',
   temperature: 0.7,
@@ -45,10 +36,6 @@ export const defaultAgentData: Partial<Agent> = {
   systemPrompt: 'You are a helpful assistant.',
 };
 
-function normalizeAgentPayload(agent: Partial<Agent>): Partial<Agent> {
-  const { type: _ignoredType, ...payload } = agent as Partial<Agent> & { type?: string };
-  return payload;
-}
 
 // Save agent function (handles both create and update)
 export const saveAgent = async function* (state: AgentEditState): AsyncGenerator<AgentEditState> {
@@ -62,11 +49,17 @@ export const saveAgent = async function* (state: AgentEditState): AsyncGenerator
   yield { ...state, loading: true, error: null };
 
   try {
-    const payload = normalizeAgentPayload(state.agent);
+    // Ensure numeric values are numbers
+    const agentData = {
+      ...state.agent,
+      temperature: Number(state.agent.temperature),
+      maxTokens: Number(state.agent.maxTokens)
+    };
+
     if (state.mode === 'create') {
-      await api.createAgent(state.worldName, payload);
+      await api.createAgent(state.worldName, agentData);
     } else {
-      await api.updateAgent(state.worldName, state.agent.name, payload);
+      await api.updateAgent(state.worldName, state.agent.name, agentData);
     }
 
     const successMessage = state.mode === 'create'
@@ -262,20 +255,6 @@ export default class AgentEdit extends Component<AgentEditState> {
 
                 {/* Model/Provider row (now above temperature/maxTokens) */}
                 <div className="form-section">
-                  <div className="form-group">
-                    <div className="form-checkbox-row">
-                      <input
-                        id="agent-auto-reply"
-                        type="checkbox"
-                        checked={state.agent.autoReply !== false}
-                        $bind="agent.autoReply"
-                        disabled={state.loading}
-                      />
-                      <label htmlFor="agent-auto-reply" className="form-checkbox-title">Auto Reply</label>
-                    </div>
-                    <p className="form-help-text form-checkbox-help">Automatically reply to sender when no explicit @mention is provided</p>
-                  </div>
-
                   <div className="form-row">
                     <div className="form-group">
                       <label htmlFor="agent-provider">Provider</label>
@@ -317,14 +296,11 @@ export default class AgentEdit extends Component<AgentEditState> {
                       <label htmlFor="agent-temperature">Temperature</label>
                       <input
                         id="agent-temperature"
-                        type="number"
+                        type="text"
                         className="form-input"
                         placeholder="0.0 - 2.0"
-                        min="0"
-                        max="2"
-                        step="0.1"
                         value={state.agent.temperature}
-                        $bind="agent.temperature"
+                        $oninput={(e: any) => state.agent.temperature = e.target.value}
                         disabled={state.loading}
                       />
                     </div>

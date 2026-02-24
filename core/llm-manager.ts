@@ -575,7 +575,16 @@ async function executeStreamAgentResponse(
       );
 
       // Emit end event after streaming completes
-      publishSSE(world, { agentName: agent.id, type: 'end', messageId });
+      publishSSE(world, { 
+        agentName: agent.id, 
+        type: 'end', 
+        messageId,
+        usage: response.usage ? {
+           inputTokens: response.usage.inputTokens,
+           outputTokens: response.usage.outputTokens,
+           totalTokens: response.usage.inputTokens + response.usage.outputTokens
+        } : undefined
+      });
 
       return { response, messageId };
     }
@@ -596,7 +605,16 @@ async function executeStreamAgentResponse(
       );
 
       // Emit end event after streaming completes
-      publishSSE(world, { agentName: agent.id, type: 'end', messageId });
+      publishSSE(world, { 
+        agentName: agent.id, 
+        type: 'end', 
+        messageId,
+        usage: response.usage ? {
+           inputTokens: response.usage.inputTokens,
+           outputTokens: response.usage.outputTokens,
+           totalTokens: response.usage.inputTokens + response.usage.outputTokens
+        } : undefined
+      });
 
       return { response, messageId };
     }
@@ -617,7 +635,16 @@ async function executeStreamAgentResponse(
       );
 
       // Emit end event after streaming completes
-      publishSSE(world, { agentName: agent.id, type: 'end', messageId });
+      publishSSE(world, { 
+        agentName: agent.id, 
+        type: 'end', 
+        messageId,
+        usage: response.usage ? {
+           inputTokens: response.usage.inputTokens,
+           outputTokens: response.usage.outputTokens,
+           totalTokens: response.usage.inputTokens + response.usage.outputTokens
+        } : undefined
+      });
 
       return { response, messageId };
     }

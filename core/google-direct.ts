@@ -19,9 +19,6 @@
  * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
- * - 2026-02-15: Stopped replaying historical tool call/response parts as Google `functionCall`/`functionResponse` in conversation conversion to avoid 400 errors requiring `thought_signature` on replayed calls.
- * - 2026-02-13: Added transport-level AbortSignal wiring to Google SDK request options where supported.
- * - 2026-02-13: Added abort-signal checks for streaming and non-streaming execution paths.
  * - 2025-11-09: Phase 4 - Removed ALL tool execution logic (~200 lines)
  * - Provider is now a pure client - only API calls and data transformation
  * - Returns LLMResponse interface with type discriminator
@@ -71,31 +68,37 @@ function convertMessagesToGoogle(messages: ChatMessage[]): { messages: any[], sy
     }
 
     if (msg.role === 'tool') {
-      // Replay compatibility: avoid functionResponse replay because Gemini
-      // expects metadata coupling with prior functionCall traces.
-      // Keep tool outcomes as plain text context.
-      if (!msg.content?.trim()) {
-        continue;
-      }
+      // Tool responses are handled as function responses in Google format
       googleMessages.push({
-        role: 'user',
-        parts: [{ text: `[Tool result]\n${msg.content}` }]
+        role: 'function',
+        parts: [{
+          functionResponse: {
+            name: msg.tool_call_id, // Use tool_call_id as the function name reference
+            response: {
+              result: msg.content
+            }
+          }
+        }]
       });
       continue;
     }
 
     if (msg.role === 'assistant' && msg.tool_calls) {
-      // Replay compatibility: do NOT replay historical functionCall parts.
-      // Gemini may reject replayed calls without provider-issued thought_signature.
+      // Assistant message with function calls
       const parts: any[] = [];
 
       if (msg.content) {
         parts.push({ text: msg.content });
       }
 
-      if (parts.length === 0) {
-        parts.push({ text: '[Tool call history omitted for Google replay compatibility]' });
-      }
+      msg.tool_calls.forEach(toolCall => {
+        parts.push({
+          functionCall: {
+            name: toolCall.function.name,
+            args: JSON.parse(toolCall.function.arguments || '{}')
+          }
+        });
+      });
 
       googleMessages.push({
         role: 'model',
@@ -137,8 +140,7 @@ export async function streamGoogleResponse(
   mcpTools: Record<string, any>,
   world: World,
   onChunk: (content: string) => void,
-  messageId: string,
-  abortSignal?: AbortSignal
+  messageId: string
 ): Promise<LLMResponse> {
   const googleTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToGoogle(mcpTools) : undefined;
   const { messages: googleMessages, systemInstruction } = convertMessagesToGoogle(messages);
@@ -159,19 +161,18 @@ export async function streamGoogleResponse(
   let functionCalls: any[] = [];
 
   try {
-    if (abortSignal?.aborted) {
-      throw new DOMException('Google stream aborted before start', 'AbortError');
-    }
-    const result = await generativeModel.generateContentStream(
-      { contents: googleMessages },
-      abortSignal ? { signal: abortSignal } : undefined
-    );
+    const result = await generativeModel.generateContentStream({ contents: googleMessages });
 
     for await (const chunk of result.stream) {
-      if (abortSignal?.aborted) {
-        throw new DOMException('Google stream aborted', 'AbortError');
+      let chunkText = '';
+      try {
+        chunkText = chunk.text();
+      } catch (e) {
+        // chunk.text() throws if the response is a function call or blocked by safety
+        // Log it to see what's happening
+        logger.debug('Google Direct: chunk.text() threw error (likely tool call)', { error: e instanceof Error ? e.message : String(e) });
       }
-      const chunkText = chunk.text();
+
       if (chunkText) {
         fullResponse += chunkText;
         onChunk(chunkText);
@@ -180,7 +181,8 @@ export async function streamGoogleResponse(
       // Check for function calls in the chunk
       if (chunk.candidates?.[0]?.content?.parts) {
         for (const part of chunk.candidates[0].content.parts) {
-          if (part.functionCall) {
+           if (part.functionCall) {
+            logger.debug('Google Direct: Function call detected in chunk', { name: part.functionCall.name });
             functionCalls.push({
               id: generateId(),
               type: 'function',
@@ -254,8 +256,7 @@ export async function generateGoogleResponse(
   messages: ChatMessage[],
   agent: Agent,
   mcpTools: Record<string, any>,
-  world: World,
-  abortSignal?: AbortSignal
+  world: World
 ): Promise<LLMResponse> {
   const googleTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToGoogle(mcpTools) : undefined;
   const { messages: googleMessages, systemInstruction } = convertMessagesToGoogle(messages);
@@ -277,13 +278,7 @@ export async function generateGoogleResponse(
   });
 
   try {
-    if (abortSignal?.aborted) {
-      throw new DOMException('Google generation aborted before start', 'AbortError');
-    }
-    const result = await generativeModel.generateContent(
-      { contents: googleMessages },
-      abortSignal ? { signal: abortSignal } : undefined
-    );
+    const result = await generativeModel.generateContent({ contents: googleMessages });
     const response = result.response;
 
     let content = response.text() || '';

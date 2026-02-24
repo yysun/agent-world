@@ -14,13 +14,19 @@
  * - Work with loaded world without importing (uses external storage path)
  * 
  * Changes:
- * - 2026-02-20: Enforced options-only HITL handling in interactive and pipeline modes.
- * - 2026-02-14: Added interactive + pipeline HITL option response handling for generic approval requests.
- * - 2026-02-11: Fixed tool-stream timeout: extendTimeout() resets idle timeout on streaming data
- * - 2026-02-11: Pipeline mode now listens for tool-stream SSE events to extend timeout
- * - 2026-02-21: Extended timeout-refresh detection to include shell assistant-stream SSE events (`start`/`chunk`/`end` with `toolName='shell_cmd'`) in addition to legacy `tool-stream`.
  * - 2026-01-09: Added --streaming flag for explicit streaming control (overrides TTY auto-detection)
  * - 2025-02-06: Prevented duplicate MESSAGE output when streaming already rendered agent responses
+ * - 2025-11-10: Aligned approval submission tool_call_id to originalToolCall.id (parity with web/API)
+ * - 2025-11-08: Phase 3 - Display approval completion status from toolCallStatus field
+ * - 2025-11-08: Improved approval UI - "Approval Required" instead of "Tool Approval Required"
+ * - 2025-11-06: Updated approval protocol - agentId now embedded in JSON (server auto-prepends @mention)
+ * - 2025-11-05: Aligned tool approval to OpenAI protocol - check tool_calls in message events
+ * - 2025-11-05: Changed approval UI from enquirer to rl.question (numbered choices)
+ * - 2025-11-05: Removed SSE-based approval handling (approvals come as message events)
+ * - 2025-11-05: Added message-based approval system support for client.requestApproval tool calls
+ * - 2025-11-05: Extended MessageEventPayload interface to include tool_calls
+ * - 2025-11-05: Added handleNewApprovalRequest function for three-option approval prompting
+ * - 2025-11-05: Made handleWorldEvent async to support approval request processing
  * - 2025-11-01: Added multi-world selection in loadWorldFromFile
  * - 2025-11-01: Allow working with external worlds without importing
  * - 2025-11-01: Changed selectWorld return type to support external path tracking
@@ -81,10 +87,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { program } from 'commander';
 import readline from 'readline';
+import enquirer from 'enquirer';
 import {
   listWorlds,
   subscribeWorld,
-  submitWorldHitlResponse,
   ClientConnection,
   createCategoryLogger,
   LLMProvider,
@@ -93,6 +99,7 @@ import {
   type WorldActivityEventPayload,
   type WorldActivityEventType
 } from '../core/index.js';
+import { OpikTracer } from '@agent-world/opik';
 import { World, EventType } from '../core/types.js';
 import { getDefaultRootPath } from '../core/storage/storage-factory.js';
 import { processCLIInput, displayChatMessages } from './commands.js';
@@ -101,20 +108,10 @@ import {
   createStreamingState,
   handleWorldEventWithStreaming,
   handleToolEvents,
+  handleActivityEvents,
+  handleToolCallEvents,
 } from './stream.js';
 import { configureLLMProvider } from '../core/llm-config.js';
-import {
-  createStatusLineManager,
-  type StatusLineManager,
-  formatToolName,
-  getToolIcon,
-  log as statusLog,
-} from './display.js';
-import {
-  parseHitlPromptRequest,
-  resolveHitlOptionSelectionInput,
-  type HitlOptionRequestPayload,
-} from './hitl.js';
 
 // Create CLI category logger after logger auto-initialization
 const logger = createCategoryLogger('cli');
@@ -139,21 +136,18 @@ interface MessageEventPayload {
 interface SystemEventPayload {
   message?: string;
   content?: string;
-  chatId?: string | null;
   [key: string]: any;
 }
 
 // State management for interactive mode
 interface GlobalState {
   awaitingResponse: boolean;
-  hitlPromptActive: boolean;
   world?: any;
 }
 
 function createGlobalState(): GlobalState {
   return {
-    awaitingResponse: false,
-    hitlPromptActive: false
+    awaitingResponse: false
   };
 }
 
@@ -178,6 +172,217 @@ const success = (text: string) => `${boldGreen('✓')} ${text}`;
 const error = (text: string) => `${boldRed('✗')} ${text}`;
 const bullet = (text: string) => `${gray('•')} ${text}`;
 
+interface ApprovalRequest {
+  toolCallId: string;
+  originalToolCall?: any;
+  toolName: string;
+  toolArgs: any;
+  message: string;
+  options: string[];
+  agentId?: string;
+}
+
+// Handle approval requests from tool calls
+async function handleNewApprovalRequest(
+  request: ApprovalRequest,
+  rl: readline.Interface,
+  world: any
+): Promise<void> {
+  const { toolCallId, toolName, toolArgs, message, options, agentId } = request;
+
+  // Small delay to avoid mixing with world messages
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  console.log(`\n${boldYellow('🔒 Approval Required')}`);
+  console.log(`${gray('Tool:')} ${yellow(toolName)}`);
+
+  if (toolArgs && Object.keys(toolArgs).length > 0) {
+    console.log(`${gray('Arguments:')}`);
+    for (const [key, value] of Object.entries(toolArgs)) {
+      const displayValue = typeof value === 'string' && value.length > 100
+        ? `${value.substring(0, 100)}...`
+        : String(value);
+      console.log(`  ${gray(key + ':')} ${displayValue}`);
+    }
+  }
+
+  if (message) {
+    console.log(`${gray('Reason:')} ${message}`);
+  }
+
+  // Create choices based on available options
+  const choices = [];
+  let choiceNumber = 1;
+  const choiceMap: Record<number, string> = {};
+
+  if (options.includes('deny')) {
+    choices.push(`  ${yellow(`${choiceNumber}.`)} ${cyan('Deny')}`);
+    choiceMap[choiceNumber] = 'deny';
+    choiceNumber++;
+  }
+  if (options.includes('approve_once')) {
+    choices.push(`  ${yellow(`${choiceNumber}.`)} ${cyan('Approve Once')}`);
+    choiceMap[choiceNumber] = 'approve_once';
+    choiceNumber++;
+  }
+  if (options.includes('approve_session')) {
+    choices.push(`  ${yellow(`${choiceNumber}.`)} ${cyan('Approve for Session')}`);
+    choiceMap[choiceNumber] = 'approve_session';
+    choiceNumber++;
+  }
+
+  // Fallback to basic options if none match
+  if (choices.length === 0) {
+    choices.push(`  ${yellow('1.')} ${cyan('Deny')}`);
+    choices.push(`  ${yellow('2.')} ${cyan('Approve Once')}`);
+    choices.push(`  ${yellow('3.')} ${cyan('Approve for Session')}`);
+    choiceMap[1] = 'deny';
+    choiceMap[2] = 'approve_once';
+    choiceMap[3] = 'approve_session';
+  }
+
+  console.log(`\n${boldMagenta('How would you like to respond?')}`);
+  for (const choice of choices) {
+    console.log(choice);
+  }
+
+  return new Promise<void>((resolve) => {
+    function askForDecision() {
+      rl.question(`\n${boldMagenta('Select an option (number):')} `, async (answer) => {
+        const trimmed = answer.trim();
+        const num = parseInt(trimmed);
+
+        if (!isNaN(num) && choiceMap[num]) {
+          const decision = choiceMap[num];
+
+          let approvalDecision: 'approve' | 'deny';
+          let approvalScope: 'session' | 'once' | undefined;
+
+          if (decision === 'approve_session') {
+            approvalDecision = 'approve';
+            approvalScope = 'session';
+          } else if (decision === 'approve_once') {
+            approvalDecision = 'approve';
+            approvalScope = 'once';
+          } else {
+            approvalDecision = 'deny';
+            approvalScope = undefined;
+          }
+
+          try {
+            if (!agentId) {
+              console.error(`${error('Cannot send approval: agentId is missing')}`);
+              resolve();
+              return;
+            }
+
+            const { publishToolResult } = await import('../core/events/index.js');
+            const { originalToolCall } = request;
+            const submittedToolCallId = (originalToolCall && originalToolCall.id) ? originalToolCall.id : toolCallId;
+            publishToolResult(world, agentId, {
+              tool_call_id: submittedToolCallId,
+              decision: approvalDecision,
+              scope: approvalScope,
+              toolName: originalToolCall?.name || toolName,
+              toolArgs: originalToolCall?.args || toolArgs,
+              workingDirectory: originalToolCall?.workingDirectory
+            });
+            resolve();
+          } catch (err) {
+            console.error(`${error('Failed to send approval response:')} ${err}`);
+            resolve();
+          }
+        } else {
+          console.log(boldRed('Invalid selection. Please try again.'));
+          askForDecision();
+        }
+      });
+    }
+
+    askForDecision();
+  });
+}
+
+// HITL (Human-in-the-Loop) request handler
+async function handleNewHITLRequest(
+  request: any,
+  rl: readline.Interface,
+  world: any
+): Promise<void> {
+  const { toolCallId, prompt, options, context, agentId } = request;
+
+  // Small delay to avoid mixing with world messages
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  console.log(`\n${boldYellow('🤔 Human Input Required')}`);
+  console.log(`${gray('Request:')} ${prompt}`);
+
+  if (context && Object.keys(context).length > 0) {
+    console.log(`${gray('Context:')}`);
+    for (const [key, value] of Object.entries(context)) {
+      const displayValue = typeof value === 'string' && value.length > 100
+        ? `${value.substring(0, 100)}...`
+        : String(value);
+      console.log(`  ${gray(key + ':')} ${displayValue}`);
+    }
+  }
+
+  // Create numbered choices from options array
+  const choices: string[] = [];
+  const choiceMap: Record<number, string> = {};
+
+  options.forEach((option: string, index: number) => {
+    const choiceNumber = index + 1;
+    choices.push(`  ${yellow(`${choiceNumber}.`)} ${cyan(option)}`);
+    choiceMap[choiceNumber] = option;
+  });
+
+  console.log(`\n${boldMagenta('Please select an option:')}`);
+  for (const choice of choices) {
+    console.log(choice);
+  }
+
+  return new Promise<void>((resolve) => {
+    function askForChoice() {
+      rl.question(`\n${boldMagenta('Select an option (number):')} `, async (answer) => {
+        const trimmed = answer.trim();
+        const num = parseInt(trimmed);
+
+        if (!isNaN(num) && choiceMap[num]) {
+          const choice = choiceMap[num];
+
+          try {
+            if (!agentId) {
+              console.error(`${error('Cannot send HITL response: agentId is missing')}`);
+              resolve();
+              return;
+            }
+
+            const { publishToolResult } = await import('../core/events/index.js');
+            const { originalToolCall } = request;
+            const submittedToolCallId = (originalToolCall && originalToolCall.id) ? originalToolCall.id : toolCallId;
+            publishToolResult(world, agentId, {
+              tool_call_id: submittedToolCallId,
+              choice: choice,
+              toolName: originalToolCall?.name || 'client.humanIntervention',
+              toolArgs: originalToolCall?.args
+            });
+            resolve();
+          } catch (err) {
+            console.error(`${error('Failed to send HITL response:')} ${err}`);
+            resolve();
+          }
+        } else {
+          console.log(boldRed('Invalid selection. Please try again.'));
+          askForChoice();
+        }
+      });
+    }
+
+    askForChoice();
+  });
+}
+
 type ActivityEventState = WorldActivityEventType;
 
 interface ActivityEventSnapshot {
@@ -192,7 +397,6 @@ interface IdleWaiter {
   seenProcessing: boolean;
   timeoutId?: ReturnType<typeof setTimeout>;
   noActivityTimeoutId?: ReturnType<typeof setTimeout>;
-  timeoutMs: number;
 }
 
 class WorldActivityMonitor {
@@ -271,8 +475,7 @@ class WorldActivityMonitor {
           cleanup();
           reject(error);
         },
-        seenProcessing: false,
-        timeoutMs
+        seenProcessing: false
       };
 
       const cleanup = () => {
@@ -324,27 +527,6 @@ class WorldActivityMonitor {
     this.lastEvent = null;
   }
 
-  /**
-   * Extend timeout for all active waiters.
-   * Called when streaming data arrives to prevent premature timeout.
-   */
-  extendTimeout(): void {
-    for (const waiter of this.waiters) {
-      // Reset the main timeout
-      if (waiter.timeoutId) {
-        clearTimeout(waiter.timeoutId);
-        waiter.timeoutId = setTimeout(() => {
-          this.finishWaiter(waiter, false, new Error('Timed out waiting for world to become idle'));
-        }, waiter.timeoutMs);
-      }
-      // Clear noActivity timeout since we have activity
-      if (waiter.noActivityTimeoutId) {
-        clearTimeout(waiter.noActivityTimeoutId);
-        waiter.noActivityTimeoutId = undefined;
-      }
-    }
-  }
-
   getActiveSources(): string[] {
     return this.lastEvent?.activeSources ?? [];
   }
@@ -384,47 +566,39 @@ function parseActivitySource(source?: string): { type: 'agent' | 'message'; name
   return null;
 }
 
-async function promptHitlOptionSelection(
-  request: HitlOptionRequestPayload,
-  statusLine: StatusLineManager,
-  rl: readline.Interface
-): Promise<string> {
-  const fallbackOptionId = request.defaultOptionId;
-  statusLine.pause();
-  try {
-    while (true) {
-      console.log(`\n${boldMagenta('Approval Required')}`);
-      console.log(`${boldCyan(request.title)}`);
-      if (request.message) {
-        console.log(gray(request.message));
-      }
-      console.log(gray('Select an option:'));
-      request.options.forEach((option, index) => {
-        const isDefault = option.id === fallbackOptionId;
-        const defaultSuffix = isDefault ? gray(' (default)') : '';
-        console.log(`  ${yellow(String(index + 1) + '.')} ${option.label}${defaultSuffix}`);
-        if (option.description) {
-          console.log(`     ${gray(option.description)}`);
-        }
-      });
+class ActivityProgressRenderer {
+  private activeAgents = new Set<string>();
 
-      const answer = await new Promise<string>((resolve) => {
-        rl.question(`${boldMagenta('Choice (number or option id):')} `, (input) => resolve(input.trim()));
-      });
+  handle(event: WorldActivityEventPayload): void {
+    if (!event) return;
 
-      const resolvedOptionId = resolveHitlOptionSelectionInput(
-        request.options,
-        answer,
-        fallbackOptionId
-      );
-      if (resolvedOptionId) {
-        return resolvedOptionId;
-      }
-
-      console.log(boldRed('Invalid selection. Please choose a listed option.'));
+    // Reset on idle
+    if (event.type === 'idle') {
+      this.reset();
+      return;
     }
-  } finally {
-    statusLine.resume();
+
+    const details = parseActivitySource(event.source);
+    if (!details || details.type !== 'agent') {
+      return;
+    }
+
+    // Track agent start on response-start
+    if (event.type === 'response-start' && !this.activeAgents.has(details.name)) {
+      this.activeAgents.add(details.name);
+    }
+
+    // Track agent end on response-end
+    if (event.type === 'response-end' && this.activeAgents.has(details.name)) {
+      this.activeAgents.delete(details.name);
+    }
+  }
+
+  reset(): void {
+    if (this.activeAgents.size > 0) {
+      this.activeAgents.clear();
+      // console.log(gray('All agents finished.'));
+    }
   }
 }
 
@@ -455,12 +629,12 @@ function configureLLMProvidersFromEnv(): void {
   }
 
   // Azure
-  if (process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_OPENAI_RESOURCE_NAME && process.env.AZURE_OPENAI_DEPLOYMENT_NAME) {
+  if (process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_RESOURCE_NAME && process.env.AZURE_DEPLOYMENT) {
     configureLLMProvider(LLMProvider.AZURE, {
       apiKey: process.env.AZURE_OPENAI_API_KEY,
-      resourceName: process.env.AZURE_OPENAI_RESOURCE_NAME,
-      deployment: process.env.AZURE_OPENAI_DEPLOYMENT_NAME,
-      apiVersion: process.env.AZURE_OPENAI_API_VERSION || '2024-10-21-preview'
+      resourceName: process.env.AZURE_RESOURCE_NAME,
+      deployment: process.env.AZURE_DEPLOYMENT,
+      apiVersion: process.env.AZURE_API_VERSION || '2024-10-21-preview'
     });
     logger.debug('Configured Azure provider from environment');
   }
@@ -525,7 +699,7 @@ function printCLIResult(result: any) {
  * @param streaming - Streaming state for interactive mode (null for pipeline mode)
  * @param globalState - Global state for interactive mode (null for pipeline mode)
  * @param activityMonitor - Activity monitor for tracking world events
- * @param statusLine - Status line manager for interactive display (null for pipeline mode)
+ * @param progressRenderer - Progress renderer for displaying activity
  * @param rl - Readline interface for interactive mode (undefined for pipeline mode)
  * @returns Map of event types to listener functions for cleanup
  */
@@ -534,18 +708,18 @@ function attachCLIListeners(
   streaming: StreamingState | null,
   globalState: GlobalState | null,
   activityMonitor: WorldActivityMonitor,
-  statusLine: StatusLineManager | null,
+  progressRenderer: ActivityProgressRenderer,
   rl?: readline.Interface
 ): Map<string, (...args: any[]) => void> {
   const listeners = new Map<string, (...args: any[]) => void>();
-  let hitlPromptChain: Promise<void> = Promise.resolve();
 
   // World activity events
   const worldListener = (eventData: WorldActivityEventPayload) => {
     activityMonitor.handle(eventData);
     // Only render activity progress in interactive mode
-    if (streaming && globalState && rl && statusLine) {
-      handleWorldEvent(EventType.WORLD, eventData, streaming, globalState, activityMonitor, statusLine, rl)
+    if (streaming && globalState && rl) {
+      progressRenderer.handle(eventData);
+      handleWorldEvent(EventType.WORLD, eventData, streaming, globalState, activityMonitor, progressRenderer, rl)
         .catch(err => console.error('Error handling world event:', err));
     }
     // Pipeline mode: silently track events for completion detection
@@ -559,8 +733,8 @@ function attachCLIListeners(
       typeof eventData.content === 'string' &&
       eventData.content.includes('Success message sent')) return;
 
-    if (streaming && globalState && rl && statusLine) {
-      handleWorldEvent(EventType.MESSAGE, eventData, streaming, globalState, activityMonitor, statusLine, rl)
+    if (streaming && globalState && rl) {
+      handleWorldEvent(EventType.MESSAGE, eventData, streaming, globalState, activityMonitor, progressRenderer, rl)
         .catch(err => console.error('Error handling message event:', err));
     } else {
       // Pipeline mode: simple console output
@@ -576,88 +750,22 @@ function attachCLIListeners(
   listeners.set(EventType.MESSAGE, messageListener);
 
   // SSE events (interactive mode only - pipeline mode uses non-streaming LLM calls)
-  if (streaming && globalState && rl && statusLine) {
+  if (streaming && globalState && rl) {
     const sseListener = (eventData: any) => {
-      // Extend timeout when long-running shell stream activity arrives.
-      const isLegacyToolStream = eventData.type === 'tool-stream';
-      const isShellAssistantStream = eventData.toolName === 'shell_cmd' &&
-        (eventData.type === 'start' || eventData.type === 'chunk' || eventData.type === 'end');
-      if (isLegacyToolStream || isShellAssistantStream) {
-        activityMonitor.extendTimeout();
-      }
-      handleWorldEvent(EventType.SSE, eventData, streaming, globalState, activityMonitor, statusLine, rl)
+      handleWorldEvent(EventType.SSE, eventData, streaming, globalState, activityMonitor, progressRenderer, rl)
         .catch(err => console.error('Error handling SSE event:', err));
     };
     world.eventEmitter.on(EventType.SSE, sseListener);
     listeners.set(EventType.SSE, sseListener);
-  } else {
-    // Pipeline mode: listen for shell stream events to extend timeout on long-running commands.
-    const sseTimeoutListener = (eventData: any) => {
-      const isLegacyToolStream = eventData.type === 'tool-stream';
-      const isShellAssistantStream = eventData.toolName === 'shell_cmd' &&
-        (eventData.type === 'start' || eventData.type === 'chunk' || eventData.type === 'end');
-      if (isLegacyToolStream || isShellAssistantStream) {
-        activityMonitor.extendTimeout();
-      }
-    };
-    world.eventEmitter.on(EventType.SSE, sseTimeoutListener);
-    listeners.set(EventType.SSE, sseTimeoutListener);
   }
 
   // System events
   const systemListener = (eventData: SystemEventPayload) => {
-    const hitlRequest = parseHitlPromptRequest(eventData);
-    if (hitlRequest) {
-      hitlPromptChain = hitlPromptChain
-        .then(async () => {
-          if (streaming && globalState && rl && statusLine) {
-            globalState.hitlPromptActive = true;
-            try {
-              const result = submitWorldHitlResponse({
-                worldId: world.id,
-                requestId: hitlRequest.requestId,
-                optionId: await promptHitlOptionSelection(hitlRequest, statusLine, rl),
-                chatId: hitlRequest.chatId,
-              });
-              if (!result.accepted) {
-                statusLine.pause();
-                console.log(boldRed(`Failed to submit approval response: ${result.reason || 'unknown error'}`));
-                statusLine.resume();
-                return;
-              }
-              statusLine.pause();
-              console.log(green('Submitted HITL option response.'));
-              statusLine.resume();
-              return;
-            } finally {
-              globalState.hitlPromptActive = false;
-            }
-          }
-
-          // Pipeline/non-interactive mode: auto-respond with default option to avoid blocking.
-          const result = submitWorldHitlResponse({
-            worldId: world.id,
-            requestId: hitlRequest.requestId,
-            optionId: hitlRequest.defaultOptionId,
-            chatId: hitlRequest.chatId,
-          });
-          if (!result.accepted) {
-            console.error(boldRed(`Failed to auto-respond HITL request: ${result.reason || 'unknown error'}`));
-            return;
-          }
-          console.log(`${gray('● system:')} Auto-selected HITL option "${hitlRequest.defaultOptionId}"`);
-        })
-        .catch((error) => {
-          console.error(boldRed(`Error handling HITL request: ${error instanceof Error ? error.message : String(error)}`));
-        });
-      return;
-    }
-
     if (eventData.content &&
       typeof eventData.content === 'string' &&
       eventData.content.includes('Success message sent')) return;
-    if (streaming && globalState && rl && statusLine) {
-      handleWorldEvent(EventType.SYSTEM, eventData, streaming, globalState, activityMonitor, statusLine, rl)
+    if (streaming && globalState && rl) {
+      handleWorldEvent(EventType.SYSTEM, eventData, streaming, globalState, activityMonitor, progressRenderer, rl)
         .catch(err => console.error('Error handling system event:', err));
     } else if (eventData.message || eventData.content) {
       // Pipeline mode: system messages are handled by message listener
@@ -691,6 +799,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
   let worldSubscription: any = null;
   let cliListeners: Map<string, (...args: any[]) => void> | null = null;
   const activityMonitor = new WorldActivityMonitor();
+  const progressRenderer = new ActivityProgressRenderer();
 
   try {
 
@@ -703,9 +812,12 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
       }
       world = worldSubscription.world as World;
 
+      // Attach Opik tracer if configured
+      tryAttachOpik(world);
+
       // Attach direct listeners to the world.eventEmitter for pipeline handling
       // Note: Pipeline mode uses non-streaming LLM calls, so SSE events are not needed
-      cliListeners = attachCLIListeners(world, null, null, activityMonitor, null);
+      cliListeners = attachCLIListeners(world, null, null, activityMonitor, progressRenderer);
     }
 
     // Execute command from --command option
@@ -838,6 +950,21 @@ function cleanupWorldSubscription(worldState: WorldState | null): void {
   }
 }
 
+// Helper to attach Opik tracer if configured
+function tryAttachOpik(world: World): void {
+  // Check if Opik is enabled via ENV or manual flag? 
+  // Assuming keys presence is enough as per OpikClient logic.
+  if (process.env.OPIK_API_KEY || process.env.OPIK_ENABLED === 'true') {
+    try {
+      const tracer = new OpikTracer();
+      tracer.attachToWorld(world);
+      console.log('Opik tracing enabled for world:', world.name);
+    } catch (error) {
+      console.warn('Failed to attach Opik tracer:', error);
+    }
+  }
+}
+
 /**
  * Subscribe to world and attach CLI event listeners for interactive mode
  * 
@@ -846,7 +973,7 @@ function cleanupWorldSubscription(worldState: WorldState | null): void {
  * @param streaming - Streaming state for real-time response display
  * @param globalState - Global state for timer management
  * @param activityMonitor - Activity monitor for tracking world events
- * @param statusLine - Status line manager for interactive display
+ * @param progressRenderer - Progress renderer for displaying activity
  * @param rl - Readline interface for interactive input
  * @returns WorldState with subscription and world instance
  */
@@ -856,7 +983,7 @@ async function handleSubscribe(
   streaming: StreamingState,
   globalState: GlobalState,
   activityMonitor: WorldActivityMonitor,
-  statusLine: StatusLineManager,
+  progressRenderer: ActivityProgressRenderer,
   rl?: readline.Interface
 ): Promise<WorldState | null> {
   // Subscribe to world lifecycle but do not request forwarding callbacks
@@ -865,14 +992,17 @@ async function handleSubscribe(
 
   const world = subscription.world as World;
 
-  // Store world in globalState for access in interactive event handlers.
+  // Store world in globalState for access in event handlers (e.g., approval handling)
   if (globalState) {
     globalState.world = world;
   }
 
+  // Attach Opik tracer if configured
+  tryAttachOpik(world);
+
   // Attach direct listeners to the world.eventEmitter for CLI handling
   // Interactive mode needs all event types including SSE for streaming responses
-  attachCLIListeners(world, streaming, globalState, activityMonitor, statusLine, rl);
+  attachCLIListeners(world, streaming, globalState, activityMonitor, progressRenderer, rl);
 
   return { subscription, world };
 }
@@ -884,7 +1014,7 @@ async function handleWorldEvent(
   streaming: StreamingState,
   globalState: GlobalState,
   activityMonitor: WorldActivityMonitor,
-  statusLine: StatusLineManager,
+  progressRenderer: ActivityProgressRenderer,
   rl?: readline.Interface
 ): Promise<void> {
   if (eventType === 'world') {
@@ -892,80 +1022,29 @@ async function handleWorldEvent(
     // Handle activity events (new format: type = 'response-start' | 'response-end' | 'idle')
     if (payload.type === 'response-start' || payload.type === 'response-end' || payload.type === 'idle') {
       activityMonitor.handle(payload as WorldActivityEventPayload);
+      progressRenderer.handle(payload as WorldActivityEventPayload);
 
-      // Update status line based on activity events
-      const details = parseActivitySource(payload.source);
-      const agentName = details?.type === 'agent' ? details.name : payload.source || '';
+      // Call handleActivityEvents for verbose activity logging
+      handleActivityEvents(payload);
 
-      if (payload.type === 'response-start' && agentName) {
-        statusLine.setSpinner(`${agentName} is thinking...`);
-        statusLine.startElapsedTimer();
-        // Update agent list from activeSources
-        if (payload.activeSources) {
-          const agentEntries = payload.activeSources
-            .map((s: string) => parseActivitySource(s))
-            .filter((d: any) => d?.type === 'agent')
-            .map((d: any) => ({ name: d.name, active: true }));
-          statusLine.setAgents(agentEntries);
-        }
-      }
-
-      if (payload.type === 'response-end') {
-        // Update agent list — remove finished agent
-        if (payload.activeSources) {
-          const agentEntries = payload.activeSources
-            .map((s: string) => parseActivitySource(s))
-            .filter((d: any) => d?.type === 'agent')
-            .map((d: any) => ({ name: d.name, active: true }));
-          statusLine.setAgents(agentEntries);
-          // Update spinner label to next active agent if any
-          if (agentEntries.length > 0) {
-            statusLine.setSpinner(`${agentEntries[0].name} is thinking...`);
-          } else {
-            statusLine.setSpinner(null);
-            statusLine.stopElapsedTimer();
-          }
-        }
-      }
-
-      if (payload.type === 'idle') {
-        statusLine.reset();
-        if (rl && globalState.awaitingResponse) {
-          globalState.awaitingResponse = false;
-          statusLine.clear();
-          console.log(); // Empty line before prompt
-          rl.prompt();
-        }
+      if (payload.type === 'idle' && rl && globalState.awaitingResponse) {
+        globalState.awaitingResponse = false;
+        console.log(); // Empty line before prompt
+        rl.prompt();
       }
     }
-    // Handle informational world messages.
+    // Handle info messages (e.g., approval checking)
     else if (payload.type === 'info' && payload.message) {
-      statusLog(statusLine, `${gray('[World]')} ${payload.message}`);
+      console.log(`${gray('[World]')} ${payload.message}`);
     }
     // Handle tool events (migrated from sse channel)
     else if (payload.type === 'tool-start' || payload.type === 'tool-result' || payload.type === 'tool-error' || payload.type === 'tool-progress') {
-      // Update status line with tool info
-      if (payload.type === 'tool-start' && payload.toolExecution) {
-        statusLine.addTool(payload.toolExecution.toolName);
-      } else if (payload.type === 'tool-result' && payload.toolExecution) {
-        statusLine.removeTool(payload.toolExecution.toolName, 'done');
-      } else if (payload.type === 'tool-error' && payload.toolExecution) {
-        statusLine.removeTool(payload.toolExecution.toolName, 'error');
-      }
-
-      // Print permanent tool event output
-      statusLine.pause();
       handleToolEvents(payload);
-      // Only resume status line if not actively streaming
-      // (streaming code manages its own pause/resume lifecycle)
-      if (!streaming.isActive) {
-        statusLine.resume();
-      }
     }
     return;
   }
 
-  if (handleWorldEventWithStreaming(eventType, eventData, streaming, statusLine)) {
+  if (handleWorldEventWithStreaming(eventType, eventData, streaming)) {
     return;
   }
 
@@ -975,6 +1054,32 @@ async function handleWorldEvent(
 
   // Handle regular message events from agents (non-streaming or after streaming ends)
   if (eventType === 'message' && eventData.sender && (eventData.content || eventData.tool_calls)) {
+    // Check for tool calls FIRST (including approval and HITL requests) - following OpenAI protocol
+    if (rl && eventData.tool_calls) {
+      const toolCallResult = handleToolCallEvents(eventData);
+      if (toolCallResult?.isApprovalRequest && toolCallResult.approvalData) {
+        await handleNewApprovalRequest(toolCallResult.approvalData, rl, globalState.world);
+        return;
+      }
+      if (toolCallResult?.isHITLRequest && toolCallResult.hitlData) {
+        await handleNewHITLRequest(toolCallResult.hitlData, rl, globalState.world);
+        return;
+      }
+    }
+
+    // Display tool call completion status (approval results)
+    if (eventData.toolCallStatus) {
+      for (const [toolCallId, status] of Object.entries(eventData.toolCallStatus)) {
+        if (status && typeof status === 'object' && 'complete' in status && status.complete && 'result' in status && status.result) {
+          const result = status.result as { decision: string; scope?: string; toolName?: string; timestamp?: string };
+          const decision = result.decision === 'approve' ? green('✓ Approved') : boldRed('✗ Denied');
+          const scope = result.scope === 'session' ? gray('(for session)') : result.scope === 'once' ? gray('(once)') : '';
+          const toolName = result.toolName || 'unknown';
+          console.log(`${gray('[Approval]')} ${decision} ${scope} - ${yellow(toolName)}`);
+        }
+      }
+    }
+
     // Skip user messages to prevent echo
     if (eventData.sender === 'human' || eventData.sender.startsWith('user')) {
       return;
@@ -1000,13 +1105,13 @@ async function handleWorldEvent(
 
     // Display system messages
     if (eventData.sender === 'system') {
-      statusLog(statusLine, `${boldRed('● system:')} ${eventData.content}`);
+      console.log(`${boldRed('● system:')} ${eventData.content}`);
       return;
     }
 
     // Display agent messages (fallback for non-streaming or missed messages)
     if (eventData.content) {
-      statusLog(statusLine, `\n${boldGreen(`● ${eventData.sender}:`)} ${eventData.content}\n`);
+      console.log(`\n${boldGreen(`● ${eventData.sender}:`)} ${eventData.content}\n`);
     }
     return;
   }
@@ -1411,7 +1516,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
   const globalState: GlobalState = createGlobalState();
   const streaming = createStreamingState();
   const activityMonitor = new WorldActivityMonitor();
-  const statusLine = createStatusLineManager();
+  const progressRenderer = new ActivityProgressRenderer();
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -1432,8 +1537,8 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       logger.debug(`Loading world: ${options.world}`);
       try {
         activityMonitor.reset();
-        statusLine.reset();
-        worldState = await handleSubscribe(rootPath, options.world, streaming, globalState, activityMonitor, statusLine, rl);
+        progressRenderer.reset();
+        worldState = await handleSubscribe(rootPath, options.world, streaming, globalState, activityMonitor, progressRenderer, rl);
         currentWorldName = options.world;
         console.log(success(`Connected to world: ${currentWorldName}`));
 
@@ -1459,8 +1564,8 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       logger.debug(`Loading world: ${selectedWorld.worldName} from ${effectiveRootPath}`);
       try {
         activityMonitor.reset();
-        statusLine.reset();
-        worldState = await handleSubscribe(effectiveRootPath, selectedWorld.worldName, streaming, globalState, activityMonitor, statusLine, rl);
+        progressRenderer.reset();
+        worldState = await handleSubscribe(effectiveRootPath, selectedWorld.worldName, streaming, globalState, activityMonitor, progressRenderer, rl);
         currentWorldName = selectedWorld.worldName;
         console.log(success(`Connected to world: ${currentWorldName}`));
         if (selectedWorld.externalPath) {
@@ -1497,10 +1602,6 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
     rl.prompt();
 
     rl.on('line', async (input) => {
-      if (globalState.hitlPromptActive) {
-        return;
-      }
-
       const trimmedInput = input.trim();
 
       if (!trimmedInput) {
@@ -1571,8 +1672,8 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
             // Subscribe to the new world
             logger.debug(`Subscribing to world: ${selectedWorld.worldName}...`);
             activityMonitor.reset();
-            statusLine.reset();
-            worldState = await handleSubscribe(effectiveRootPath, selectedWorld.worldName, streaming, globalState, activityMonitor, statusLine, rl);
+            progressRenderer.reset();
+            worldState = await handleSubscribe(effectiveRootPath, selectedWorld.worldName, streaming, globalState, activityMonitor, progressRenderer, rl);
             currentWorldName = selectedWorld.worldName;
             console.log(success(`Connected to world: ${currentWorldName}`));
             if (selectedWorld.externalPath) {
@@ -1798,7 +1899,6 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
     rl.on('close', () => {
       if (isExiting) return; // Prevent duplicate cleanup
       isExiting = true;
-      statusLine.cleanup();
       console.log(`\n${boldCyan('Goodbye!')}`);
       if (worldState) cleanupWorldSubscription(worldState);
       process.exit(0);
@@ -1807,7 +1907,6 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
     rl.on('SIGINT', () => {
       if (isExiting) return; // Prevent duplicate cleanup
       isExiting = true;
-      statusLine.cleanup();
       console.log(`\n${boldCyan('Shutting down...')}`);
       console.log(`\n${boldCyan('Goodbye!')}`);
       if (worldState) cleanupWorldSubscription(worldState);
@@ -1817,7 +1916,6 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
 
   } catch (err) {
     console.error(boldRed('Error starting interactive mode:'), err instanceof Error ? err.message : err);
-    statusLine.cleanup();
     rl.close();
     process.exit(1);
   }

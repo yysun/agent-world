@@ -28,6 +28,7 @@
  *   (can occur due to retries, multiple listeners, or error recovery)
  * 
  * Changes:
+ * - 2026-02-03: Added graceful FK constraint failure handling to prevent crashes when chatId doesn't exist
  * - 2025-11-09: CRITICAL FIX - Let AUTOINCREMENT handle seq, don't set manually (was causing INSERT failures)
  * - 2025-11-03: Added INSERT OR IGNORE to handle duplicate event IDs gracefully
  * - 2025-11-06: Removed event_sequences table, use MAX(seq) + 1 for auto-increment
@@ -37,6 +38,9 @@ import type { Database } from 'sqlite3';
 import { promisify } from 'util';
 import type { EventStorage, StoredEvent, GetEventsOptions } from './types.js';
 import { validateEventForPersistence } from './validation.js';
+import { createCategoryLogger } from '../../logger.js';
+
+const logger = createCategoryLogger('sqlite-event-storage');
 
 export interface SQLiteEventStorageContext {
   db: Database;
@@ -169,19 +173,33 @@ async function saveEvent(ctx: SQLiteEventStorageContext, event: StoredEvent): Pr
   // Validate event metadata before persistence
   validateEventForPersistence(event);
 
-  // seq is AUTOINCREMENT - don't specify it, let SQLite handle it
-  await dbRun(
-    ctx.db,
-    `INSERT OR IGNORE INTO events (id, world_id, chat_id, type, payload, meta, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    event.id,
-    event.worldId,
-    event.chatId,
-    event.type,
-    JSON.stringify(event.payload),
-    event.meta ? JSON.stringify(event.meta) : null,
-    event.createdAt.toISOString()
-  );
+  try {
+    // seq is AUTOINCREMENT - don't specify it, let SQLite handle it
+    await dbRun(
+      ctx.db,
+      `INSERT OR IGNORE INTO events (id, world_id, chat_id, type, payload, meta, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      event.id,
+      event.worldId,
+      event.chatId,
+      event.type,
+      JSON.stringify(event.payload),
+      event.meta ? JSON.stringify(event.meta) : null,
+      event.createdAt.toISOString()
+    );
+  } catch (error: any) {
+    // Handle FK constraint failures gracefully - event will be skipped
+    if (error.message?.includes('FOREIGN KEY constraint failed')) {
+      logger.warn('Skipping event due to missing foreign key reference', {
+        eventId: event.id,
+        worldId: event.worldId,
+        chatId: event.chatId,
+        eventType: event.type
+      });
+      return;
+    }
+    throw error;
+  }
 }
 
 /**
@@ -200,19 +218,33 @@ async function saveEvents(ctx: SQLiteEventStorageContext, events: StoredEvent[])
       // Validate event metadata before persistence
       validateEventForPersistence(event);
 
-      // seq is AUTOINCREMENT - let SQLite handle it
-      await dbRun(
-        ctx.db,
-        `INSERT OR IGNORE INTO events (id, world_id, chat_id, type, payload, meta, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        event.id,
-        event.worldId,
-        event.chatId,
-        event.type,
-        JSON.stringify(event.payload),
-        event.meta ? JSON.stringify(event.meta) : null,
-        event.createdAt.toISOString()
-      );
+      try {
+        // seq is AUTOINCREMENT - let SQLite handle it
+        await dbRun(
+          ctx.db,
+          `INSERT OR IGNORE INTO events (id, world_id, chat_id, type, payload, meta, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          event.id,
+          event.worldId,
+          event.chatId,
+          event.type,
+          JSON.stringify(event.payload),
+          event.meta ? JSON.stringify(event.meta) : null,
+          event.createdAt.toISOString()
+        );
+      } catch (error: any) {
+        // Handle FK constraint failures gracefully - skip this event but continue batch
+        if (error.message?.includes('FOREIGN KEY constraint failed')) {
+          logger.warn('Skipping event in batch due to missing foreign key reference', {
+            eventId: event.id,
+            worldId: event.worldId,
+            chatId: event.chatId,
+            eventType: event.type
+          });
+          continue;
+        }
+        throw error;
+      }
     }
 
     await dbRun(ctx.db, 'COMMIT');

@@ -7,12 +7,6 @@
  * - AI SDK compatible chat messages with utility functions for seamless integration
  * - Storage interfaces and world-specific file operations with EventEmitter integration
  * - Comprehensive LLM provider enumeration (OpenAI, Anthropic, Azure, Google, XAI, Ollama)
- *
- * Recent Changes:
- * - 2026-02-13: Added world-level `mainAgent` routing field and agent-level `autoReply` flag.
- * - 2026-02-13: Added optional storage compare-and-set helper for chat title updates (`updateChatNameIfCurrent`).
- * - 2026-02-13: Added optional `chatId` to world tool events for session-scoped realtime routing.
- * - 2026-02-08: Removed legacy manual tool-intervention result types from core API surface
  */
 
 import { type EventEmitter } from 'events';
@@ -78,10 +72,47 @@ export interface AgentMessage extends ChatMessage {
   agentId?: string; // Agent ID for identifying message source
 
   /**
-   * Tool call completion tracking.
-   * Maps tool_call_id to completion status and result payload.
+   * Tool call completion tracking for approval requests/responses
+   * Maps tool_call_id to completion status and result
+   * 
+   * Usage:
+   * - Approval requests: Mark as incomplete when tool_calls sent
+   * - Approval responses: Mark as complete with decision/scope
+   * - Server is source of truth, client reads this status
+   * 
+   * @example
+   * // Approval request (incomplete)
+   * {
+   *   "approval_123": {
+   *     complete: false,
+   *     result: null
+   *   }
+   * }
+   * 
+   * // Approval response (complete)
+   * {
+   *   "approval_123": {
+   *     complete: true,
+   *     result: {
+   *       decision: "approve",
+   *       scope: "session",
+   *       timestamp: "2025-11-08T16:30:00.000Z"
+   *     }
+   *   }
+   * }
    */
-  toolCallStatus?: Record<string, { complete: boolean; result: any }>;
+  toolCallStatus?: Record<string, { complete: boolean; result: any | null }>;
+}
+
+export interface ToolResultData {
+  tool_call_id: string;
+  decision?: string;
+  scope?: string;
+  choice?: string;
+  toolName?: string;
+  toolArgs?: any;
+  workingDirectory?: string;
+  [key: string]: any;
 }
 
 // Agent Types
@@ -89,7 +120,6 @@ export interface Agent {
   id: string; // kebab-case of agent name
   name: string;
   type: string;
-  autoReply?: boolean;
   status?: 'active' | 'inactive' | 'error';
   provider: LLMProvider;
   model: string;
@@ -179,6 +209,8 @@ export type EventPayloadMap = {
   /** World/tool events use WorldToolEvent for agent behavioral tracking */
   [EventType.WORLD]: WorldToolEvent;
 
+  /** CRUD events use WorldCRUDEvent for configuration changes */
+  [EventType.CRUD]: WorldCRUDEvent;
 };
 
 /**
@@ -209,7 +241,9 @@ export enum EventType {
   /** SSE channel - streaming LLM responses */
   SSE = 'sse',
   /** System events for internal notifications */
-  SYSTEM = 'system'
+  SYSTEM = 'system',
+  /** CRUD events - agent, chat, and world configuration changes */
+  CRUD = 'crud'
 }
 
 export enum SenderType {
@@ -228,7 +262,6 @@ export interface CreateAgentParams {
   id?: string; // Optional - will be auto-generated from name using toKebabCase if not provided
   name: string;
   type: string;
-  autoReply?: boolean;
   provider: LLMProvider;
   model: string;
   systemPrompt?: string;
@@ -329,11 +362,9 @@ export interface CreateWorldParams {
   name: string;
   description?: string | null;
   turnLimit?: number;
-  mainAgent?: string | null;
   chatLLMProvider?: LLMProvider; // For chat summarization
   chatLLMModel?: string; // For chat summarization
   mcpConfig?: string | null; // MCP configuration JSON string
-  variables?: string; // .env-style world variables text
 }
 
 /**
@@ -351,12 +382,10 @@ export interface World {
   name: string;
   description?: string | null;
   turnLimit: number;
-  mainAgent?: string | null;
   chatLLMProvider?: string; // For chat summarization
   chatLLMModel?: string; // For chat summarization
   currentChatId?: string | null; // Track active chat session
   mcpConfig?: string | null; // MCP configuration JSON string
-  variables?: string; // .env-style world variables text
   isProcessing?: boolean; // Flag to prevent edits during agent processing
   createdAt: Date;
   lastUpdated: Date;
@@ -369,7 +398,6 @@ export interface World {
   eventStorage?: any; // EventStorage interface - optional for backward compatibility
   _eventPersistenceCleanup?: () => void; // Internal cleanup function for event listeners
   _activityListenerCleanup?: () => void; // Internal cleanup function for activity listener
-  _agentUnsubscribers?: Map<string, () => void>; // Per-agent message listener unsubscribe functions
 }
 
 // Unified Storage Interface - Consolidated from StorageManager and StorageAPI
@@ -404,7 +432,6 @@ export interface StorageAPI {
   deleteChatData(worldId: string, chatId: string): Promise<boolean>;
   listChats(worldId: string): Promise<Chat[]>;
   updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<Chat | null>;
-  updateChatNameIfCurrent?(worldId: string, chatId: string, expectedName: string, nextName: string): Promise<boolean>;
 
   // Chat operations
   saveWorldChat(worldId: string, chatId: string, chat: WorldChat): Promise<void>;
@@ -462,7 +489,7 @@ export interface LLMResponse {
 
   /**
    * Original assistant message for memory storage
-   * Must include full tool_calls array to preserve tool call context.
+   * CRITICAL: Must include full tool_calls array for approval flow
    */
   assistantMessage: {
     role: 'assistant';
@@ -506,12 +533,10 @@ export interface WorldMessageEvent {
  */
 export interface WorldSSEEvent {
   agentName: string;
-  type: 'start' | 'chunk' | 'end' | 'error' | 'log' | 'tool-stream';
+  type: 'start' | 'chunk' | 'end' | 'error' | 'log';
   content?: string;
   error?: string;
   messageId: string;
-  /** Chat ID for concurrency-safe event routing. Events without chatId are broadcast to all sessions. */
-  chatId?: string | null;
   usage?: {
     inputTokens: number;
     outputTokens: number;
@@ -524,18 +549,19 @@ export interface WorldSSEEvent {
     timestamp: string;
     data?: any;
   };
-  // Tool streaming fields
-  toolName?: string;
-  stream?: 'stdout' | 'stderr';
-  // Tool calls data for complete display with parameters
-  tool_calls?: Array<{
-    id: string;
-    type: 'function';
-    function: {
-      name: string;
-      arguments: string | Record<string, unknown>;
-    };
-  }>;
+}
+
+/**
+ * World CRUD event data structure for World.eventEmitter
+ * Used to broadcast agent, chat, and world configuration changes to subscribed clients
+ */
+export interface WorldCRUDEvent {
+  operation: 'create' | 'update' | 'delete';
+  entityType: 'agent' | 'chat' | 'world';
+  entityId: string;
+  entityData?: any; // Full entity data for create/update, null for delete
+  timestamp: Date;
+  chatId?: string | null; // For chat-specific operations
 }
 
 /**
@@ -546,7 +572,6 @@ export interface WorldToolEvent {
   agentName: string;
   type: 'tool-start' | 'tool-result' | 'tool-error' | 'tool-progress';
   messageId: string;
-  chatId?: string | null;
   toolExecution: {
     toolName: string;
     toolCallId: string;
@@ -744,3 +769,6 @@ export function validateMessageThreading(
     }
   }
 }
+
+
+

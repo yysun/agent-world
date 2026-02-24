@@ -20,7 +20,15 @@ import { createCategoryLogger, type LogLevel, addLogStreamCallback } from './log
 import { subscribeAgentToMessages, subscribeWorldToMessages } from './events/index.js';
 
 function toKebabCase(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/([a-z])([A-Z])/g, '$1-$2')
+    .replace(/[^a-zA-Z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase();
 }
 
 // Create subscription category logger (part of core functionality)
