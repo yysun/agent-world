@@ -19,9 +19,11 @@
  * - 2026-02-16: Added optional `projectPath` filter support for `listSkillRegistry` so project-scope skill discovery can follow the currently selected project folder.
  * - 2026-02-16: Added `session:branchFromMessage` IPC handler to create a branched chat and copy source-chat messages up to an assistant message.
  * - 2026-02-16: Updated `listSkillRegistry` to return scope-filtered skills (global/project) using the same env-driven rules as system-prompt skill injection.
+ * - 2026-02-23: Removed redundant message-existence pre-check from `editMessageInChat` to fix "404 Message not found" false positives.
+ *   - Pre-check used core `getMemory` (requires world in runtime store) which could fail when message exists in SQLite.
+ *   - `editUserMessage` uses `getActiveSubscribedWorld` fallback making it resilient; pre-check was redundant.
  * - 2026-02-15: Aligned `message:edit` IPC preconditions with web/API semantics.
  *   - Validates chat existence before edit delegation.
- *   - Validates target message exists in chat and is a user-role message.
  * - 2026-02-14: Added `hitl:respond` IPC handler to resolve core pending HITL option requests from renderer selections.
  * - 2026-02-14: Added `listSkillRegistry` IPC handler to sync/read core skill registry entries for empty-chat welcome rendering.
  * - 2026-02-14: Simplified edit-message IPC flow to delegate to core `editUserMessage` without runtime subscription refresh/rebind side effects.
@@ -1071,20 +1073,6 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     const restoredWorld = await restoreChat(worldId, chatId);
     if (!restoredWorld || restoredWorld.currentChatId !== chatId) {
       throw new Error(`404 Chat not found: ${chatId}`);
-    }
-
-    const memory = await getMemory(worldId, chatId);
-    const targetMessage = Array.isArray(memory)
-      ? memory.find((entry: any) => String(entry?.messageId || '') === messageId)
-      : null;
-
-    if (!targetMessage) {
-      throw new Error(`404 Message not found: ${messageId}`);
-    }
-
-    const targetRole = String(targetMessage?.role || '').toLowerCase();
-    if (targetRole !== 'user') {
-      throw new Error('400 Can only edit user messages');
     }
 
     return editUserMessage(worldId, messageId, newContent, chatId);

@@ -48,7 +48,6 @@ export function useMessageManagement({
   setSelectedSessionId,
   setStatusText,
   streamingStateRef,
-  activityStateRef,
   hasActiveHitlPrompt = false,
   setHitlPromptQueue,
   setSubmittingHitlRequestId,
@@ -183,9 +182,6 @@ export function useMessageManagement({
         if (streamingStateRef.current) {
           streamingStateRef.current.cleanup();
         }
-        if (activityStateRef.current) {
-          activityStateRef.current.cleanup();
-        }
         updateRegistry(r => clearChatAgents(r, loadedWorldId, selectedSessionId));
       }
 
@@ -206,7 +202,6 @@ export function useMessageManagement({
       });
     }
   }, [
-    activityStateRef,
     api,
     loadedWorldId,
     selectedSessionId,
@@ -297,11 +292,7 @@ export function useMessageManagement({
     if (streamingStateRef.current) {
       streamingStateRef.current.cleanup();
     }
-    if (activityStateRef.current) {
-      activityStateRef.current.cleanup();
-    }
-    // Reset registry so stale inFlightSse/inFlightTools counters don't block the
-    // new SSE flow from the resubmitted message.
+    // Reset registry so the working indicator clears before the new SSE flow begins.
     updateRegistry(r => clearChatAgents(r, loadedWorldId, targetChatId));
 
     const targetIdentity = getMessageIdentity(message);

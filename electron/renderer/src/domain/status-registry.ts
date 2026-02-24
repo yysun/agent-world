@@ -95,6 +95,37 @@ export function clearChatAgents(
 }
 
 /**
+ * Post-replay normalization: force any agent still at `working` to `complete`.
+ * Used after DB event replay to handle incomplete sequences (e.g. sse/end missing
+ * because the session was interrupted before it could be persisted).
+ */
+export function finalizeReplayedChat(
+  registry: StatusRegistry,
+  worldId: string,
+  chatId: string,
+): StatusRegistry {
+  const world = registry.worlds.get(worldId);
+  const chat = world?.chats.get(chatId);
+  if (!chat) return registry;
+
+  let changed = false;
+  const agents = new Map(chat.agents);
+  for (const [id, agent] of agents) {
+    if (agent.status === 'working') {
+      agents.set(id, { ...agent, status: 'complete' });
+      changed = true;
+    }
+  }
+  if (!changed) return registry;
+
+  const chats = new Map(world!.chats);
+  chats.set(chatId, { chatId, agents });
+  const worlds = new Map(registry.worlds);
+  worlds.set(worldId, { worldId, chats });
+  return { worlds };
+}
+
+/**
  * Non-destructive sync: adds new chats/agents as `idle`, removes stale ones,
  * leaves `working`/`complete` agents untouched.
  */
@@ -119,7 +150,7 @@ export function syncWorldRoster(
       if (existing) {
         newAgents.set(agentId, existing);
       } else {
-        newAgents.set(agentId, { agentId, status: 'idle', inFlightSse: 0, inFlightTools: 0 });
+        newAgents.set(agentId, { agentId, status: 'idle' });
       }
     }
 

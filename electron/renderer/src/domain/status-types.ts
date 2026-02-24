@@ -20,8 +20,6 @@ export type WorkingStatus = 'idle' | 'working' | 'complete';
 export interface AgentStatusEntry {
   agentId: string;
   status: WorkingStatus;
-  inFlightSse: number;   // count of open sse:start without matching end/error
-  inFlightTools: number; // count of open tool-start without matching result/error
 }
 
 export interface ChatStatusEntry {

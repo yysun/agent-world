@@ -78,8 +78,8 @@ import {
   parseOptionalInteger,
 } from './utils/app-helpers';
 import { useChatEventSubscriptions } from './hooks/useChatEventSubscriptions';
-import { clearChatAgents, getChatStatus, syncWorldRoster, updateRegistry } from './domain/status-registry';
-import { applyEventToRegistry } from './domain/status-updater';
+import { clearChatAgents, finalizeReplayedChat, getChatStatus, syncWorldRoster, updateRegistry } from './domain/status-registry';
+import { applyEventToRegistry, parseStoredEventReplayArgs } from './domain/status-updater';
 import {
   createLeftSidebarProps,
   createMainContentComposerProps,
@@ -230,7 +230,6 @@ export default function App() {
 
   const {
     streamingStateRef,
-    activityStateRef,
     resetActivityRuntimeState,
   } = useStreamingActivity({ setMessages });
 
@@ -507,7 +506,6 @@ export default function App() {
     setSelectedSessionId,
     setStatusText,
     streamingStateRef,
-    activityStateRef,
     hasActiveHitlPrompt,
     setHitlPromptQueue,
     setSubmittingHitlRequestId,
@@ -586,14 +584,13 @@ export default function App() {
           let reg = clearChatAgents(r, worldId, chatId);
           if (!Array.isArray(events)) return reg;
           for (const storedEvent of events) {
-            const eventCategory = String(storedEvent?.type || '').trim();
-            const payload = storedEvent?.payload || {};
-            const subtype = String(payload?.type || '').trim();
-            const agentName = String(payload?.agentName || '').trim();
-            if (!agentName || !subtype) continue;
-            if (eventCategory !== 'sse' && eventCategory !== 'tool') continue;
-            reg = applyEventToRegistry(reg, worldId, chatId, agentName, eventCategory as any, subtype as any);
+            const args = parseStoredEventReplayArgs(storedEvent);
+            if (!args) continue;
+            reg = applyEventToRegistry(reg, worldId, chatId, args.agentName, args.eventType, args.subtype);
           }
+          // Normalize: force any remaining 'working' to 'complete'.
+          // Handles incomplete sequences (e.g. sse/end missing from interrupted sessions).
+          reg = finalizeReplayedChat(reg, worldId, chatId);
           // Don't downgrade complete → working (DB persistence lag)
           if (liveStatus === 'complete' && getChatStatus(reg, worldId, chatId) === 'working') {
             return r;
@@ -674,7 +671,6 @@ export default function App() {
     setMessages,
     chatSubscriptionCounter,
     streamingStateRef,
-    activityStateRef,
     refreshSessions,
     resetActivityRuntimeState,
     setHitlPromptQueue,

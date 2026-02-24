@@ -13,6 +13,8 @@
  * - Accepts state setters/callbacks via dependency injection.
  *
  * Recent Changes:
+ * - 2026-02-24: Removed activityStateRef — activity-state.ts deleted as part of
+ *   working-status simplification.
  * - 2026-02-22: Removed onSessionResponseStateChange, setPendingResponseSessionIds,
  *   setSessionActivity, setStatusText, setActiveStreamCount as part of status-registry
  *   migration (Phase 1).
@@ -65,15 +67,6 @@ type RealtimeState = {
   cleanup: () => void;
 };
 
-type ActivityState = {
-  setActiveStreamCount: (count: number) => void;
-  handleToolStart: (toolUseId: string, toolName: string, toolInput?: Record<string, unknown>) => void;
-  handleToolResult: (toolUseId: string, result: string) => void;
-  handleToolError: (toolUseId: string, error: string) => void;
-  handleToolProgress: (toolUseId: string, progress: string) => void;
-  cleanup: () => void;
-};
-
 type UseChatEventSubscriptionsArgs = {
   api: DesktopApi;
   loadedWorld: { id?: string } | null;
@@ -81,7 +74,6 @@ type UseChatEventSubscriptionsArgs = {
   setMessages: Dispatch<SetStateAction<MessageLike[]>>;
   chatSubscriptionCounter: MutableRefObject<number>;
   streamingStateRef: MutableRefObject<RealtimeState | null>;
-  activityStateRef: MutableRefObject<ActivityState | null>;
   refreshSessions: (worldId: string, preferredSessionId?: string | null) => Promise<void>;
   resetActivityRuntimeState: () => void;
   setHitlPromptQueue: Dispatch<SetStateAction<HitlPrompt[]>>;
@@ -94,7 +86,6 @@ export function useChatEventSubscriptions({
   setMessages,
   chatSubscriptionCounter,
   streamingStateRef,
-  activityStateRef,
   refreshSessions,
   resetActivityRuntimeState,
   setHitlPromptQueue,
@@ -122,7 +113,6 @@ export function useChatEventSubscriptions({
       loadedWorldId: loadedWorld.id,
       selectedSessionId,
       streamingStateRef,
-      activityStateRef,
       setMessages,
       onSessionSystemEvent: (systemEvent) => {
         if (!loadedWorld?.id) return;
@@ -192,13 +182,9 @@ export function useChatEventSubscriptions({
       if (streamingStateRef.current) {
         streamingStateRef.current.cleanup();
       }
-      if (activityStateRef.current) {
-        activityStateRef.current.cleanup();
-      }
       resetActivityRuntimeState();
     };
   }, [
-    activityStateRef,
     api,
     chatSubscriptionCounter,
     loadedWorld,

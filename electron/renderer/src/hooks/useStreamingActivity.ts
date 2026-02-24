@@ -1,11 +1,11 @@
 /**
  * useStreamingActivity Hook
  * Purpose:
- * - Manage renderer streaming/activity runtime state and lifecycle wiring.
+ * - Manage renderer streaming runtime state and lifecycle wiring.
  *
  * Key Features:
- * - Owns streaming refs and activity refs used by chat subscriptions.
- * - Initializes stream/activity managers with message/tool-stream callbacks.
+ * - Owns streaming ref used by chat subscriptions.
+ * - Initializes stream manager with message/tool-stream callbacks.
  * - Exposes reset helper for world/session lifecycle cleanup.
  *
  * Implementation Notes:
@@ -13,6 +13,8 @@
  * - Keeps manager setup/teardown centralized in one hook.
  *
  * Recent Changes:
+ * - 2026-02-24: Removed activityStateRef entirely — activity-state.ts deleted
+ *   as part of working-status simplification (all callbacks were no-ops).
  * - 2026-02-22: Removed isBusy, elapsedMs, activeTools, activeStreamCount, sessionActivity
  *   states and their callbacks as part of status-registry migration (Phase 1).
  * - 2026-02-21: Propagated tool-stream command metadata into renderer messages so shell tool cards can display `Running command: <name>`.
@@ -24,12 +26,10 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import { createStreamingState } from '../streaming-state';
-import { createActivityState } from '../activity-state';
 import { upsertMessageList } from '../domain/message-updates';
 
 export function useStreamingActivity({ setMessages }) {
   const streamingStateRef = useRef(null);
-  const activityStateRef = useRef(null);
 
   useEffect(() => {
     streamingStateRef.current = createStreamingState({
@@ -129,30 +129,12 @@ export function useStreamingActivity({ setMessages }) {
     };
   }, [setMessages]);
 
-  useEffect(() => {
-    activityStateRef.current = createActivityState({
-      onToolStart: () => {},
-      onToolResult: () => {},
-      onToolError: () => {},
-      onToolProgress: () => {},
-      onElapsedUpdate: () => {},
-      onBusyChange: () => {},
-    });
-
-    return () => {
-      if (activityStateRef.current) {
-        activityStateRef.current.cleanup();
-      }
-    };
-  }, []);
-
   const resetActivityRuntimeState = useCallback(() => {
-    // activity refs are cleaned up by the subscription effect on chat switch
+    // streaming ref is cleaned up by the subscription effect on chat switch
   }, []);
 
   return {
     streamingStateRef,
-    activityStateRef,
     resetActivityRuntimeState,
   };
 }

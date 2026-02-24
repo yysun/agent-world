@@ -6,13 +6,17 @@
  * Features:
  * - Global log event handler for status or message timeline updates
  * - Session-scoped realtime handler for message/sse/tool events
- * - Stream/activity synchronization helpers
+ * - Stream synchronization helpers
  *
  * Implementation Notes:
  * - Handlers are generated from dependency injection for testability.
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
+ * - 2026-02-24: Removed ActivityRefs/activityStateRef and syncActiveStreamCount —
+ *   activity-state.ts deleted as part of working-status simplification.
+ * - 2026-02-22: Added activity event handler (response-end/idle) as authoritative
+ *   "all done" signal to clear stale streaming state and reset working indicator.
  * - 2026-02-21: Backfilled tool-stream row metadata on late `tool-start` events so shell cards still resolve command/tool labels even when stream chunks arrive first.
  * - 2026-02-21: Derived shell command labels for tool-stream rows from `tool-start` input (`toolUseId -> command`) and forwarded command metadata into streaming state.
  * - 2026-02-21: Forwarded SSE `toolName` into tool-stream state so tool streaming cards can render tool-specific running labels.
@@ -31,7 +35,7 @@
  */
 
 import { createLogMessage, upsertMessageList, type MessageLike } from './message-updates';
-import { updateRegistry } from './status-registry';
+import { clearChatAgents, updateRegistry } from './status-registry';
 import { applyEventToRegistry } from './status-updater';
 
 interface BasePayload {
@@ -54,17 +58,7 @@ interface RealtimeRefs {
     handleToolStreamChunk: (messageId: string, content: string, streamType: 'stdout' | 'stderr', toolName?: string, command?: string) => void;
     handleToolStreamEnd: (messageId: string) => void;
     isActive: (messageId: string) => boolean;
-  } | null;
-}
-
-interface ActivityRefs {
-  current: {
-    setActiveStreamCount: (count: number) => void;
-    handleToolStart: (toolUseId: string, toolName: string, toolInput?: Record<string, unknown>) => void;
-    handleToolResult: (toolUseId: string, result: string) => void;
-    handleToolError: (toolUseId: string, error: string) => void;
-    handleToolProgress: (toolUseId: string, progress: string) => void;
-    resetElapsed?: () => void;
+    cleanup: () => void;
   } | null;
 }
 
@@ -73,7 +67,6 @@ interface ChatHandlerOptions {
   loadedWorldId: string | null | undefined;
   selectedSessionId: string | null | undefined;
   streamingStateRef: RealtimeRefs;
-  activityStateRef: ActivityRefs;
   setMessages: (updater: (existing: MessageLike[]) => MessageLike[]) => void;
   onSessionSystemEvent?: (event: {
     eventType: string;
@@ -142,30 +135,15 @@ export function createChatSubscriptionEventHandler({
   loadedWorldId,
   selectedSessionId,
   streamingStateRef,
-  activityStateRef,
   setMessages,
   onSessionSystemEvent,
 }: ChatHandlerOptions) {
   const toolCommandByUseId = new Map<string, string>();
 
-  const syncActiveStreamCount = () => {
-    const streaming = streamingStateRef.current;
-    if (!streaming) return;
-
-    const count = streaming.getActiveCount();
-    if (activityStateRef.current) {
-      activityStateRef.current.setActiveStreamCount(count);
-    }
-  };
-
   const endAllToolStreams = () => {
     const streaming = streamingStateRef.current;
     if (!streaming) return;
-
-    const endedIds = streaming.endAllToolStreams();
-    if (endedIds.length > 0) {
-      syncActiveStreamCount();
-    }
+    streaming.endAllToolStreams();
   };
 
   const endResponseStreamByMessage = (incomingMessage: Record<string, unknown>) => {
@@ -178,16 +156,10 @@ export function createChatSubscriptionEventHandler({
       String(incomingMessage.id || '').trim(),
     ].filter(Boolean);
 
-    let ended = false;
     for (const candidateId of candidateIds) {
       if (!streaming.isActive(candidateId)) continue;
       streaming.handleEnd(candidateId);
-      ended = true;
       break;
-    }
-
-    if (ended) {
-      syncActiveStreamCount();
     }
   };
 
@@ -209,6 +181,14 @@ export function createChatSubscriptionEventHandler({
         return;
       }
 
+      // End streaming state BEFORE upserting the final message so that
+      // onStreamUpdate (re-sets isStreaming:true) + onStreamEnd (removes isStreaming:true
+      // entries) fire first, then the upsert adds the message with isStreaming:false.
+      if (isAssistantLikeMessage(incomingMessage)) {
+        endResponseStreamByMessage(incomingMessage);
+        endAllToolStreams();
+      }
+
       setMessages((existing) => upsertMessageList(existing, {
         ...incomingMessage,
         isStreaming: false,
@@ -216,10 +196,6 @@ export function createChatSubscriptionEventHandler({
         streamType: undefined,
       }));
 
-      if (isAssistantLikeMessage(incomingMessage)) {
-        endResponseStreamByMessage(incomingMessage);
-        endAllToolStreams();
-      }
       return;
     }
 
@@ -241,7 +217,6 @@ export function createChatSubscriptionEventHandler({
       if (!messageId) {
         if (eventType === 'end' || eventType === 'error') {
           endAllToolStreams();
-          syncActiveStreamCount();
           if (sseAgentName && loadedWorldId && sseChatId) {
             updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', eventType));
           }
@@ -252,7 +227,6 @@ export function createChatSubscriptionEventHandler({
       if (eventType === 'start') {
         endAllToolStreams();
         streaming.handleStart(messageId, String(streamPayload.agentName || 'assistant'));
-        syncActiveStreamCount();
         if (sseAgentName && loadedWorldId && sseChatId) {
           updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', 'start'));
         }
@@ -260,13 +234,11 @@ export function createChatSubscriptionEventHandler({
         streaming.handleChunk(messageId, String(streamPayload.content || ''));
       } else if (eventType === 'end') {
         streaming.handleEnd(messageId);
-        syncActiveStreamCount();
         if (sseAgentName && loadedWorldId && sseChatId) {
           updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', 'end'));
         }
       } else if (eventType === 'error') {
         streaming.handleError(messageId, String(streamPayload.error || 'Stream error'));
-        syncActiveStreamCount();
         if (sseAgentName && loadedWorldId && sseChatId) {
           updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', 'error'));
         }
@@ -283,7 +255,6 @@ export function createChatSubscriptionEventHandler({
             toolName,
             command,
           );
-          syncActiveStreamCount();
         }
         streaming.handleToolStreamChunk(messageId, content, stream, toolName, command);
       }
@@ -295,9 +266,6 @@ export function createChatSubscriptionEventHandler({
       if (!toolPayload) return;
       const toolChatId = String(payload.chatId || toolPayload.chatId || '').trim() || null;
       if (selectedSessionId && toolChatId && toolChatId !== selectedSessionId) return;
-
-      const activity = activityStateRef.current;
-      if (!activity) return;
 
       const toolEventType = String(toolPayload.eventType || '').toLowerCase();
       const toolUseId = String(toolPayload.toolUseId || '').trim();
@@ -329,21 +297,14 @@ export function createChatSubscriptionEventHandler({
             return next;
           });
         }
-        activity.handleToolStart(
-          toolUseId,
-          toolName,
-          toolInput,
-        );
         if (toolAgentName && loadedWorldId && toolChatIdResolved) {
           updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, toolChatIdResolved, toolAgentName, 'tool', 'tool-start'));
         }
       } else if (toolEventType === 'tool-result') {
         toolCommandByUseId.delete(toolUseId);
-        activity.handleToolResult(toolUseId, String(toolPayload.result || ''));
         const streaming = streamingStateRef.current;
         if (streaming?.isActive(toolUseId)) {
           streaming.handleToolStreamEnd(toolUseId);
-          syncActiveStreamCount();
         }
         endAllToolStreams();
         if (toolAgentName && loadedWorldId && toolChatIdResolved) {
@@ -351,18 +312,14 @@ export function createChatSubscriptionEventHandler({
         }
       } else if (toolEventType === 'tool-error') {
         toolCommandByUseId.delete(toolUseId);
-        activity.handleToolError(toolUseId, String(toolPayload.error || 'Tool error'));
         const streaming = streamingStateRef.current;
         if (streaming?.isActive(toolUseId)) {
           streaming.handleToolStreamEnd(toolUseId);
-          syncActiveStreamCount();
         }
         endAllToolStreams();
         if (toolAgentName && loadedWorldId && toolChatIdResolved) {
           updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, toolChatIdResolved, toolAgentName, 'tool', 'tool-error'));
         }
-      } else if (toolEventType === 'tool-progress') {
-        activity.handleToolProgress(toolUseId, String(toolPayload.progress || ''));
       }
     }
 
@@ -389,6 +346,45 @@ export function createChatSubscriptionEventHandler({
         const hitlChatId = systemChatId || selectedSessionId || null;
         if (hitlAgentName && loadedWorldId && hitlChatId) {
           updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, hitlChatId, hitlAgentName, 'system', 'hitl-option-request'));
+        }
+      }
+    }
+
+    // Activity events (response-end, idle) are the backend's authoritative "all done"
+    // signal. Use them to clean up any stale streaming state and reset the working
+    // status registry so the indicator doesn't stay stuck when SSE end events are
+    // missing or out-of-order.
+    if (payload.type === 'activity') {
+      const activityPayload = payload.activity as Record<string, unknown> | undefined;
+      if (!activityPayload) return;
+
+      const activityChatId = String(payload.chatId || activityPayload.chatId || '').trim() || null;
+      // Allow unscoped (no chatId) activity events through; only filter explicit mismatches.
+      if (selectedSessionId && activityChatId && activityChatId !== selectedSessionId) return;
+
+      const activityEventType = String(activityPayload.eventType || '').toLowerCase();
+      const pendingOps = Number(activityPayload.pendingOperations ?? -1);
+      const isResponseEnd = activityEventType === 'response-end' && pendingOps === 0;
+      const isIdle = activityEventType === 'idle';
+      if (!isResponseEnd && !isIdle) return;
+
+      // Flush and clear all active streams without firing per-stream callbacks that
+      // might re-tag a just-upserted final message as streaming.
+      const streaming = streamingStateRef.current;
+      if (streaming) {
+        streaming.cleanup();
+      }
+
+      // Remove any remaining streaming placeholders left by the cleanup above.
+      setMessages((existing) => existing.filter(
+        (msg) => msg.isStreaming !== true && msg.isToolStreaming !== true
+      ));
+
+      // Reset registry so the working indicator clears.
+      if (loadedWorldId) {
+        const targetChatId = activityChatId || selectedSessionId || null;
+        if (targetChatId) {
+          updateRegistry((r) => clearChatAgents(r, loadedWorldId, targetChatId));
         }
       }
     }
