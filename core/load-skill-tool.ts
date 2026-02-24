@@ -18,9 +18,8 @@
  * - Keeps payload format deterministic for stable downstream parsing
  *
  * Recent Changes:
- * - 2026-02-16: Treat non-zero exit status from instruction-referenced skill scripts as execution errors so UI receives tool-error feedback.
- * - 2026-02-15: Reject `load_skill` script execution when a referenced script resolves outside the active execution working directory.
- * - 2026-02-15: Execute skill scripts in the project working directory (from context) instead of the skill root.
+ * - 2026-02-24: Surface non-zero script exits as informational output instead of blocking errors (scripts may be CLI tools requiring args).
+ * - 2026-02-24: Execute skill scripts with cwd set to the skill root directory, not the project working directory.
  * - 2026-02-14: Strip SKILL.md YAML front matter from injected `<instructions>` content.
  * - 2026-02-14: Omit `<active_resources>` from `load_skill` payloads when no instruction-referenced scripts are present.
  * - 2026-02-14: Added skill-level HITL gating so `load_skill` requires approval even when no script references are present.
@@ -336,7 +335,7 @@ async function executeSkillScripts(options: {
 
   const worldId = String(options.context?.world?.id || '').trim();
   const chatId = options.context?.chatId ?? options.context?.world?.currentChatId ?? null;
-  const executionDirectory = options.context?.workingDirectory || options.skillRoot;
+  const executionDirectory = options.skillRoot;
 
   if (!worldId || !options.context?.world) {
     return [{
@@ -397,14 +396,6 @@ async function executeSkillScripts(options: {
     }
 
     const absoluteCommandSpec = resolveScriptCommand(normalizedAbsoluteScriptPath);
-    if (!isPathWithinRoot(executionDirectory, normalizedAbsoluteScriptPath)) {
-      scriptOutputs.push({
-        source: relativeScriptPath,
-        output: `Script path rejected: "${relativeScriptPath}" resolves outside execution working directory "${executionDirectory}".`,
-      });
-      continue;
-    }
-
     const executionResult = await executeShellCommand(
       absoluteCommandSpec.command,
       absoluteCommandSpec.parameters,
@@ -421,10 +412,17 @@ async function executeSkillScripts(options: {
     if (executionResult.exitCode !== 0 || executionResult.error) {
       const exitCode = executionResult.exitCode === null ? 'unknown' : String(executionResult.exitCode);
       const stderr = executionResult.stderr.trim();
-      const stderrSuffix = stderr ? ` stderr: ${stderr}` : '';
-      throw new SkillScriptExecutionError(
-        `Skill script "${relativeScriptPath}" failed with exit code ${exitCode}.${stderrSuffix}`,
-      );
+      const stdoutPreview = executionResult.stdout.trim();
+      const detail = [
+        `exit code ${exitCode}`,
+        stderr ? `stderr: ${stderr}` : '',
+        stdoutPreview ? `stdout: ${stdoutPreview}` : '',
+      ].filter(Boolean).join(' | ');
+      scriptOutputs.push({
+        source: relativeScriptPath,
+        output: `Script exited with ${detail}`,
+      });
+      continue;
     }
 
     scriptOutputs.push({

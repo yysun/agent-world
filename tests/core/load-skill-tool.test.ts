@@ -16,9 +16,8 @@
  * - Uses mocked in-memory fs APIs only (no filesystem access)
  *
  * Recent changes:
- * - 2026-02-16: Added coverage verifying non-zero referenced script exits are surfaced as load_skill execution errors.
- * - 2026-02-15: Added coverage ensuring referenced scripts outside `workingDirectory` are rejected and not executed.
- * - 2026-02-15: Added coverage verifying skill scripts execute in the project working directory from context.
+ * - 2026-02-24: Updated coverage: non-zero exits surface as informational output (not blocking errors).
+ * - 2026-02-24: Updated coverage to verify skill scripts execute with cwd = skill root directory (not project cwd).
  * - 2026-02-14: Added coverage ensuring SKILL.md YAML front matter is stripped from injected `<instructions>`.
  * - 2026-02-14: Added coverage ensuring `<active_resources>` is omitted when no instruction-referenced scripts are present.
  * - 2026-02-14: Added coverage for skill-level HITL gating when skills have no local script references.
@@ -266,7 +265,7 @@ describe('core/load-skill-tool', () => {
     expect(result).toContain('formatted script output');
   });
 
-  it('throws when referenced script exits with non-zero code', async () => {
+  it('surfaces non-zero script exits as informational output without blocking skill load', async () => {
     mockedGetSkill.mockReturnValue({
       skill_id: 'pdf-extract',
       description: 'Extract PDF content',
@@ -288,29 +287,32 @@ describe('core/load-skill-tool', () => {
       executionId: 'exec-2',
       command: 'bash',
       parameters: ['scripts/build.sh'],
-      stdout: '',
-      stderr: 'script failed',
-      exitCode: 2,
+      stdout: 'Usage: build.sh <target>',
+      stderr: '',
+      exitCode: 1,
       signal: null,
-      error: 'Command exited with code 2',
+      error: 'Command exited with code 1',
       executedAt: new Date('2026-02-14T12:00:00.000Z'),
       duration: 15,
     });
 
     const tool = createLoadSkillToolDefinition();
+    const result = await tool.execute(
+      { skill_id: 'pdf-extract' },
+      undefined,
+      undefined,
+      {
+        world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+        chatId: 'chat-1',
+      },
+    );
 
-    await expect(
-      tool.execute(
-        { skill_id: 'pdf-extract' },
-        undefined,
-        undefined,
-        {
-          world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
-          chatId: 'chat-1',
-          workingDirectory: '/skills/pdf-extract',
-        },
-      ),
-    ).rejects.toThrow('Skill script "scripts/build.sh" failed with exit code 2');
+    // Skill loads successfully despite non-zero exit
+    expect(result).toContain('<instructions>');
+    expect(result).toContain('<active_resources>');
+    // Exit info surfaced so LLM can see the script requires arguments
+    expect(result).toContain('exit code 1');
+    expect(result).toContain('Usage: build.sh');
   });
 
   it('returns declined output when HITL skill approval is declined', async () => {
@@ -451,20 +453,21 @@ describe('core/load-skill-tool', () => {
     expect(result).not.toContain('\n---\n');
   });
 
-  it('rejects referenced scripts that resolve outside workingDirectory and skips execution', async () => {
+  it('validates script scope using skill-root-relative path when skill is a subdirectory of cwd', async () => {
     mockedGetSkill.mockReturnValue({
       skill_id: 'pdf-extract',
       description: 'Extract PDF content',
       hash: 'e99a18ad',
       lastUpdated: '2026-02-14T12:00:00.000Z',
     });
-    mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
+    // Skill lives at /projects/myapp/skills/my-skill/SKILL.md; cwd is /projects/myapp
+    mockedGetSkillSourcePath.mockReturnValue('/projects/myapp/skills/my-skill/SKILL.md');
     vi.mocked(fs.readFile).mockResolvedValue([
-      '# PDF Extraction Instructions',
-      'Run `scripts/build.sh` before processing.',
+      '# My Skill Instructions',
+      'Run `scripts/setup.sh` before processing.',
     ].join('\n') as any);
     vi.mocked((fs as any).stat).mockImplementation(async (targetPath: string) => {
-      if (String(targetPath).endsWith('/skills/pdf-extract/scripts/build.sh')) {
+      if (String(targetPath).endsWith('/projects/myapp/skills/my-skill/scripts/setup.sh')) {
         return { isFile: () => true, isDirectory: () => false };
       }
       throw new Error('ENOENT');
@@ -478,12 +481,27 @@ describe('core/load-skill-tool', () => {
       {
         world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
         chatId: 'chat-1',
-        workingDirectory: '/projects/my-project',
+        workingDirectory: '/projects/myapp',
       },
     );
 
-    expect(mockedRequestWorldOption).toHaveBeenCalledTimes(1);
-    expect(mockedExecuteShellCommand).not.toHaveBeenCalled();
-    expect(result).toContain('resolves outside execution working directory');
+    // Scope validation must use the skill-root-relative path ('scripts/setup.sh')
+    // and skillRoot as the trusted boundary — never the cwd-relative path
+    expect(mockedValidateShellCommandScope).toHaveBeenCalledWith(
+      'bash',
+      ['scripts/setup.sh'],
+      '/projects/myapp/skills/my-skill',
+    );
+    // Execution must use the fully-resolved absolute path for parameters
+    // and skillRoot as cwd — never the project working directory
+    expect(mockedExecuteShellCommand).toHaveBeenCalledWith(
+      'bash',
+      ['/projects/myapp/skills/my-skill/scripts/setup.sh'],
+      '/projects/myapp/skills/my-skill',
+      expect.objectContaining({ timeout: 120000 }),
+    );
+    expect(result).toContain('<active_resources>');
+    expect(result).toContain('formatted script output');
   });
+
 });
