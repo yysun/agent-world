@@ -13,6 +13,7 @@
  * - Accepts required collaborators (session/message setters and panel controls) via args.
  *
  * Recent Changes:
+ * - 2026-02-19: Added `onExportWorld` action for desktop world save/export workflow via IPC bridge.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 3 custom hook migration.
  */
 
@@ -277,6 +278,32 @@ export function useWorldManagement({
     }
   }, [api, setSelectedAgentId, setSelectedSessionId, setSessions, setStatusText]);
 
+  const onExportWorld = useCallback(async () => {
+    const worldId = String(loadedWorld?.id || '').trim();
+    if (!worldId) {
+      setStatusText('Load a world before exporting.', 'error');
+      return;
+    }
+
+    try {
+      const result = await api.exportWorld(worldId) as any;
+      if (result?.success) {
+        const exportPath = String(result?.data?.path || '').trim();
+        setStatusText(
+          exportPath ? `World exported: ${loadedWorld?.name} (${exportPath})` : `World exported: ${loadedWorld?.name}`,
+          'success'
+        );
+        return;
+      }
+
+      const errorMessage = String(result?.message || result?.error || 'Failed to export world').trim();
+      const canceled = errorMessage.toLowerCase().includes('canceled');
+      setStatusText(errorMessage, canceled ? 'info' : 'error');
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to export world.'), 'error');
+    }
+  }, [api, loadedWorld?.id, loadedWorld?.name, setStatusText]);
+
   return {
     loadedWorld,
     setLoadedWorld,
@@ -300,5 +327,6 @@ export function useWorldManagement({
     onUpdateWorld,
     onDeleteWorld,
     onImportWorld,
+    onExportWorld,
   };
 }

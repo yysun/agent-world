@@ -13,6 +13,11 @@
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
+ * - 2026-02-21: Backfilled tool-stream row metadata on late `tool-start` events so shell cards still resolve command/tool labels even when stream chunks arrive first.
+ * - 2026-02-21: Derived shell command labels for tool-stream rows from `tool-start` input (`toolUseId -> command`) and forwarded command metadata into streaming state.
+ * - 2026-02-21: Forwarded SSE `toolName` into tool-stream state so tool streaming cards can render tool-specific running labels.
+ * - 2026-02-20: Allow `hitl-option-request` system events to bypass strict chatId session filtering so approval prompts remain visible when event scope is stale/unscoped.
+ * - 2026-02-19: Reset elapsed activity timer on idle→active session-activity transition so new agent work starts from 0s.
  * - 2026-02-16: Added defensive SSE end/error handling when `messageId` is missing by clearing response state and ending lingering streams.
  * - 2026-02-16: Added selected-session fallback for unscoped SSE/tool completion events so waiting indicators clear when `chatId` is omitted.
  * - 2026-02-16: Added assistant-message inference from sender when `role` is missing so response-state clears reliably for backend messages published without explicit role.
@@ -26,7 +31,8 @@
  */
 
 import { createLogMessage, upsertMessageList, type MessageLike } from './message-updates';
-import { publishStatusBarStatus } from './status-bar';
+import { updateRegistry } from './status-registry';
+import { applyEventToRegistry } from './status-updater';
 
 interface BasePayload {
   type?: string;
@@ -44,8 +50,8 @@ interface RealtimeRefs {
     handleChunk: (messageId: string, content: string) => void;
     handleEnd: (messageId: string) => void;
     handleError: (messageId: string, errorMessage: string) => void;
-    handleToolStreamStart: (messageId: string, agentName: string, streamType: 'stdout' | 'stderr') => void;
-    handleToolStreamChunk: (messageId: string, content: string, streamType: 'stdout' | 'stderr') => void;
+    handleToolStreamStart: (messageId: string, agentName: string, streamType: 'stdout' | 'stderr', toolName?: string, command?: string) => void;
+    handleToolStreamChunk: (messageId: string, content: string, streamType: 'stdout' | 'stderr', toolName?: string, command?: string) => void;
     handleToolStreamEnd: (messageId: string) => void;
     isActive: (messageId: string) => boolean;
   } | null;
@@ -58,6 +64,7 @@ interface ActivityRefs {
     handleToolResult: (toolUseId: string, result: string) => void;
     handleToolError: (toolUseId: string, error: string) => void;
     handleToolProgress: (toolUseId: string, progress: string) => void;
+    resetElapsed?: () => void;
   } | null;
 }
 
@@ -68,15 +75,6 @@ interface ChatHandlerOptions {
   streamingStateRef: RealtimeRefs;
   activityStateRef: ActivityRefs;
   setMessages: (updater: (existing: MessageLike[]) => MessageLike[]) => void;
-  setActiveStreamCount: (count: number) => void;
-  onSessionResponseStateChange?: (chatId: string, isActive: boolean) => void;
-  onSessionActivityUpdate?: (activity: {
-    eventType: string;
-    pendingOperations: number;
-    activityId: number;
-    source: string | null;
-    activeSources: string[];
-  }) => void;
   onSessionSystemEvent?: (event: {
     eventType: string;
     chatId: string | null;
@@ -101,46 +99,28 @@ function isAssistantLikeMessage(message: Record<string, unknown> | null | undefi
   return true;
 }
 
-function buildLogStatusText(logEvent: Record<string, unknown> | null | undefined) {
-  const category = String(logEvent?.category || 'system');
-  const baseMessage = String(logEvent?.message || 'Unknown error');
-  const data = logEvent?.data && typeof logEvent.data === 'object'
-    ? (logEvent.data as Record<string, unknown>)
-    : null;
 
-  if (!data) {
-    return `${category} - ${baseMessage}`;
+function isHitlRequestPayload(systemPayload: Record<string, unknown>): boolean {
+  const topLevelType = String(systemPayload.eventType || '').trim();
+  if (topLevelType === 'hitl-option-request') {
+    return true;
   }
-
-  const detailParts: string[] = [];
-  const detailText = data.error || data.errorMessage || data.message;
-  if (detailText) {
-    detailParts.push(String(detailText));
+  const nestedContent = systemPayload.content;
+  if (nestedContent && typeof nestedContent === 'object') {
+    const eventType = String((nestedContent as Record<string, unknown>).eventType || '').trim();
+    return eventType === 'hitl-option-request';
   }
-  if (data.toolCallId) {
-    detailParts.push(`toolCallId=${String(data.toolCallId)}`);
-  }
-  if (data.agentId) {
-    detailParts.push(`agent=${String(data.agentId)}`);
-  }
-
-  if (detailParts.length === 0) {
-    return `${category} - ${baseMessage}`;
-  }
-
-  return `${category} - ${baseMessage}: ${detailParts.join(' | ')}`;
+  return false;
 }
 
 export function createGlobalLogEventHandler({
   loadedWorldId,
   selectedSessionId,
   setMessages,
-  setStatusText,
 }: {
   loadedWorldId: string | null | undefined;
   selectedSessionId: string | null | undefined;
   setMessages: (updater: (existing: MessageLike[]) => MessageLike[]) => void;
-  setStatusText?: (text: string, kind: 'info' | 'error' | 'success') => void;
 }) {
   return (payload: BasePayload & { logEvent?: Record<string, unknown> }) => {
     if (!payload || payload.type !== 'log') return;
@@ -149,15 +129,11 @@ export function createGlobalLogEventHandler({
     if (!logEvent) return;
 
     const hasActiveSession = Boolean(loadedWorldId && selectedSessionId);
-    if (hasActiveSession) {
-      setMessages((existing) => [...existing, createLogMessage(logEvent)]);
-      return;
-    }
+    if (!hasActiveSession) return;
 
-    const statusText = buildLogStatusText(logEvent);
-    const level = String(logEvent?.level || '').toLowerCase();
-    const emitStatus = typeof setStatusText === 'function' ? setStatusText : publishStatusBarStatus;
-    emitStatus(statusText, level === 'error' ? 'error' : 'info');
+    const logChatId = String(payload.chatId || logEvent?.chatId || '').trim();
+    if (logChatId && logChatId !== selectedSessionId) return;
+    setMessages((existing) => [...existing, createLogMessage(logEvent, logChatId || (selectedSessionId ?? undefined))]);
   };
 }
 
@@ -168,17 +144,15 @@ export function createChatSubscriptionEventHandler({
   streamingStateRef,
   activityStateRef,
   setMessages,
-  setActiveStreamCount,
-  onSessionResponseStateChange,
-  onSessionActivityUpdate,
   onSessionSystemEvent,
 }: ChatHandlerOptions) {
+  const toolCommandByUseId = new Map<string, string>();
+
   const syncActiveStreamCount = () => {
     const streaming = streamingStateRef.current;
     if (!streaming) return;
 
     const count = streaming.getActiveCount();
-    setActiveStreamCount(count);
     if (activityStateRef.current) {
       activityStateRef.current.setActiveStreamCount(count);
     }
@@ -194,6 +168,29 @@ export function createChatSubscriptionEventHandler({
     }
   };
 
+  const endResponseStreamByMessage = (incomingMessage: Record<string, unknown>) => {
+    const streaming = streamingStateRef.current;
+    if (!streaming) return;
+    if (typeof streaming.isActive !== 'function' || typeof streaming.handleEnd !== 'function') return;
+
+    const candidateIds = [
+      String(incomingMessage.messageId || '').trim(),
+      String(incomingMessage.id || '').trim(),
+    ].filter(Boolean);
+
+    let ended = false;
+    for (const candidateId of candidateIds) {
+      if (!streaming.isActive(candidateId)) continue;
+      streaming.handleEnd(candidateId);
+      ended = true;
+      break;
+    }
+
+    if (ended) {
+      syncActiveStreamCount();
+    }
+  };
+
   return (payload: BasePayload) => {
     if (!payload) return;
     if (payload.subscriptionId && payload.subscriptionId !== subscriptionId) return;
@@ -205,12 +202,8 @@ export function createChatSubscriptionEventHandler({
 
       const incomingChatId = String(incomingMessage.chatId || payload.chatId || '').trim() || null;
       if (selectedSessionId && incomingChatId !== selectedSessionId) {
-        if (
-          !incomingChatId
-          && isAssistantLikeMessage(incomingMessage)
-          && typeof onSessionResponseStateChange === 'function'
-        ) {
-          onSessionResponseStateChange(selectedSessionId, false);
+        if (!incomingChatId && isAssistantLikeMessage(incomingMessage)) {
+          endResponseStreamByMessage(incomingMessage);
           endAllToolStreams();
         }
         return;
@@ -224,9 +217,7 @@ export function createChatSubscriptionEventHandler({
       }));
 
       if (isAssistantLikeMessage(incomingMessage)) {
-        if (typeof onSessionResponseStateChange === 'function' && incomingChatId) {
-          onSessionResponseStateChange(incomingChatId, false);
-        }
+        endResponseStreamByMessage(incomingMessage);
         endAllToolStreams();
       }
       return;
@@ -238,57 +229,63 @@ export function createChatSubscriptionEventHandler({
 
       const streamChatId = String(streamPayload.chatId || payload.chatId || '').trim() || null;
       if (selectedSessionId && streamChatId && streamChatId !== selectedSessionId) return;
-      const responseChatId = streamChatId || selectedSessionId || null;
 
       const eventType = String(streamPayload.eventType || '').toLowerCase();
       const messageId = streamPayload.messageId ? String(streamPayload.messageId) : '';
       const streaming = streamingStateRef.current;
       if (!streaming) return;
 
+      const sseAgentName = String(streamPayload.agentName || '').trim() || null;
+      const sseChatId = streamChatId || selectedSessionId || null;
+
       if (!messageId) {
         if (eventType === 'end' || eventType === 'error') {
-          if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
-            onSessionResponseStateChange(responseChatId, false);
-          }
           endAllToolStreams();
           syncActiveStreamCount();
+          if (sseAgentName && loadedWorldId && sseChatId) {
+            updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', eventType));
+          }
         }
         return;
       }
 
       if (eventType === 'start') {
-        if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
-          onSessionResponseStateChange(responseChatId, true);
-        }
         endAllToolStreams();
         streaming.handleStart(messageId, String(streamPayload.agentName || 'assistant'));
         syncActiveStreamCount();
+        if (sseAgentName && loadedWorldId && sseChatId) {
+          updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', 'start'));
+        }
       } else if (eventType === 'chunk') {
         streaming.handleChunk(messageId, String(streamPayload.content || ''));
       } else if (eventType === 'end') {
-        if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
-          onSessionResponseStateChange(responseChatId, false);
-        }
         streaming.handleEnd(messageId);
         syncActiveStreamCount();
-      } else if (eventType === 'error') {
-        if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
-          onSessionResponseStateChange(responseChatId, false);
+        if (sseAgentName && loadedWorldId && sseChatId) {
+          updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', 'end'));
         }
+      } else if (eventType === 'error') {
         streaming.handleError(messageId, String(streamPayload.error || 'Stream error'));
         syncActiveStreamCount();
+        if (sseAgentName && loadedWorldId && sseChatId) {
+          updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', 'error'));
+        }
       } else if (eventType === 'tool-stream') {
         const content = String(streamPayload.content || '');
         const stream = String(streamPayload.stream || 'stdout') === 'stderr' ? 'stderr' : 'stdout';
+        const toolName = String(streamPayload.toolName || 'shell_cmd').trim() || 'shell_cmd';
+        const command = toolCommandByUseId.get(messageId);
         if (!streaming.isActive(messageId)) {
           streaming.handleToolStreamStart(
             messageId,
             String(streamPayload.agentName || 'shell_cmd'),
             stream,
+            toolName,
+            command,
           );
           syncActiveStreamCount();
         }
-        streaming.handleToolStreamChunk(messageId, content, stream);
+        streaming.handleToolStreamChunk(messageId, content, stream, toolName, command);
       }
       return;
     }
@@ -298,7 +295,6 @@ export function createChatSubscriptionEventHandler({
       if (!toolPayload) return;
       const toolChatId = String(payload.chatId || toolPayload.chatId || '').trim() || null;
       if (selectedSessionId && toolChatId && toolChatId !== selectedSessionId) return;
-      const responseChatId = toolChatId || selectedSessionId || null;
 
       const activity = activityStateRef.current;
       if (!activity) return;
@@ -307,71 +303,66 @@ export function createChatSubscriptionEventHandler({
       const toolUseId = String(toolPayload.toolUseId || '').trim();
       if (!toolUseId) return;
 
+      const toolAgentName = String(toolPayload.agentName || toolPayload.agentId || '').trim() || null;
+      const toolChatIdResolved = toolChatId || selectedSessionId || null;
+
       if (toolEventType === 'tool-start') {
-        if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
-          onSessionResponseStateChange(responseChatId, true);
+        const toolName = String(toolPayload.toolName || 'unknown');
+        const toolInput = (toolPayload.toolInput as Record<string, unknown> | undefined) || undefined;
+        const command = typeof toolInput?.command === 'string' ? toolInput.command.trim() : '';
+        if (command) {
+          toolCommandByUseId.set(toolUseId, command);
+
+          // Stream chunks can occasionally arrive before tool-start metadata.
+          // Backfill command/tool label onto an already-created tool stream row.
+          setMessages((existing) => {
+            const index = existing.findIndex(
+              (message) => String(message?.messageId || '').trim() === toolUseId
+            );
+            if (index < 0) return existing;
+            const next = [...existing];
+            next[index] = {
+              ...next[index],
+              ...(toolName ? { toolName } : {}),
+              command
+            };
+            return next;
+          });
         }
         activity.handleToolStart(
           toolUseId,
-          String(toolPayload.toolName || 'unknown'),
-          (toolPayload.toolInput as Record<string, unknown> | undefined) || undefined,
+          toolName,
+          toolInput,
         );
-      } else if (toolEventType === 'tool-result') {
-        if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
-          onSessionResponseStateChange(responseChatId, false);
+        if (toolAgentName && loadedWorldId && toolChatIdResolved) {
+          updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, toolChatIdResolved, toolAgentName, 'tool', 'tool-start'));
         }
+      } else if (toolEventType === 'tool-result') {
+        toolCommandByUseId.delete(toolUseId);
         activity.handleToolResult(toolUseId, String(toolPayload.result || ''));
         const streaming = streamingStateRef.current;
         if (streaming?.isActive(toolUseId)) {
           streaming.handleToolStreamEnd(toolUseId);
           syncActiveStreamCount();
-        } else {
-          endAllToolStreams();
+        }
+        endAllToolStreams();
+        if (toolAgentName && loadedWorldId && toolChatIdResolved) {
+          updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, toolChatIdResolved, toolAgentName, 'tool', 'tool-result'));
         }
       } else if (toolEventType === 'tool-error') {
-        if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
-          onSessionResponseStateChange(responseChatId, false);
-        }
+        toolCommandByUseId.delete(toolUseId);
         activity.handleToolError(toolUseId, String(toolPayload.error || 'Tool error'));
         const streaming = streamingStateRef.current;
         if (streaming?.isActive(toolUseId)) {
           streaming.handleToolStreamEnd(toolUseId);
           syncActiveStreamCount();
-        } else {
-          endAllToolStreams();
+        }
+        endAllToolStreams();
+        if (toolAgentName && loadedWorldId && toolChatIdResolved) {
+          updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, toolChatIdResolved, toolAgentName, 'tool', 'tool-error'));
         }
       } else if (toolEventType === 'tool-progress') {
         activity.handleToolProgress(toolUseId, String(toolPayload.progress || ''));
-      }
-    }
-
-    if (payload.type === 'activity') {
-      const activityPayload = payload.activity as Record<string, unknown> | undefined;
-      if (!activityPayload) return;
-
-      const activityChatId = String(payload.chatId || '').trim() || null;
-      if (selectedSessionId && activityChatId && activityChatId !== selectedSessionId) return;
-
-      if (typeof onSessionActivityUpdate === 'function') {
-        onSessionActivityUpdate({
-          eventType: String(activityPayload.eventType || ''),
-          pendingOperations: Number(activityPayload.pendingOperations) || 0,
-          activityId: Number(activityPayload.activityId) || 0,
-          source: activityPayload.source ? String(activityPayload.source) : null,
-          activeSources: Array.isArray(activityPayload.activeSources)
-            ? activityPayload.activeSources.map((source) => String(source))
-            : [],
-        });
-      }
-
-      if (typeof onSessionResponseStateChange === 'function') {
-        const pendingOperations = Number(activityPayload.pendingOperations) || 0;
-        if (pendingOperations <= 0) {
-          const responseChatId = activityChatId || selectedSessionId || null;
-          if (responseChatId) {
-            onSessionResponseStateChange(responseChatId, false);
-          }
-        }
       }
     }
 
@@ -380,7 +371,8 @@ export function createChatSubscriptionEventHandler({
       if (!systemPayload) return;
 
       const systemChatId = String(payload.chatId || systemPayload.chatId || '').trim() || null;
-      if (selectedSessionId && systemChatId !== selectedSessionId) return;
+      const isHitlRequest = isHitlRequestPayload(systemPayload);
+      if (!isHitlRequest && selectedSessionId && systemChatId !== selectedSessionId) return;
 
       if (typeof onSessionSystemEvent === 'function') {
         onSessionSystemEvent({
@@ -390,6 +382,14 @@ export function createChatSubscriptionEventHandler({
           createdAt: systemPayload.createdAt ? String(systemPayload.createdAt) : null,
           content: systemPayload.content,
         });
+      }
+
+      if (isHitlRequest) {
+        const hitlAgentName = String(systemPayload.agentName || '').trim() || null;
+        const hitlChatId = systemChatId || selectedSessionId || null;
+        if (hitlAgentName && loadedWorldId && hitlChatId) {
+          updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, hitlChatId, hitlAgentName, 'system', 'hitl-option-request'));
+        }
       }
     }
   };

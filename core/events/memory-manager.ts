@@ -20,8 +20,8 @@
  * - storage (runtime)
  * 
  * Changes:
- * - 2026-02-20: Added Infinite-Etude handoff safeguard to enforce Pedagogue -> Engraver final mention when missing.
- * - 2026-02-16: Added plain-text tool-intent fallback parser in continuation to synthesize executable `tool_calls` when providers return `Calling tool: ...` text.
+ * - 2026-02-21: Shell tool continuation context now requests minimal LLM result mode (`status`/`exit_code`) and passes agent name for assistant-stream shell SSE attribution.
+ * - 2026-02-20: Added Infinite-Etude handoff safeguard to enforce Pedagogue -> Engraver final mention when missing. * - 2026-02-16: Added plain-text tool-intent fallback parser in continuation to synthesize executable `tool_calls` when providers return `Calling tool: ...` text.
  * - 2026-02-16: Max tool-hop guardrail now emits UI/tool errors and injects transient LLM context, then continues loop instead of returning.
  * - 2026-02-16: Removed plain-text tool-intent reminder/retry path; continuation now relies only on tool-call loop + hop guardrail.
  * - 2026-02-16: Empty/invalid continuation tool_calls now write a synthetic tool-error result back to memory before continuing the LLM loop.
@@ -468,7 +468,7 @@ export async function continueLLMAfterToolExecution(
     emptyToolCallRetryCount?: number;
   }
 ): Promise<void> {
-  const completeActivity = beginWorldActivity(world, `agent:${agent.id}`);
+  const completeActivity = beginWorldActivity(world, `agent:${agent.id}`, chatId ?? undefined);
   try {
     let hopCount = options?.hopCount ?? 0;
     const maxToolHops = 50;
@@ -1005,6 +1005,8 @@ export async function continueLLMAfterToolExecution(
           chatId: targetChatId,
           abortSignal: options?.abortSignal,
           workingDirectory: trustedWorkingDirectory,
+          agentName: agent.id,
+          llmResultMode: toolCall.function.name === 'shell_cmd' ? 'minimal' : 'verbose',
         };
 
         const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);

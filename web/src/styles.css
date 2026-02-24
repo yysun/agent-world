@@ -1,38 +1,26 @@
 /*
- * World Selection Screen Styles
- * 
- * Features:
- * - World selection interface with carousel-style preview
- * - Animated world graphics (Neon City, Mystic Forest, Cyber Ocean)
- * - Responsive design with mobile-first approach
- * - Interactive controls and navigation indicators
- * - Memory-only message styling (gray border for agent→agent messages)
- * - Agent activity display with fade-in animation
- * 
- * Implementation:
- * - CSS Grid and Flexbox for layout
- * - CSS animations for graphics and transitions
- * - CSS custom properties for theming
- * - Gradient effects and box shadows for visual depth
- * 
- * Recent Changes:
- * - Matched system/log message typography with regular agent message font in world chat
- * - Prevented wide markdown content from stretching the chat column by constraining overflow inside message content
- * - Fixed user-message edit/delete controls clipping by placing action buttons inside the message bubble
- * - Matched chat avatar size to top agent sprites, kept avatars on the left, and constrained widths to prevent horizontal scroll
- * - Moved right-aligned message avatars to the message side and removed circular avatar mask
- * - Fixed message avatar sprite-sheet coordinates for 32px chat avatars
- * - Left human message avatars empty while preserving avatar spacing
- * - Added left-side avatar layout for world chat message boxes
- * - Added activity indicator styles for world events (response-start, tool-start)
- * - Added .memory-only-message class for agent messages saved to other agents' memory (gray border)
- * - Removed @import for Google Fonts to prevent flickering during route changes
- * - Font is now preloaded in HTML head for better performance
- * - Removed text-shadow from banner title to reduce blur
- * - Changed select button text color from white to light gray (#f8f9fa)
- * - Made indicator dots less bright with gray border instead of theme variable
- * - Updated body font to game-style typography with Orbitron/Exo 2 fallbacks
- * - Fixed .world-back-icon styling by adding desktop styles and improving mobile sizing
+ * Purpose:
+ * - Define shared visual styles for the web world screens, including world selection, chat layout, and composer UI.
+ *
+ * Key Features:
+ * - World selection visuals, responsive layout primitives, and interactive controls.
+ * - Chat transcript styling (message roles, tool output, avatars, activity indicators).
+ * - Electron-aligned chat composer shell with toolbar actions and send/stop control visuals.
+ *
+ * Notes on Implementation:
+ * - Uses CSS custom properties for theme tokens and predictable light-theme rendering.
+ * - Balances AppRun/Tailwind utility usage with stylesheet-level overrides for complex chat behavior.
+ *
+ * Summary of Recent Changes:
+ * - 2026-02-21: Aligned mobile right-panel world action buttons on the same header row as the close button.
+ * - 2026-02-21: Removed right-panel mobile Chats/World tab styling, kept world actions at the top of the panel, and added right spacing for the hamburger toggle button.
+ * - 2026-02-22: Added responsive right-panel styles (desktop side panel, tablet slide-in, mobile bottom-sheet) and disabled world zoom scaling on smaller viewports.
+ * - 2026-02-21: Changed tool output toggle to an SVG icon button and set `Tool Output` label size to regular message text.
+ * - 2026-02-21: Updated tool output header to left label + right Open/Collapse control and removed tool output card border.
+ * - 2026-02-21: Made composer float above conversation content so chat messages render beneath it.
+ * - 2026-02-21: Restyled composer toolbar to match Electron app structure shown in product reference (plus action, project pill, gray circular send button).
+ * - 2026-02-21: Updated world chat composer styling to mirror Electron's textarea-based composer shell and icon send/stop button.
+ * - 2026-02-20: Added top-row main-agent highlight treatment and badge.
  */
 
 /* Reset and base styles */
@@ -95,10 +83,22 @@ a {
   font-size: 0.5em;
 }
 
+.home-page {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
 @media only screen and (max-width: 600px) {
   body {
     font-size: 1.25em;
     padding: 0.5em;
+  }
+
+  .home-page {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+    overflow-x: hidden;
   }
 
   .container {
@@ -138,6 +138,59 @@ a {
   .world-carousel {
     padding: 1rem 0;
     max-width: 100%;
+  }
+
+  .home-page .world-carousel {
+    gap: 0.45rem;
+  }
+
+  .home-page .world-cards {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .home-page .carousel-arrow {
+    font-size: 1.35rem;
+    padding: 0.35rem 0.45rem;
+  }
+
+  .home-page .carousel-arrow {
+    display: none;
+  }
+
+  .home-page .description-card {
+    padding: 0.9rem;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .home-page .action-buttons {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+  }
+
+  .home-page .btn.enter-btn {
+    font-size: 1.05rem !important;
+    padding: 0.6rem 1.1rem;
+  }
+}
+
+@media only screen and (max-width: 1024px) {
+  .home-page {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+    overflow-x: hidden;
+  }
+
+  .home-page .world-carousel {
+    max-width: 100%;
+    gap: 0.6rem;
+  }
+
+  .home-page .world-cards {
+    min-width: 0;
+    width: 100%;
   }
 }
 
@@ -209,6 +262,31 @@ h2 {
   padding: 2rem 0;
   width: 100%;
   max-width: 800px;
+  touch-action: pan-y;
+}
+
+/* SwipeCarousel component */
+.swipe-carousel {
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+@media (min-width: 768px) {
+  .swipe-carousel {
+    width: 66.67%;
+  }
+}
+
+.swipe-carousel-viewport {
+  border-radius: 1rem;
+}
+
+/* Hide arrows on mobile – swipe is the primary gesture */
+@media (max-width: 640px) {
+  .swipe-carousel-arrow {
+    display: none;
+  }
 }
 
 .world-cards {
@@ -264,7 +342,6 @@ h2 {
   transform: scale(1.1);
   width: 200px;
   height: 150px;
-  font-size: 1rem;
   box-shadow: var(--shadow-lg);
 }
 
@@ -272,13 +349,18 @@ h2 {
   opacity: 0.7;
   width: 160px;
   height: 120px;
-  font-size: 0.9rem;
 }
 
 .world-card-btn .world-name {
-  font-weight: bold;
-  font-size: 1.5rem;
+  display: block;
+  width: 100%;
+  max-width: 100%;
   font-style: italic;
+  line-height: 1.15;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-align: center;
 }
 
 /* Description card */
@@ -491,12 +573,15 @@ h2 {
 
 /* World Component Styles - Two-column layout with chat and settings */
 .world-container {
-  max-width: 1500px !important;
-  width: 100vw;
+  --world-scale: 0.75;
+  max-width: 90vw !important;
+  width: 90vw;
   margin: 0 auto;
   padding: 0.5rem 2rem 1rem 2rem;
   min-height: 100vh;
+  height: 100vh;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .world-columns {
@@ -508,6 +593,27 @@ h2 {
   max-width: none;
   min-width: 0;
   overflow: hidden;
+  zoom: var(--world-scale);
+}
+
+/* Keep World-page dialogs visually aligned with scaled world content. */
+.world-container .modal-content {
+  zoom: var(--world-scale);
+}
+
+@supports not (zoom: 1) {
+  .world-columns {
+    height: calc((100vh - 1rem) / var(--world-scale));
+    min-height: calc(650px / var(--world-scale));
+    width: calc(100% / var(--world-scale));
+    transform: scale(var(--world-scale));
+    transform-origin: top left;
+  }
+
+  .world-container .modal-content {
+    transform: scale(var(--world-scale));
+    transform-origin: center center;
+  }
 }
 
 /* Chat Column - takes up most of the space */
@@ -597,6 +703,52 @@ h2 {
   min-height: 100px;
 }
 
+.right-panel-toggle-container {
+  display: none;
+  align-items: center;
+  justify-content: flex-end;
+  margin-left: 0.5rem;
+  margin-right: 0.5rem;
+}
+
+.right-panel-toggle {
+  display: inline-flex;
+}
+
+.world-panel-backdrop {
+  display: none;
+}
+
+.right-panel-mobile-header {
+  display: none;
+}
+
+.right-panel-mobile-header-spacer {
+  flex: 1;
+}
+
+.right-panel-mobile-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.world-right-panel .settings-fieldset {
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+}
+
+.world-panel-world-actions {
+  flex-shrink: 0;
+}
+
+.world-panel-chats-section {
+  flex: 1;
+  min-height: 0;
+}
+
 .agent-item {
   display: flex;
   flex-direction: column;
@@ -619,6 +771,37 @@ h2 {
 .agent-item.selected .agent-sprite {
   transform: scale(1.1);
   animation: agentShake 2s infinite ease-in-out, agentFloat 3s infinite ease-in-out;
+}
+
+.agent-item.main-agent {
+  background: rgba(255, 214, 102, 0.12);
+  box-shadow: 0 0 0 1px rgba(244, 181, 16, 0.25);
+}
+
+.agent-item.main-agent .agent-sprite-container {
+  box-shadow: 0 0 0 2px rgba(244, 181, 16, 0.7);
+  border-radius: 9999px;
+}
+
+.agent-item.main-agent .agent-name {
+  color: #b7791f;
+  font-weight: 700;
+}
+
+.main-agent-badge {
+  top: -7px;
+  left: -10px;
+  z-index: 2;
+  background: #f59e0b;
+  color: #1f2937;
+  border-radius: 9999px;
+  border: 1px solid #fbbf24;
+  padding: 1px 6px;
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1.3;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.35);
 }
 
 @keyframes agentShake {
@@ -860,12 +1043,13 @@ legend {
 }
 
 .chat-container {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
   width: 100%;
-  max-width: none;
+  max-width: 100% !important;
 }
 
 /* Chat fieldset - takes up the remaining space in chat column */
@@ -877,6 +1061,31 @@ legend {
   width: auto;
   max-width: none;
   height: 100%;
+}
+
+/* Override doodle.css ".doodle fieldset *" max-width constraint for chat layout elements */
+.chat-fieldset .chat-container,
+.chat-fieldset .conversation-area,
+.chat-fieldset .input-area,
+.chat-fieldset .composer-shell,
+.chat-fieldset .message-row,
+.chat-fieldset .message-row .message {
+  max-width: 100%;
+}
+
+/* Ensure tool output spans message width despite doodle's fieldset descendant max-width rule */
+.chat-fieldset .message .tool-output-container,
+.chat-fieldset .message .tool-output-content,
+.chat-fieldset .message .tool-output-text {
+  width: 100%;
+  max-width: 100% !important;
+  min-width: 0;
+}
+
+/* Keep composer constrained/centered on large screens despite doodle/chat-fieldset overrides */
+.chat-fieldset .composer-shell {
+  max-width: 48rem;
+  width: min(100%, 48rem);
 }
 
 /* Settings fieldset - takes up the remaining space in settings column */
@@ -903,7 +1112,8 @@ legend {
   background-color: transparent;
   border-radius: 8px;
   padding: 1rem;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0;
+  padding-bottom: clamp(8.5rem, 13vh, 11rem);
   min-height: 400px;
   min-width: 0;
   width: 100%;
@@ -1074,6 +1284,26 @@ legend {
   /* Gray for system messages */
 }
 
+.hitl-inline-message {
+  background-color: color-mix(in srgb, var(--bg-accent) 65%, white 35%);
+  border-style: dashed;
+}
+
+.hitl-inline-actions {
+  margin-top: 0.75rem;
+}
+
+.hitl-inline-option-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.hitl-inline-buttons {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .message-sender {
   font-weight: bold;
   font-size: 1.2rem;
@@ -1082,7 +1312,7 @@ legend {
 
 .message-content {
   font-size: 1rem;
-  line-height: 1.4;
+  line-height: 1.48;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -1352,6 +1582,14 @@ legend {
   transform: none;
 }
 
+.message-edit-btn svg,
+.message-delete-btn svg {
+  width: 1rem;
+  height: 1rem;
+  display: block;
+  pointer-events: none;
+}
+
 /* Message Edit Container */
 .message-edit-container {
   display: flex;
@@ -1419,38 +1657,181 @@ legend {
 
 /* User Input Area */
 .input-area {
-  padding: 0;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  padding: 0.15rem 0.7rem 0.35rem;
   background-color: transparent;
-}
-
-.input-container {
   display: flex;
-  gap: 1rem;
-  align-items: center;
-}
-
-.prompt-indicator {
-  font-family: 'Short Stack', cursive;
-  font-size: 1rem;
-  font-weight: bold;
-  color: var(--text-tertiary);
-  min-width: 1rem;
-  display: inline-flex;
   justify-content: center;
-  transition: color 0.2s ease;
+  pointer-events: none;
 }
 
-.prompt-indicator.prompt-ready {
-  color: var(--accent-primary);
+.composer-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  width: 100%;
+  max-width: 48rem;
+  border: 1px solid color-mix(in srgb, var(--border-secondary) 85%, #c4c4c4 15%);
+  border-radius: 14px;
+  background-color: #ffffff;
+  padding: 0.9rem 1rem 0.75rem;
+  box-shadow: var(--shadow-md);
+  pointer-events: auto;
 }
 
-.prompt-indicator.prompt-waiting {
-  color: var(--text-tertiary);
-  animation: prompt-waiting-pulse 1.5s ease-in-out infinite;
+.composer-shell:focus-within {
+  border-color: color-mix(in srgb, var(--border-secondary) 70%, #b5b5b5 30%);
 }
 
-.message-input {
+.composer-textarea {
   flex: 1;
+  width: 100%;
+  min-height: 3.05rem;
+  max-height: 9rem;
+  padding: 0.15rem 0.1rem;
+  border: none;
+  resize: none;
+  outline: none;
+  background-color: transparent;
+  font-family: 'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--text-primary) 70%, #4b5563 30%);
+  overflow-y: auto;
+}
+
+.composer-textarea:focus {
+  outline: none;
+}
+
+.composer-textarea::placeholder {
+  color: color-mix(in srgb, var(--text-tertiary) 80%, #7a7a7a 20%);
+}
+
+.composer-textarea:disabled {
+  cursor: not-allowed;
+  color: color-mix(in srgb, var(--text-tertiary) 85%, #8b8b8b 15%);
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.composer-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 2rem;
+}
+
+.composer-action-icon-button {
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: color-mix(in srgb, var(--text-secondary) 80%, #7a7a7a 20%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.composer-action-icon-button:hover {
+  background-color: color-mix(in srgb, var(--bg-accent) 80%, white 20%);
+  color: var(--text-primary);
+}
+
+.composer-toolbar-icon {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.composer-project-button {
+  height: 2rem;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: color-mix(in srgb, var(--text-secondary) 80%, #7a7a7a 20%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0 0.55rem;
+  font-family: 'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.composer-project-button:hover {
+  background-color: color-mix(in srgb, var(--bg-accent) 80%, white 20%);
+  color: var(--text-primary);
+}
+
+.composer-project-icon {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+/* Override doodle.css button/textarea border-image styles for composer controls */
+.doodle .composer-textarea,
+.doodle .composer-action-icon-button,
+.doodle .composer-project-button {
+  border: none !important;
+  border-image: none !important;
+}
+
+.composer-submit-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.05rem;
+  height: 2.05rem;
+  padding: 0;
+  border-radius: 9999px;
+  border: none;
+  background-color: color-mix(in srgb, var(--text-tertiary) 65%, #8f8f8f 35%);
+  color: #ffffff;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
+}
+
+.composer-submit-button:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--text-secondary) 70%, #808080 30%);
+  transform: translateY(-1px);
+}
+
+.composer-submit-button.stop-button {
+  background-color: color-mix(in srgb, #c2410c 75%, #ea580c 25%);
+}
+
+.composer-submit-button.stop-button:hover:not(:disabled) {
+  background-color: color-mix(in srgb, #9a3412 80%, #c2410c 20%);
+}
+
+.composer-submit-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.composer-submit-icon {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+/* Shared text input fields (e.g., chat history search) */
+.message-input {
+  width: 100%;
   padding: 0.4rem 0.6rem;
   border: 2px solid var(--border-primary);
   border-radius: 4px;
@@ -1468,39 +1849,6 @@ legend {
 
 .message-input::placeholder {
   color: var(--text-tertiary);
-}
-
-.send-button {
-  padding: 0.4rem 0.8rem;
-  background-color: var(--accent-primary);
-  color: white;
-  border: none;
-  border-radius: 4px;
-  font-family: 'Short Stack', cursive;
-  font-size: 0.85rem;
-  font-weight: bold;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.send-button:hover:not(:disabled) {
-  background-color: var(--accent-secondary);
-  color: white;
-  transform: translateY(-1px);
-}
-
-.send-button.stop-button {
-  background-color: var(--text-secondary);
-}
-
-.send-button.stop-button:hover:not(:disabled) {
-  background-color: var(--text-primary);
-  color: white;
-}
-
-.send-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* Chat Settings Area */
@@ -1527,42 +1875,113 @@ legend {
 }
 
 /* Responsive design for smaller screens */
-@media only screen and (max-width: 768px) {
+@media only screen and (max-width: 1024px) {
   .world-container {
-    max-width: 100%;
-    padding: 1rem 1rem 1rem 1rem;
+    --world-scale: 1;
+    max-width: 100% !important;
+    width: 100%;
+    padding: 0.5rem 0.75rem 0.75rem;
+    overflow-x: hidden;
   }
 
   .world-columns {
-    flex-direction: column;
-    height: auto;
-    min-height: calc(100vh - 3rem);
+    height: calc(100dvh - 1.25rem);
+    min-height: 0;
+    zoom: 1;
   }
 
-  .chat-column {
-    flex: none;
-    order: 1;
+  .world-container .modal-content {
+    zoom: 1;
   }
 
-  .settings-column {
-    flex: none;
-    min-width: auto;
+  @supports not (zoom: 1) {
+    .world-columns {
+      width: 100%;
+      height: calc(100dvh - 1.25rem);
+      transform: none;
+      min-height: 0;
+    }
+
+    .world-container .modal-content {
+      transform: none;
+    }
+  }
+
+  .right-panel-toggle-container {
+    display: flex;
+  }
+
+  .world-panel-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    border: none;
+    background: rgba(15, 23, 42, 0.35);
+    z-index: 25;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .world-right-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    width: min(92vw, 24rem);
     max-width: none;
-    order: 2;
+    min-width: 0;
+    height: 100dvh;
+    background: var(--bg-primary);
+    border-left: 1px solid var(--border-primary);
+    box-shadow: -12px 0 24px rgba(15, 23, 42, 0.16);
+    transform: translateX(100%);
+    transition: transform 0.22s ease;
+    overflow: hidden;
   }
 
-  .settings-section {
-    justify-content: center;
-    padding: 0.5rem;
+  .world-right-panel.is-open {
+    transform: translateX(0);
   }
 
-  .world-settings-btn {
-    width: 35px;
-    height: 35px;
+  .right-panel-mobile-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.75rem 0.75rem 0.5rem;
+    border-bottom: 1px solid var(--border-primary);
+    background: var(--bg-primary);
   }
 
-  .world-gear-icon {
-    font-size: 1.3rem;
+  .right-panel-mobile-header .world-settings-btn {
+    width: 34px;
+    height: 34px;
+  }
+
+  .right-panel-mobile-header .world-gear-icon {
+    font-size: 1.25rem;
+  }
+
+  .right-panel-mobile-header .right-panel-close {
+    margin-left: auto;
+  }
+
+  .world-right-panel .settings-row {
+    min-height: auto;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    row-gap: 0.35rem;
+  }
+
+  .world-right-panel .settings-section {
+    justify-content: flex-start;
+    min-height: auto;
+    padding: 0.75rem;
+  }
+
+  .world-right-panel .settings-fieldset {
+    height: calc(100dvh - 7rem);
   }
 
   .agents-section {
@@ -1578,15 +1997,26 @@ legend {
     justify-content: center;
     gap: 1rem;
   }
+}
 
-  .settings-section {
-    justify-content: center;
-    padding: 0.5rem;
-    min-height: 80px;
+@media only screen and (max-width: 768px) {
+  .world-columns {
+    flex-direction: column;
+    width: 100%;
   }
 
-  .settings-row {
-    min-height: 80px;
+  .chat-column {
+    flex: none;
+    order: 1;
+  }
+
+  .world-settings-btn {
+    width: 35px;
+    height: 35px;
+  }
+
+  .world-gear-icon {
+    font-size: 1.3rem;
   }
 
   .agent-sprite {
@@ -1634,19 +2064,78 @@ legend {
   .message {
     width: 100%;
     max-width: 100%;
+    padding: 0.875rem;
   }
 
   .message-row .message {
-    width: calc(100% - var(--chat-message-avatar-size) - var(--chat-message-avatar-gap));
-    max-width: calc(100% - var(--chat-message-avatar-size) - var(--chat-message-avatar-gap));
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .message-row .user-message,
+  .message-row .agent-message,
+  .message-row .system-message {
+    width: 100%;
+    max-width: 100%;
+    align-self: stretch;
+  }
+
+  .message-row .user-message {
+    padding-right: 2.25rem !important;
+  }
+
+  .message-row .user-message .message-actions {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    opacity: 1;
+    flex-direction: column;
+    justify-content: flex-start;
+    margin-top: 0;
   }
 
   .message-row {
     --chat-message-avatar-size: 65px;
+    --chat-message-avatar-gap: 0;
+    display: block;
+    width: 100%;
+  }
+
+  .message-avatar-container {
+    display: none;
+  }
+
+  .message-row-left,
+  .message-row-right {
+    justify-content: stretch;
   }
 
   .conversation-area {
     min-height: 250px;
+    padding-bottom: clamp(8rem, 22vh, 10rem);
+  }
+
+  .world-right-panel {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: min(88dvh, 40rem);
+    border-left: none;
+    border-top: 1px solid var(--border-primary);
+    border-top-left-radius: 14px;
+    border-top-right-radius: 14px;
+    box-shadow: 0 -10px 24px rgba(15, 23, 42, 0.16);
+    transform: translateY(100%);
+  }
+
+  .world-right-panel.is-open {
+    transform: translateY(0);
+  }
+
+  .world-right-panel .settings-fieldset {
+    height: calc(min(88dvh, 40rem) - 7rem);
   }
 }
 
@@ -1661,17 +2150,7 @@ legend {
 
   .world-columns {
     gap: 0.5rem;
-    height: auto;
-    min-height: calc(100vh - 2rem);
-  }
-
-  .settings-section {
-    padding: 0.25rem;
-    min-height: 70px;
-  }
-
-  .settings-row {
-    min-height: 70px;
+    height: calc(100dvh - 1.25rem);
   }
 
   .world-settings-btn {
@@ -1692,17 +2171,37 @@ legend {
     min-height: 70px;
   }
 
-  .input-container {
-    flex-direction: column;
-    gap: 0.75rem;
+  .composer-shell {
+    max-width: 100%;
+    padding: 0.65rem 0.7rem 0.55rem;
   }
 
-  .message-input {
-    width: 100%;
+  .input-area {
+    padding: 0.1rem 0.35rem 0.25rem;
   }
 
-  .send-button {
-    width: 100%;
+  .composer-textarea {
+    min-height: 2.45rem;
+    font-size: 0.84rem;
+  }
+
+  .composer-action-icon-button,
+  .composer-project-button {
+    height: 1.8rem;
+  }
+
+  .composer-action-icon-button {
+    width: 1.8rem;
+  }
+
+  .composer-project-button {
+    font-size: 0.84rem;
+    padding: 0 0.5rem;
+  }
+
+  .composer-submit-button {
+    width: 1.85rem;
+    height: 1.85rem;
   }
 
   .agents-list {
@@ -1757,6 +2256,11 @@ legend {
     font-size: 0.7rem;
     top: -6px;
     right: -6px;
+  }
+
+  .right-panel-mobile-tab {
+    font-size: 0.74rem;
+    padding: 0.25rem 0.55rem;
   }
 }
 
@@ -2117,6 +2621,14 @@ legend {
   border: 2px solid var(--border-primary);
 }
 
+.modal-content.edit-modal {
+  --edit-form-title-size: 1.15rem;
+  --edit-form-label-size: 0.95rem;
+  --edit-form-help-size: 0.8rem;
+  --edit-form-input-size: 0.95rem;
+  --edit-form-checkbox-size: 0.95rem;
+}
+
 .modal-header {
   display: flex;
   align-items: center;
@@ -2126,7 +2638,7 @@ legend {
 }
 
 .modal-title {
-  font-size: 1.5rem;
+  font-size: var(--edit-form-title-size, 1.5rem);
   font-weight: bold;
   color: var(--text-primary);
   margin: 0;
@@ -2215,7 +2727,40 @@ legend {
 .form-group label {
   font-weight: 500;
   color: var(--text-secondary);
-  font-size: 0.9rem;
+  font-size: var(--edit-form-label-size, 0.95rem);
+}
+
+.form-checkbox-row {
+  --form-control-size: var(--edit-form-checkbox-size, 1rem);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.form-checkbox-row input[type="checkbox"] {
+  width: var(--form-control-size);
+  height: var(--form-control-size);
+  margin-top: 0;
+  flex: 0 0 auto;
+}
+
+.form-checkbox-title {
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-size: var(--edit-form-label-size, var(--form-control-size));
+  margin: 0;
+  cursor: pointer;
+}
+
+.form-help-text {
+  font-size: var(--edit-form-help-size, 0.78rem);
+  line-height: 1.35;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+
+.form-checkbox-help {
+  margin-left: 1.45rem;
 }
 
 .form-input,
@@ -2225,7 +2770,7 @@ legend {
   padding: 0.75rem;
   border: 2px solid var(--border-primary);
   border-radius: 6px;
-  font-size: 0.9rem;
+  font-size: var(--edit-form-input-size, 0.9rem);
   background-color: var(--bg-primary);
   color: var(--text-primary);
   transition: border-color 0.2s ease;
@@ -2411,6 +2956,20 @@ legend {
 .chat-history-header.centered {
   justify-content: center;
   margin: 1em 0;
+}
+
+.chat-history-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.35rem 0 0.6rem 0;
+}
+
+.chat-history-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.88rem;
 }
 
 /* Simplified chat list styles */
@@ -2711,12 +3270,16 @@ legend {
   background: var(--accent-primary);
   color: white;
   border: none;
-  padding: 0.5rem 1rem;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
   border-radius: 0.25rem;
   cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition: background-color 0.2s;
+  flex: 0 0 auto;
 }
 
 .new-chat-btn:hover {
@@ -2725,6 +3288,12 @@ legend {
 
 .new-chat-btn:active {
   transform: translateY(1px);
+}
+
+.new-chat-btn svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  display: block;
 }
 
 /* Update chat fieldset legend to include unsaved indicator */
@@ -3047,7 +3616,7 @@ legend {
 /* Tool Output Container */
 .tool-output-container {
   margin: 8px 0;
-  border: 1px solid var(--border-subtle);
+  border: none;
   border-radius: 6px;
   overflow: hidden;
   background-color: var(--bg-secondary);
@@ -3057,46 +3626,57 @@ legend {
 .tool-output-header {
   display: flex;
   align-items: center;
-  padding: 0;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
 }
 
 /* Tool Output Toggle Button */
 .tool-output-toggle {
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 12px;
-  background-color: var(--bg-secondary);
-  border: none;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  background-color: transparent;
+  border: 0 !important;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 0.875rem;
-  color: var(--text-primary);
-  text-align: left;
-  transition: background-color 0.2s ease;
+  color: var(--text-secondary);
+  outline: none;
+  box-shadow: none;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .tool-output-toggle:hover {
   background-color: var(--bg-tertiary);
+  color: var(--accent-primary);
 }
 
-/* Toggle Icon */
-.toggle-icon {
-  font-size: 0.75em;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-  transition: transform 0.2s ease;
+.tool-output-toggle:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 /* Tool Label */
 .tool-label {
-  font-weight: 500;
-  flex-grow: 1;
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1.48;
+}
+
+.tool-toggle-icon {
+  width: 0.875rem;
+  height: 0.875rem;
+  display: block;
 }
 
 /* Tool Output Content */
 .tool-output-content {
   padding: 12px;
+  width: 100%;
+  box-sizing: border-box;
   animation: expandOutput 0.3s ease-out;
 }
 
@@ -3137,7 +3717,7 @@ legend {
 .tool-output-stdout .tool-output-text {
   background-color: #1e1e1e;
   color: #d4d4d4;
-  border: 1px solid #333;
+  border: none;
 }
 
 /* Stderr Output (red-tinted) */
@@ -3151,7 +3731,7 @@ legend {
 .tool-output-stderr .tool-output-text {
   background-color: #2a1a1a;
   color: #ffcccc;
-  border: 1px solid #4a2a2a;
+  border: none;
 }
 
 /* Truncation Warning */

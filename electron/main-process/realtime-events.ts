@@ -11,6 +11,7 @@
  * - Uses dependency injection for window lookup and world subscription API.
  *
  * Recent Changes:
+ * - 2026-02-20: Allow `hitl-option-request` system events to bypass strict chatId filtering so approval prompts are not dropped by chat-scope mismatch.
  * - 2026-02-16: Fixed activity events (response-start, idle) being filtered out when subscription has a chatId — activity events are world-level and carry no chatId.
  * - 2026-02-13: Added system-event forwarding for chat-title update notifications to renderer subscribers.
  * - 2026-02-13: Preserved unsubscribe tombstones across runtime resets and lifecycle cleanup to keep subscription IDs non-reusable.
@@ -74,6 +75,19 @@ export interface RealtimeEventsRuntime {
   refreshWorldSubscription: (worldId: string) => Promise<string | null>;
   resetRuntimeSubscriptions: () => Promise<void>;
   removeWorldSubscriptions: (worldId: string) => Promise<void>;
+}
+
+function isHitlRequestSystemEvent(event: any): boolean {
+  const content = event?.content;
+  if (typeof content === 'object' && content) {
+    const eventType = String((content as { eventType?: unknown }).eventType || '').trim();
+    return eventType === 'hitl-option-request';
+  }
+  if (typeof content === 'string') {
+    const eventType = content.trim();
+    return eventType === 'hitl-option-request';
+  }
+  return false;
 }
 
 export function createRealtimeEventsRuntime(
@@ -258,7 +272,8 @@ export function createRealtimeEventsRuntime(
 
     const systemHandler = (event: any) => {
       const eventChatId = event?.chatId ? String(event.chatId) : null;
-      if (chatId && eventChatId !== chatId) return;
+      const isHitlRequest = isHitlRequestSystemEvent(event);
+      if (!isHitlRequest && chatId && eventChatId !== chatId) return;
       sendRealtimeEventToRenderer({
         ...serializeRealtimeSystemEvent(worldId, eventChatId || chatId, event),
         subscriptionId

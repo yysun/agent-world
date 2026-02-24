@@ -15,6 +15,7 @@
  * - Exercises subscriber behavior through emitted `world` events.
  *
  * Recent Changes:
+ * - 2026-02-19: Asserted chat-title CRUD payload shape.
  * - 2026-02-13: Asserted structured `chat-title-updated` system payload shape.
  * - 2026-02-13: Added repeated-idle dedupe and no-activity human-message title-generation coverage.
  * - 2026-02-13: Added low-quality-title fallback and cancellation no-op coverage.
@@ -201,9 +202,9 @@ describe('World activity-based title update', () => {
     expect(world.chats.get('chat-1')!.name).toBe('Scoped Chat Title');
     expect(world.chats.get('chat-2')!.name).toBe('New Chat');
     expect(mocks.updateChatNameIfCurrent).toHaveBeenCalledWith('world-1', 'chat-1', 'New Chat', 'Scoped Chat Title');
-    expect(systemEvents.at(-1)?.chatId).toBe('chat-1');
     expect(systemEvents.at(-1)?.content).toMatchObject({
       eventType: 'chat-title-updated',
+      chatId: 'chat-1',
       title: 'Scoped Chat Title',
       source: 'idle'
     });

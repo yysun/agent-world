@@ -1,59 +1,21 @@
 /**
- * World Chat Component - Real-time chat interface with agent message filtering
+ * Purpose:
+ * - Render the world chat transcript and composer with AppRun-compatible events.
  *
- * Features:
- * - Real-time message streaming with agent selection filtering
- * - Cross-agent message detection and system message display
- * - Memory-only message styling (agent messages saved to other agents' memory)
- * - User input handling with send functionality and loading states
- * - Message editing with frontend-driven DELETE → POST flow
- * - Message deletion with confirmation dialog (deletes message and all after it)
- * - Message deduplication by messageId for multi-agent scenarios
- * - Displays only the first/intended recipient agent, not all who received it
- * - Agent activity display for world events (response-start, tool-start)
- * - Tool result message filtering (hides internal tool result protocol messages)
- * - Message body rendering delegated to domain module (`renderMessageContent`)
- * - Left-side avatar rendering for message boxes using actual agent spriteIndex values
- * - Human messages keep an empty avatar slot (no sprite image)
- * - Activity indicators: ActivityPulse and ElapsedTimeCounter in chat header
- * - Agent queue indicator in chat header (active + queued agents)
- * - Collapsible tool output: Expand/collapse tool results with stdout/stderr styling
- * - Tool output truncation: 50K character limit with truncation warning
- * - Role-based message styling: Distinct left border colors for visual hierarchy
- * - AppRun JSX with props-based state management
+ * Key Features:
+ * - Real-time message streaming with filtering, deduplication, and role-based rendering.
+ * - Chat composer with send/stop controls, HITL safety gating, and Electron-style toolbar layout.
+ * - Agent activity/queue indicators and message-level tooling/edit/delete affordances.
  *
- * Changes:
- * - 2026-02-16: Disabled message-edit `Update` button until trimmed content differs from original message text.
- * - 2026-02-15: Suppressed reply-target sender labels when the sender agent has `autoReply` disabled; now shows plain sender for parity with Electron.
- * - 2026-02-14: Extracted message body rendering to `web/src/domain/message-content.tsx`
- * - 2026-02-14: Added send/stop composer toggle so web users can stop active chat processing.
- * - 2026-02-14: Removed legacy 3-tier tool call reconstruction in favor of canonical message text rendering
- * - 2026-02-14: Added AgentQueueDisplay in chat header for active/queued visibility
- * - 2026-02-11: Phase 6 - Added role-based left border colors (human=light blue, agent=sky blue, tool=amber, system=gray, cross-agent=purple)
- * - 2026-02-11: Phase 6 - Applied .tool-message class to tool result messages
- * - 2026-02-11: Phase 5 - Added collapsible tool output with expand/collapse
- * - 2026-02-11: Phase 5 - Added 50K character truncation for long tool outputs
- * - 2026-02-11: Phase 5 - Distinguished stdout (terminal style) vs stderr (red-tinted)
- * - 2026-02-11: Phase 5 - Tool messages now visible (no longer hidden by shouldHideMessage)
- * - 2026-02-11: Phase 3 - Added ActivityPulse and ElapsedTimeCounter to chat header
- * - 2026-02-11: Integrated isBusy and elapsedMs props from World.tsx state
- * - 2026-02-08: Removed legacy manual tool-intervention request and response box rendering
- * - 2026-02-08: Fixed undefined HUMAN_AVATAR_SPRITE_INDEX runtime error in avatar sprite resolver
- * - 2026-02-08: Left human message avatars empty while preserving avatar alignment slot
- * - 2026-02-08: Mapped message avatars to world agents' assigned spriteIndex values
- * - 2026-02-08: Added left-side avatars for world chat message boxes
- * - 2025-11-03: Display agent activities (response-start, tool-start) instead of waiting dots
- * - 2025-10-27: Fixed message labeling to match export format - consistent reply detection
- * - 2025-10-27: Removed confusing '[in-memory, no reply]' labels from display
- * - 2025-10-26: Fixed agent filter to check sender first (whose memory) for in-memory messages
- * - 2025-10-26: Fixed cross-agent message display - sender=recipient, fromAgentId=original author
- * - 2025-10-26: Fixed 'To: unknown' bug - empty seenByAgents handled gracefully
- * - 2025-10-26: Added comment explaining empty seenByAgents will be populated by duplicates
- * - 2025-10-26: Added message delete button with confirmation dialog
- * - 2025-10-25: Added memory-only message styling with gray left border for agent→agent messages
- * - 2025-10-25: Added delivery status badge showing seenByAgents (📨 o1, a1, o3)
- * - 2025-10-25: Edit button disabled until messageId confirmed from backend
- * - 2025-10-21: Integrated message edit functionality with remove-and-resubmit flow
+ * Notes on Implementation:
+ * - Stateless functional component that derives UI directly from props.
+ * - Message body rendering is delegated to domain helpers to keep this file focused on view composition.
+ *
+ * Summary of Recent Changes:
+ * - 2026-02-21: Wired `Project` button to web project-folder selection flow and dynamic folder tooltip text.
+ * - 2026-02-21: Matched web composer toolbar structure to Electron (plus icon + project pill + round arrow action).
+ * - 2026-02-21: Aligned web composer UI/behavior with Electron (textarea composer shell, icon action button, and Enter/Shift+Enter semantics).
+ * - 2026-02-20: Disabled new-message sending while a HITL prompt is pending; users must resolve HITL first.
  */
 
 import { app } from 'apprun';
@@ -69,9 +31,31 @@ const SYSTEM_AVATAR_SPRITE_INDEX = 4;
 
 export interface ComposerActionState {
   canStopCurrentSession: boolean;
+  composerDisabled: boolean;
   actionButtonDisabled: boolean;
   actionButtonClass: string;
-  actionButtonText: string;
+  actionButtonLabel: string;
+}
+
+export function isBranchableAgentMessage(message: Message): boolean {
+  if (!message || message.role !== 'assistant') return false;
+
+  const sender = String(message.sender || '').toLowerCase().trim();
+  if (!sender || sender === 'system' || sender === 'tool' || sender === 'human' || sender === 'user') {
+    return false;
+  }
+
+  const text = String(message.text || '').trim();
+  if (!text || /^error\s*:/i.test(text)) {
+    return false;
+  }
+
+  const anyMessage = message as any;
+  if (Array.isArray(anyMessage.tool_calls) && anyMessage.tool_calls.length > 0) return false;
+  if (anyMessage.tool_call_id) return false;
+  if (anyMessage.toolCallStatus) return false;
+
+  return true;
 }
 
 export function getComposerActionState(params: {
@@ -80,6 +64,7 @@ export function getComposerActionState(params: {
   isBusy: boolean;
   isStopping: boolean;
   isSending: boolean;
+  hasActiveHitlPrompt: boolean;
   userInput: string;
 }): ComposerActionState {
   const {
@@ -88,23 +73,24 @@ export function getComposerActionState(params: {
     isBusy,
     isStopping,
     isSending,
+    hasActiveHitlPrompt,
     userInput,
   } = params;
 
   const canStopCurrentSession = Boolean(currentChatId) && (isWaiting || isBusy);
+  const composerDisabled = hasActiveHitlPrompt && !canStopCurrentSession;
   const actionButtonDisabled = canStopCurrentSession
     ? isStopping
-    : (!userInput.trim() || isSending || isWaiting || isStopping);
-  const actionButtonClass = canStopCurrentSession ? 'send-button stop-button' : 'send-button';
-  const actionButtonText = canStopCurrentSession
-    ? (isStopping ? 'Stopping...' : 'Stop')
-    : (isSending ? 'Sending...' : 'Send');
+    : (isSending || !userInput.trim() || composerDisabled);
+  const actionButtonClass = canStopCurrentSession ? 'composer-submit-button stop-button' : 'composer-submit-button';
+  const actionButtonLabel = canStopCurrentSession ? 'Stop message processing' : 'Send message';
 
   return {
     canStopCurrentSession,
+    composerDisabled,
     actionButtonDisabled,
     actionButtonClass,
-    actionButtonText,
+    actionButtonLabel,
   };
 }
 
@@ -122,26 +108,32 @@ export default function WorldChat(props: WorldChatProps) {
     agents = [],
     currentChat,
     currentChatId = null,
+    selectedProjectPath = null,
     editingMessageId = null,
     editingText = '',
     agentFilters = [],  // Agent IDs to filter by
     isBusy = false,
     elapsedMs = 0,
-    isStopping = false
+    isStopping = false,
+    activeHitlPrompt = null,
+    submittingHitlRequestId = null,
   } = props;
 
-  const promptReady = !isWaiting;
-  const promptIndicator = promptReady ? '>' : '…';
-  const inputPlaceholder = promptReady ? 'Type your message...' : 'Waiting for agents...';
-  const inputDisabled = isSending || isWaiting || isStopping;
-  const { canStopCurrentSession, actionButtonDisabled, actionButtonClass, actionButtonText } = getComposerActionState({
+  const { canStopCurrentSession, composerDisabled, actionButtonDisabled, actionButtonClass, actionButtonLabel } = getComposerActionState({
     currentChatId,
     isWaiting,
     isBusy,
     isStopping,
     isSending,
+    hasActiveHitlPrompt: Boolean(activeHitlPrompt),
     userInput,
   });
+  const inputPlaceholder = composerDisabled
+    ? 'Resolve pending HITL prompt before sending a new message...'
+    : 'Send a message...';
+  const projectButtonTitle = selectedProjectPath
+    ? `Project folder: ${selectedProjectPath}`
+    : 'Select project folder for context';
   const waitingAgentName = activeAgent?.name?.trim() || agents[0]?.name?.trim() || 'Agent';
   const agentSpriteByName = new Map<string, number>();
   const agentSpriteById = new Map<string, number>();
@@ -311,7 +303,7 @@ export default function WorldChat(props: WorldChatProps) {
           queuedAgents={queuedAgents}
         />
         <ActivityPulse isBusy={isBusy || false} />
-        {(isBusy || (elapsedMs && elapsedMs > 0)) && <ElapsedTimeCounter elapsedMs={elapsedMs || 0} />}
+        {(isBusy || elapsedMs > 0) && <ElapsedTimeCounter elapsedMs={elapsedMs || 0} />}
       </legend>
       <div className="chat-container">
         {/* Conversation Area */}
@@ -529,7 +521,9 @@ export default function WorldChat(props: WorldChatProps) {
                               title="Edit message"
                               disabled={!message.messageId || message.userEntered}
                             >
-                              ✏️
+                              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm2.92 2.33H5v-.92l9.06-9.06.92.92L5.92 19.58zM20.71 7.04a1.003 1.003 0 0 0 0-1.42L18.37 3.29a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.83z" />
+                              </svg>
                             </button>
                             <button
                               className="message-delete-btn"
@@ -542,7 +536,9 @@ export default function WorldChat(props: WorldChatProps) {
                               title="Delete message and all after it"
                               disabled={!message.messageId || message.userEntered}
                             >
-                              🗑️
+                              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                <path fill="currentColor" d="M6 7h12l-1 14H7L6 7zm3-4h6l1 2h4v2H4V5h4l1-2z" />
+                              </svg>
                             </button>
                           </div>
                         )}
@@ -590,28 +586,135 @@ export default function WorldChat(props: WorldChatProps) {
               </div>
             </div>
           )}
+
+          {activeHitlPrompt ? (
+            <div className="message-row message-row-left">
+              <div className="message-avatar-container" title="Human input required">
+                <div className="message-avatar sprite-4"></div>
+              </div>
+              <div className="message system-message hitl-inline-message">
+                <div className="message-sender">
+                  {activeHitlPrompt.title || 'Human input required'}
+                </div>
+                <div className="message-content">
+                  {(activeHitlPrompt.message || 'Please choose an option to continue.').replace(/\n\s*\n+/g, '\n')}
+                </div>
+                <div className="hitl-inline-actions hitl-inline-option-actions">
+                  {activeHitlPrompt.options.map((option) => {
+                    const isSubmitting = submittingHitlRequestId === activeHitlPrompt.requestId;
+                    return (
+                      <button
+                        key={option.id}
+                        className="btn-secondary px-4 py-2 rounded shrink-0"
+                        disabled={isSubmitting}
+                        $onclick={['respond-hitl-option', {
+                          requestId: activeHitlPrompt.requestId,
+                          optionId: option.id,
+                          chatId: activeHitlPrompt.chatId
+                        }]}
+                      >
+                        <div className="font-bold">{option.label}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {/* User Input Area */}
         <div className="input-area">
-          <div className="input-container">
-            <input
-              type="text"
-              className="message-input"
+          <div className="composer-shell">
+            <textarea
+              className="composer-textarea"
               placeholder={inputPlaceholder}
               value={userInput || ''}
               $oninput='update-input'
-              $onkeypress='key-press'
-              disabled={inputDisabled}
+              $onkeydown='key-press'
+              rows={1}
+              aria-label="Message input"
+              disabled={composerDisabled}
             />
-            <button
-              className={actionButtonClass}
-              $onclick={canStopCurrentSession ? 'stop-message-processing' : 'send-message'}
-              disabled={actionButtonDisabled}
-              title={canStopCurrentSession ? 'Stop processing' : 'Send message'}
-            >
-              {actionButtonText}
-            </button>
+            <div className="composer-toolbar">
+              <div className="composer-toolbar-left">
+                <button
+                  type="button"
+                  className="composer-action-icon-button"
+                  aria-label="Attach file"
+                  title="Attach file"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="composer-toolbar-icon"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className="composer-project-button"
+                  $onclick='select-project-folder'
+                  aria-label="Select project folder"
+                  title={projectButtonTitle}
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="composer-project-icon"
+                    aria-hidden="true"
+                  >
+                    <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+                  </svg>
+                  <span>Project</span>
+                </button>
+              </div>
+              <button
+                className={actionButtonClass}
+                $onclick={canStopCurrentSession ? 'stop-message-processing' : 'send-message'}
+                disabled={actionButtonDisabled}
+                title={actionButtonLabel}
+                aria-label={actionButtonLabel}
+              >
+                {canStopCurrentSession ? (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    className="composer-submit-icon"
+                    aria-hidden="true"
+                  >
+                    <rect x="6" y="6" width="12" height="12" rx="1.5" />
+                  </svg>
+                ) : (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="composer-submit-icon"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 19V5M5 12l7-7 7 7" />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </div>

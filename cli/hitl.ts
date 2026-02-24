@@ -11,9 +11,10 @@
  *
  * Implementation Notes:
  * - Parser accepts generic event payloads and rejects incomplete requests.
- * - Fallback defaults to explicit `no` when available, otherwise first option.
+ * - Option fallback defaults to explicit `no` when available, otherwise first option.
  *
  * Recent Changes:
+ * - 2026-02-20: Enforced options-only HITL parsing in CLI helpers.
  * - 2026-02-14: Added initial helper module for CLI HITL response flow support.
  */
 
@@ -28,11 +29,14 @@ export interface HitlOptionRequestPayload {
   title: string;
   message: string;
   chatId: string | null;
+  mode: 'option';
   options: HitlOptionPayload[];
   defaultOptionId: string;
 }
 
-export function parseHitlOptionRequest(eventData: unknown): HitlOptionRequestPayload | null {
+export type HitlPromptRequestPayload = HitlOptionRequestPayload;
+
+export function parseHitlPromptRequest(eventData: unknown): HitlPromptRequestPayload | null {
   if (!eventData || typeof eventData !== 'object') {
     return null;
   }
@@ -40,7 +44,8 @@ export function parseHitlOptionRequest(eventData: unknown): HitlOptionRequestPay
   const content = payload.content && typeof payload.content === 'object'
     ? (payload.content as Record<string, unknown>)
     : null;
-  if (!content || String(content.eventType || '').trim() !== 'hitl-option-request') {
+  const eventType = String(content?.eventType || '').trim();
+  if (!content || eventType !== 'hitl-option-request') {
     return null;
   }
 
@@ -51,18 +56,19 @@ export function parseHitlOptionRequest(eventData: unknown): HitlOptionRequestPay
 
   const options: HitlOptionPayload[] = Array.isArray(content.options)
     ? content.options
-      .map((option): HitlOptionPayload => {
-        const optionRecord = option && typeof option === 'object'
-          ? (option as Record<string, unknown>)
-          : null;
-        return {
-          id: String(optionRecord?.id || '').trim(),
-          label: String(optionRecord?.label || '').trim(),
-          description: optionRecord?.description ? String(optionRecord.description) : undefined
-        };
-      })
-      .filter((option) => option.id.length > 0 && option.label.length > 0)
+        .map((option): HitlOptionPayload => {
+          const optionRecord = option && typeof option === 'object'
+            ? (option as Record<string, unknown>)
+            : null;
+          return {
+            id: String(optionRecord?.id || '').trim(),
+            label: String(optionRecord?.label || '').trim(),
+            description: optionRecord?.description ? String(optionRecord.description) : undefined
+          };
+        })
+        .filter((option) => option.id.length > 0 && option.label.length > 0)
     : [];
+
   if (options.length === 0) {
     return null;
   }
@@ -77,9 +83,14 @@ export function parseHitlOptionRequest(eventData: unknown): HitlOptionRequestPay
     title: String(content.title || 'Approval required').trim() || 'Approval required',
     message: String(content.message || '').trim(),
     chatId: payload.chatId ? String(payload.chatId) : null,
+    mode: 'option',
     options,
     defaultOptionId
   };
+}
+
+export function parseHitlOptionRequest(eventData: unknown): HitlOptionRequestPayload | null {
+  return parseHitlPromptRequest(eventData);
 }
 
 export function resolveHitlOptionSelectionInput(
@@ -106,4 +117,3 @@ export function resolveHitlOptionSelectionInput(
   }
   return null;
 }
-

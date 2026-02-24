@@ -12,6 +12,13 @@
  * - No filesystem or network dependencies.
  *
  * Recent Changes:
+ * - 2026-02-22: Added regression for pending-only inline status to avoid fallback agent names on invalid mention flows.
+ * - 2026-02-22: Added coverage for end-of-run processed-agent status summary text helper.
+ * - 2026-02-22: Added regression coverage to prevent fallback agent attribution when no concrete agent activity state exists.
+ * - 2026-02-20: Added coverage for `isRenderableMessageEntry` used by Electron welcome-card visibility logic.
+ * - 2026-02-19: Updated phase-label expectations to `calling LLM...` and `streaming response...`.
+ * - 2026-02-19: Added coverage for per-agent inline status summary formatting (`buildInlineAgentStatusSummary`).
+ * - 2026-02-19: Added coverage for inline agent work phase text helper (`getAgentWorkPhaseText`).
  * - 2026-02-16: Added tests for extracted constants/util modules from App.jsx.
  */
 
@@ -37,6 +44,7 @@ import {
   getMessageIdentity,
   getMessageSenderLabel,
   isHumanMessage,
+  isRenderableMessageEntry,
   isToolRelatedMessage,
   isTrueAgentResponseMessage,
   resolveMessageAvatar,
@@ -106,6 +114,7 @@ describe('extracted formatting utils', () => {
   });
 });
 
+
 describe('extracted validation utils', () => {
   it('validates world form and enforces required fields', () => {
     expect(validateWorldForm({ name: '' }).valid).toBe(false);
@@ -146,6 +155,10 @@ describe('extracted message utils', () => {
   it('classifies human/tool/assistant message roles correctly', () => {
     expect(isHumanMessage({ role: 'user' })).toBe(true);
     expect(isToolRelatedMessage({ role: 'tool' })).toBe(true);
+    expect(isToolRelatedMessage({
+      role: 'assistant',
+      tool_calls: [{ type: 'function', function: { name: 'shell_cmd', arguments: '{}' } }]
+    })).toBe(true);
     expect(isTrueAgentResponseMessage({ role: 'assistant', sender: 'agent-a', content: 'hello' })).toBe(true);
     expect(isTrueAgentResponseMessage({ role: 'assistant', content: 'Calling tool: shell_cmd' })).toBe(false);
   });
@@ -153,6 +166,8 @@ describe('extracted message utils', () => {
   it('returns stable message identity and style class', () => {
     const message = { messageId: 'msg-1', role: 'assistant', sender: 'Agent A' };
     expect(getMessageIdentity(message)).toBe('msg-1');
+    expect(isRenderableMessageEntry(message)).toBe(true);
+    expect(isRenderableMessageEntry({ role: 'assistant' })).toBe(false);
     const className = getMessageCardClassName(message, new Map(), [message], 0);
     expect(className).toContain('rounded-lg');
   });

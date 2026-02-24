@@ -99,7 +99,6 @@ export function useSessionManagement({
     if (!loadedWorldId) return;
     const previousSessionId = selectedSessionId;
     messageRefreshCounter.current += 1;
-    setMessages([]);
     setSelectedSessionId(chatId);
     try {
       const result = await api.selectSession(loadedWorldId, chatId);

@@ -1,3 +1,57 @@
-@tailwind base;
-@tailwind components;
+/*
+ * Tailwind CSS v4 – CSS-first configuration
+ *
+ * Preflight (browser reset) is intentionally excluded via separate imports
+ * so it does not override doodle.css base styles.
+ *
+ * All theme values that were previously in tailwind.config.js are declared
+ * here via @theme.  tailwind.config.js is no longer used.
+ */
+
+/* Skip preflight; import only theme variables and utility classes */
+@import "tailwindcss/theme";
 @tailwind utilities;
+
+@theme {
+  /* ── Typography ─────────────────────────────────────────────────────────── */
+  --font-sans: "Short Stack", cursive;
+
+  /* ── Background colours ─────────────────────────────────────────────────── */
+  --color-bg-primary:   #ffffff;
+  --color-bg-secondary: #f8f9fa;
+  --color-bg-tertiary:  #f7fafc;
+  --color-bg-accent:    #f1f5f9;
+
+  /* ── Border colours ─────────────────────────────────────────────────────── */
+  --color-border-primary:   #e2e8f0;
+  --color-border-secondary: #cbd5e0;
+  --color-border-accent:    #475569;
+
+  /* ── Text colours ───────────────────────────────────────────────────────── */
+  --color-text-primary:    #2d3748;
+  --color-text-secondary:  #4a5568;
+  --color-text-tertiary:   #718096;
+  --color-text-quaternary: #a0aec0;
+
+  /* ── Accent colours ─────────────────────────────────────────────────────── */
+  --color-accent-primary:   #475569;
+  --color-accent-secondary: #334155;
+
+  /* ── Message colours ────────────────────────────────────────────────────── */
+  --color-message-user:   #e2e8f0;
+  --color-message-agent:  #2196f3;
+  --color-message-cross:  #ff9800;
+  --color-message-memory: #9e9e9e;
+  --color-message-system: #e53935;
+
+  /* ── Custom breakpoints (added on top of v4 defaults sm/md/lg/xl/2xl) ──── */
+  --breakpoint-mobile:  480px;
+  --breakpoint-tablet:  600px;
+  --breakpoint-desktop: 768px;
+
+  /* ── Box shadows ────────────────────────────────────────────────────────── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 4px 20px rgba(71, 85, 105, 0.2);
+}

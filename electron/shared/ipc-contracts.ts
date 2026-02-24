@@ -15,8 +15,10 @@
  * - Runtime validation remains in main-process handlers for behavior parity.
  *
  * Recent Changes:
+ * - 2026-02-19: Added `world:export` invoke contract for desktop world save/export flows aligned with CLI storage options.
  * - 2026-02-16: Added `session:branchFromMessage` invoke contract for creating a branched chat from an assistant message.
  * - 2026-02-14: Added `hitl:respond` invoke contract for resolving world HITL option prompts from renderer.
+ * - 2026-02-20: Enforced options-only HITL response payload (`optionId` required).
  * - 2026-02-14: Added `skill:list` invoke contract for renderer welcome-screen skill registry display.
  * - 2026-02-13: Added `message:edit` invoke contract for core-driven message edit + resubmission flow.
  * - 2026-02-13: Added chat stop-message invoke contract for session-scoped processing interruption.
@@ -33,6 +35,7 @@ export const DESKTOP_INVOKE_CHANNELS = {
   WORLD_LOAD_FROM_FOLDER: 'world:loadFromFolder',
   WORLD_LOAD: 'world:load',
   WORLD_IMPORT: 'world:import',
+  WORLD_EXPORT: 'world:export',
   WORLD_LIST: 'world:list',
   SKILL_LIST: 'skill:list',
   WORLD_CREATE: 'world:create',
@@ -59,7 +62,8 @@ export const DESKTOP_INVOKE_CHANNELS = {
   CHAT_UNSUBSCRIBE_EVENTS: 'chat:unsubscribeEvents',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SAVE: 'settings:save',
-  DIALOG_PICK_FILE: 'dialog:pickFile'
+  DIALOG_PICK_FILE: 'dialog:pickFile',
+  CHAT_GET_EVENTS: 'chat:getEvents'
 } as const;
 
 export type DesktopInvokeChannel =
@@ -67,6 +71,10 @@ export type DesktopInvokeChannel =
 
 export interface WorldIdPayload {
   worldId: string;
+}
+
+export interface WorldExportPayload extends WorldIdPayload {
+  targetPath?: string;
 }
 
 export interface WorldChatPayload extends WorldIdPayload {
@@ -95,6 +103,17 @@ export interface MessageDeletePayload extends WorldChatPayload {
 export interface MessageEditPayload extends WorldChatPayload {
   messageId: string;
   newContent: string;
+}
+
+export interface ChatSendMessagePayload extends WorldChatPayload {
+  content: string;
+  sender?: string;
+  systemSettings?: {
+    enableGlobalSkills?: boolean;
+    enableProjectSkills?: boolean;
+    disabledGlobalSkillIds?: string[];
+    disabledProjectSkillIds?: string[];
+  };
 }
 
 export interface HitlResponsePayload extends WorldIdPayload {
@@ -139,6 +158,7 @@ export interface DesktopApi {
   loadWorldFromFolder: () => Promise<unknown>;
   loadWorld: (worldId: string) => Promise<unknown>;
   importWorld: () => Promise<unknown>;
+  exportWorld: (worldId: string) => Promise<unknown>;
   listWorlds: () => Promise<unknown>;
   listSkills: (filters?: SkillListFilterPayload) => Promise<SkillRegistrySummary[]>;
   createWorld: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -156,7 +176,7 @@ export interface DesktopApi {
   deleteSession: (worldId: string, chatId: string) => Promise<unknown>;
   selectSession: (worldId: string, chatId: string) => Promise<unknown>;
   getMessages: (worldId: string, chatId: string) => Promise<unknown>;
-  sendMessage: (payload: Record<string, unknown>) => Promise<unknown>;
+  sendMessage: (payload: ChatSendMessagePayload) => Promise<unknown>;
   editMessage: (worldId: string, messageId: string, newContent: string, chatId: string) => Promise<unknown>;
   respondHitlOption: (worldId: string, requestId: string, optionId: string, chatId?: string | null) => Promise<unknown>;
   stopMessage: (worldId: string, chatId: string) => Promise<unknown>;
@@ -167,4 +187,5 @@ export interface DesktopApi {
   getSettings: () => Promise<unknown>;
   saveSettings: (settings: Record<string, unknown>) => Promise<unknown>;
   pickFile: () => Promise<unknown>;
+  getChatEvents: (worldId: string, chatId: string) => Promise<unknown>;
 }

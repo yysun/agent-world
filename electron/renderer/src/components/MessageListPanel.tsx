@@ -13,22 +13,35 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-21: Added assistant-message action button to copy raw markdown beside branch action.
+ * - 2026-02-20: Added inline message-flow HITL prompt card rendering for option prompts, replacing overlay-only HITL UX.
+ * - 2026-02-20: Added message-loading guard so session switches render loading state instead of welcome-card flicker.
+ * - 2026-02-20: Aligned renderable message filtering with App welcome-state logic to prevent empty-state flicker.
+ * - 2026-02-20: Suppressed edit/delete actions for pending optimistic user messages until backend confirmation.
+ * - 2026-02-19: Inline indicator now supports primary single-agent status text (`inlineStatusText`) separate from full status-bar state.
+ * - 2026-02-19: Added support for preformatted inline activity status text (per-agent phase strings).
+ * - 2026-02-19: Replaced single-agent inline working label with richer activity details and elapsed time.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component extraction.
  */
 
+import { useState } from 'react';
 import MessageContent from './MessageContent';
+import ElapsedTimeCounter from './ElapsedTimeCounter';
 import { compactSkillDescription, formatTime } from '../utils/formatting';
 import {
   getMessageCardClassName,
   getMessageIdentity,
   getMessageSenderLabel,
+  isRenderableMessageEntry,
   isHumanMessage,
+  isToolRelatedMessage,
   isTrueAgentResponseMessage,
   resolveMessageAvatar,
 } from '../utils/message-utils';
 
 export default function MessageListPanel({
   messagesContainerRef,
+  messagesLoading,
   hasConversationMessages,
   selectedSession,
   refreshSkillRegistry,
@@ -48,19 +61,54 @@ export default function MessageListPanel({
   onStartEditMessage,
   onDeleteMessage,
   onBranchFromMessage,
+  onCopyRawMarkdownFromMessage,
   showInlineWorkingIndicator,
-  inlineWorkingAgentLabel,
+  inlineWorkingIndicatorState,
+  activeHitlPrompt,
+  submittingHitlRequestId,
+  onRespondHitlOption,
 }) {
+  const inlinePrimaryText = String(inlineWorkingIndicatorState?.primaryText || 'Agent');
+  const inlineStatusText = String(
+    inlineWorkingIndicatorState?.inlineStatusText
+    || inlineWorkingIndicatorState?.statusText
+    || ''
+  ).trim();
+  const inlineDetailText = String(inlineWorkingIndicatorState?.detailText || '').trim();
+  const inlineElapsedMs = Number(inlineWorkingIndicatorState?.elapsedMs || 0);
+  const renderableMessages = messages.filter(isRenderableMessageEntry);
+  const shouldShowLoading = messagesLoading && renderableMessages.length === 0;
+  const [collapsedMessageIds, setCollapsedMessageIds] = useState<Set<string>>(new Set());
+  const toggleMessageCollapsed = (messageId: string) => {
+    setCollapsedMessageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(messageId)) next.delete(messageId);
+      else next.add(messageId);
+      return next;
+    });
+  };
+  const shouldShowWelcome = !messagesLoading && !hasConversationMessages;
+
   return (
     <div ref={messagesContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden p-5">
       <div
         className={
-          !hasConversationMessages && selectedSession
+          shouldShowWelcome && selectedSession
             ? 'mx-auto flex min-h-full w-full max-w-[920px] items-start justify-center py-4'
             : 'mx-auto w-full max-w-[750px] space-y-3'
         }
       >
-        {!hasConversationMessages ? (
+        {shouldShowLoading ? (
+          selectedSession ? (
+            <section className="w-full max-w-[680px] rounded-xl bg-card/40 px-6 py-5">
+              <p className="text-sm text-muted-foreground">Loading messages...</p>
+            </section>
+          ) : (
+            <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+              Select a session from the left column.
+            </div>
+          )
+        ) : shouldShowWelcome ? (
           selectedSession ? (
             <section className="w-full max-w-[680px] rounded-xl bg-card/60 px-6 py-5">
               <div className="flex items-start justify-between gap-3">
@@ -122,12 +170,11 @@ export default function MessageListPanel({
             </div>
           )
         ) : (
-          messages.map((message, messageIndex) => {
-            if (!message?.messageId) return null;
+          renderableMessages.map((message, messageIndex) => {
             const senderLabel = getMessageSenderLabel(
               message,
               messagesById,
-              messages,
+              renderableMessages,
               messageIndex,
               worldAgentsById,
               worldAgentsByName
@@ -135,6 +182,9 @@ export default function MessageListPanel({
             const messageKey = message.messageId;
             const messageAvatar = resolveMessageAvatar(message, worldAgentsById, worldAgentsByName);
             const isHuman = isHumanMessage(message);
+            const isPendingOptimisticUserMessage = isHuman && message?.optimisticUserPending === true;
+            const messageRole = String(message?.role || '').toLowerCase();
+            const shouldRightAlignMessage = isHuman || isToolRelatedMessage(message) || messageRole === 'assistant';
             const isBranchableAgentMessage = !isHuman && isTrueAgentResponseMessage(message) && Boolean(message.messageId);
             const normalizedEditedText = editingText.trim();
             const normalizedOriginalText = String(message?.content || '').trim();
@@ -142,7 +192,7 @@ export default function MessageListPanel({
             return (
               <div
                 key={messageKey}
-                className={`flex min-w-0 w-full items-start gap-2 ${isHuman ? 'justify-end' : 'justify-start'}`}
+                className={`flex min-w-0 w-full items-start gap-2 ${shouldRightAlignMessage ? 'justify-end' : 'justify-start'}`}
               >
                 {messageAvatar ? (
                   <div
@@ -154,10 +204,31 @@ export default function MessageListPanel({
                   </div>
                 ) : null}
 
-                <article className={`min-w-0 ${getMessageCardClassName(message, messagesById, messages, messageIndex)}`}>
+                <article className={`min-w-0 ${getMessageCardClassName(message, messagesById, renderableMessages, messageIndex)}`}>
                   <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
                     <span>{senderLabel}</span>
-                    <span>{formatTime(message.createdAt)}</span>
+                    <div className="flex items-center gap-1">
+                      <span>{formatTime(message.createdAt)}</span>
+                      {(isBranchableAgentMessage || isToolRelatedMessage(message)) && messageKey ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleMessageCollapsed(messageKey)}
+                          className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
+                          title={collapsedMessageIds.has(messageKey) ? 'Expand' : 'Collapse'}
+                          aria-label={collapsedMessageIds.has(messageKey) ? 'Expand' : 'Collapse'}
+                        >
+                          {collapsedMessageIds.has(messageKey) ? (
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3" aria-hidden="true">
+                              <path d="m6 9 6 6 6-6" />
+                            </svg>
+                          ) : (
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3" aria-hidden="true">
+                              <path d="m18 15-6-6-6 6" />
+                            </svg>
+                          )}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
 
                   {editingMessageId === getMessageIdentity(message) ? (
@@ -194,10 +265,10 @@ export default function MessageListPanel({
                       </div>
                     </div>
                   ) : (
-                    <MessageContent message={message} />
+                    <MessageContent message={message} collapsed={(isBranchableAgentMessage || isToolRelatedMessage(message)) && Boolean(messageKey) && collapsedMessageIds.has(messageKey)} />
                   )}
 
-                  {isHumanMessage(message) && message.messageId && editingMessageId !== getMessageIdentity(message) ? (
+                  {isHumanMessage(message) && message.messageId && !isPendingOptimisticUserMessage && editingMessageId !== getMessageIdentity(message) ? (
                     <div className="absolute bottom-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         type="button"
@@ -228,7 +299,7 @@ export default function MessageListPanel({
                   ) : null}
 
                   {isBranchableAgentMessage && editingMessageId !== getMessageIdentity(message) ? (
-                    <div className="absolute bottom-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="mt-2 flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         type="button"
                         onClick={() => onBranchFromMessage(message)}
@@ -243,6 +314,18 @@ export default function MessageListPanel({
                           <path d="M9 18h6a3 3 0 0 0 3-3V9" />
                         </svg>
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => onCopyRawMarkdownFromMessage(message)}
+                        className="rounded p-1 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-foreground/10 focus:outline-none focus:ring-2 focus:ring-sidebar-ring transition-all bg-background/80 backdrop-blur-sm"
+                        title="Copy raw markdown"
+                        aria-label="Copy raw markdown"
+                      >
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                      </button>
                     </div>
                   ) : null}
                 </article>
@@ -251,13 +334,47 @@ export default function MessageListPanel({
           })
         )}
 
+        {activeHitlPrompt ? (
+          <div className="flex min-w-0 w-full items-start gap-2 justify-start">
+            <article className="min-w-0 w-full rounded-lg border border-dashed border-border bg-card/70 px-3 py-3">
+              <div className="mb-1 text-xs font-semibold text-foreground">
+                {activeHitlPrompt.title || 'Human input required'}
+              </div>
+              <div className="whitespace-pre-wrap text-xs text-muted-foreground">
+                {(activeHitlPrompt.message || 'Please choose an option to continue.').replace(/\n\s*\n+/g, '\n')}
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                {activeHitlPrompt.options.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    disabled={submittingHitlRequestId === activeHitlPrompt.requestId}
+                    onClick={() => onRespondHitlOption(activeHitlPrompt, option.id)}
+                    className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-60"
+                    title={option.description || option.label}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </article>
+          </div>
+        ) : null}
+
         {showInlineWorkingIndicator ? (
           <div className="flex w-full items-start gap-2 justify-start">
-            <div className="flex items-center gap-2 px-1 py-1 text-[13px] text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-2 px-1 py-1 text-[13px] text-muted-foreground">
               <span className="inline-block h-2 w-2 rounded-full bg-foreground/70 animate-pulse" aria-hidden="true"></span>
               <div className="text-[13px]">
-                {inlineWorkingAgentLabel} is working...
+                {inlineStatusText || `${inlinePrimaryText} working...`}
               </div>
+              {inlineDetailText ? (
+                <div className="text-[12px] text-muted-foreground/85">
+                  · {inlineDetailText}
+                </div>
+              ) : null}
+              <ElapsedTimeCounter elapsedMs={inlineElapsedMs} showIcon={false} />
             </div>
           </div>
         ) : null}

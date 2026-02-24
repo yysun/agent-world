@@ -5,49 +5,31 @@
  *
  * Key Features:
  * - Owns streaming refs and activity refs used by chat subscriptions.
- * - Initializes stream/activity managers with message/tool/busy callbacks.
- * - Exposes state and reset helper for world/session lifecycle cleanup.
+ * - Initializes stream/activity managers with message/tool-stream callbacks.
+ * - Exposes reset helper for world/session lifecycle cleanup.
  *
  * Implementation Notes:
  * - Preserves prior App.jsx behavior for message upserts and tool-stream updates.
  * - Keeps manager setup/teardown centralized in one hook.
  *
  * Recent Changes:
+ * - 2026-02-22: Removed isBusy, elapsedMs, activeTools, activeStreamCount, sessionActivity
+ *   states and their callbacks as part of status-registry migration (Phase 1).
+ * - 2026-02-21: Propagated tool-stream command metadata into renderer messages so shell tool cards can display `Running command: <name>`.
+ * - 2026-02-21: Propagated tool-stream `toolName` into renderer messages so tool-running headers can resolve specific tool labels.
+ * - 2026-02-20: Restored web-aligned assistant placeholder lifecycle (start placeholder, chunk updates, end removes placeholder).
+ * - 2026-02-19: Prevented empty assistant cards by creating stream messages on first chunk instead of stream start.
  * - 2026-02-17: Extracted streaming/activity lifecycle from `App.jsx` during Phase 3.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { createStreamingState } from '../streaming-state';
 import { createActivityState } from '../activity-state';
 import { upsertMessageList } from '../domain/message-updates';
 
-type SessionActivityState = {
-  eventType: string;
-  pendingOperations: number;
-  activityId: number;
-  source: string | null;
-  activeSources: string[];
-};
-
-function createIdleSessionActivity() {
-  return {
-    eventType: 'idle',
-    pendingOperations: 0,
-    activityId: 0,
-    source: null,
-    activeSources: []
-  };
-}
-
 export function useStreamingActivity({ setMessages }) {
   const streamingStateRef = useRef(null);
   const activityStateRef = useRef(null);
-
-  const [isBusy, setIsBusy] = useState(false);
-  const [elapsedMs, setElapsedMs] = useState(0);
-  const [activeTools, setActiveTools] = useState<any[]>([]);
-  const [activeStreamCount, setActiveStreamCount] = useState(0);
-  const [sessionActivity, setSessionActivity] = useState<SessionActivityState>(createIdleSessionActivity);
 
   useEffect(() => {
     streamingStateRef.current = createStreamingState({
@@ -57,27 +39,38 @@ export function useStreamingActivity({ setMessages }) {
           messageId: entry.messageId,
           role: 'assistant',
           sender: entry.agentName,
-          content: '',
+          content: '...',
           createdAt: entry.createdAt,
           isStreaming: true
         }));
       },
-      onStreamUpdate: (messageId, content) => {
+      onStreamUpdate: (entry) => {
         setMessages((existing) => {
-          const index = existing.findIndex((message) => String(message.messageId || '') === String(messageId));
-          if (index < 0) return existing;
+          const messageId = String(entry.messageId || '');
+          const index = existing.findIndex((message) => String(message.messageId || '') === messageId);
+          if (index < 0) {
+            return upsertMessageList(existing, {
+              id: messageId,
+              messageId,
+              role: 'assistant',
+              sender: entry.agentName,
+              content: entry.content,
+              createdAt: entry.createdAt,
+              isStreaming: true
+            });
+          }
           const next = [...existing];
-          next[index] = { ...next[index], content };
+          next[index] = { ...next[index], sender: entry.agentName, content: entry.content, isStreaming: true };
           return next;
         });
       },
       onStreamEnd: (messageId) => {
         setMessages((existing) => {
-          const index = existing.findIndex((message) => String(message.messageId || '') === String(messageId));
-          if (index < 0) return existing;
-          const next = [...existing];
-          next[index] = { ...next[index], isStreaming: false };
-          return next;
+          const normalizedId = String(messageId || '');
+          return existing.filter((message) => {
+            const sameMessageId = String(message.messageId || '') === normalizedId;
+            return !(sameMessageId && message.isStreaming === true);
+          });
         });
       },
       onStreamError: (messageId, errorMessage) => {
@@ -95,18 +88,26 @@ export function useStreamingActivity({ setMessages }) {
           messageId: entry.messageId,
           role: 'tool',
           sender: entry.agentName || 'shell_cmd',
+          toolName: entry.toolName || entry.agentName || 'shell_cmd',
+          command: entry.command || '',
           content: '',
           createdAt: entry.createdAt,
           isToolStreaming: true,
           streamType: entry.streamType
         }));
       },
-      onToolStreamUpdate: (messageId, content, streamType) => {
+      onToolStreamUpdate: (messageId, content, streamType, toolName, command) => {
         setMessages((existing) => {
           const index = existing.findIndex((message) => String(message.messageId || '') === String(messageId));
           if (index < 0) return existing;
           const next = [...existing];
-          next[index] = { ...next[index], content, streamType };
+          next[index] = {
+            ...next[index],
+            content,
+            streamType,
+            ...(toolName ? { toolName } : {}),
+            ...(command ? { command } : {})
+          };
           return next;
         });
       },
@@ -130,26 +131,12 @@ export function useStreamingActivity({ setMessages }) {
 
   useEffect(() => {
     activityStateRef.current = createActivityState({
-      onToolStart: (entry) => {
-        setActiveTools((tools) => [...tools, entry]);
-      },
-      onToolResult: (toolUseId) => {
-        setActiveTools((tools) => tools.filter((tool) => tool.toolUseId !== toolUseId));
-      },
-      onToolError: (toolUseId) => {
-        setActiveTools((tools) => tools.filter((tool) => tool.toolUseId !== toolUseId));
-      },
-      onToolProgress: (toolUseId, progress) => {
-        setActiveTools((tools) => tools.map((tool) =>
-          tool.toolUseId === toolUseId ? { ...tool, progress } : tool
-        ));
-      },
-      onElapsedUpdate: (ms) => {
-        setElapsedMs(ms);
-      },
-      onBusyChange: (busy) => {
-        setIsBusy(busy);
-      }
+      onToolStart: () => {},
+      onToolResult: () => {},
+      onToolError: () => {},
+      onToolProgress: () => {},
+      onElapsedUpdate: () => {},
+      onBusyChange: () => {},
     });
 
     return () => {
@@ -160,24 +147,12 @@ export function useStreamingActivity({ setMessages }) {
   }, []);
 
   const resetActivityRuntimeState = useCallback(() => {
-    setActiveStreamCount(0);
-    setActiveTools([]);
-    setIsBusy(false);
-    setSessionActivity(createIdleSessionActivity());
+    // activity refs are cleaned up by the subscription effect on chat switch
   }, []);
 
   return {
     streamingStateRef,
     activityStateRef,
-    isBusy,
-    setIsBusy,
-    elapsedMs,
-    activeTools,
-    setActiveTools,
-    activeStreamCount,
-    setActiveStreamCount,
-    sessionActivity,
-    setSessionActivity,
     resetActivityRuntimeState,
   };
 }

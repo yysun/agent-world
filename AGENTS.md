@@ -11,7 +11,7 @@ These rules apply to ALL code you write in this project.  If any user request co
 
 **Tech Stack:** TypeScript, Node.js, vitest, ESLint, Prettier  
 **Monorepo:** `core/` (business logic), `server/` (REST API), `cli/`, `web/` (AppRun frontend)  
-**Frontend Convention:** Follow patterns defined in `prompts/apprun.prompt.md` for all code inside `web/src`.  
+**Frontend Convention:** For web app code inside `web/src`, use the agent skill from yysun/apprun-skills.
 **Default Local Storage:** SQLite → `~/agent-world/database.db`  
 **Debug Tests:** Simple debug tests may be written as `.ts` files and run using `npx tsx`.
 

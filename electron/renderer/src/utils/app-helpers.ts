@@ -13,6 +13,13 @@
  * - Keep defaults aligned with existing renderer constants.
  *
  * Recent Changes:
+ * - 2026-02-22: Removed inline agent-name fallback for activity summaries with no resolved active agents to prevent random-agent labels on invalid @mentions.
+ * - 2026-02-22: Added `getProcessedAgentsStatusText` to format end-of-run status-bar summaries with agent processed counts.
+ * - 2026-02-22: Suppressed fallback agent status text when no concrete active/done/pending agents are present to avoid false `a1: streaming response...` attribution on invalid mentions.
+ * - 2026-02-19: Extended `buildInlineAgentStatusSummary` with explicit done-state rendering for completed agents during active runs.
+ * - 2026-02-19: Updated LLM phase wording to distinguish pre-stream (`calling LLM...`) vs active stream (`streaming response...`).
+ * - 2026-02-19: Added `buildInlineAgentStatusSummary` for per-agent inline activity text composition.
+ * - 2026-02-19: Added `getAgentWorkPhaseText` to describe inline agent activity phases (LLM wait/tool calls/queue).
  * - 2026-02-17: Extracted from App.tsx during CC pass to reduce top-level file size.
  */
 
@@ -125,3 +132,4 @@ export function getWorldFormFromWorld(world: unknown) {
     variables: worldValue.variables == null ? '' : String(worldValue.variables)
   };
 }
+

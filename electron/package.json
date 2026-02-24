@@ -6,6 +6,7 @@
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
+    "check": "npx tsc --noEmit --project tsconfig.electron.json",
     "main:build": "npx tsc --project tsconfig.electron.json",
     "main:watch": "npx tsc --project tsconfig.electron.json --watch --preserveWatchOutput",
     "renderer:dev": "vite --config vite.config.js",

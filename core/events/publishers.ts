@@ -6,7 +6,6 @@
  * - Message publishing with chat session management
  * - SSE event publishing for streaming
  * - Tool event publishing for agent behaviors
- * - CRUD event publishing for configuration changes
  *
  * Implementation Notes:
  * - Uses parseMessageContent to preserve enhanced tool-result protocol support
@@ -23,7 +22,7 @@
  */
 
 import {
-  World, WorldMessageEvent, WorldSSEEvent, WorldToolEvent, WorldSystemEvent, WorldCRUDEvent,
+  World, WorldMessageEvent, WorldSSEEvent, WorldToolEvent, WorldSystemEvent,
   EventType
 } from '../types.js';
 import { generateId } from '../utils.js';
@@ -57,37 +56,18 @@ export function normalizeSender(sender: string): string {
   return trimmed;
 }
 
-/**
- * Publish CRUD event for agent, chat, or world configuration changes
- * Allows subscribed clients to receive real-time updates for all CRUD operations
- * 
- * Note: CRUD events are entity-level operations and don't belong to any specific chat,
- * so chatId is always null to avoid foreign key constraint issues.
- */
-export function publishCRUDEvent(
+function resolveRequiredChatId(
   world: World,
-  operation: 'create' | 'update' | 'delete',
-  entityType: 'agent' | 'chat' | 'world',
-  entityId: string,
-  entityData?: any
-): void {
-  const event: WorldCRUDEvent = {
-    operation,
-    entityType,
-    entityId,
-    entityData: operation === 'delete' ? null : entityData,
-    timestamp: new Date(),
-    chatId: null  // CRUD events are entity-level, not chat-scoped
-  };
+  chatId: string | null | undefined,
+  callsite: 'publishMessage' | 'publishMessageWithId'
+) {
+  const explicitChatId = typeof chatId === 'string' ? chatId.trim() : '';
+  if (explicitChatId) return explicitChatId;
 
-  world.eventEmitter.emit(EventType.CRUD, event);
+  const currentChatId = typeof world?.currentChatId === 'string' ? world.currentChatId.trim() : '';
+  if (currentChatId) return currentChatId;
 
-  loggerPublish.debug('CRUD event published', {
-    worldId: world.id,
-    operation,
-    entityType,
-    entityId
-  });
+  throw new Error(`${callsite}: chatId is required for message events.`);
 }
 
 /**
@@ -114,7 +94,7 @@ export function publishEvent(world: World, type: string, content: any, chatId?: 
  */
 export function publishMessage(world: World, content: string, sender: string, chatId?: string | null, replyToMessageId?: string): WorldMessageEvent {
   const messageId = generateId();
-  const targetChatId = chatId !== undefined ? chatId : world.currentChatId;
+  const targetChatId = resolveRequiredChatId(world, chatId, 'publishMessage');
   const normalizedSender = normalizeSender(sender);
 
   loggerMemory.debug('[publishMessage] ENTRY', {
@@ -207,7 +187,7 @@ export function publishMessage(world: World, content: string, sender: string, ch
  * @param replyToMessageId - Optional parent message ID for threading
  */
 export function publishMessageWithId(world: World, content: string, sender: string, messageId: string, chatId?: string | null, replyToMessageId?: string): WorldMessageEvent {
-  const targetChatId = chatId !== undefined ? chatId : world.currentChatId;
+  const targetChatId = resolveRequiredChatId(world, chatId, 'publishMessageWithId');
   const normalizedSender = normalizeSender(sender);
   const messageEvent: WorldMessageEvent = {
     content,

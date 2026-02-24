@@ -5,6 +5,7 @@
  * Features tested:
  * - shell_cmd tool availability in all worlds
  * - load_skill built-in tool availability in all worlds
+ * - create_agent built-in tool availability in all worlds
  * - read_file/list_files/grep built-in tool availability in all worlds
  * - Tool schema and parameter validation
  * - Command execution through tool interface
@@ -16,6 +17,9 @@
  * - Executes real local shell commands and validates formatted tool output.
  * 
  * Changes:
+ * - 2026-02-21: Added `list_files` bounding/filtering coverage (`maxEntries`, `includePattern`) to prevent oversized tool results from inflating continuation tokens.
+ * - 2026-02-21: Added LLM minimal-result mode coverage for `shell_cmd` (status-only result contract).
+ * - 2026-02-20: Added assertion that built-in `create_agent` is registered alongside other always-on tools.
  * - 2026-02-16: Added recursive `list_files` integration coverage (`recursive=true`) with nested entry assertions.
  * - 2026-02-16: Added explicit empty-directory `list_files` coverage (`found=false` + message).
  * - 2026-02-16: Added integration assertions for built-in `read_file`, `list_files`, and `grep` tools.
@@ -64,6 +68,11 @@ describe('shell_cmd integration with worlds', () => {
     expect(tools.load_skill).toBeDefined();
     expect(tools.load_skill.parameters).toBeDefined();
     expect(tools.load_skill.execute).toBeInstanceOf(Function);
+
+    expect(tools).toHaveProperty('create_agent');
+    expect(tools.create_agent).toBeDefined();
+    expect(tools.create_agent.parameters).toBeDefined();
+    expect(tools.create_agent.execute).toBeInstanceOf(Function);
 
     expect(tools).toHaveProperty('read_file');
     expect(tools.read_file).toBeDefined();
@@ -256,6 +265,63 @@ describe('shell_cmd integration with worlds', () => {
     }
   });
 
+  test('should bound list_files output and support includePattern filtering', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const tempRoot = await mkdtemp(path.join(tmpdir(), 'agent-world-list-files-bounded-'));
+
+    try {
+      for (let index = 0; index < 240; index += 1) {
+        const extension = index % 2 === 0 ? 'md' : 'txt';
+        await writeFile(path.join(tempRoot, `file-${index}.${extension}`), `content-${index}`);
+      }
+
+      const defaultBoundedRaw = await tools.list_files.execute(
+        { path: '.', recursive: false },
+        undefined,
+        undefined,
+        { workingDirectory: tempRoot },
+      );
+
+      if (typeof defaultBoundedRaw === 'string' && defaultBoundedRaw.startsWith('Error:')) {
+        throw new Error(defaultBoundedRaw);
+      }
+
+      const defaultBounded = JSON.parse(defaultBoundedRaw);
+      expect(defaultBounded).toHaveProperty('total', 240);
+      expect(defaultBounded).toHaveProperty('maxEntries', 200);
+      expect(defaultBounded).toHaveProperty('returned', 200);
+      expect(defaultBounded).toHaveProperty('truncated', true);
+      expect(Array.isArray(defaultBounded.entries)).toBe(true);
+      expect(defaultBounded.entries.length).toBe(200);
+      expect(typeof defaultBounded.message).toBe('string');
+      expect(defaultBounded.message).toContain('Result truncated');
+
+      const markdownOnlyRaw = await tools.list_files.execute(
+        {
+          path: '.',
+          recursive: false,
+          includePattern: '**/*.md',
+          maxEntries: 500,
+        },
+        undefined,
+        undefined,
+        { workingDirectory: tempRoot },
+      );
+
+      if (typeof markdownOnlyRaw === 'string' && markdownOnlyRaw.startsWith('Error:')) {
+        throw new Error(markdownOnlyRaw);
+      }
+
+      const markdownOnly = JSON.parse(markdownOnlyRaw);
+      expect(markdownOnly).toHaveProperty('total', 120);
+      expect(markdownOnly).toHaveProperty('truncated', false);
+      expect(markdownOnly).toHaveProperty('returned', 120);
+      expect(markdownOnly.entries.every((entry: string) => entry.endsWith('.md'))).toBe(true);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test('should execute load_skill tool through tool interface', async () => {
     const tools = await getMCPToolsForWorld(worldId());
     const loadSkillTool = tools.load_skill;
@@ -386,6 +452,90 @@ describe('shell_cmd integration with worlds', () => {
     expect(result).toContain('**Command:** `echo "Hello from test"`');
     expect(result).toContain('Exit code 0');
     expect(result).toContain('Hello from test');
+  });
+
+  test('should return status-only shell result in llm minimal mode', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    const result = await shellCmdTool.execute(
+      {
+        command: 'echo',
+        parameters: ['llm-minimal-mode-output']
+      },
+      undefined,
+      undefined,
+      {
+        llmResultMode: 'minimal',
+        world: {
+          id: worldId(),
+          variables: `working_directory=${workspaceRoot}`
+        }
+      }
+    );
+
+    expect(result).toContain('status: success');
+    expect(result).toContain('exit_code: 0');
+    expect(result).not.toContain('llm-minimal-mode-output');
+    expect(result).not.toContain('### Standard Output');
+  });
+
+  test('should stream stdout as assistant message, stream stderr as tool-stream, and persist only finalized stdout', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+    const world = await getTestWorld();
+    if (!world) {
+      throw new Error('Test world not initialized');
+    }
+
+    const sseEvents: any[] = [];
+    const messageEvents: any[] = [];
+    const contextMessages: any[] = [];
+    const toolCallId = 'shell-stream-split-test';
+    const stdoutMessageId = `${toolCallId}-stdout`;
+
+    const sseListener = (event: any) => sseEvents.push(event);
+    const messageListener = (event: any) => messageEvents.push(event);
+    world.eventEmitter.on('sse', sseListener);
+    world.eventEmitter.on('message', messageListener);
+
+    try {
+      await shellCmdTool.execute(
+        {
+          command: 'ls',
+          parameters: ['.', './__shell_stream_missing_path__']
+        },
+        undefined,
+        undefined,
+        {
+          llmResultMode: 'minimal',
+          world,
+          toolCallId,
+          chatId: 'shell-stream-chat',
+          agentName: 'stream-agent',
+          messages: contextMessages,
+          workingDirectory: workspaceRoot
+        }
+      );
+    } finally {
+      world.eventEmitter.off('sse', sseListener);
+      world.eventEmitter.off('message', messageListener);
+    }
+
+    const streamStarts = sseEvents.filter((event) => event.type === 'start' && event.toolName === 'shell_cmd');
+    const streamChunks = sseEvents.filter((event) => event.type === 'chunk' && event.toolName === 'shell_cmd');
+    const streamEnds = sseEvents.filter((event) => event.type === 'end' && event.toolName === 'shell_cmd');
+    const toolStreamEvents = sseEvents.filter((event) => event.type === 'tool-stream' && event.toolName === 'shell_cmd');
+
+    expect(streamStarts.some((event) => event.messageId === stdoutMessageId)).toBe(true);
+    expect(streamChunks.some((event) => event.messageId === stdoutMessageId && event.stream === 'stdout')).toBe(true);
+    expect(streamEnds.some((event) => event.messageId === stdoutMessageId)).toBe(true);
+    expect(toolStreamEvents.some((event) => event.messageId === toolCallId && event.stream === 'stderr')).toBe(true);
+
+    expect(messageEvents.some((event) => event.messageId === stdoutMessageId && event.sender === 'stream-agent')).toBe(true);
+    expect(messageEvents.some((event) => event.messageId === toolCallId)).toBe(false);
+    expect(contextMessages.some((message) => message.messageId === stdoutMessageId && message.role === 'assistant' && message.sender === 'stream-agent')).toBe(true);
+    expect(contextMessages.some((message) => message.messageId === toolCallId)).toBe(false);
   });
 
   test('should use world working_directory when directory parameter is omitted', async () => {

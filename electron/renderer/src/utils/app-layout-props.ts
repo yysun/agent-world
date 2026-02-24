@@ -12,6 +12,12 @@
  * - Data-only transformations from provided inputs.
  *
  * Recent Changes:
+ * - 2026-02-21: Added message-list prop wiring for assistant raw-markdown copy action.
+ * - 2026-02-20: Added inline HITL message-card props to main message-list wiring (replacing overlay HITL modal usage).
+ * - 2026-02-20: Added `activeHeaderAgentIds` wiring so header avatars can reflect active streaming agents.
+ * - 2026-02-19: Added status-bar `agentStatusText` wiring for full per-agent activity summaries.
+ * - 2026-02-19: Added inline working indicator state wiring for richer chat activity details.
+ * - 2026-02-19: Added left-sidebar prop wiring for world export action.
  * - 2026-02-17: Extracted from App.tsx during CC pass.
  */
 
@@ -20,6 +26,7 @@ type PropBag = Record<string, unknown>;
 export function createMainContentMessageListProps<T extends PropBag>(input: T) {
   return {
     messagesContainerRef: input.messagesContainerRef,
+    messagesLoading: input.messagesLoading,
     hasConversationMessages: input.hasConversationMessages,
     selectedSession: input.selectedSession,
     refreshSkillRegistry: input.refreshSkillRegistry,
@@ -39,8 +46,12 @@ export function createMainContentMessageListProps<T extends PropBag>(input: T) {
     onStartEditMessage: input.onStartEditMessage,
     onDeleteMessage: input.onDeleteMessage,
     onBranchFromMessage: input.onBranchFromMessage,
+    onCopyRawMarkdownFromMessage: input.onCopyRawMarkdownFromMessage,
     showInlineWorkingIndicator: input.showInlineWorkingIndicator,
-    inlineWorkingAgentLabel: input.inlineWorkingAgentLabel,
+    inlineWorkingIndicatorState: input.inlineWorkingIndicatorState,
+    activeHitlPrompt: input.activeHitlPrompt,
+    submittingHitlRequestId: input.submittingHitlRequestId,
+    onRespondHitlOption: input.onRespondHitlOption,
   };
 }
 
@@ -56,6 +67,7 @@ export function createMainContentComposerProps<T extends PropBag>(input: T) {
     canStopCurrentSession: input.canStopCurrentSession,
     isCurrentSessionStopping: input.isCurrentSessionStopping,
     isCurrentSessionSending: input.isCurrentSessionSending,
+    hasActiveHitlPrompt: input.hasActiveHitlPrompt,
   };
 }
 
@@ -126,6 +138,7 @@ export function createLeftSidebarProps<T extends PropBag>(input: T) {
     loadedWorld: input.loadedWorld,
     onOpenCreateWorldPanel: input.onOpenCreateWorldPanel,
     onImportWorld: input.onImportWorld,
+    onExportWorld: input.onExportWorld,
     onSelectWorld: input.onSelectWorld,
     loadingWorld: input.loadingWorld,
     worldLoadError: input.worldLoadError,
@@ -156,9 +169,11 @@ export function createMainHeaderProps<T extends PropBag>(input: T) {
     selectedSession: input.selectedSession,
     visibleWorldAgents: input.visibleWorldAgents,
     hiddenWorldAgentCount: input.hiddenWorldAgentCount,
+    activeHeaderAgentIds: input.activeHeaderAgentIds,
     onOpenEditAgentPanel: input.onOpenEditAgentPanel,
     onOpenCreateAgentPanel: input.onOpenCreateAgentPanel,
     onOpenSettingsPanel: input.onOpenSettingsPanel,
+    onRefreshWorld: input.onRefreshWorldInfo,
     panelMode: input.panelMode,
     panelOpen: input.panelOpen,
     dragRegionStyle: input.DRAG_REGION_STYLE,
@@ -169,6 +184,7 @@ export function createMainHeaderProps<T extends PropBag>(input: T) {
 export function createStatusActivityBarProps<T extends PropBag>(input: T) {
   return {
     status: input.status,
+    agentStatusText: input.agentStatusText,
     hasComposerActivity: input.hasComposerActivity,
     isAgentWorkInProgress: input.isAgentWorkInProgress,
     activeTools: input.activeTools,

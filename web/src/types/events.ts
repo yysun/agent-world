@@ -25,6 +25,10 @@
  * ```
  * 
  * Changes:
+ * - 2026-02-22: Added responsive right-panel events (`open-right-panel`, `close-right-panel`, `toggle-right-panel`, `switch-right-panel-tab`, `sync-right-panel-viewport`).
+ * - 2026-02-21: Added `select-project-folder` event variant for web composer project picker integration.
+ * - 2026-02-21: Extended `key-press` payload typing with keyboard modifier/preventDefault fields for textarea Enter/Shift+Enter composer behavior.
+ * - 2026-02-20: Enforced options-only HITL event set.
  * - 2026-02-14: Added HITL option-response event variant for web approval prompts.
  * - 2026-02-14: Added `stop-message-processing` event variant for chat-scoped stop controls.
  * - 2026-02-08: Removed legacy manual tool-intervention event variants
@@ -57,14 +61,40 @@ export type WorldEvents =
   /** Update user input field value */
   | { name: 'update-input'; payload: { target: { value: string } } }
 
-  /** Handle key press in input field */
-  | { name: 'key-press'; payload: { key: string } }
+  /** Handle key press in message composer */
+  | {
+    name: 'key-press'; payload: {
+      key: string;
+      shiftKey?: boolean;
+      keyCode?: number;
+      preventDefault?: () => void;
+      nativeEvent?: { isComposing?: boolean };
+    }
+  }
 
   /** Send message to agents */
   | { name: 'send-message'; payload: void }
 
   /** Stop active message processing for current chat */
   | { name: 'stop-message-processing'; payload: void }
+
+  /** Open project-folder picker and persist world `working_directory` */
+  | { name: 'select-project-folder'; payload: void }
+
+  /** Open right panel with optional tab selection */
+  | { name: 'open-right-panel'; payload: 'chats' | 'world' | void }
+
+  /** Close right panel */
+  | { name: 'close-right-panel'; payload: void }
+
+  /** Toggle right panel with optional tab selection */
+  | { name: 'toggle-right-panel'; payload: 'chats' | 'world' | void }
+
+  /** Switch active right-panel tab */
+  | { name: 'switch-right-panel-tab'; payload: 'chats' | 'world' }
+
+  /** Sync viewport mode/panel defaults on resize/orientation change */
+  | { name: 'sync-right-panel-viewport'; payload: { width: number } }
 
   // ========================================
   // MESSAGE EDITING EVENTS

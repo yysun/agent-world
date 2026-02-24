@@ -46,3 +46,29 @@ export async function importCoreModule(baseDir: string): Promise<any> {
   throw new Error(`Failed to locate core module. Searched: ${searched}`);
 }
 
+export async function importCoreStorageFactoryModule(baseDir: string): Promise<any> {
+  const candidates = [
+    path.resolve(baseDir, '../../dist/core/storage/storage-factory.js'),
+    path.resolve(baseDir, '../dist/core/storage/storage-factory.js')
+  ];
+
+  const existingCandidates = candidates
+    .filter((candidate) => fs.existsSync(candidate))
+    .map((candidate) => ({
+      candidate,
+      mtimeMs: fs.statSync(candidate).mtimeMs
+    }))
+    .sort((left, right) => {
+      if (right.mtimeMs !== left.mtimeMs) {
+        return right.mtimeMs - left.mtimeMs;
+      }
+      return candidates.indexOf(left.candidate) - candidates.indexOf(right.candidate);
+    });
+
+  if (existingCandidates.length > 0) {
+    return import(pathToFileURL(existingCandidates[0].candidate).href);
+  }
+
+  const searched = candidates.map((item) => `'${item}'`).join(', ');
+  throw new Error(`Failed to locate core storage-factory module. Searched: ${searched}`);
+}

@@ -13,6 +13,12 @@
  * - Keeps branch/session refresh semantics aligned with the existing desktop IPC flows.
  *
  * Recent Changes:
+ * - 2026-02-22: Removed renderer-side no-agent inference on send; status now follows core-emitted activity events only.
+ * - 2026-02-22: Enforced strict pending semantics: `pendingResponseSessionIds` is now populated only from realtime agent-start signals, never on send.
+ * - 2026-02-21: Added assistant-message raw-markdown copy action with clipboard API + legacy fallback.
+ * - 2026-02-20: Blocked composer sends while HITL prompt queue is non-empty to enforce resolve-first workflow.
+ * - 2026-02-20: Added defensive renderer-side chatId invariant before IPC send so UI fails fast when session context is missing.
+ * - 2026-02-20: Added optimistic user-message insertion and reconciliation aligned with web message timing behavior.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 3 custom hook migration.
  */
 
@@ -21,6 +27,12 @@ import { safeMessage } from '../domain/desktop-api';
 import { normalizeStringList, sortSessionsByNewest } from '../utils/data-transform';
 import { getRefreshWarning } from '../utils/formatting';
 import { getMessageIdentity, isTrueAgentResponseMessage } from '../utils/message-utils';
+import {
+  createOptimisticUserMessage,
+  reconcileOptimisticUserMessage,
+  removeOptimisticUserMessage,
+  upsertMessageList,
+} from '../domain/message-updates';
 
 export function useMessageManagement({
   api,
@@ -36,10 +48,9 @@ export function useMessageManagement({
   setStatusText,
   streamingStateRef,
   activityStateRef,
-  setActiveStreamCount,
-  setActiveTools,
-  setIsBusy,
-  setSessionActivity,
+  hasActiveHitlPrompt = false,
+  setHitlPromptQueue,
+  setSubmittingHitlRequestId,
 }) {
   const [composer, setComposer] = useState('');
   const [sendingSessionIds, setSendingSessionIds] = useState<Set<string>>(new Set());
@@ -66,6 +77,11 @@ export function useMessageManagement({
   }, [messagesById]);
 
   const onSendMessage = useCallback(async () => {
+    if (hasActiveHitlPrompt) {
+      setStatusText('Resolve the pending HITL prompt before sending a new message.', 'info');
+      return;
+    }
+
     const activeSessionId = String(selectedSessionId || '').trim() || null;
     if (activeSessionId && sendingSessionIds.has(activeSessionId)) return;
     if (!loadedWorldId || !activeSessionId) {
@@ -75,11 +91,26 @@ export function useMessageManagement({
 
     const content = composer.trim();
     if (!content) return;
+    const optimisticMessage = createOptimisticUserMessage({
+      chatId: activeSessionId,
+      content,
+      sender: 'human',
+    });
+    const optimisticMessageId = String(optimisticMessage.messageId || '').trim();
 
-    setPendingResponseSessionIds((prev) => new Set([...prev, activeSessionId]));
+    setPendingResponseSessionIds((prev) => {
+      const next = new Set(prev);
+      next.delete(activeSessionId);
+      return next;
+    });
     setSendingSessionIds((prev) => new Set([...prev, activeSessionId]));
+    setMessages((existing) => upsertMessageList(existing, optimisticMessage));
     try {
-      await api.sendMessage({
+      if (!activeSessionId || !String(activeSessionId).trim()) {
+        throw new Error('Chat ID is required before sending a message.');
+      }
+
+      const sendResult = await api.sendMessage({
         worldId: loadedWorldId,
         chatId: activeSessionId,
         content,
@@ -90,9 +121,29 @@ export function useMessageManagement({
           disabledGlobalSkillIds: normalizeStringList(systemSettings.disabledGlobalSkillIds),
           disabledProjectSkillIds: normalizeStringList(systemSettings.disabledProjectSkillIds),
         }
-      });
+      }) as Record<string, unknown>;
+      const confirmedMessageId = String(sendResult?.messageId || '').trim();
+      const confirmedCreatedAt = String(sendResult?.createdAt || '').trim() || new Date().toISOString();
+      if (optimisticMessageId && confirmedMessageId) {
+        setMessages((existing) => reconcileOptimisticUserMessage(existing, {
+          tempMessageId: optimisticMessageId,
+          confirmedMessage: {
+            messageId: confirmedMessageId,
+            id: confirmedMessageId,
+            role: 'user',
+            sender: String(sendResult?.sender || 'human'),
+            content,
+            chatId: activeSessionId,
+            createdAt: confirmedCreatedAt,
+          },
+        }));
+      }
+
       setComposer('');
     } catch (error) {
+      if (optimisticMessageId) {
+        setMessages((existing) => removeOptimisticUserMessage(existing, optimisticMessageId));
+      }
       setPendingResponseSessionIds((prev) => {
         const next = new Set(prev);
         next.delete(activeSessionId);
@@ -106,7 +157,7 @@ export function useMessageManagement({
         return next;
       });
     }
-  }, [api, composer, loadedWorldId, selectedSessionId, sendingSessionIds, setStatusText, systemSettings]);
+  }, [api, composer, hasActiveHitlPrompt, loadedWorldId, selectedSessionId, sendingSessionIds, setMessages, setStatusText, systemSettings]);
 
   const onStopMessage = useCallback(async () => {
     if (!loadedWorldId || !selectedSessionId) {
@@ -134,16 +185,6 @@ export function useMessageManagement({
         if (activityStateRef.current) {
           activityStateRef.current.cleanup();
         }
-        setActiveStreamCount(0);
-        setActiveTools([]);
-        setIsBusy(false);
-        setSessionActivity({
-          eventType: 'idle',
-          pendingOperations: 0,
-          activityId: 0,
-          source: null,
-          activeSources: []
-        });
       }
 
       if (stopped) {
@@ -167,10 +208,6 @@ export function useMessageManagement({
     api,
     loadedWorldId,
     selectedSessionId,
-    setActiveStreamCount,
-    setActiveTools,
-    setIsBusy,
-    setSessionActivity,
     setStatusText,
     stoppingSessionIds,
     streamingStateRef,
@@ -259,6 +296,8 @@ export function useMessageManagement({
     setMessages(optimisticMessages);
     setEditingMessageId(null);
     setEditingText('');
+    setHitlPromptQueue?.([]);
+    setSubmittingHitlRequestId?.(null);
 
     try {
       const editResult = await api.editMessage(loadedWorldId, message.messageId, editedText, targetChatId);
@@ -395,6 +434,52 @@ export function useMessageManagement({
     }
   }, [api, loadedWorldId, resolveMessageTargetChatId, setSelectedSessionId, setSessions, setStatusText]);
 
+  const onCopyRawMarkdownFromMessage = useCallback(async (message) => {
+    const messageContent = message?.content;
+    const rawMarkdown = typeof messageContent === 'string'
+      ? messageContent
+      : String(messageContent ?? '');
+
+    if (!rawMarkdown) {
+      setStatusText('Cannot copy: message content is empty.', 'error');
+      return;
+    }
+
+    const fallbackCopy = () => {
+      if (typeof document === 'undefined' || !document.body) return false;
+      const textarea = document.createElement('textarea');
+      textarea.value = rawMarkdown;
+      textarea.setAttribute('readonly', 'true');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      textarea.style.pointerEvents = 'none';
+      textarea.style.left = '-9999px';
+      textarea.style.top = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+      const copied = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      return copied;
+    };
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(rawMarkdown);
+      } else if (!fallbackCopy()) {
+        throw new Error('Clipboard API unavailable.');
+      }
+      setStatusText('Copied raw markdown.', 'success');
+    } catch (error) {
+      if (fallbackCopy()) {
+        setStatusText('Copied raw markdown.', 'success');
+        return;
+      }
+      setStatusText(safeMessage(error, 'Failed to copy raw markdown.'), 'error');
+    }
+  }, [setStatusText]);
+
   const resetMessageRuntimeState = useCallback(() => {
     setSendingSessionIds(new Set());
     setStoppingSessionIds(new Set());
@@ -423,6 +508,7 @@ export function useMessageManagement({
     onSaveEditMessage,
     onDeleteMessage,
     onBranchFromMessage,
+    onCopyRawMarkdownFromMessage,
     resetMessageRuntimeState,
   };
 }

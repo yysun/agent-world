@@ -111,7 +111,7 @@ describe('createStreamingState', () => {
       // Simulate RAF callback
       rafCallback();
 
-      expect(callbacks.onStreamUpdate).toHaveBeenCalledWith('msg-1', 'Hello');
+      expect(callbacks.onStreamUpdate).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'msg-1', content: 'Hello' }));
     });
 
     it('batches multiple chunks before RAF fires', () => {
@@ -127,7 +127,7 @@ describe('createStreamingState', () => {
 
       // Single update with full content
       expect(callbacks.onStreamUpdate).toHaveBeenCalledTimes(1);
-      expect(callbacks.onStreamUpdate).toHaveBeenCalledWith('msg-1', 'Hello World!');
+      expect(callbacks.onStreamUpdate).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'msg-1', content: 'Hello World!' }));
     });
 
     it('handles chunks for unknown stream by creating entry', () => {
@@ -177,7 +177,7 @@ describe('createStreamingState', () => {
       state.handleEnd('msg-1');
 
       // Should have flushed the pending update
-      expect(callbacks.onStreamUpdate).toHaveBeenCalledWith('msg-1', 'Hello');
+      expect(callbacks.onStreamUpdate).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'msg-1', content: 'Hello' }));
       expect(callbacks.onStreamEnd).toHaveBeenCalled();
     });
 
@@ -207,7 +207,7 @@ describe('createStreamingState', () => {
       state.handleChunk('msg-1', 'Partial content');
       state.handleError('msg-1', 'Error');
 
-      expect(callbacks.onStreamUpdate).toHaveBeenCalledWith('msg-1', 'Partial content');
+      expect(callbacks.onStreamUpdate).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'msg-1', content: 'Partial content' }));
     });
 
     it('handles error for unknown stream', () => {
@@ -226,8 +226,8 @@ describe('createStreamingState', () => {
 
       state.flush();
 
-      expect(callbacks.onStreamUpdate).toHaveBeenCalledWith('msg-1', 'Content 1');
-      expect(callbacks.onStreamUpdate).toHaveBeenCalledWith('msg-2', 'Content 2');
+      expect(callbacks.onStreamUpdate).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'msg-1', content: 'Content 1' }));
+      expect(callbacks.onStreamUpdate).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'msg-2', content: 'Content 2' }));
     });
 
     it('cancels pending RAF', () => {
@@ -275,7 +275,7 @@ describe('createStreamingState', () => {
       state.handleChunk('msg-1', 'Hello');
       state.cleanup();
 
-      expect(callbacks.onStreamUpdate).toHaveBeenCalledWith('msg-1', 'Hello');
+      expect(callbacks.onStreamUpdate).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'msg-1', content: 'Hello' }));
     });
   });
 
@@ -385,7 +385,7 @@ describe('createStreamingState', () => {
         expect(callbacks.onToolStreamUpdate).not.toHaveBeenCalled();
 
         rafCallback();
-        expect(callbacks.onToolStreamUpdate).toHaveBeenCalledWith('msg-1', 'Output', 'stdout');
+        expect(callbacks.onToolStreamUpdate).toHaveBeenCalledWith('msg-1', 'Output', 'stdout', undefined, undefined);
       });
 
       it('should update streamType when switching streams', () => {
@@ -452,7 +452,7 @@ describe('createStreamingState', () => {
 
         state.handleToolStreamEnd('msg-1');
 
-        expect(callbacks.onToolStreamUpdate).toHaveBeenCalledWith('msg-1', 'Final', 'stdout');
+        expect(callbacks.onToolStreamUpdate).toHaveBeenCalledWith('msg-1', 'Final', 'stdout', undefined, undefined);
       });
 
       it('should return null for unknown stream', () => {

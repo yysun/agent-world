@@ -13,10 +13,12 @@
  * - Helper functions are scoped to this module because only this component uses them.
  *
  * Recent Changes:
+ * - 2026-02-21: Added shell command header labeling (`Running command: <name>`) from tool-stream command metadata and unified stderr/stdout tool output styling to dark background with light text.
+ * - 2026-02-21: Prefer tool name from `tool_calls` metadata and treat assistant messages with `tool_calls` as explicit tool requests in header labeling.
  * - 2026-02-16: Extracted from `App.jsx` as part of renderer refactor Phase 2.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { renderMarkdown } from '../utils/markdown';
 import { formatLogMessage } from '../utils/formatting';
 import { isToolRelatedMessage } from '../utils/message-utils';
@@ -25,6 +27,13 @@ function extractToolNameFromMessage(message) {
   const explicitToolName = String(message?.toolName || message?.tool_name || '').trim();
   if (explicitToolName) {
     return explicitToolName;
+  }
+
+  if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
+    const firstToolName = String(message.tool_calls[0]?.function?.name || '').trim();
+    if (firstToolName) {
+      return firstToolName;
+    }
   }
 
   const content = String(message?.content || '');
@@ -36,12 +45,26 @@ function extractToolNameFromMessage(message) {
   return '';
 }
 
+function extractCommandNameFromMessage(message) {
+  const rawCommand = String(message?.command || '').trim();
+  if (!rawCommand) {
+    return '';
+  }
+
+  const firstToken = rawCommand.split(/\s+/)[0] || '';
+  if (!firstToken) {
+    return '';
+  }
+
+  const pathSegments = firstToken.split(/[\\/]/).filter(Boolean);
+  return pathSegments[pathSegments.length - 1] || firstToken;
+}
+
 function getToolMessageHeaderLabel(message) {
   const content = String(message?.content || '');
-  const isToolCallRequest = /calling tool\s*:/i.test(content);
+  const hasToolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
+  const isToolCallRequest = hasToolCalls || /calling tool\s*:/i.test(content);
   const toolName = extractToolNameFromMessage(message);
-  const normalizedToolName = toolName.toLowerCase();
-  const isShellCommandTool = normalizedToolName === 'shell_cmd' || normalizedToolName === 'shell-cmd' || normalizedToolName === 'shell';
   const streamType = String(message?.streamType || '').toLowerCase();
 
   if (isToolCallRequest) {
@@ -49,33 +72,24 @@ function getToolMessageHeaderLabel(message) {
   }
 
   if (message?.isToolStreaming) {
-    if (isShellCommandTool) {
-      return '⚙️ Running command...';
+    const normalized = toolName.toLowerCase();
+    const isShell = normalized === 'shell_cmd' || normalized === 'shell-cmd' || normalized === 'shell';
+    if (isShell) {
+      const commandName = extractCommandNameFromMessage(message);
+      return commandName ? `⚙️ Running: ${commandName}` : '⚙️ Running shell command...';
     }
-    return toolName ? `⚙️ Running ${toolName}...` : '⚙️ Running action...';
+    return toolName ? `⚙️ Running ${toolName}...` : '⚙️ Running...';
   }
 
   if (streamType === 'stderr') {
-    if (isShellCommandTool) {
-      return '⚙️ Command errors';
-    }
     return toolName ? `⚙️ ${toolName} errors` : '⚙️ Execution errors';
   }
 
-  if (isShellCommandTool) {
-    return '⚙️ Terminal output';
-  }
-
-  if (toolName) {
-    return `⚙️ ${toolName} result`;
-  }
-
-  return '⚙️ Execution result';
+  return toolName ? `⚙️ ${toolName} result` : '⚙️ Tool result';
 }
 
-export default function MessageContent({ message }) {
+export default function MessageContent({ message, collapsed = false }) {
   const isToolMessage = isToolRelatedMessage(message);
-  const [isToolCollapsed, setIsToolCollapsed] = useState(true);
   const MAX_TOOL_OUTPUT_LENGTH = 50000;
 
   const renderedContent = useMemo(() => {
@@ -122,65 +136,13 @@ export default function MessageContent({ message }) {
 
     return (
       <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-xs font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
-            {toolHeaderLabel}
-          </div>
-          <button
-            type="button"
-            onClick={() => setIsToolCollapsed((collapsed) => !collapsed)}
-            className="inline-flex h-6 w-6 items-center justify-center rounded border border-border text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
-            aria-label={isToolCollapsed ? 'Expand tool output' : 'Collapse tool output'}
-            title={isToolCollapsed ? 'Expand tool output' : 'Collapse tool output'}
-          >
-            {isToolCollapsed ? (
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-3.5 w-3.5"
-                aria-hidden="true"
-              >
-                <path d="m6 9 6 6 6-6" />
-              </svg>
-            ) : (
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-3.5 w-3.5"
-                aria-hidden="true"
-              >
-                <path d="m18 15-6-6-6 6" />
-              </svg>
-            )}
-          </button>
+        <div className="text-xs font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
+          {toolHeaderLabel}
         </div>
-        {!isToolCollapsed ? (
-          <div
-            className="rounded-md overflow-hidden border"
-            style={message.streamType === 'stderr' ? {
-              backgroundColor: 'rgba(69, 10, 10, 0.3)',
-              borderColor: 'rgba(239, 68, 68, 0.3)'
-            } : {
-              backgroundColor: 'rgb(15, 23, 42)',
-              borderColor: 'rgb(51, 65, 85)'
-            }}
-          >
+        {!collapsed ? (
+          <div className="rounded-md overflow-hidden border border-border bg-muted">
             <pre
-              className="text-xs p-3 font-mono whitespace-pre-wrap"
-              style={{
-                color: message.streamType === 'stderr'
-                  ? 'rgb(248, 113, 113)'
-                  : 'rgb(203, 213, 225)',
-                wordBreak: 'break-all'
-              }}
+              className="text-xs p-3 font-mono whitespace-pre-wrap break-all text-foreground"
             >
               {visibleContent || (message.isToolStreaming ? '(waiting for output...)' : '(no output)')}
             </pre>
@@ -194,6 +156,8 @@ export default function MessageContent({ message }) {
       </div>
     );
   }
+
+  if (collapsed) return null;
 
   return (
     <div

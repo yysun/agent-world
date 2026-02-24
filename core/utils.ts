@@ -33,11 +33,16 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-02-21: Added `list_files` prompt guidance to prefer `includePattern` and bounded `maxEntries` for file-type searches to reduce oversized tool results and continuation churn.
+ * - 2026-02-21: Excluded persisted shell stdout stream assistant messages (messageId suffix `-stdout`) from LLM-history relevance filtering to prevent tool-continuation token amplification loops.
+ * - 2026-02-20: Updated HITL tool system-prompt guidance to enforce options-only HITL usage.
+ * - 2026-02-20: Added `buildToolUsagePromptSection()` for centralized, tool-aware system-prompt guidance (including HITL usage guidance when available).
+ * - 2026-02-19: Replaced raw `working directory: <value>` system-prompt suffix with explicit `shell_cmd` scope instructions and a no-echo directive.
  * - 2026-02-16: Added env-driven global/project skill-scope filtering for the `## Agent Skills` system prompt section.
  * - 2026-02-15: prepareMessagesForLLM now appends a concise, strict cross-agent addressing rule requiring `@<agent_id>, <message>` when targeting a specific agent.
  * - 2026-02-14: prepareMessagesForLLM now injects an `## Agent Skills` section with registry-backed `<available_skills>` entries and `load_skill` guidance.
  * - 2026-02-14: Added shared default working-directory resolver (env override -> user home -> `./`) and switched missing world `working_directory` fallback from `./` to user home.
- * - 2026-02-13: prepareMessagesForLLM now appends `working directory: <value>` to every system prompt using world `working_directory`.
+ * - 2026-02-13: prepareMessagesForLLM began appending execution-directory context from world `working_directory`.
  * - 2026-02-08: Fixed wouldAgentHaveRespondedToHistoricalMessage to include assistant messages with tool_calls
  *   (prevents OpenAI error: "messages with role 'tool' must be a response to a preceeding message with 'tool_calls'")
  * - Enhanced comment documentation with detailed feature descriptions
@@ -195,10 +200,49 @@ export function getEnvValueFromText(variablesText: string | undefined, key: stri
 
 function buildAgentMentionFormatRule(): string {
   return [
-    'Always use this format when addressing a specific agent: @<agent>, <message>.',
-    'Put @<agent> at the very start of the reply.',
-    'Do not use other addressing styles (e.g. To @<agent>, Hi @<agent>, Hey @<agent>, Hello @<agent>, or mid-sentence mentions).'
+    'Only use @mentions when handing off to another agent; for normal user replies, do not mention agents.',
+    'Place each @<agent> at the start of a paragraph.',
+    'For multiple agents, use one paragraph-beginning mention per target.'
   ].join('\n');
+}
+
+/**
+ * Build tool-usage guidance section for the system prompt.
+ * Guidance is tool-aware and only includes HITL instructions when HITL tool names are present.
+ */
+export function buildToolUsagePromptSection(options: { toolNames: string[] }): string {
+  const toolNames = Array.isArray(options?.toolNames)
+    ? options.toolNames.map((toolName) => String(toolName || '').trim()).filter(Boolean)
+    : [];
+  if (toolNames.length === 0) {
+    return '';
+  }
+
+  const normalizedToolNames = new Set(toolNames.map((toolName) => toolName.toLowerCase()));
+  const hasHitlTool = normalizedToolNames.has('human_intervention_request');
+  const hasListFilesTool = normalizedToolNames.has('list_files');
+
+  const lines = [
+    'You have access to tools.',
+    'Use tools when the user requests an action that requires tool execution.',
+  ];
+
+  if (hasHitlTool) {
+    lines.push(
+      'If you need to ask the human a clarifying question, request an option choice, or request confirmation, call human_intervention_request instead of asking directly in plain assistant text.'
+    );
+    lines.push(
+      'Use multiple-choice options only; do not request free-text HITL input.'
+    );
+  }
+
+  if (hasListFilesTool) {
+    lines.push(
+      'When using list_files for file-type searches, always narrow with includePattern (for example, **/*.md) and keep maxEntries small to avoid oversized results.'
+    );
+  }
+
+  return lines.join('\n');
 }
 
 /**
@@ -403,6 +447,16 @@ export function wouldAgentHaveRespondedToHistoricalMessage(
   agent: Agent,
   message: AgentMessage
 ): boolean {
+  const shellStdoutStreamMessage = message.role === 'assistant'
+    && typeof message.messageId === 'string'
+    && message.messageId.endsWith('-stdout');
+
+  // Persisted shell stdout stream messages are UI/history artifacts.
+  // Excluding them prevents large transcript echoes from inflating continuation context.
+  if (shellStdoutStreamMessage) {
+    return false;
+  }
+
   // Always include own messages (by agentId or sender)
   if (message.agentId === agent.id || message.sender?.toLowerCase() === agent.id.toLowerCase()) {
     return true;
@@ -512,15 +566,16 @@ export async function prepareMessagesForLLM(
   // System messages are NEVER saved to storage.
   const interpolatedPrompt = interpolateTemplateVariables(freshSystemPrompt || '', worldEnvMap);
   const workingDirectory = getEnvValueFromText(worldVariablesText, 'working_directory') || getDefaultWorkingDirectory();
-  const promptWithWorkingDirectory = interpolatedPrompt.trim().length > 0
+  const shellExecutionRule = 'When using `shell_cmd`, execute commands only within this trusted working directory scope: ' + workingDirectory;
+  const promptWithShellExecutionRule = interpolatedPrompt.trim().length > 0
     ? (interpolatedPrompt.endsWith('\n')
-      ? `${interpolatedPrompt}working directory: ${workingDirectory}`
-      : `${interpolatedPrompt}\nworking directory: ${workingDirectory}`)
-    : `working directory: ${workingDirectory}`;
+      ? `${interpolatedPrompt}${shellExecutionRule}`
+      : `${interpolatedPrompt}\n${shellExecutionRule}`)
+    : shellExecutionRule;
   const agentSkillsPromptSection = await buildAgentSkillsPromptSection();
-  const promptWithSkills = promptWithWorkingDirectory.endsWith('\n')
-    ? `${promptWithWorkingDirectory}\n${agentSkillsPromptSection}`
-    : `${promptWithWorkingDirectory}\n\n${agentSkillsPromptSection}`;
+  const promptWithSkills = promptWithShellExecutionRule.endsWith('\n')
+    ? `${promptWithShellExecutionRule}\n${agentSkillsPromptSection}`
+    : `${promptWithShellExecutionRule}\n\n${agentSkillsPromptSection}`;
   const mentionFormatRule = buildAgentMentionFormatRule();
   const promptWithMentionRule = promptWithSkills.endsWith('\n')
     ? `${promptWithSkills}\n${mentionFormatRule}`

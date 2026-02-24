@@ -37,6 +37,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-21: Passed `agentName` + minimal shell `llmResultMode` in initial tool-execution context so `shell_cmd` tool results stay status-only for LLM continuation and stdout assistant attribution remains consistent.
  * - 2026-02-16: Added `LOG_LLM_TOOL_BRIDGE` gate for LLM↔tool console bridge logs.
  * - 2026-02-16: Added explicit console debug logs for LLM↔tool request/result/error handoff payloads.
  * - 2026-02-14: Shell tool trusted cwd fallback now uses core default working directory (user home) when world `working_directory` is missing.
@@ -397,12 +398,11 @@ export async function processAgentMessage(
   agent: Agent,
   messageEvent: WorldMessageEvent
 ): Promise<void> {
-  const completeActivity = beginWorldActivity(world, `agent:${agent.id}`);
+  // Derive target chatId before activity begins so it is captured in per-chat tracking
+  const targetChatId = messageEvent.chatId ?? world.currentChatId ?? null;
+  const completeActivity = beginWorldActivity(world, `agent:${agent.id}`, targetChatId ?? undefined);
   let processingHandle: ReturnType<typeof beginChatMessageProcessing> | null = null;
   try {
-    // Derive target chatId from the originating message event for concurrency-safe processing
-    // This ensures processing stays bound to the originating session even if world.currentChatId changes
-    const targetChatId = messageEvent.chatId ?? world.currentChatId ?? null;
     if (targetChatId) {
       processingHandle = beginChatMessageProcessing(world.id, targetChatId);
     }
@@ -748,7 +748,9 @@ export async function processAgentMessage(
             toolCallId: toolCall.id,
             chatId: targetChatId,
             abortSignal: processingHandle?.signal,
-            workingDirectory: trustedWorkingDirectory
+            workingDirectory: trustedWorkingDirectory,
+            agentName: agent.id,
+            llmResultMode: toolCall.function.name === 'shell_cmd' ? 'smart' : 'verbose'
           };
 
           const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);
@@ -1055,7 +1057,16 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
   if (agent.llmCallCount >= worldTurnLimit) {
     loggerTurnLimit.debug('Turn limit reached, sending turn limit message', { agentId: agent.id, llmCallCount: agent.llmCallCount, worldTurnLimit });
     const turnLimitMessage = `@human Turn limit reached (${worldTurnLimit} LLM calls). Please take control of the conversation.`;
-    publishMessage(world, turnLimitMessage, agent.id);
+    const turnLimitChatId = messageEvent.chatId ?? world.currentChatId ?? null;
+    if (turnLimitChatId) {
+      publishMessage(world, turnLimitMessage, agent.id, turnLimitChatId);
+    } else {
+      loggerTurnLimit.warn('Skipping turn limit message publish without chat context', {
+        agentId: agent.id,
+        worldId: world.id,
+        messageId: messageEvent.messageId,
+      });
+    }
     return false;
   }
 

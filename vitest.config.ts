@@ -12,18 +12,12 @@
  * - Coverage reporting excluding API and CLI code
  * - Mock support with auto-reset between tests
  * - Workspace module resolution via vite-tsconfig-paths
- * - Sequential test execution (singleFork: true)
+ * - Sequential test file execution (fileParallelism: false)
  */
 
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
-  poolOptions: {
-    forks: {
-      singleFork: true
-    }
-  },
-
   test: {
     // Environment
     environment: 'node',
@@ -63,6 +57,7 @@ export default defineConfig({
 
     // Sequential execution (equivalent to Jest maxWorkers: 1)
     pool: 'forks',
+    fileParallelism: false,
 
     // No globals - explicit imports required
     globals: false,

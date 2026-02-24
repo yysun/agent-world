@@ -11,6 +11,7 @@
  * - Tests route build + registration helpers together.
  *
  * Recent Changes:
+ * - 2026-02-19: Added channel/order/payload assertions for `world:export` route wiring.
  * - 2026-02-16: Added channel/order/payload assertions for `session:branchFromMessage` route wiring.
  * - 2026-02-14: Added channel/order/payload assertions for `hitl:respond` route wiring.
  * - 2026-02-14: Added channel/order/payload assertions for `skill:list` route wiring.
@@ -32,6 +33,7 @@ function createHandlerMocks() {
     loadWorldsFromWorkspace: vi.fn(async () => ([])),
     loadSpecificWorld: vi.fn(async () => ({})),
     importWorld: vi.fn(async () => ({})),
+    exportWorld: vi.fn(async () => ({})),
     listWorkspaceWorlds: vi.fn(async () => ([])),
     listSkillRegistry: vi.fn(async () => ([])),
     createWorkspaceWorld: vi.fn(async () => ({})),
@@ -48,6 +50,7 @@ function createHandlerMocks() {
     deleteWorldSession: vi.fn(async () => ({ deleted: true })),
     selectWorldSession: vi.fn(async () => true),
     getSessionMessages: vi.fn(async () => ([])),
+    getChatEvents: vi.fn(async () => ([])),
     sendChatMessage: vi.fn(async () => ({})),
     editMessageInChat: vi.fn(async () => ({})),
     respondHitlOption: vi.fn(async () => ({ accepted: true })),
@@ -73,6 +76,7 @@ describe('buildMainIpcRoutes', () => {
       'world:loadFromFolder',
       'world:load',
       'world:import',
+      'world:export',
       'world:list',
       'skill:list',
       'world:create',
@@ -90,6 +94,7 @@ describe('buildMainIpcRoutes', () => {
       'session:delete',
       'session:select',
       'chat:getMessages',
+      'chat:getEvents',
       'chat:sendMessage',
       'message:edit',
       'hitl:respond',
@@ -110,6 +115,7 @@ describe('buildMainIpcRoutes', () => {
     await routes.find((route) => route.channel === 'world:saveLastSelected')?.handler({}, 'world-99');
     await routes.find((route) => route.channel === 'workspace:open')?.handler({}, { directoryPath: '/tmp/workspace' });
     await routes.find((route) => route.channel === 'dialog:pickDirectory')?.handler({});
+    await routes.find((route) => route.channel === 'world:export')?.handler({}, { worldId: 'w-9' });
     await routes.find((route) => route.channel === 'skill:list')?.handler({});
     await routes.find((route) => route.channel === 'session:list')?.handler({}, { worldId: 'w-1' });
     await routes.find((route) => route.channel === 'session:branchFromMessage')?.handler({}, { worldId: 'w-1', chatId: 'c-1', messageId: 'm-1' });
@@ -124,6 +130,7 @@ describe('buildMainIpcRoutes', () => {
     expect(handlers.writeWorldPreference).toHaveBeenCalledWith('world-99');
     expect(handlers.openWorkspaceDialog).toHaveBeenCalledWith({ directoryPath: '/tmp/workspace' });
     expect(handlers.pickDirectoryDialog).toHaveBeenCalledTimes(1);
+    expect(handlers.exportWorld).toHaveBeenCalledWith({ worldId: 'w-9' });
     expect(handlers.listSkillRegistry).toHaveBeenCalledTimes(1);
     expect(handlers.listWorldSessions).toHaveBeenCalledWith('w-1');
     expect(handlers.branchWorldSessionFromMessage).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1', messageId: 'm-1' });

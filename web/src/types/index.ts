@@ -18,6 +18,10 @@
  * - SSE event data structures for real-time updates
  * 
  * Changes:
+ * - 2026-02-22: Added responsive right-panel UI state typings (`rightPanelTab`, `isRightPanelOpen`, `viewportMode`) for World page mobile/tablet behavior.
+ * - 2026-02-21: Added project-folder selection props/state (`selectedProjectPath`) for web composer parity with Electron.
+ * - 2026-02-20: Added inline HITL card props to `WorldChatProps` for in-flow prompt rendering (replacing popup-only HITL UI).
+ * - 2026-02-20: Enforced options-only HITL prompt typing.
  * - 2026-02-14: Added HITL prompt state/types for generic option-list approvals in web chat flows.
  * - 2026-02-14: Added stop-processing UI state and currentChatId prop support for send/stop composer toggle.
  * - 2026-02-08: Removed legacy manual tool-intervention message and state types
@@ -72,8 +76,13 @@ export interface HitlPromptRequest {
   chatId: string | null;
   title: string;
   message: string;
+  mode: 'option';
   options: HitlPromptOption[];
-  defaultOptionId: string;
+  defaultOptionId?: string;
+  metadata?: {
+    refreshAfterDismiss?: boolean;
+    kind?: string;
+  };
 }
 
 // Web UI Message Interface - extends core with streaming states
@@ -216,6 +225,7 @@ export interface WorldChatProps {
   selectedAgent?: { id?: string; name: string } | null;
   currentChat?: string;
   currentChatId?: string | null;
+  selectedProjectPath?: string | null;
   editingMessageId?: string | null;
   editingText?: string;
   agentFilters?: string[];  // Agent IDs to filter messages by
@@ -227,6 +237,10 @@ export interface WorldChatProps {
 
   // Phase 4: Tool execution status
   activeTools?: ToolEntry[];
+
+  // HITL inline prompt card
+  activeHitlPrompt?: HitlPromptRequest | null;
+  submittingHitlRequestId?: string | null;
 }
 
 // World Settings Component Props
@@ -285,6 +299,9 @@ export interface WorldChatHistoryProps {
   world: World | null;
 }
 
+export type RightPanelTab = 'chats' | 'world';
+export type WorldViewportMode = 'desktop' | 'tablet' | 'mobile';
+
 // ========================================
 // COMPONENT STATE INTERFACES
 // ========================================
@@ -327,6 +344,7 @@ export interface WorldComponentState extends SSEComponentState {
 
   // Chat management state
   currentChat: Chat | null;
+  selectedProjectPath: string | null;
   chatToDelete: Chat | null;
 
   // Message edit state
@@ -358,6 +376,11 @@ export interface WorldComponentState extends SSEComponentState {
   // HITL option prompts
   hitlPromptQueue: HitlPromptRequest[];
   submittingHitlRequestId: string | null;
+
+  // Responsive right-panel state
+  rightPanelTab: RightPanelTab;
+  isRightPanelOpen: boolean;
+  viewportMode: WorldViewportMode;
 }
 
 // ========================================

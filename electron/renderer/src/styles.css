@@ -15,6 +15,7 @@
  * - Scrollbar styling uses semantic theme color tokens
  *
  * Recent Changes:
+ * - 2026-02-20: Added `header-agent-active` animation for active/streaming agent badges in the top header strip.
  * - 2026-02-10: Darkened `sidebar-session-selected` token further for clearer selected-session emphasis
  * - 2026-02-10: Added `sidebar-session-selected` token for a slightly darker selected-chat background in both light and dark themes
  * - 2026-02-10: Darkened light-theme sidebar background token slightly for better visual contrast
@@ -228,6 +229,44 @@ body {
 
 *::-webkit-scrollbar-thumb:hover {
   background: var(--color-scrollbar-thumb-hover);
+}
+
+@keyframes header-agent-shake {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+
+  20% {
+    transform: translateY(-2px) scale(1.05);
+  }
+
+  40% {
+    transform: translateY(1px) scale(0.99);
+  }
+
+  60% {
+    transform: translateY(-1px) scale(1.03);
+  }
+
+  80% {
+    transform: translateY(1px) scale(0.98);
+  }
+}
+
+@keyframes header-agent-float {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-ring) 0%, transparent);
+  }
+
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in oklab, var(--color-ring) 26%, transparent);
+  }
+}
+
+.header-agent-active {
+  animation: header-agent-shake 1.1s infinite ease-in-out, header-agent-float 2.2s infinite ease-in-out;
 }
 
 /* Markdown prose styling */

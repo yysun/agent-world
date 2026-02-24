@@ -11,6 +11,7 @@
  * - Avoids Electron runtime and filesystem dependencies.
  *
  * Recent Changes:
+ * - 2026-02-20: Added coverage that `hitl-option-request` system events bypass chatId filtering for chat-scoped subscriptions.
  * - 2026-02-16: Added coverage for world-level activity events forwarded to chat-scoped subscriptions.
  * - 2026-02-13: Updated system-event forwarding coverage to structured payload content.
  * - 2026-02-13: Added system-event forwarding coverage for chat title update notifications.
@@ -373,6 +374,11 @@ describe('createRealtimeEventsRuntime', () => {
       chatId: 'chat-1'
     });
 
+    worldSubscription.world.eventEmitter.emit('message', {
+      messageId: 'msg-unscoped',
+      sender: 'human',
+      content: 'unscoped user message'
+    });
     worldSubscription.world.eventEmitter.emit('sse', {
       type: 'chunk',
       messageId: 'sse-1',
@@ -490,5 +496,52 @@ describe('createRealtimeEventsRuntime', () => {
     });
 
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('forwards hitl-option-request system events even when scoped to a different chat', async () => {
+    const send = vi.fn();
+    const worldSubscription = createWorldSubscription();
+
+    const runtime = createRealtimeEventsRuntime({
+      getMainWindow: () => ({
+        isDestroyed: () => false,
+        webContents: { send }
+      }),
+      chatEventChannel: 'chat:event',
+      addLogStreamCallback: () => () => { },
+      subscribeWorld: async () => worldSubscription,
+      ensureCoreReady: async () => { }
+    });
+
+    await runtime.subscribeChatEvents({
+      subscriptionId: 'sub-hitl',
+      worldId: 'world-1',
+      chatId: 'chat-1'
+    });
+
+    worldSubscription.world.eventEmitter.emit('system', {
+      chatId: 'chat-2',
+      content: {
+        eventType: 'hitl-option-request',
+        requestId: 'req-1',
+        title: 'Approval required',
+        options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }]
+      },
+      messageId: 'sys-hitl',
+      timestamp: new Date('2026-02-20T00:00:00.000Z')
+    });
+
+    expect(send).toHaveBeenCalledWith(
+      'chat:event',
+      expect.objectContaining({
+        type: 'system',
+        subscriptionId: 'sub-hitl',
+        worldId: 'world-1',
+        chatId: 'chat-2',
+        system: expect.objectContaining({
+          eventType: 'hitl-option-request'
+        })
+      })
+    );
   });
 });

@@ -4,7 +4,7 @@
  * Features:
  * - Serializes world/chat/agent summaries for IPC payloads.
  * - Normalizes persisted chat memory into canonical renderer message shapes.
- * - Serializes realtime message, SSE, tool, and log events.
+ * - Serializes realtime message, SSE, tool, system, CRUD, activity, and log events.
  *
  * Implementation Notes:
  * - Canonical message identity is based on `messageId`.
@@ -12,6 +12,9 @@
  * - Runtime validation remains in higher-level handlers.
  *
  * Recent Changes:
+ * - 2026-02-21: Preserved assistant tool-call metadata (`tool_calls`, `toolCallStatus`) in realtime message serialization so renderer can reliably render tool-request rows.
+ * - 2026-02-21: Included SSE `toolName` and `stream` fields in realtime serialization so renderer can label/format tool-stream rows correctly.
+ * - 2026-02-19: Added realtime CRUD-event serialization so renderer can refresh world/agent state after background updates.
  * - 2026-02-13: Added realtime system-event serialization so renderer can react to chat title updates.
  * - 2026-02-12: Extracted world/chat/message/event serialization helpers from `electron/main.ts`.
  */
@@ -194,26 +197,35 @@ export function normalizeSessionMessages(messages: any[]): any[] {
   return deduplicated;
 }
 
-export function serializeRealtimeMessageEvent(worldId: string, event: any): Record<string, unknown> | null {
+export function serializeRealtimeMessageEvent(
+  worldId: string,
+  event: any,
+): Record<string, unknown> | null {
   const messageId = String(event?.messageId || '').trim();
   if (!messageId) {
     return null;
   }
 
   const createdAt = toIsoTimestamp(event?.timestamp);
+  const resolvedChatId = event?.chatId || null;
+
   return {
     type: 'message',
     worldId,
-    chatId: event?.chatId || null,
+    chatId: resolvedChatId,
     message: {
       id: messageId,
       role: deriveEventRole(event),
       sender: event?.sender || 'unknown',
       content: event?.content || '',
       createdAt,
-      chatId: event?.chatId || null,
+      chatId: resolvedChatId,
       messageId,
-      replyToMessageId: event?.replyToMessageId || null
+      replyToMessageId: event?.replyToMessageId || null,
+      tool_calls: Array.isArray(event?.tool_calls) ? event.tool_calls : undefined,
+      toolCallStatus: event?.toolCallStatus && typeof event.toolCallStatus === 'object'
+        ? event.toolCallStatus
+        : undefined,
     }
   };
 }
@@ -232,6 +244,8 @@ export function serializeRealtimeSSEEvent(
       eventType: event?.type || 'chunk',
       messageId,
       agentName: event?.agentName || 'assistant',
+      toolName: event?.toolName || null,
+      stream: event?.stream || null,
       content: event?.content || '',
       error: event?.error || null,
       createdAt: new Date().toISOString(),
@@ -266,6 +280,7 @@ export function serializeRealtimeToolEvent(
       error: event?.error || toolExecution?.error || null,
       progress: event?.progress || null,
       agentId: event?.agentId || null,
+      agentName: event?.agentName || null,
       createdAt: new Date().toISOString()
     }
   };
@@ -285,6 +300,9 @@ export function serializeRealtimeSystemEvent(
         ? content.type
         : 'system';
 
+  const contentObj = content && typeof content === 'object' ? (content as Record<string, unknown>) : null;
+  const agentName = contentObj?.agentName != null ? String(contentObj.agentName) : null;
+
   return {
     type: 'system',
     worldId,
@@ -294,7 +312,32 @@ export function serializeRealtimeSystemEvent(
       content,
       messageId: typeof event?.messageId === 'string' ? event.messageId : null,
       createdAt: toIsoTimestamp(event?.timestamp),
-      chatId: chatId || null
+      chatId: chatId || null,
+      agentName,
+    }
+  };
+}
+
+export function serializeRealtimeCrudEvent(
+  worldId: string,
+  chatId: string | null,
+  event: any
+): Record<string, unknown> {
+  const operation = typeof event?.operation === 'string' ? event.operation : 'update';
+  const entityType = typeof event?.entityType === 'string' ? event.entityType : 'world';
+  const entityId = typeof event?.entityId === 'string' ? event.entityId : '';
+
+  return {
+    type: 'crud',
+    worldId,
+    chatId: chatId || null,
+    crud: {
+      operation,
+      entityType,
+      entityId,
+      entityData: event?.entityData ?? null,
+      chatId: event?.chatId ?? chatId ?? null,
+      createdAt: toIsoTimestamp(event?.timestamp)
     }
   };
 }

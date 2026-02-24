@@ -44,6 +44,12 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2026-02-21: Prevented tool output expand/collapse actions from consuming pending auto-scroll state and jumping to transcript bottom.
+ * - 2026-02-21: Switched project-folder selection to browser File API flow and preserved UI-enriched world agent fields after updates.
+ * - 2026-02-21: Added `select-project-folder` handler to persist `working_directory` from composer Project button selection.
+ * - 2026-02-21: Updated composer key handling for textarea parity with Electron (Enter sends, Shift+Enter inserts newline, composition-safe).
+ * - 2026-02-20: Blocked new outbound message sends while HITL prompt queue is non-empty.
+ * - 2026-02-20: Enforced options-only HITL handlers and removed free-text prompt events.
  * - 2026-02-16: Added no-op edit guard to skip save when message content is unchanged.
  * - 2026-02-15: Updated init chat selection to prioritize current selected chat ID, with backend currentChatId as fallback.
  * - 2026-02-14: Added generic HITL option prompt queue handling and response submission event for web approval flows.
@@ -86,6 +92,8 @@ import * as WorldExportDomain from '../domain/world-export';
 import * as MessageDisplayDomain from '../domain/message-display';
 import * as HitlDomain from '../domain/hitl';
 import { resolveActiveChatId } from '../domain/chat-selection';
+import { getEnvValueFromText, upsertEnvVariable } from '../domain/world-variables';
+import { pickProjectFolderPath } from '../domain/project-folder-picker';
 import {
   sendChatMessage,
   editChatMessage,
@@ -256,6 +264,39 @@ const deduplicateMessages = (messages: Message[], agents: Agent[] = []): Message
       return roleOrderA - roleOrderB;
     });
 };
+
+function mergeUpdatedWorldWithUiState(
+  currentWorld: WorldComponentState['world'],
+  updatedWorld: WorldComponentState['world']
+): WorldComponentState['world'] {
+  if (!updatedWorld) {
+    return currentWorld;
+  }
+
+  if (!currentWorld) {
+    return updatedWorld;
+  }
+
+  const existingAgentById = new Map<string, Agent>();
+  for (const existingAgent of currentWorld.agents || []) {
+    existingAgentById.set(existingAgent.id, existingAgent);
+  }
+
+  const mergedAgents = (updatedWorld.agents || []).map((agent, index) => {
+    const existingAgent = existingAgentById.get(agent.id);
+    return {
+      ...agent,
+      spriteIndex: existingAgent?.spriteIndex ?? (index % 9),
+      messageCount: existingAgent?.messageCount ?? 0,
+    };
+  });
+
+  return {
+    ...currentWorld,
+    ...updatedWorld,
+    agents: mergedAgents,
+  };
+}
 
 // ========================================
 // PHASE 2: STREAMING STATE HELPERS (RAF Debouncing)
@@ -512,11 +553,13 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
     // Apply deduplication to loaded messages (same as SSE streaming path)
     // Pass agents array so user messages get correct seenByAgents
     const messages = deduplicateMessages([...rawMessages], agents);
+    const selectedProjectPath = getEnvValueFromText(world.variables, 'working_directory');
 
     yield {
       ...state,
       world,
       currentChat: world.chats.find(c => c.id === chatId) || null,
+      selectedProjectPath,
       messages,
       rawMessages,
       loading: false,
@@ -585,11 +628,22 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
     }
   }
 
+  if (eventType === 'agent-created') {
+    // Re-fetch world to pick up the new agent in the agents list.
+    const activeChatId = newState.currentChat?.id || newState.world?.currentChatId || undefined;
+    const updates = initWorld(newState, newState.worldName, activeChatId);
+    for await (const update of updates) {
+      return { ...newState, ...update };
+    }
+  }
+
   const hitlPrompt = HitlDomain.parseHitlPromptRequest(data);
   if (hitlPrompt) {
+    const currentQueue = newState.hitlPromptQueue || [];
+    const nextQueue = HitlDomain.enqueueHitlPrompt(currentQueue, hitlPrompt);
     return {
       ...newState,
-      hitlPromptQueue: HitlDomain.enqueueHitlPrompt(newState.hitlPromptQueue || [], hitlPrompt)
+      hitlPromptQueue: nextQueue,
     };
   }
 
@@ -801,12 +855,26 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     InputDomain.updateInput(state, payload.target.value),
 
   'key-press': (state: WorldComponentState, payload: WorldEventPayload<'key-press'>) => {
-    if (InputDomain.shouldSendOnEnter(payload.key, state.userInput)) {
+    if (payload.nativeEvent?.isComposing || payload.keyCode === 229) {
+      return;
+    }
+    if ((state.hitlPromptQueue || []).length > 0) {
+      return;
+    }
+    if (InputDomain.shouldSendOnEnter(payload.key, payload.shiftKey, state.userInput)) {
+      payload.preventDefault?.();
       app.run('send-message');
     }
   },
 
   'send-message': async (state: WorldComponentState): Promise<WorldComponentState> => {
+    if ((state.hitlPromptQueue || []).length > 0) {
+      return {
+        ...state,
+        error: 'Resolve the pending HITL prompt before sending a new message.'
+      };
+    }
+
     const prepared = InputDomain.validateAndPrepareMessage(state.userInput, state.worldName);
     if (!prepared) return state;
 
@@ -827,6 +895,47 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
       return InputDomain.createSentState(newState);
     } catch (error: any) {
       return InputDomain.createSendErrorState(newState, error.message || 'Failed to send message');
+    }
+  },
+
+  'select-project-folder': async (state: WorldComponentState): Promise<WorldComponentState> => {
+    if (!state.world?.name) {
+      return {
+        ...state,
+        error: 'Load a world before selecting a project folder.'
+      };
+    }
+
+    try {
+      const pickerResult = await pickProjectFolderPath(state.selectedProjectPath || null);
+      if (pickerResult?.canceled || !pickerResult?.directoryPath) {
+        return state;
+      }
+
+      const selectedPath = String(pickerResult.directoryPath || '').trim();
+      if (!selectedPath) {
+        return state;
+      }
+
+      const nextVariables = upsertEnvVariable(
+        state.world.variables || '',
+        'working_directory',
+        selectedPath
+      );
+
+      const updatedWorld = await api.updateWorld(state.worldName, { variables: nextVariables });
+      const mergedWorld = mergeUpdatedWorldWithUiState(state.world, updatedWorld);
+      return {
+        ...state,
+        world: mergedWorld,
+        selectedProjectPath: selectedPath,
+        error: null
+      };
+    } catch (error: any) {
+      return {
+        ...state,
+        error: error?.message || 'Failed to select project folder.'
+      };
     }
   },
 
@@ -949,6 +1058,19 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         submittingHitlRequestId: null,
         hitlPromptQueue: HitlDomain.removeHitlPromptByRequestId(state.hitlPromptQueue || [], requestId)
       };
+
+      if (prompt?.metadata?.refreshAfterDismiss) {
+        const activeChatId = state.currentChat?.id || state.world?.currentChatId || undefined;
+        const updates = initWorld(state, state.worldName, activeChatId);
+        for await (const update of updates) {
+          yield {
+            ...state,
+            ...update,
+            submittingHitlRequestId: null,
+            hitlPromptQueue: HitlDomain.removeHitlPromptByRequestId((update.hitlPromptQueue || state.hitlPromptQueue || []), requestId)
+          };
+        }
+      }
     } catch (error: any) {
       yield {
         ...state,
@@ -1043,7 +1165,8 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
 
     return {
       ...state,
-      messages
+      messages,
+      needScroll: false
     };
   },
 
@@ -1316,7 +1439,7 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         activityStartTime: null,
         elapsedIntervalId: null,
         hitlPromptQueue: [],
-        submittingHitlRequestId: null
+        submittingHitlRequestId: null,
       };
 
       yield ChatHistoryDomain.createChatLoadingState(cleanState);

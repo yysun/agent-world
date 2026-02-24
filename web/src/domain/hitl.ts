@@ -15,6 +15,7 @@
  * - Default option falls back to `no` when present, otherwise first option.
  *
  * Recent Changes:
+ * - 2026-02-20: Enforced options-only parsing for `hitl-option-request` payloads.
  * - 2026-02-14: Added initial HITL prompt parsing/queue helpers for web client flows.
  */
 
@@ -27,7 +28,8 @@ export function parseHitlPromptRequest(eventData: unknown): HitlPromptRequest | 
   const content = envelope && typeof envelope.content === 'object'
     ? (envelope.content as Record<string, unknown>)
     : null;
-  if (!content || String(content.eventType || '').trim() !== 'hitl-option-request') {
+  const eventType = String(content?.eventType || '').trim();
+  if (!content || eventType !== 'hitl-option-request') {
     return null;
   }
 
@@ -38,18 +40,19 @@ export function parseHitlPromptRequest(eventData: unknown): HitlPromptRequest | 
 
   const options = Array.isArray(content.options)
     ? content.options
-      .map((option): HitlPromptOption => {
-        const optionRecord = option && typeof option === 'object'
-          ? (option as Record<string, unknown>)
-          : null;
-        return {
-          id: String(optionRecord?.id || '').trim(),
-          label: String(optionRecord?.label || '').trim(),
-          description: optionRecord?.description ? String(optionRecord.description) : undefined
-        };
-      })
-      .filter((option) => option.id.length > 0 && option.label.length > 0)
+        .map((option): HitlPromptOption => {
+          const optionRecord = option && typeof option === 'object'
+            ? (option as Record<string, unknown>)
+            : null;
+          return {
+            id: String(optionRecord?.id || '').trim(),
+            label: String(optionRecord?.label || '').trim(),
+            description: optionRecord?.description ? String(optionRecord.description) : undefined
+          };
+        })
+        .filter((option) => option.id.length > 0 && option.label.length > 0)
     : [];
+
   if (options.length === 0) {
     return null;
   }
@@ -59,13 +62,24 @@ export function parseHitlPromptRequest(eventData: unknown): HitlPromptRequest | 
     ? preferredDefault
     : (options.find((option) => option.id === 'no')?.id || options[0].id);
 
+  const metadata = content.metadata && typeof content.metadata === 'object'
+    ? {
+      refreshAfterDismiss: (content.metadata as Record<string, unknown>).refreshAfterDismiss === true,
+      kind: typeof (content.metadata as Record<string, unknown>).kind === 'string'
+        ? String((content.metadata as Record<string, unknown>).kind)
+        : undefined,
+    }
+    : undefined;
+
   return {
     requestId,
     chatId: envelope?.chatId ? String(envelope.chatId) : null,
     title: String(content.title || 'Approval required').trim() || 'Approval required',
     message: String(content.message || '').trim(),
+    mode: 'option',
     options,
-    defaultOptionId
+    ...(defaultOptionId ? { defaultOptionId } : {}),
+    ...(metadata ? { metadata } : {}),
   };
 }
 
@@ -87,4 +101,3 @@ export function removeHitlPromptByRequestId(
   const existing = Array.isArray(queue) ? queue : [];
   return existing.filter((entry) => entry.requestId !== requestId);
 }
-

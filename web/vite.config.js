@@ -12,6 +12,8 @@ export default defineConfig({
         secure: false
       }
     },
+    // Hosts allowed to access the dev server (useful for tunneling)
+    allowedHosts: ['unzealously-plantlike-rebecca.ngrok-free.dev'],
     // SPA mode - serve index.html for all routes
     historyApiFallback: true
   }

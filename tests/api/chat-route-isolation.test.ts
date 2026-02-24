@@ -52,7 +52,7 @@ vi.mock('../../core/index.js', () => {
     removeMessagesFrom: vi.fn(),
     editUserMessage,
     stopMessageProcessing: vi.fn(),
-    submitWorldOptionResponse: vi.fn(() => ({ accepted: true })),
+    submitWorldHitlResponse: vi.fn(() => ({ accepted: true })),
     subscribeWorld: vi.fn(),
     ClientConnection: vi.fn(),
     LLMProvider: {

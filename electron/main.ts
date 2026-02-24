@@ -19,6 +19,8 @@
  * - Defaults to SQLite storage and workspace path if env vars not set
  *
  * Recent Changes:
+ * - 2026-02-21: Added single-instance guard with `app.requestSingleInstanceLock()` and second-instance focus/restore handling.
+ * - 2026-02-19: Added `world:export` IPC wiring and storage-factory dependency injection for CLI-parity desktop world import/export flows.
  * - 2026-02-16: Wired `session:branchFromMessage` IPC to core `branchChatFromMessage` for branch-chat creation from assistant messages.
  * - 2026-02-14: Added `hitl:respond` IPC wiring so renderer approvals can resolve core HITL option requests.
  * - 2026-02-14: Added `skill:list` IPC wiring backed by core `syncSkills/getSkills` for empty-session welcome skill cards in renderer.
@@ -79,7 +81,7 @@ import { resolvePreloadPath, resolveRendererIndexPath } from './main-process/win
 import { setupMainLifecycle } from './main-process/lifecycle.js';
 import { createRealtimeEventsRuntime } from './main-process/realtime-events.js';
 import { createWorkspaceRuntime } from './main-process/workspace-runtime.js';
-import { importCoreModule } from './main-process/core-module-loader.js';
+import { importCoreModule, importCoreStorageFactoryModule } from './main-process/core-module-loader.js';
 import {
   applySystemSettings,
   configureProvidersFromEnv,
@@ -115,7 +117,7 @@ const {
   newChat,
   branchChatFromMessage,
   publishMessage,
-  submitWorldOptionResponse,
+  submitWorldHitlResponse,
   stopMessageProcessing,
   restoreChat,
   syncSkills,
@@ -127,10 +129,16 @@ const {
   configureLLMProvider,
   addLogStreamCallback
 } = await importCoreModule(__dirname);
+const { createStorage, createStorageFromEnv } = await importCoreStorageFactoryModule(__dirname);
 
 const CHAT_EVENT_CHANNEL = 'chat:event';
 
 let mainWindow: BrowserWindow | null = null;
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
 
 loadEnvironmentVariables(__dirname);
 applySystemSettings(readSystemSettings(app));
@@ -198,12 +206,14 @@ const ipcHandlers = createMainIpcHandlers({
   newChat,
   branchChatFromMessage,
   publishMessage,
-  submitWorldOptionResponse,
+  submitWorldHitlResponse,
   stopMessageProcessing,
   restoreChat,
   updateWorld,
   editUserMessage,
-  removeMessagesFrom
+  removeMessagesFrom,
+  createStorage,
+  createStorageFromEnv
 });
 
 function registerIpcHandlers() {
@@ -214,6 +224,7 @@ function registerIpcHandlers() {
     loadWorldsFromWorkspace: ipcHandlers.loadWorldsFromWorkspace,
     loadSpecificWorld: (worldId) => ipcHandlers.loadSpecificWorld(String(worldId ?? '')),
     importWorld: ipcHandlers.importWorld,
+    exportWorld: ipcHandlers.exportWorld,
     listWorkspaceWorlds: ipcHandlers.listWorkspaceWorlds,
     listSkillRegistry: ipcHandlers.listSkillRegistry,
     createWorkspaceWorld: ipcHandlers.createWorkspaceWorld,
@@ -233,6 +244,7 @@ function registerIpcHandlers() {
     deleteWorldSession: ipcHandlers.deleteWorldSession,
     selectWorldSession: ipcHandlers.selectWorldSession,
     getSessionMessages: ipcHandlers.getSessionMessages,
+    getChatEvents: ipcHandlers.getChatEvents,
     sendChatMessage: ipcHandlers.sendChatMessage,
     editMessageInChat: ipcHandlers.editMessageInChat,
     respondHitlOption: ipcHandlers.respondHitlOption,
@@ -290,6 +302,20 @@ function createMainWindow() {
     console.error('Failed to load renderer:', error);
   });
 }
+
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.focus();
+    return;
+  }
+
+  if (app.isReady()) {
+    createMainWindow();
+  }
+});
 
 function setupAppLifecycle() {
   setupMainLifecycle({

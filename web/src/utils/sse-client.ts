@@ -8,6 +8,7 @@
  * - Event parsing and routing via AppRun
  * - Streaming message state management
  * - Tool execution event handling (start, progress, result, error)
+ * - System/world event routing for real-time refresh handling
  * - Log event processing with error detail extraction
  * - Shell command output streaming (stdout/stderr) with real-time display
  * - Tool call data preservation in streaming chunks
@@ -22,6 +23,7 @@
  * - Extracts error details from log data for better error visibility in UI
  * 
  * Created: 2025-10-25 - Initial SSE client implementation
+ * Updated: 2026-02-20 - Removed stale CRUD SSE routing branch to align with runtime event channels.
  * Updated: 2026-02-11 - Enhanced error log display to include error details from log data
  * Updated: 2026-02-11 - Preserve tool_calls in handleStreamChunk for complete display
  * Updated: 2026-02-08 - Removed legacy manual tool-intervention request and tool-result submission helpers

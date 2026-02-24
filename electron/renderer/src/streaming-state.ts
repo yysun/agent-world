@@ -17,6 +17,9 @@
  * - Cleanup method for session switches
  *
  * Recent Changes:
+ * - 2026-02-21: Added optional command propagation for tool-stream entries so shell rows can display `Running command: <name>`.
+ * - 2026-02-21: Added optional tool-name propagation for tool-stream entries so tool rows can render specific running labels (e.g., shell command).
+ * - 2026-02-19: Deferred assistant message rendering to first chunk by emitting stream updates with full entry data.
  * - 2026-02-10: Added getActiveToolStreamIds/endAllToolStreams to prevent stale tool-stream busy state
  * - 2026-02-10: Added tool streaming support (handleToolStreamStart/Chunk/End)
  * - 2026-02-10: Added 50K character truncation for tool output
@@ -32,6 +35,8 @@ export type ToolStreamType = 'stdout' | 'stderr';
 export interface StreamEntry {
   messageId: string;
   agentName: string;
+  toolName?: string;
+  command?: string;
   content: string;
   isStreaming: boolean;
   hasError: boolean;
@@ -43,17 +48,25 @@ export interface StreamEntry {
 
 export interface StreamingStateCallbacks {
   onStreamStart: (entry: StreamEntry) => void;
-  onStreamUpdate: (messageId: string, content: string) => void;
+  onStreamUpdate: (entry: StreamEntry) => void;
   onStreamEnd: (messageId: string) => void;
   onStreamError: (messageId: string, errorMessage: string) => void;
   onToolStreamStart?: (entry: StreamEntry) => void;
-  onToolStreamUpdate?: (messageId: string, content: string, streamType: ToolStreamType) => void;
+  onToolStreamUpdate?: (
+    messageId: string,
+    content: string,
+    streamType: ToolStreamType,
+    toolName?: string,
+    command?: string
+  ) => void;
   onToolStreamEnd?: (messageId: string) => void;
 }
 
 interface PendingToolUpdate {
   content: string;
   streamType: ToolStreamType;
+  toolName?: string;
+  command?: string;
 }
 
 export interface StreamingStateApi {
@@ -61,8 +74,8 @@ export interface StreamingStateApi {
   handleChunk: (messageId: string, chunk: string) => void;
   handleEnd: (messageId: string) => string | null;
   handleError: (messageId: string, errorMessage: string) => void;
-  handleToolStreamStart: (messageId: string, agentName: string, streamType: ToolStreamType) => StreamEntry;
-  handleToolStreamChunk: (messageId: string, chunk: string, streamType: ToolStreamType) => void;
+  handleToolStreamStart: (messageId: string, agentName: string, streamType: ToolStreamType, toolName?: string, command?: string) => StreamEntry;
+  handleToolStreamChunk: (messageId: string, chunk: string, streamType: ToolStreamType, toolName?: string, command?: string) => void;
   handleToolStreamEnd: (messageId: string) => string | null;
   getContent: (messageId: string) => string | null;
   isActive: (messageId: string) => boolean;
@@ -76,7 +89,7 @@ export interface StreamingStateApi {
 
 export function createStreamingState(callbacks: StreamingStateCallbacks): StreamingStateApi {
   const streams = new Map<string, StreamEntry>();
-  const pendingUpdates = new Map<string, string>();
+  const pendingUpdates = new Map<string, StreamEntry>();
   const pendingToolUpdates = new Map<string, PendingToolUpdate>();
 
   let debounceFrameId: number | null = null;
@@ -94,21 +107,21 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
       debounceFrameId = null;
     }
 
-    for (const [messageId, content] of pendingUpdates) {
-      callbacks.onStreamUpdate(messageId, content);
+    for (const [, entry] of pendingUpdates) {
+      callbacks.onStreamUpdate(entry);
     }
     pendingUpdates.clear();
 
     for (const [messageId, update] of pendingToolUpdates) {
       if (callbacks.onToolStreamUpdate) {
-        callbacks.onToolStreamUpdate(messageId, update.content, update.streamType);
+        callbacks.onToolStreamUpdate(messageId, update.content, update.streamType, update.toolName, update.command);
       }
     }
     pendingToolUpdates.clear();
   }
 
-  function scheduleUpdate(messageId: string, content: string) {
-    pendingUpdates.set(messageId, content);
+  function scheduleUpdate(entry: StreamEntry) {
+    pendingUpdates.set(entry.messageId, { ...entry });
 
     if (debounceFrameId === null) {
       debounceFrameId = requestAnimationFrame(() => {
@@ -118,8 +131,14 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
     }
   }
 
-  function scheduleToolUpdate(messageId: string, content: string, streamType: ToolStreamType) {
-    pendingToolUpdates.set(messageId, { content, streamType });
+  function scheduleToolUpdate(
+    messageId: string,
+    content: string,
+    streamType: ToolStreamType,
+    toolName?: string,
+    command?: string
+  ) {
+    pendingToolUpdates.set(messageId, { content, streamType, toolName, command });
 
     if (debounceFrameId === null) {
       debounceFrameId = requestAnimationFrame(() => {
@@ -159,11 +178,12 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
       };
       streams.set(messageId, newEntry);
       callbacks.onStreamStart(newEntry);
+      scheduleUpdate(newEntry);
       return;
     }
 
     entry.content += chunk;
-    scheduleUpdate(messageId, entry.content);
+    scheduleUpdate(entry);
   }
 
   function handleEnd(messageId: string) {
@@ -171,7 +191,7 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
     if (!entry) return null;
 
     if (pendingUpdates.has(messageId)) {
-      callbacks.onStreamUpdate(messageId, entry.content);
+      callbacks.onStreamUpdate({ ...entry });
       pendingUpdates.delete(messageId);
     }
 
@@ -190,7 +210,7 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
     }
 
     if (pendingUpdates.has(messageId)) {
-      callbacks.onStreamUpdate(messageId, entry.content);
+      callbacks.onStreamUpdate({ ...entry });
       pendingUpdates.delete(messageId);
     }
 
@@ -201,10 +221,12 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
     callbacks.onStreamError(messageId, errorMessage);
   }
 
-  function handleToolStreamStart(messageId: string, agentName: string, streamType: ToolStreamType) {
+  function handleToolStreamStart(messageId: string, agentName: string, streamType: ToolStreamType, toolName?: string, command?: string) {
     const entry: StreamEntry = {
       messageId,
       agentName,
+      ...(toolName ? { toolName } : {}),
+      ...(command ? { command } : {}),
       content: '',
       isStreaming: false,
       isToolStreaming: true,
@@ -221,12 +243,14 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
     return entry;
   }
 
-  function handleToolStreamChunk(messageId: string, chunk: string, streamType: ToolStreamType) {
+  function handleToolStreamChunk(messageId: string, chunk: string, streamType: ToolStreamType, toolName?: string, command?: string) {
     const entry = streams.get(messageId);
     if (!entry) {
       const newEntry: StreamEntry = {
         messageId,
         agentName: 'shell_cmd',
+        ...(toolName ? { toolName } : {}),
+        ...(command ? { command } : {}),
         content: chunk,
         isStreaming: false,
         isToolStreaming: true,
@@ -242,6 +266,12 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
       return;
     }
 
+    if (toolName && !entry.toolName) {
+      entry.toolName = toolName;
+    }
+    if (command && !entry.command) {
+      entry.command = command;
+    }
     entry.content += chunk;
     entry.streamType = streamType;
 
@@ -249,7 +279,7 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
       entry.content = truncateOutput(entry.content);
     }
 
-    scheduleToolUpdate(messageId, entry.content, streamType);
+    scheduleToolUpdate(messageId, entry.content, streamType, entry.toolName, entry.command);
   }
 
   function handleToolStreamEnd(messageId: string) {
@@ -259,7 +289,7 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
     if (pendingToolUpdates.has(messageId)) {
       const update = pendingToolUpdates.get(messageId);
       if (callbacks.onToolStreamUpdate && update) {
-        callbacks.onToolStreamUpdate(messageId, update.content, update.streamType);
+        callbacks.onToolStreamUpdate(messageId, update.content, update.streamType, update.toolName, update.command);
       }
       pendingToolUpdates.delete(messageId);
     }

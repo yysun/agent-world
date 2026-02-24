@@ -14,9 +14,11 @@
  * - Work with loaded world without importing (uses external storage path)
  * 
  * Changes:
+ * - 2026-02-20: Enforced options-only HITL handling in interactive and pipeline modes.
  * - 2026-02-14: Added interactive + pipeline HITL option response handling for generic approval requests.
  * - 2026-02-11: Fixed tool-stream timeout: extendTimeout() resets idle timeout on streaming data
  * - 2026-02-11: Pipeline mode now listens for tool-stream SSE events to extend timeout
+ * - 2026-02-21: Extended timeout-refresh detection to include shell assistant-stream SSE events (`start`/`chunk`/`end` with `toolName='shell_cmd'`) in addition to legacy `tool-stream`.
  * - 2026-01-09: Added --streaming flag for explicit streaming control (overrides TTY auto-detection)
  * - 2025-02-06: Prevented duplicate MESSAGE output when streaming already rendered agent responses
  * - 2025-11-01: Added multi-world selection in loadWorldFromFile
@@ -82,7 +84,7 @@ import readline from 'readline';
 import {
   listWorlds,
   subscribeWorld,
-  submitWorldOptionResponse,
+  submitWorldHitlResponse,
   ClientConnection,
   createCategoryLogger,
   LLMProvider,
@@ -111,9 +113,8 @@ import {
   log as statusLog,
 } from './display.js';
 import {
-  parseHitlOptionRequest,
+  parseHitlPromptRequest,
   resolveHitlOptionSelectionInput,
-  type HitlOptionPayload,
   type HitlOptionRequestPayload,
 } from './hitl.js';
 
@@ -456,12 +457,12 @@ function configureLLMProvidersFromEnv(): void {
   }
 
   // Azure
-  if (process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_RESOURCE_NAME && process.env.AZURE_DEPLOYMENT) {
+  if (process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_OPENAI_RESOURCE_NAME && process.env.AZURE_OPENAI_DEPLOYMENT_NAME) {
     configureLLMProvider(LLMProvider.AZURE, {
       apiKey: process.env.AZURE_OPENAI_API_KEY,
-      resourceName: process.env.AZURE_RESOURCE_NAME,
-      deployment: process.env.AZURE_DEPLOYMENT,
-      apiVersion: process.env.AZURE_API_VERSION || '2024-10-21-preview'
+      resourceName: process.env.AZURE_OPENAI_RESOURCE_NAME,
+      deployment: process.env.AZURE_OPENAI_DEPLOYMENT_NAME,
+      apiVersion: process.env.AZURE_OPENAI_API_VERSION || '2024-10-21-preview'
     });
     logger.debug('Configured Azure provider from environment');
   }
@@ -580,8 +581,11 @@ function attachCLIListeners(
   // SSE events (interactive mode only - pipeline mode uses non-streaming LLM calls)
   if (streaming && globalState && rl && statusLine) {
     const sseListener = (eventData: any) => {
-      // Extend timeout when tool-stream data arrives (keeps long-running tools alive)
-      if (eventData.type === 'tool-stream') {
+      // Extend timeout when long-running shell stream activity arrives.
+      const isLegacyToolStream = eventData.type === 'tool-stream';
+      const isShellAssistantStream = eventData.toolName === 'shell_cmd' &&
+        (eventData.type === 'start' || eventData.type === 'chunk' || eventData.type === 'end');
+      if (isLegacyToolStream || isShellAssistantStream) {
         activityMonitor.extendTimeout();
       }
       handleWorldEvent(EventType.SSE, eventData, streaming, globalState, activityMonitor, statusLine, rl)
@@ -590,9 +594,12 @@ function attachCLIListeners(
     world.eventEmitter.on(EventType.SSE, sseListener);
     listeners.set(EventType.SSE, sseListener);
   } else {
-    // Pipeline mode: listen for tool-stream events to extend timeout on long-running commands
+    // Pipeline mode: listen for shell stream events to extend timeout on long-running commands.
     const sseTimeoutListener = (eventData: any) => {
-      if (eventData.type === 'tool-stream') {
+      const isLegacyToolStream = eventData.type === 'tool-stream';
+      const isShellAssistantStream = eventData.toolName === 'shell_cmd' &&
+        (eventData.type === 'start' || eventData.type === 'chunk' || eventData.type === 'end');
+      if (isLegacyToolStream || isShellAssistantStream) {
         activityMonitor.extendTimeout();
       }
     };
@@ -602,18 +609,18 @@ function attachCLIListeners(
 
   // System events
   const systemListener = (eventData: SystemEventPayload) => {
-    const hitlRequest = parseHitlOptionRequest(eventData);
+    const hitlRequest = parseHitlPromptRequest(eventData);
     if (hitlRequest) {
       hitlPromptChain = hitlPromptChain
         .then(async () => {
           if (streaming && globalState && rl && statusLine) {
             globalState.hitlPromptActive = true;
             try {
-              const selectedOptionId = await promptHitlOptionSelection(hitlRequest, statusLine, rl);
-              const result = submitWorldOptionResponse({
+              const result = submitWorldHitlResponse({
                 worldId: world.id,
                 requestId: hitlRequest.requestId,
-                optionId: selectedOptionId
+                optionId: await promptHitlOptionSelection(hitlRequest, statusLine, rl),
+                chatId: hitlRequest.chatId,
               });
               if (!result.accepted) {
                 statusLine.pause();
@@ -622,7 +629,7 @@ function attachCLIListeners(
                 return;
               }
               statusLine.pause();
-              console.log(green(`Approved option: ${selectedOptionId}`));
+              console.log(green('Submitted HITL option response.'));
               statusLine.resume();
               return;
             } finally {
@@ -631,10 +638,11 @@ function attachCLIListeners(
           }
 
           // Pipeline/non-interactive mode: auto-respond with default option to avoid blocking.
-          const result = submitWorldOptionResponse({
+          const result = submitWorldHitlResponse({
             worldId: world.id,
             requestId: hitlRequest.requestId,
-            optionId: hitlRequest.defaultOptionId
+            optionId: hitlRequest.defaultOptionId,
+            chatId: hitlRequest.chatId,
           });
           if (!result.accepted) {
             console.error(boldRed(`Failed to auto-respond HITL request: ${result.reason || 'unknown error'}`));

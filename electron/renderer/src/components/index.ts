@@ -26,7 +26,7 @@ export { default as SettingsSkillSwitch } from './SettingsSkillSwitch';
 export { default as MessageContent } from './MessageContent';
 export { default as MessageListPanel } from './MessageListPanel';
 export { default as RightPanelContent } from './RightPanelContent';
-export { default as StatusActivityBar } from './StatusActivityBar';
+export { default as WorkingStatusBar } from './WorkingStatusBar';
 export { default as HitlPromptModal } from './HitlPromptModal';
 export { default as EditorModalsHost } from './EditorModalsHost';
 export { default as LeftSidebarPanel } from './LeftSidebarPanel';

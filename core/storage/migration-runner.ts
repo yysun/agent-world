@@ -176,8 +176,7 @@ export function readMigrationFile(filePath: string): string {
  * Execute a single migration file
  */
 export async function executeMigration(db: Database, migration: MigrationFile): Promise<void> {
-  // Split SQL by semicolons and execute each statement
-  const run = promisify(db.run.bind(db));
+  const exec = promisify(db.exec.bind(db));
 
   logger.info('Executing migration', {
     version: migration.version,
@@ -187,15 +186,9 @@ export async function executeMigration(db: Database, migration: MigrationFile): 
   const sql = readMigrationFile(migration.filePath);
 
   try {
-    // Split SQL into statements and execute each one
-    const statements = sql
-      .split(';')
-      .map(s => s.trim())
-      .filter(s => s.length > 0);
-
-    for (const statement of statements) {
-      await run(statement);
-    }
+    // Execute the migration file as a single SQL script.
+    // This preserves trigger/procedure bodies that contain embedded semicolons.
+    await exec(sql);
 
     await recordMigration(db, migration.version, migration.name);
     await setVersion(db, migration.version);

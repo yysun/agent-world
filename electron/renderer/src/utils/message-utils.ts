@@ -13,6 +13,8 @@
  * - Helper functions are intentionally colocated to preserve behavior parity.
  *
  * Recent Changes:
+ * - 2026-02-21: Classified assistant messages with `tool_calls` as tool-related so tool-request rows render reliably even when text lacks `Calling tool: ...`.
+ * - 2026-02-20: Added `isRenderableMessageEntry` so welcome-state and list rendering share identical message-presence logic.
  * - 2026-02-16: Extracted from App.jsx into dedicated utility module.
  */
 
@@ -30,6 +32,9 @@ export function isHumanMessage(message) {
 export function isToolRelatedMessage(message) {
   const role = String(message?.role || '').trim().toLowerCase();
   if (role === 'tool' || Boolean(message?.isToolStreaming)) {
+    return true;
+  }
+  if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
     return true;
   }
 
@@ -93,6 +98,10 @@ export function getMessageIdentity(message) {
   return String(message?.messageId || '').trim();
 }
 
+export function isRenderableMessageEntry(message) {
+  return getMessageIdentity(message).length > 0;
+}
+
 function isCrossAgentAssistantMessage(message, messagesById, messages, currentIndex) {
   const role = String(message?.role || '').toLowerCase();
   if (role !== 'assistant') return false;
@@ -129,12 +138,12 @@ export function getMessageCardClassName(message, messagesById, messages, current
   const roleClassName = isUser
     ? 'ml-auto w-[80%] border-l-sidebar-border bg-sidebar-accent'
     : isTool
-      ? 'mr-auto w-[92%] border-l-amber-500/50'
+      ? 'ml-auto w-[92%] border-l-amber-500/50'
       : isCrossAgent
-        ? 'mr-auto w-[86%] border-l-violet-500/50'
+        ? 'ml-auto w-[92%] border-l-violet-500/50'
         : isSystem
           ? 'mr-auto w-[90%] border-l-border bg-muted/40'
-          : 'mr-auto w-[86%] border-l-sky-500/40';
+          : 'ml-auto w-[92%] border-l-sky-500/40';
 
   return `group relative rounded-lg border-l p-3 ${roleClassName}`;
 }

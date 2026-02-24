@@ -22,6 +22,8 @@
  * - Message deletion uses DELETE /worlds/:worldName/messages/:messageId endpoint
  *
  * Changes:
+ * - 2026-02-21: Removed server-side project-folder picker call; web now uses browser File API flow.
+ * - 2026-02-20: Enforced options-only HITL response API (`respondHitlOption`).
  * - 2026-02-14: Added respondHitlOption() API call for generic HITL option approvals.
  * - 2026-02-14: Added stopMessageProcessing() API call to cancel active chat processing from web UI.
  * - 2026-02-13: Added core-managed editMessage() API call and separated delete/edit semantics
@@ -374,8 +376,10 @@ async function respondHitlOption(
   optionId: string,
   chatId?: string | null
 ): Promise<{ accepted: boolean; reason?: string }> {
-  if (!worldName || !requestId || !optionId) {
-    throw new Error('World name, request ID, and option ID are required');
+  const normalizedRequestId = String(requestId || '').trim();
+  const normalizedOptionId = String(optionId || '').trim();
+  if (!worldName || !normalizedRequestId || !normalizedOptionId) {
+    throw new Error('World name, request ID, and optionId are required');
   }
 
   const response = await apiRequest(
@@ -383,8 +387,8 @@ async function respondHitlOption(
     {
       method: 'POST',
       body: JSON.stringify({
-        requestId,
-        optionId,
+        requestId: normalizedRequestId,
+        optionId: normalizedOptionId,
         chatId: chatId ?? null
       }),
     }
@@ -467,5 +471,3 @@ export default {
   stopMessageProcessing,
   sendMessage,
 };
-
-

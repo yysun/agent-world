@@ -12,6 +12,9 @@
  * - Tests with valid calls to ensure they pass through
  * - Tests with mixed valid and invalid calls
  * - Verifies tool_call_id handling with fallback
+ *
+ * Recent changes:
+ * - 2026-02-20: Added alias normalization coverage for `create_agent` (`auto-reply` and `next agent` variants).
  */
 
 import { describe, test, expect, vi, beforeEach } from 'vitest';
@@ -375,5 +378,91 @@ describe('Tool Utils - validateToolParameters', () => {
 
     expect(validation.valid).toBe(false);
     expect(validation.error).toContain("Required parameter 'path' is missing or empty");
+  });
+
+  test('normalizes create_agent aliases for autoReply and nextAgent', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        autoReply: { type: 'boolean' },
+        nextAgent: { type: 'string' },
+      },
+      required: ['name'],
+      additionalProperties: false,
+    };
+
+    const validation = validateToolParameters(
+      { name: 'Router', 'auto-reply': false, 'next agent': 'reviewer' },
+      schema,
+      'create_agent',
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(validation.correctedArgs).toEqual({
+      name: 'Router',
+      autoReply: false,
+      nextAgent: 'reviewer',
+    });
+  });
+
+  test('keeps canonical create_agent keys when aliases are also present', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        autoReply: { type: 'boolean' },
+        nextAgent: { type: 'string' },
+      },
+      required: ['name'],
+      additionalProperties: false,
+    };
+
+    const validation = validateToolParameters(
+      {
+        name: 'Router',
+        autoReply: true,
+        'auto-reply': false,
+        nextAgent: 'human',
+        'next agent': 'reviewer',
+      },
+      schema,
+      'create_agent',
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(validation.correctedArgs).toEqual({
+      name: 'Router',
+      autoReply: true,
+      nextAgent: 'human',
+    });
+  });
+
+  test('rejects unknown parameters when schema disables additional properties', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        question: { type: 'string' },
+        options: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+      },
+      required: ['question', 'options'],
+      additionalProperties: false,
+    };
+
+    const validation = validateToolParameters(
+      {
+        question: 'Pick one',
+        options: ['A', 'B'],
+        answer: 'free text should be rejected',
+      },
+      schema,
+      'human_intervention_request',
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(String(validation.error || '')).toContain("Unknown parameter 'answer' is not allowed");
   });
 });

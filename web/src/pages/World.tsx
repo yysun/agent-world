@@ -3,7 +3,7 @@
  *
  * Features:
  * - Centered agent list with message badges and real-time SSE chat streaming
- * - Right panel always shows Chat History (no settings panel toggle)
+ * - Responsive right panel behavior (desktop side-by-side, tablet/mobile toggle surface)
  * - Agent selection highlighting with message filtering and CRUD modals
  * - AppRun MVU pattern with modular components and extracted handlers
  * - Tailwind CSS utilities for layout, spacing, and responsive design
@@ -15,6 +15,12 @@
  * - Custom CSS for agent sprites, animations, and message styling
  * 
  * Recent Changes:
+ * - 2026-02-21: Moved mobile world action buttons into the right-panel header row so they align with the close button.
+ * - 2026-02-21: Removed mobile Chats/World tabs, kept world action buttons pinned at the top of the panel, and simplified right-panel content visibility.
+ * - 2026-02-22: Added responsive right-panel state/toggle/tabs with desktop side panel + tablet/mobile overlay behaviors.
+ * - 2026-02-21: Passed selected project-folder context into chat composer for Electron-style `Project` button parity.
+ * - 2026-02-20: Moved HITL prompts from modal overlays to inline chat-flow cards (options-only).
+ * - 2026-02-20: Highlighted the world main agent in the top agent row.
  * - 2026-02-14: Added generic HITL approval modal for option-list system prompts with web response submission wiring.
  * - 2026-02-14: Added web send/stop composer wiring via `currentChatId` and `isStopping` props.
  * - 2026-02-08: Removed legacy manual tool-intervention dialog rendering and state wiring
@@ -27,7 +33,7 @@
  */
 
 import { app, Component, safeHTML } from 'apprun';
-import type { WorldComponentState, Agent } from '../types';
+import type { WorldComponentState, Agent, RightPanelTab, WorldViewportMode } from '../types';
 import type { WorldEventName } from '../types/events';
 import WorldChat from '../components/world-chat';
 import WorldChatHistory from '../components/world-chat-history';
@@ -35,9 +41,39 @@ import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
 import { worldUpdateHandlers } from './World.update';
 
+const DESKTOP_PANEL_BREAKPOINT = 1024;
+const TABLET_PANEL_BREAKPOINT = 768;
+
+function getViewportMode(width: number): WorldViewportMode {
+  if (width >= DESKTOP_PANEL_BREAKPOINT) return 'desktop';
+  if (width >= TABLET_PANEL_BREAKPOINT) return 'tablet';
+  return 'mobile';
+}
+
+function getInitialViewportMode(): WorldViewportMode {
+  if (typeof window === 'undefined') return 'desktop';
+  return getViewportMode(window.innerWidth);
+}
+
+function isWorldMainAgent(agent: Agent, worldMainAgent: string | null | undefined): boolean {
+  const normalizedMainAgent = String(worldMainAgent || '').trim().toLowerCase();
+  if (!normalizedMainAgent) return false;
+
+  const normalizedAgentId = String(agent?.id || '').trim().toLowerCase();
+  const normalizedAgentName = String(agent?.name || '').trim().toLowerCase();
+  return normalizedMainAgent === normalizedAgentId || normalizedMainAgent === normalizedAgentName;
+}
+
 export default class WorldComponent extends Component<WorldComponentState, WorldEventName> {
   //                                                   ^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^
   //                                                   State type           Event type (AppRun native typed events)
+
+  private readonly handleViewportChange = () => {
+    if (typeof window === 'undefined') return;
+    app.run('sync-right-panel-viewport', { width: window.innerWidth });
+  };
+
+  private readonly initialViewportMode = getInitialViewportMode();
 
   override state = {
     worldName: 'World',
@@ -63,6 +99,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
     connectionStatus: 'disconnected',
     needScroll: false,  // Always false by default, set true only when new content added
     currentChat: null,
+    selectedProjectPath: null,
     editingMessageId: null,
     editingText: '',
     messageToDelete: null,
@@ -82,11 +119,18 @@ export default class WorldComponent extends Component<WorldComponentState, World
 
     // HITL approval prompt state
     hitlPromptQueue: [],
-    submittingHitlRequestId: null
+    submittingHitlRequestId: null,
+
+    // Responsive right-panel state
+    rightPanelTab: 'chats' as RightPanelTab,
+    isRightPanelOpen: this.initialViewportMode === 'desktop',
+    viewportMode: this.initialViewportMode,
   };
 
   override view = (state: WorldComponentState) => {
     const activeHitlPrompt = state.hitlPromptQueue?.length ? state.hitlPromptQueue[0] : null;
+    const isDesktopViewport = state.viewportMode === 'desktop';
+    const isRightPanelOpen = isDesktopViewport ? true : state.isRightPanelOpen;
 
     // Guard clauses for loading and error states
     // if (state.loading) {
@@ -150,7 +194,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
 
     // Main content view
     return (
-      <div className="world-container flex flex-col h-screen">
+      <div className={`world-container flex flex-col h-screen viewport-${state.viewportMode}`}>
         <div className="world-columns flex flex-1 overflow-hidden">
           <div className="chat-column flex flex-col flex-1">
             <div className="agents-section">
@@ -172,10 +216,20 @@ export default class WorldComponent extends Component<WorldComponentState, World
                       {state.world?.agents.map((agent, index) => {
                         const isSelected = state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id;
                         const isFilterActive = state.activeAgentFilters.includes(agent.id);
+                        const isMainAgent = isWorldMainAgent(agent, state.world?.mainAgent);
                         return (
-                          <div key={`agent-${agent.id || index}`} className={`agent-item ${isSelected ? 'selected' : ''} flex flex-col items-center gap-1 px-4 cursor-pointer`} $onclick={['open-agent-edit', agent]}>
+                          <div
+                            key={`agent-${agent.id || index}`}
+                            className={`agent-item ${isSelected ? 'selected' : ''} ${isMainAgent ? 'main-agent' : ''} flex flex-col items-center gap-1 px-4 cursor-pointer`}
+                            $onclick={['open-agent-edit', agent]}
+                          >
                             <div className="agent-sprite-container relative">
                               <div className={`agent-sprite sprite-${agent.spriteIndex} w-16 h-16`}></div>
+                              {isMainAgent ? (
+                                <div className="main-agent-badge absolute" title="Main agent">
+                                  MAIN
+                                </div>
+                              ) : null}
                               <div
                                 className={`message-badge ${isFilterActive ? 'active' : ''} absolute`}
                                 $onclick={['toggle-agent-filter', agent.id]}
@@ -190,6 +244,18 @@ export default class WorldComponent extends Component<WorldComponentState, World
                     </div>
                   )}
                 </div>
+                {!isDesktopViewport ? (
+                  <div className="right-panel-toggle-container">
+                    <button
+                      className="world-settings-btn right-panel-toggle"
+                      title="Open chats and world actions"
+                      aria-label="Open chats and world actions"
+                      $onclick="toggle-right-panel"
+                    >
+                      <span className="world-gear-icon">☰</span>
+                    </button>
+                  </div>
+                ) : null}
               </div>
             </div>
 
@@ -207,6 +273,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
               selectedAgent={state.selectedSettingsTarget === 'agent' ? state.selectedAgent : null}
               currentChat={state.currentChat?.name}
               currentChatId={state.currentChat?.id || null}
+              selectedProjectPath={state.selectedProjectPath}
               editingMessageId={state.editingMessageId}
               editingText={state.editingText}
               agentFilters={state.activeAgentFilters}
@@ -214,12 +281,14 @@ export default class WorldComponent extends Component<WorldComponentState, World
               elapsedMs={state.elapsedMs}
               activeTools={state.activeTools}
               isStopping={state.isStopping}
+              activeHitlPrompt={activeHitlPrompt}
+              submittingHitlRequestId={state.submittingHitlRequestId}
             />
           </div>
 
-          <div className="settings-column w-96">
-            <div className="settings-section p-4">
-              <div className="settings-row flex gap-2">
+          <div className={`settings-column world-right-panel ${isRightPanelOpen ? 'is-open' : 'is-closed'} ${state.viewportMode}-panel`}>
+            <div className="right-panel-mobile-header">
+              <div className="right-panel-mobile-actions">
                 <button
                   className="world-settings-btn"
                   title="Create New Agent"
@@ -231,7 +300,6 @@ export default class WorldComponent extends Component<WorldComponentState, World
                   className="world-settings-btn"
                   title="World Settings"
                   $onclick="open-world-edit"
-                  style={{ marginLeft: '8px' }}
                 >
                   <span className="world-gear-icon">⚙</span>
                 </button>
@@ -239,7 +307,6 @@ export default class WorldComponent extends Component<WorldComponentState, World
                   className="world-settings-btn"
                   $onclick={['export-world-markdown', { worldName: state.world?.name }]}
                   title="Export world to markdown file"
-                  style={{ marginLeft: '8px' }}
                 >
                   <span className="world-gear-icon">↓</span>
                 </button>
@@ -247,18 +314,73 @@ export default class WorldComponent extends Component<WorldComponentState, World
                   className="world-settings-btn"
                   $onclick={['view-world-markdown', { worldName: state.world?.name }]}
                   title="View world markdown in new tab"
-                  style={{ marginLeft: '4px' }}
                 >
                   <span className="world-gear-icon">&#x1F5CE;</span>
                 </button>
               </div>
+              <button
+                className="world-settings-btn right-panel-close"
+                title="Close panel"
+                aria-label="Close panel"
+                $onclick="close-right-panel"
+              >
+                <span className="world-gear-icon">×</span>
+              </button>
             </div>
 
-            <WorldChatHistory
-              world={state.world}
-            />
+            {isDesktopViewport ? (
+              <div className="settings-section p-4 world-panel-world-actions">
+                <div className="settings-row flex gap-2">
+                  <button
+                    className="world-settings-btn"
+                    title="Create New Agent"
+                    $onclick="open-agent-create"
+                  >
+                    <span className="world-gear-icon">+</span>
+                  </button>
+                  <button
+                    className="world-settings-btn"
+                    title="World Settings"
+                    $onclick="open-world-edit"
+                    style={{ marginLeft: '8px' }}
+                  >
+                    <span className="world-gear-icon">⚙</span>
+                  </button>
+                  <button
+                    className="world-settings-btn"
+                    $onclick={['export-world-markdown', { worldName: state.world?.name }]}
+                    title="Export world to markdown file"
+                    style={{ marginLeft: '8px' }}
+                  >
+                    <span className="world-gear-icon">↓</span>
+                  </button>
+                  <button
+                    className="world-settings-btn"
+                    $onclick={['view-world-markdown', { worldName: state.world?.name }]}
+                    title="View world markdown in new tab"
+                    style={{ marginLeft: '4px' }}
+                  >
+                    <span className="world-gear-icon">&#x1F5CE;</span>
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="world-panel-chats-section">
+              <WorldChatHistory
+                world={state.world}
+              />
+            </div>
           </div>
         </div>
+
+        {!isDesktopViewport && isRightPanelOpen ? (
+          <button
+            className="world-panel-backdrop"
+            aria-label="Close panel"
+            $onclick="close-right-panel"
+          />
+        ) : null}
 
         {state.showAgentEdit &&
           <AgentEdit
@@ -276,36 +398,6 @@ export default class WorldComponent extends Component<WorldComponentState, World
             parentComponent={this}
           />
         }
-
-        {activeHitlPrompt && (
-          <div className="modal-overlay fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="modal-content chat-history-modal bg-white rounded-lg p-6 max-w-md" onclick={(e: Event) => e.stopPropagation()}>
-              <h3 className="text-xl font-bold mb-4">{activeHitlPrompt.title || 'Approval required'}</h3>
-              <p className="delete-confirmation-text whitespace-pre-wrap mb-4">
-                {(activeHitlPrompt.message || 'Please choose an option to continue.').replace(/\n\s*\n+/g, '\n')}
-              </p>
-              <div className="form-actions flex gap-2 justify-end flex-nowrap overflow-x-auto pb-1">
-                {activeHitlPrompt.options.map((option) => {
-                  const isSubmitting = state.submittingHitlRequestId === activeHitlPrompt.requestId;
-                  return (
-                    <button
-                      key={option.id}
-                      className="btn-secondary px-4 py-2 rounded shrink-0"
-                      disabled={isSubmitting}
-                      $onclick={['respond-hitl-option', {
-                        requestId: activeHitlPrompt.requestId,
-                        optionId: option.id,
-                        chatId: activeHitlPrompt.chatId
-                      }]}
-                    >
-                      <div className="font-bold">{option.label}</div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Chat Delete Confirmation Modal */}
         {state.chatToDelete && (
@@ -380,6 +472,13 @@ export default class WorldComponent extends Component<WorldComponentState, World
   // we could select events to be global, but for simplicity we keep them local
   override is_global_event = () => true;
 
+  override mounted = () => {
+    if (typeof window === 'undefined') return;
+    this.handleViewportChange();
+    window.addEventListener('resize', this.handleViewportChange);
+    window.addEventListener('orientationchange', this.handleViewportChange);
+  };
+
   /**
    * Phase 2: Cleanup lifecycle - cancel RAF and timers on unmount
    */
@@ -389,6 +488,10 @@ export default class WorldComponent extends Component<WorldComponentState, World
     }
     if (this.state.elapsedIntervalId !== null) {
       clearInterval(this.state.elapsedIntervalId);
+    }
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('resize', this.handleViewportChange);
+      window.removeEventListener('orientationchange', this.handleViewportChange);
     }
   };
 
@@ -428,7 +531,8 @@ export default class WorldComponent extends Component<WorldComponentState, World
       ...state,
       showWorldEdit: true,
       worldEditMode: 'edit',
-      selectedWorldForEdit: state.world
+      selectedWorldForEdit: state.world,
+      rightPanelTab: 'world',
     }),
 
     'close-world-edit': (state: WorldComponentState): WorldComponentState => ({
@@ -458,6 +562,49 @@ export default class WorldComponent extends Component<WorldComponentState, World
         activeAgentFilters: isActive
           ? currentFilters.filter(id => id !== agentId)  // Remove if active
           : [...currentFilters, agentId]  // Add if not active
+      };
+    },
+
+    'open-right-panel': (state: WorldComponentState, tab?: RightPanelTab): WorldComponentState => ({
+      ...state,
+      rightPanelTab: tab || state.rightPanelTab,
+      isRightPanelOpen: true,
+    }),
+
+    'close-right-panel': (state: WorldComponentState): WorldComponentState => ({
+      ...state,
+      isRightPanelOpen: state.viewportMode === 'desktop' ? true : false,
+    }),
+
+    'toggle-right-panel': (state: WorldComponentState, tab?: RightPanelTab): WorldComponentState => ({
+      ...state,
+      rightPanelTab: tab || state.rightPanelTab,
+      isRightPanelOpen: state.viewportMode === 'desktop' ? true : !state.isRightPanelOpen,
+    }),
+
+    'switch-right-panel-tab': (state: WorldComponentState, tab: RightPanelTab): WorldComponentState => ({
+      ...state,
+      rightPanelTab: tab,
+      isRightPanelOpen: true,
+    }),
+
+    'sync-right-panel-viewport': (state: WorldComponentState, payload?: { width: number }): WorldComponentState => {
+      const width = Number(payload?.width || 0);
+      if (!width) return state;
+
+      const nextViewportMode = getViewportMode(width);
+      if (nextViewportMode === state.viewportMode) return state;
+
+      const nextPanelOpen = nextViewportMode === 'desktop'
+        ? true
+        : state.viewportMode === 'desktop'
+          ? false
+          : state.isRightPanelOpen;
+
+      return {
+        ...state,
+        viewportMode: nextViewportMode,
+        isRightPanelOpen: nextPanelOpen,
       };
     },
 

@@ -5,11 +5,14 @@
  * Supports world/agent/chat management with optimized serialization and error handling.
  *
  * Changes:
+ * - 2026-02-21: Removed temporary server-side folder-picker endpoint in favor of web File API based selection.
+ * - 2026-02-20: Enforced options-only HITL response endpoint `POST /worlds/:worldName/hitl/respond` (`optionId` required).
  * - 2026-02-14: Added HITL option response endpoint `POST /worlds/:worldName/hitl/respond` for web/CLI approval submissions.
  * - 2026-02-13: Added core-managed message edit endpoint `PUT /worlds/:worldName/messages/:messageId`
  *   - Delegates edit/remove/resubmit flow to `core.editUserMessage` for cross-client consistency
  *   - Streams edit-resubmission follow-up events over SSE by default (`stream: true`)
  *   - Keeps DELETE endpoint focused on removal-only behavior
+ * - 2026-02-21: Extended non-streaming timeout refresh to include shell assistant-stream SSE activity (`start`/`chunk`/`end` with `toolName='shell_cmd'`) in addition to legacy `tool-stream`.
  * - 2026-02-11: Extended non-streaming timeout on tool-stream events to prevent premature timeout during long-running tools
  * - Standardized world-scoped routes to use validateWorld middleware to load and attach worldCtx/world
  * - Removed ad-hoc world loading and undefined getWorldOrError usage; handlers now use (req as any).worldCtx and (req as any).world
@@ -74,7 +77,7 @@ import {
   removeMessagesFrom,
   editUserMessage,
   stopMessageProcessing,
-  submitWorldOptionResponse,
+  submitWorldHitlResponse,
   type World,
   type Agent,
   type Chat,
@@ -655,7 +658,7 @@ async function handleNonStreamingChat(
         }
       }, 60000); // Longer timeout as fallback since we rely on events
 
-      // Helper to reset the fallback timeout (called when tool-stream data arrives)
+      // Helper to reset the fallback timeout when long-running shell stream activity arrives.
       const resetTimeout = () => {
         clearTimeout(timeoutTimer);
         timeoutTimer = setTimeout(() => {
@@ -711,9 +714,13 @@ async function handleNonStreamingChat(
         world.eventEmitter.on(EventType.MESSAGE, messageListener);
         listeners.set(EventType.MESSAGE, messageListener);
 
-        // Listen to SSE events to extend timeout on tool-stream data
+        // Listen to SSE events to extend timeout on shell stream activity.
         const sseListener = (eventData: any) => {
-          if (eventData.type === 'tool-stream') {
+          const isLegacyToolStream = eventData.type === 'tool-stream';
+          const isShellAssistantStream = eventData.toolName === 'shell_cmd' &&
+            (eventData.type === 'start' || eventData.type === 'chunk' || eventData.type === 'end');
+
+          if (isLegacyToolStream || isShellAssistantStream) {
             resetTimeout();
           }
         };
@@ -800,11 +807,18 @@ async function handleStreamingChat(
   // Create SSE handler - automatically sets up headers, listeners, and cleanup
   const sseHandler = createSSEHandler(req, res, world, 'chat', chatId);
 
-  // Clean up subscription when the HTTP response finishes to prevent stale world
+  // Clean up subscription when the HTTP response closes/finishes to prevent stale world
   // instances from accumulating in activeSubscribedWorlds.
-  res.on('finish', () => {
-    subscription?.unsubscribe();
-  });
+  let subscriptionCleanedUp = false;
+  const cleanupSubscription = () => {
+    if (subscriptionCleanedUp) {
+      return;
+    }
+    subscriptionCleanedUp = true;
+    void subscription.unsubscribe();
+  };
+  res.on('finish', cleanupSubscription);
+  res.on('close', cleanupSubscription);
 
   try {
     // Publish message - events will be automatically streamed
@@ -923,6 +937,15 @@ router.put('/worlds/:worldName/messages/:messageId', validateWorld, async (req: 
 
     const sseHandler = createSSEHandler(req, res, subscription.world, 'edit', chatId);
 
+    let subscriptionCleanedUp = false;
+    const cleanupSubscription = () => {
+      if (subscriptionCleanedUp) {
+        return;
+      }
+      subscriptionCleanedUp = true;
+      void subscription.unsubscribe();
+    };
+
     const finalizeWithError = (message: string, data?: any): void => {
       sseHandler.sendSSE({
         type: 'error',
@@ -931,14 +954,13 @@ router.put('/worlds/:worldName/messages/:messageId', validateWorld, async (req: 
       });
       setTimeout(() => {
         sseHandler.endResponse();
-        subscription?.unsubscribe();
+        cleanupSubscription();
       }, 500);
     };
 
-    // Clean up subscription when the HTTP response finishes.
-    res.on('finish', () => {
-      subscription?.unsubscribe();
-    });
+    // Clean up subscription when the HTTP response closes/finishes.
+    res.on('finish', cleanupSubscription);
+    res.on('close', cleanupSubscription);
 
     // Pass subscription.world so editUserMessage emits on the same eventEmitter
     // that the SSE handler is listening on, avoiding stale-world mismatch.
@@ -1065,11 +1087,12 @@ router.post('/worlds/:worldName/hitl/respond', validateWorld, async (req: Reques
     }
 
     const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
-    const { requestId, optionId } = validation.data;
-    const result = submitWorldOptionResponse({
+    const { requestId, optionId, chatId } = validation.data;
+    const result = submitWorldHitlResponse({
       worldId: worldCtx.id,
       requestId,
-      optionId
+      optionId,
+      ...(chatId !== undefined ? { chatId } : {}),
     });
     res.json(result);
   } catch (error) {
