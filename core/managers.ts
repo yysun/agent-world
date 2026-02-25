@@ -25,6 +25,7 @@
  * - Error log persistence with 100-entry retention policy
  *
  * Recent Changes:
+ * - 2026-02-25: Added non-blocking pending tool-call resume trigger during `restoreChat` so unresolved persisted tool calls continue after chat load/switch.
  * - 2026-02-24: Replays unresolved HITL prompts during `restoreChat` so blocked requests become visible again on chat load.
  * - 2026-02-20: Added `claimAgentCreationSlot` to allow `create_agent` tool to hold the TOCTOU slot before showing approval dialog, preventing duplicate-approval race conditions.
  * - 2026-02-20: Added `createAgent` option `allowWhileWorldProcessing` so approval-gated in-flight tool calls can create agents without disabling default processing guards.
@@ -82,6 +83,7 @@ import { getDefaultRootPath } from './storage/storage-factory.js';
 import { NEW_CHAT_TITLE, isDefaultChatTitle } from './chat-constants.js';
 import { hasActiveChatMessageProcessing, stopMessageProcessing } from './message-processing-control.js';
 import { replayPendingHitlRequests } from './hitl.js';
+import { resumePendingToolCallsForChat } from './events/memory-manager.js';
 
 // Type imports
 import type {
@@ -115,12 +117,50 @@ function ensureInitialization(): Promise<void> {
   return moduleInitialization;
 }
 const NEW_CHAT_CONFIG = { REUSABLE_CHAT_TITLE: NEW_CHAT_TITLE } as const;
+const inFlightToolResumeKeys = new Set<string>();
 
 type CreateAgentOptions = {
   allowWhileWorldProcessing?: boolean;
   /** Set to true when the creation slot was already claimed via claimAgentCreationSlot(). */
   slotAlreadyClaimed?: boolean;
 };
+
+function triggerPendingToolCallResume(world: World, chatId: string): void {
+  if (!chatId) {
+    return;
+  }
+
+  if (hasActiveChatMessageProcessing(world.id, chatId)) {
+    return;
+  }
+
+  const resumeKey = `${world.id}:${chatId}`;
+  if (inFlightToolResumeKeys.has(resumeKey)) {
+    return;
+  }
+
+  inFlightToolResumeKeys.add(resumeKey);
+  void (async () => {
+    try {
+      const resumedCount = await resumePendingToolCallsForChat(world, chatId);
+      if (resumedCount > 0) {
+        logger.debug('Resumed pending persisted tool calls after chat restore', {
+          worldId: world.id,
+          chatId,
+          resumedCount,
+        });
+      }
+    } catch (error) {
+      logger.warn('Failed to resume pending persisted tool calls after chat restore', {
+        worldId: world.id,
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      inFlightToolResumeKeys.delete(resumeKey);
+    }
+  })();
+}
 
 // TOCTOU guard: prevents two concurrent createAgent calls from both passing the
 // `agentExists` check before either write lands. Maps worldId → Set<agentId>.
@@ -1126,6 +1166,7 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
 
   if (world.currentChatId === chatId) {
     replayPendingHitlRequests(world, chatId);
+    triggerPendingToolCallResume(world, chatId);
     return world;
   }
 
@@ -1143,6 +1184,7 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
   });
   if (world) {
     replayPendingHitlRequests(world, chatId);
+    triggerPendingToolCallResume(world, chatId);
   }
   return world;
 }

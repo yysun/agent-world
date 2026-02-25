@@ -5,34 +5,38 @@
  * - Validate replay-safe HITL prompt queue ingestion behavior in renderer subscriptions.
  *
  * Coverage:
- * - Enqueues valid HITL option prompts.
- * - Deduplicates replayed prompts by requestId.
- * - Ignores malformed or non-HITL system events.
+ * - Enqueues valid HITL option prompts from tool-progress payloads.
+ * - Deduplicates prompts by requestId.
+ * - Ignores malformed or non-HITL tool payloads.
  * - Preserves metadata used by refresh-after-dismiss behavior.
  */
 
 import { describe, expect, it } from 'vitest';
-import { enqueueHitlPromptFromSystemEvent } from '../../../electron/renderer/src/hooks/useChatEventSubscriptions';
+import { enqueueHitlPromptFromToolEvent } from '../../../electron/renderer/src/hooks/useChatEventSubscriptions';
 
 describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
-  it('enqueues a valid hitl-option-request prompt', () => {
-    const queue = enqueueHitlPromptFromSystemEvent(
+  it('enqueues a valid HITL prompt from tool-progress payload', () => {
+    const queue = enqueueHitlPromptFromToolEvent(
       [],
       {
-        eventType: 'hitl-option-request',
         chatId: 'chat-1',
-        content: {
-          requestId: 'req-1',
-          title: 'Approval required',
-          message: 'Choose one',
-          defaultOptionId: 'no',
-          options: [
-            { id: 'yes', label: 'Yes' },
-            { id: 'no', label: 'No' },
-          ],
+        tool: {
+          eventType: 'tool-progress',
           metadata: {
-            kind: 'create_agent_created',
-            refreshAfterDismiss: true,
+            hitlPrompt: {
+              requestId: 'req-1',
+              title: 'Approval required',
+              message: 'Choose one',
+              defaultOptionId: 'no',
+              options: [
+                { id: 'yes', label: 'Yes' },
+                { id: 'no', label: 'No' },
+              ],
+              metadata: {
+                kind: 'create_agent_created',
+                refreshAfterDismiss: true,
+              },
+            },
           },
         },
       },
@@ -54,38 +58,45 @@ describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
   });
 
   it('deduplicates replayed prompts by requestId', () => {
-    const existing = enqueueHitlPromptFromSystemEvent(
+    const existing = enqueueHitlPromptFromToolEvent(
       [],
       {
-        eventType: 'hitl-option-request',
         chatId: 'chat-1',
-        content: {
-          requestId: 'req-replay',
-          title: 'Approval required',
-          message: 'First payload',
-          options: [
-            { id: 'yes', label: 'Yes' },
-            { id: 'no', label: 'No' },
-          ],
+        tool: {
+          eventType: 'tool-progress',
+          metadata: {
+            hitlPrompt: {
+              requestId: 'req-replay',
+              title: 'Approval required',
+              message: 'First payload',
+              options: [
+                { id: 'yes', label: 'Yes' },
+                { id: 'no', label: 'No' },
+              ],
+            },
+          },
         },
       },
       'chat-fallback'
     );
 
-    const replayed = enqueueHitlPromptFromSystemEvent(
+    const replayed = enqueueHitlPromptFromToolEvent(
       existing,
       {
-        eventType: 'hitl-option-request',
         chatId: 'chat-1',
-        content: {
-          requestId: 'req-replay',
-          title: 'Approval required (replay)',
-          message: 'Replayed payload',
-          replay: true,
-          options: [
-            { id: 'yes', label: 'Yes' },
-            { id: 'no', label: 'No' },
-          ],
+        tool: {
+          eventType: 'tool-progress',
+          metadata: {
+            hitlPrompt: {
+              requestId: 'req-replay',
+              title: 'Approval required (replay)',
+              message: 'Replayed payload',
+              options: [
+                { id: 'yes', label: 'Yes' },
+                { id: 'no', label: 'No' },
+              ],
+            },
+          },
         },
       },
       'chat-fallback'
@@ -95,17 +106,21 @@ describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
     expect(replayed[0]?.message).toBe('First payload');
   });
 
-  it('uses fallback chat id when system event is unscoped', () => {
-    const queue = enqueueHitlPromptFromSystemEvent(
+  it('uses fallback chat id when tool payload is unscoped', () => {
+    const queue = enqueueHitlPromptFromToolEvent(
       [],
       {
-        eventType: 'hitl-option-request',
-        content: {
-          requestId: 'req-fallback',
-          options: [
-            { id: 'yes', label: 'Yes' },
-            { id: 'no', label: 'No' },
-          ],
+        tool: {
+          eventType: 'tool-progress',
+          metadata: {
+            hitlPrompt: {
+              requestId: 'req-fallback',
+              options: [
+                { id: 'yes', label: 'Yes' },
+                { id: 'no', label: 'No' },
+              ],
+            },
+          },
         },
       },
       'chat-fallback'
@@ -114,7 +129,7 @@ describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
     expect(queue[0]?.chatId).toBe('chat-fallback');
   });
 
-  it('ignores non-hitl and malformed system events', () => {
+  it('ignores non-hitl and malformed tool events', () => {
     const baseQueue = [
       {
         requestId: 'req-1',
@@ -126,42 +141,52 @@ describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
       },
     ];
 
-    const nonHitl = enqueueHitlPromptFromSystemEvent(baseQueue, { eventType: 'chat-title-updated' }, 'chat-1');
-    const malformed = enqueueHitlPromptFromSystemEvent(baseQueue, {
-      eventType: 'hitl-option-request',
-      content: { requestId: '', options: [] },
+    const nonHitl = enqueueHitlPromptFromToolEvent(baseQueue, {
+      tool: { eventType: 'tool-result' }
+    }, 'chat-1');
+    const malformed = enqueueHitlPromptFromToolEvent(baseQueue, {
+      tool: {
+        eventType: 'tool-progress',
+        metadata: { hitlPrompt: { requestId: '', options: [] } },
+      }
     }, 'chat-1');
 
     expect(nonHitl).toEqual(baseQueue);
     expect(malformed).toEqual(baseQueue);
   });
 
-  it('enqueues all prompts when multiple replayed events are batched sequentially', () => {
+  it('enqueues all prompts when multiple tool events are batched sequentially', () => {
     const events = [
       {
-        systemEvent: {
-          eventType: 'hitl-option-request',
+        payload: {
           chatId: 'chat-1',
-          content: {
-            requestId: 'req-batch-a',
-            title: 'First',
-            message: 'First?',
-            options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }],
-            replay: true,
+          tool: {
+            eventType: 'tool-progress',
+            metadata: {
+              hitlPrompt: {
+                requestId: 'req-batch-a',
+                title: 'First',
+                message: 'First?',
+                options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }],
+              },
+            },
           },
         },
         fallbackChatId: 'chat-1' as string | null,
       },
       {
-        systemEvent: {
-          eventType: 'hitl-option-request',
+        payload: {
           chatId: 'chat-1',
-          content: {
-            requestId: 'req-batch-b',
-            title: 'Second',
-            message: 'Second?',
-            options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }],
-            replay: true,
+          tool: {
+            eventType: 'tool-progress',
+            metadata: {
+              hitlPrompt: {
+                requestId: 'req-batch-b',
+                title: 'Second',
+                message: 'Second?',
+                options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }],
+              },
+            },
           },
         },
         fallbackChatId: 'chat-1' as string | null,
@@ -170,7 +195,7 @@ describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
 
     let queue: any[] = [];
     for (const entry of events) {
-      queue = enqueueHitlPromptFromSystemEvent(queue, entry.systemEvent, entry.fallbackChatId);
+      queue = enqueueHitlPromptFromToolEvent(queue, entry.payload, entry.fallbackChatId);
     }
 
     expect(queue).toHaveLength(2);

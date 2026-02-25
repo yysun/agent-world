@@ -286,7 +286,7 @@ async function getWorldMarkdown(worldName: string): Promise<string> {
 export async function setChat(worldName: string, chatId: string): Promise<{
   world: any;
   chatId: string;
-  hitlPrompts?: Array<{ chatId: string | null; content: Record<string, unknown> }>;
+  hitlPrompts?: Array<{ chatId: string | null; prompt: Record<string, unknown> }>;
   success: boolean;
 }> {
   const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/setChat/${encodeURIComponent(chatId)}`, {

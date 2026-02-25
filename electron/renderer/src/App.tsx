@@ -834,6 +834,7 @@ export default function App() {
     }
     workingStartTimeRef.current = null;
     setInlineElapsedMs(0);
+    return undefined;
   }, [chatStatus]);
 
   useEffect(() => {

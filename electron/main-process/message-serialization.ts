@@ -279,6 +279,7 @@ export function serializeRealtimeToolEvent(
       result: event?.result || toolExecution?.result || null,
       error: event?.error || toolExecution?.error || null,
       progress: event?.progress || null,
+      metadata: toolExecution?.metadata || null,
       agentId: event?.agentId || null,
       agentName: event?.agentName || null,
       createdAt: new Date().toISOString()

@@ -30,7 +30,6 @@
  *
  * Created: 2025-11-10 - Extracted from api.ts for reusability
  * Updated: 2026-02-20 - Removed stale legacy event-channel SSE forwarding from this handler.
- * Updated: 2026-02-20 - Keep `hitl-option-request` system events bypassing strict chat scope filtering so HITL prompts are always delivered.
  * Updated: 2026-02-21 - Refresh fallback timeout on shell assistant-stream SSE activity (`start`/`chunk`/`end` + `toolName='shell_cmd'`) as well as legacy `tool-stream`.
  * Updated: 2026-02-11 - Extended fallback timeout on tool-stream events to prevent premature timeout
  * Updated: 2026-02-08 - Removed manual tool-intervention SSE commentary and kept generic tool_call forwarding
@@ -200,20 +199,6 @@ export function createSSEHandler(
     return normalizedEventChatId === normalizedScopedChatId;
   };
 
-  const isHitlRequestEvent = (eventData: SystemEventPayload | undefined): boolean => {
-    if (!eventData) return false;
-    const content = eventData.content;
-    if (content && typeof content === 'object') {
-      const eventType = String((content as any).eventType || '').trim();
-      return eventType === 'hitl-option-request';
-    }
-    if (typeof content === 'string') {
-      const eventType = content.trim();
-      return eventType === 'hitl-option-request';
-    }
-    return false;
-  };
-
   // Attach direct listeners to world.eventEmitter
   const worldListener = (eventData: any) => {
     // Check if this is a tool event (tool-start, tool-result, tool-error, tool-progress)
@@ -316,8 +301,7 @@ export function createSSEHandler(
   listeners.set(EventType.SSE, sseListener);
 
   const systemListener = (eventData: SystemEventPayload) => {
-    const isHitlRequest = isHitlRequestEvent(eventData);
-    if (!isHitlRequest && !isChatEventInScope(eventData?.chatId, true)) {
+    if (!isChatEventInScope(eventData?.chatId, true)) {
       return;
     }
     sendSSE({ type: EventType.SYSTEM, data: eventData });

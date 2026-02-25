@@ -21,6 +21,7 @@
  * 
  * Changes:
  * - 2026-02-24: Commented out hardcoded Infinite-Etude handoff safeguard to respect separation of concerns (logic moved to agent prompt).
+ * - 2026-02-25: Added `resumePendingToolCallsForChat` to restore unresolved persisted tool calls (e.g. `load_skill`) on chat load/switch and continue the LLM loop.
  * - 2026-02-21: Shell tool continuation context now requests minimal LLM result mode (`status`/`exit_code`) and passes agent name for assistant-stream shell SSE attribution.
  * - 2026-02-20: Added Infinite-Etude handoff safeguard to enforce Pedagogue -> Engraver final mention when missing.
  * - 2026-02-16: Added plain-text tool-intent fallback parser in continuation to synthesize executable `tool_calls` when providers return `Calling tool: ...` text.
@@ -236,6 +237,250 @@ function parseToolCallArguments(rawArguments: unknown): Record<string, any> {
   }
 
   return {};
+}
+
+function getLatestUnresolvedToolCallForChat(
+  agent: Agent,
+  chatId: string
+): { assistantMessage: AgentMessage; toolCall: { id: string; function: { name: string; arguments: unknown } } } | null {
+  const chatMessages = agent.memory.filter((message) => message.chatId === chatId);
+  if (!chatMessages.length) {
+    return null;
+  }
+
+  const completedToolCallIds = new Set<string>();
+  for (const message of chatMessages) {
+    if (message.role === 'tool' && typeof message.tool_call_id === 'string' && message.tool_call_id.trim()) {
+      completedToolCallIds.add(message.tool_call_id.trim());
+    }
+  }
+
+  for (let index = chatMessages.length - 1; index >= 0; index--) {
+    const message = chatMessages[index];
+    if (message.role !== 'assistant' || !Array.isArray(message.tool_calls) || message.tool_calls.length === 0) {
+      continue;
+    }
+
+    for (const toolCall of message.tool_calls) {
+      const toolCallId = String((toolCall as any)?.id || '').trim();
+      const toolName = String((toolCall as any)?.function?.name || '').trim();
+      if (!toolCallId || !toolName) {
+        continue;
+      }
+      if (completedToolCallIds.has(toolCallId)) {
+        continue;
+      }
+
+      return {
+        assistantMessage: message,
+        toolCall: {
+          id: toolCallId,
+          function: {
+            name: toolName,
+            arguments: (toolCall as any)?.function?.arguments,
+          },
+        },
+      };
+    }
+  }
+
+  return null;
+}
+
+export async function resumePendingToolCallsForChat(world: World, chatId: string): Promise<number> {
+  if (!chatId) {
+    return 0;
+  }
+
+  const { getMCPToolsForWorld } = await import('../mcp-server-registry.js');
+  const mcpTools = await getMCPToolsForWorld(world.id);
+  const storage = await getStorageWrappers();
+
+  let resumedCount = 0;
+
+  for (const agent of world.agents.values()) {
+    const pending = getLatestUnresolvedToolCallForChat(agent, chatId);
+    if (!pending) {
+      continue;
+    }
+
+    const { assistantMessage, toolCall } = pending;
+    let toolArgs: Record<string, any> = {};
+    try {
+      toolArgs = parseToolCallArguments(toolCall.function.arguments);
+    } catch (parseError) {
+      const errorContent = `Error executing tool: Invalid JSON in tool arguments: ${parseError instanceof Error ? parseError.message : String(parseError)}`;
+      const toolErrorMessage: AgentMessage = {
+        role: 'tool',
+        content: errorContent,
+        tool_call_id: toolCall.id,
+        sender: agent.id,
+        createdAt: new Date(),
+        chatId,
+        messageId: generateId(),
+        replyToMessageId: assistantMessage.messageId,
+        agentId: agent.id,
+      };
+      agent.memory.push(toolErrorMessage);
+      if (assistantMessage.toolCallStatus) {
+        assistantMessage.toolCallStatus[toolCall.id] = { complete: true, result: errorContent };
+      }
+      await storage.saveAgent(world.id, agent);
+      await continueLLMAfterToolExecution(world, agent, chatId);
+      resumedCount += 1;
+      continue;
+    }
+
+    const toolDef = mcpTools[toolCall.function.name];
+    if (!toolDef) {
+      const errorContent = `Error executing tool: Tool not found: ${toolCall.function.name}`;
+      const toolErrorMessage: AgentMessage = {
+        role: 'tool',
+        content: errorContent,
+        tool_call_id: toolCall.id,
+        sender: agent.id,
+        createdAt: new Date(),
+        chatId,
+        messageId: generateId(),
+        replyToMessageId: assistantMessage.messageId,
+        agentId: agent.id,
+      };
+      agent.memory.push(toolErrorMessage);
+      if (assistantMessage.toolCallStatus) {
+        assistantMessage.toolCallStatus[toolCall.id] = { complete: true, result: errorContent };
+      }
+      publishToolEvent(world, {
+        agentName: agent.id,
+        type: 'tool-error',
+        messageId: toolCall.id,
+        chatId,
+        toolExecution: {
+          toolName: toolCall.function.name,
+          toolCallId: toolCall.id,
+          input: toolArgs,
+          error: `Tool not found: ${toolCall.function.name}`,
+        },
+      });
+      await storage.saveAgent(world.id, agent);
+      await continueLLMAfterToolExecution(world, agent, chatId);
+      resumedCount += 1;
+      continue;
+    }
+
+    publishToolEvent(world, {
+      agentName: agent.id,
+      type: 'tool-start',
+      messageId: toolCall.id,
+      chatId,
+      toolExecution: {
+        toolName: toolCall.function.name,
+        toolCallId: toolCall.id,
+        input: toolArgs,
+      },
+    });
+
+    try {
+      const trustedWorkingDirectory = String(
+        getEnvValueFromText(world.variables, 'working_directory') || getDefaultWorkingDirectory()
+      ).trim() || getDefaultWorkingDirectory();
+
+      const toolContext = {
+        world,
+        messages: agent.memory,
+        toolCallId: toolCall.id,
+        chatId,
+        workingDirectory: trustedWorkingDirectory,
+        agentName: agent.id,
+        llmResultMode: toolCall.function.name === 'shell_cmd' ? 'minimal' : 'verbose',
+      };
+
+      const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);
+      const serializedToolResult = typeof toolResult === 'string'
+        ? toolResult
+        : JSON.stringify(toolResult) ?? String(toolResult);
+
+      const toolResultMessage: AgentMessage = {
+        role: 'tool',
+        content: serializedToolResult,
+        tool_call_id: toolCall.id,
+        sender: agent.id,
+        createdAt: new Date(),
+        chatId,
+        messageId: generateId(),
+        replyToMessageId: assistantMessage.messageId,
+        agentId: agent.id,
+      };
+      agent.memory.push(toolResultMessage);
+
+      if (assistantMessage.toolCallStatus) {
+        assistantMessage.toolCallStatus[toolCall.id] = {
+          complete: true,
+          result: serializedToolResult,
+        };
+      }
+
+      publishToolEvent(world, {
+        agentName: agent.id,
+        type: 'tool-result',
+        messageId: toolCall.id,
+        chatId,
+        toolExecution: {
+          toolName: toolCall.function.name,
+          toolCallId: toolCall.id,
+          input: toolArgs,
+          result: serializedToolResult.slice(0, 4000),
+          resultType: typeof toolResult === 'string'
+            ? 'string'
+            : Array.isArray(toolResult)
+              ? 'array'
+              : toolResult === null
+                ? 'null'
+                : 'object',
+          resultSize: serializedToolResult.length,
+        },
+      });
+    } catch (toolError) {
+      const errorContent = `Error executing tool: ${toolError instanceof Error ? toolError.message : String(toolError)}`;
+      const toolErrorMessage: AgentMessage = {
+        role: 'tool',
+        content: errorContent,
+        tool_call_id: toolCall.id,
+        sender: agent.id,
+        createdAt: new Date(),
+        chatId,
+        messageId: generateId(),
+        replyToMessageId: assistantMessage.messageId,
+        agentId: agent.id,
+      };
+      agent.memory.push(toolErrorMessage);
+
+      if (assistantMessage.toolCallStatus) {
+        assistantMessage.toolCallStatus[toolCall.id] = {
+          complete: true,
+          result: errorContent,
+        };
+      }
+
+      publishToolEvent(world, {
+        agentName: agent.id,
+        type: 'tool-error',
+        messageId: toolCall.id,
+        chatId,
+        toolExecution: {
+          toolName: toolCall.function.name,
+          toolCallId: toolCall.id,
+          input: toolArgs,
+          error: toolError instanceof Error ? toolError.message : String(toolError),
+        },
+      });
+    }
+
+    await storage.saveAgent(world.id, agent);
+    await continueLLMAfterToolExecution(world, agent, chatId);
+    resumedCount += 1;
+  }
+
+  return resumedCount;
 }
 
 function decodeControlTokens(value: string): string {

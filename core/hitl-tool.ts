@@ -42,6 +42,7 @@ type HitlRequestToolContext = {
   world?: World;
   chatId?: string | null;
   agentName?: string | null;
+  toolCallId?: string;
 };
 
 type NormalizedHitlRequestArgs = {
@@ -176,6 +177,7 @@ async function requestPrimaryResolution(options: {
   chatId: string | null;
   args: NormalizedHitlRequestArgs;
   agentName?: string | null;
+  toolCallId?: string;
 }): Promise<PrimaryResolution> {
   const { world, chatId, args, agentName } = options;
   const promptOptions = buildOptionPromptOptions(args.options);
@@ -190,6 +192,9 @@ async function requestPrimaryResolution(options: {
       ...(args.metadata || {}),
       tool: 'human_intervention_request',
       mode: MODE_OPTION,
+      ...(typeof options.toolCallId === 'string' && options.toolCallId.trim()
+        ? { toolCallId: options.toolCallId.trim() }
+        : {}),
     },
     agentName: agentName || null,
   });
@@ -214,6 +219,7 @@ async function requestConfirmation(options: {
   timeoutMs: number | null;
   confirmationMessage: string | null;
   metadata: Record<string, unknown> | null;
+  toolCallId?: string;
 }): Promise<{ confirmed: boolean; source: 'user' | 'timeout' }> {
   const confirmation = await requestWorldOption(options.world, {
     title: 'Confirm response',
@@ -236,6 +242,9 @@ async function requestConfirmation(options: {
       tool: 'human_intervention_request',
       mode: 'confirmation',
       requestId: options.resolution.requestId,
+      ...(typeof options.toolCallId === 'string' && options.toolCallId.trim()
+        ? { toolCallId: options.toolCallId.trim() }
+        : {}),
     },
   });
 
@@ -338,6 +347,7 @@ export function createHitlToolDefinition() {
           chatId,
           args: normalized.args,
           agentName,
+          toolCallId: context.toolCallId,
         });
 
         if (normalized.args.requireConfirmation) {
@@ -349,6 +359,7 @@ export function createHitlToolDefinition() {
             timeoutMs: normalized.args.timeoutMs,
             confirmationMessage: normalized.args.confirmationMessage,
             metadata: normalized.args.metadata,
+            toolCallId: context.toolCallId,
           });
           if (!confirmation.confirmed) {
             return buildFinalResult({

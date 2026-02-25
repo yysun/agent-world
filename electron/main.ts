@@ -118,10 +118,10 @@ const {
   newChat,
   branchChatFromMessage,
   publishMessage,
+  listPendingHitlPromptEventsFromMessages,
   submitWorldHitlResponse,
   stopMessageProcessing,
   restoreChat,
-  replayPendingHitlRequests,
   syncSkills,
   editUserMessage,
   subscribeWorld,
@@ -155,7 +155,8 @@ const realtimeEventsRuntime = createRealtimeEventsRuntime({
   addLogStreamCallback,
   subscribeWorld,
   ensureCoreReady: () => ensureCoreReady(),
-  replayPendingHitlRequests,
+  getMemory,
+  listPendingHitlPromptEventsFromMessages,
 });
 
 const workspaceRuntime = createWorkspaceRuntime({

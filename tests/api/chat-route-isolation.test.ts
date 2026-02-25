@@ -18,7 +18,8 @@ const getWorld = vi.fn();
 const restoreChat = vi.fn();
 const editUserMessage = vi.fn();
 const listChatsMock = vi.fn();
-const listPendingHitlPromptEvents = vi.fn();
+const listPendingHitlPromptEventsFromMessages = vi.fn();
+const getMemory = vi.fn();
 
 vi.mock('../../core/index.js', () => {
   const logger = {
@@ -45,11 +46,11 @@ vi.mock('../../core/index.js', () => {
     listChats: listChatsMock,
     newChat: vi.fn(),
     restoreChat,
-    listPendingHitlPromptEvents,
+    listPendingHitlPromptEventsFromMessages,
     deleteChat: vi.fn(),
     clearAgentMemory: vi.fn(),
     listAgents: vi.fn(),
-    getMemory: vi.fn(),
+    getMemory,
     exportWorldToMarkdown: vi.fn(),
     removeMessagesFrom: vi.fn(),
     editUserMessage,
@@ -155,7 +156,7 @@ describe('API chat route isolation', () => {
       chats: new Map([['chat-1', { id: 'chat-1', name: 'Chat 1', messageCount: 0 }]])
     });
     restoreChat.mockResolvedValue(null);
-    listPendingHitlPromptEvents.mockReturnValue([]);
+    listPendingHitlPromptEventsFromMessages.mockReturnValue([]);
   });
 
   it('rejects message send when requested chatId does not exist', async () => {
@@ -254,7 +255,8 @@ describe('API chat route isolation', () => {
     await routeHandler(req, res);
 
     expect(restoreChat).toHaveBeenCalledWith('world-1', 'chat-2');
-    expect(listPendingHitlPromptEvents).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-1' }), 'chat-2');
+    expect(getMemory).toHaveBeenCalledWith('world-1', 'chat-2');
+    expect(listPendingHitlPromptEventsFromMessages).toHaveBeenCalled();
     expect(res.statusCode).toBe(200);
     expect(res.body).toMatchObject({
       success: true,
@@ -268,11 +270,16 @@ describe('API chat route isolation', () => {
 
     const pendingPrompt = {
       chatId: 'chat-2',
-      content: {
-        eventType: 'hitl-option-request',
+      prompt: {
         requestId: 'req-1',
         title: 'Approval required',
         options: [{ id: 'yes', label: 'Yes' }],
+        message: 'Approve?',
+        defaultOptionId: 'yes',
+        metadata: null,
+        agentName: null,
+        toolName: 'human_intervention_request',
+        toolCallId: 'req-1',
       },
     };
 
@@ -286,7 +293,8 @@ describe('API chat route isolation', () => {
         ['chat-2', { id: 'chat-2', name: 'Chat 2', messageCount: 0 }],
       ])
     });
-    listPendingHitlPromptEvents.mockReturnValueOnce([pendingPrompt]);
+    getMemory.mockResolvedValueOnce([]);
+    listPendingHitlPromptEventsFromMessages.mockReturnValueOnce([pendingPrompt]);
 
     const req: any = {
       params: { worldName: 'world-1', chatId: 'chat-2' },
@@ -304,8 +312,7 @@ describe('API chat route isolation', () => {
       hitlPrompts: [
         expect.objectContaining({
           chatId: 'chat-2',
-          content: expect.objectContaining({
-            eventType: 'hitl-option-request',
+          prompt: expect.objectContaining({
             requestId: 'req-1',
           }),
         }),

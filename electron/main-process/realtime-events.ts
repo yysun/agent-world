@@ -11,6 +11,8 @@
  * - Uses dependency injection for window lookup and world subscription API.
  *
  * Recent Changes:
+ * - 2026-02-24: Switched HITL restore dispatch to persisted message reconstruction (`getMemory` + request/response pairing helper).
+ * - 2026-02-24: Replaced HITL replay dependency with pending-prompt read model dispatch over tool events.
  * - 2026-02-24: Restored strict chat-scoped SSE/tool filtering after source-side chatId guarantees were added to streaming emitters.
  * - 2026-02-20: Allow `hitl-option-request` system events to bypass strict chatId filtering so approval prompts are not dropped by chat-scope mismatch.
  * - 2026-02-16: Fixed activity events (response-start, idle) being filtered out when subscription has a chatId — activity events are world-level and carry no chatId.
@@ -58,7 +60,8 @@ interface CreateRealtimeEventsRuntimeDependencies {
   addLogStreamCallback: (callback: (logEvent: unknown) => void) => () => void;
   subscribeWorld: (worldId: string, options: Record<string, unknown>) => Promise<WorldSubscriptionLike | null>;
   ensureCoreReady: () => Promise<void> | void;
-  replayPendingHitlRequests?: (world: unknown, chatId?: string | null) => number;
+  getMemory?: (worldId: string, chatId: string | null) => Promise<any[] | null>;
+  listPendingHitlPromptEventsFromMessages?: (messages: any[], chatId?: string | null) => Array<{ chatId: string | null; prompt: Record<string, unknown> }>;
 }
 
 interface ChatEventSubscription {
@@ -80,19 +83,6 @@ export interface RealtimeEventsRuntime {
   removeWorldSubscriptions: (worldId: string) => Promise<void>;
 }
 
-function isHitlRequestSystemEvent(event: any): boolean {
-  const content = event?.content;
-  if (typeof content === 'object' && content) {
-    const eventType = String((content as { eventType?: unknown }).eventType || '').trim();
-    return eventType === 'hitl-option-request';
-  }
-  if (typeof content === 'string') {
-    const eventType = content.trim();
-    return eventType === 'hitl-option-request';
-  }
-  return false;
-}
-
 export function createRealtimeEventsRuntime(
   dependencies: CreateRealtimeEventsRuntimeDependencies
 ): RealtimeEventsRuntime {
@@ -102,7 +92,8 @@ export function createRealtimeEventsRuntime(
     addLogStreamCallback,
     subscribeWorld,
     ensureCoreReady,
-    replayPendingHitlRequests,
+    getMemory,
+    listPendingHitlPromptEventsFromMessages,
   } = dependencies;
 
   const chatEventSubscriptions = new Map<string, ChatEventSubscription>();
@@ -286,14 +277,7 @@ export function createRealtimeEventsRuntime(
 
     const systemHandler = (event: any) => {
       const eventChatId = event?.chatId ? String(event.chatId) : null;
-      const isHitlRequest = isHitlRequestSystemEvent(event);
-      if (chatId) {
-        if (isHitlRequest) {
-          if (eventChatId && eventChatId !== chatId) return;
-        } else if (eventChatId !== chatId) {
-          return;
-        }
-      }
+      if (chatId && eventChatId !== chatId) return;
       sendRealtimeEventToRenderer({
         ...serializeRealtimeSystemEvent(worldId, eventChatId || chatId, event),
         subscriptionId
@@ -325,11 +309,44 @@ export function createRealtimeEventsRuntime(
       return { subscribed: false, canceled: true, stale: true, subscriptionId, worldId, chatId };
     }
 
-    if (chatId && typeof replayPendingHitlRequests === 'function') {
+    if (chatId && typeof getMemory === 'function' && typeof listPendingHitlPromptEventsFromMessages === 'function') {
       try {
-        replayPendingHitlRequests(world, chatId);
+        const persistedMessages = await getMemory(worldId, chatId);
+        const pendingPrompts = listPendingHitlPromptEventsFromMessages(persistedMessages || [], chatId);
+        for (const pending of pendingPrompts) {
+          const prompt = pending?.prompt && typeof pending.prompt === 'object'
+            ? pending.prompt
+            : null;
+          if (!prompt) {
+            continue;
+          }
+
+          const toolCallId = String(prompt.toolCallId || prompt.requestId || '').trim();
+          const toolName = String(prompt.toolName || 'human_intervention_request').trim() || 'human_intervention_request';
+          if (!toolCallId) {
+            continue;
+          }
+
+          sendRealtimeEventToRenderer({
+            ...serializeRealtimeToolEvent(worldId, pending?.chatId || chatId, {
+              type: 'tool-progress',
+              chatId: pending?.chatId || chatId,
+              toolExecution: {
+                toolName,
+                toolCallId,
+                metadata: {
+                  hitlPrompt: {
+                    ...prompt,
+                    chatId: pending?.chatId || chatId,
+                  },
+                },
+              },
+            }),
+            subscriptionId,
+          });
+        }
       } catch (error) {
-        const warningMessage = `Failed to replay pending HITL requests for world '${worldId}' chat '${chatId}': ${error instanceof Error ? error.message : String(error)}`;
+        const warningMessage = `Failed to reconstruct pending HITL prompts for world '${worldId}' chat '${chatId}': ${error instanceof Error ? error.message : String(error)}`;
         console.warn(warningMessage);
       }
     }

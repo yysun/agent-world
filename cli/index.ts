@@ -114,7 +114,7 @@ import {
 } from './display.js';
 import {
   markHitlRequestHandled,
-  parseHitlPromptRequest,
+  parseHitlPromptFromToolEvent,
   resolveHitlOptionSelectionInput,
   type HitlOptionRequestPayload,
 } from './hitl.js';
@@ -547,6 +547,55 @@ function attachCLIListeners(
 
   // World activity events
   const worldListener = (eventData: WorldActivityEventPayload) => {
+    const hitlRequest = parseHitlPromptFromToolEvent(eventData);
+    if (hitlRequest) {
+      if (!markHitlRequestHandled(handledHitlRequestIds, hitlRequest.requestId)) {
+        return;
+      }
+      hitlPromptChain = hitlPromptChain
+        .then(async () => {
+          if (streaming && globalState && rl && statusLine) {
+            globalState.hitlPromptActive = true;
+            try {
+              const result = submitWorldHitlResponse({
+                worldId: world.id,
+                requestId: hitlRequest.requestId,
+                optionId: await promptHitlOptionSelection(hitlRequest, statusLine, rl),
+                chatId: hitlRequest.chatId,
+              });
+              if (!result.accepted) {
+                statusLine.pause();
+                console.log(boldRed(`Failed to submit approval response: ${result.reason || 'unknown error'}`));
+                statusLine.resume();
+                return;
+              }
+              statusLine.pause();
+              console.log(green('Submitted HITL option response.'));
+              statusLine.resume();
+              return;
+            } finally {
+              globalState.hitlPromptActive = false;
+            }
+          }
+
+          const result = submitWorldHitlResponse({
+            worldId: world.id,
+            requestId: hitlRequest.requestId,
+            optionId: hitlRequest.defaultOptionId,
+            chatId: hitlRequest.chatId,
+          });
+          if (!result.accepted) {
+            console.error(boldRed(`Failed to auto-respond HITL request: ${result.reason || 'unknown error'}`));
+            return;
+          }
+          console.log(`${gray('● system:')} Auto-selected HITL option "${hitlRequest.defaultOptionId}"`);
+        })
+        .catch((error) => {
+          console.error(boldRed(`Error handling HITL request: ${error instanceof Error ? error.message : String(error)}`));
+        });
+      return;
+    }
+
     activityMonitor.handle(eventData);
     // Only render activity progress in interactive mode
     if (streaming && globalState && rl && statusLine) {
@@ -611,56 +660,6 @@ function attachCLIListeners(
 
   // System events
   const systemListener = (eventData: SystemEventPayload) => {
-    const hitlRequest = parseHitlPromptRequest(eventData);
-    if (hitlRequest) {
-      if (!markHitlRequestHandled(handledHitlRequestIds, hitlRequest.requestId)) {
-        return;
-      }
-      hitlPromptChain = hitlPromptChain
-        .then(async () => {
-          if (streaming && globalState && rl && statusLine) {
-            globalState.hitlPromptActive = true;
-            try {
-              const result = submitWorldHitlResponse({
-                worldId: world.id,
-                requestId: hitlRequest.requestId,
-                optionId: await promptHitlOptionSelection(hitlRequest, statusLine, rl),
-                chatId: hitlRequest.chatId,
-              });
-              if (!result.accepted) {
-                statusLine.pause();
-                console.log(boldRed(`Failed to submit approval response: ${result.reason || 'unknown error'}`));
-                statusLine.resume();
-                return;
-              }
-              statusLine.pause();
-              console.log(green('Submitted HITL option response.'));
-              statusLine.resume();
-              return;
-            } finally {
-              globalState.hitlPromptActive = false;
-            }
-          }
-
-          // Pipeline/non-interactive mode: auto-respond with default option to avoid blocking.
-          const result = submitWorldHitlResponse({
-            worldId: world.id,
-            requestId: hitlRequest.requestId,
-            optionId: hitlRequest.defaultOptionId,
-            chatId: hitlRequest.chatId,
-          });
-          if (!result.accepted) {
-            console.error(boldRed(`Failed to auto-respond HITL request: ${result.reason || 'unknown error'}`));
-            return;
-          }
-          console.log(`${gray('● system:')} Auto-selected HITL option "${hitlRequest.defaultOptionId}"`);
-        })
-        .catch((error) => {
-          console.error(boldRed(`Error handling HITL request: ${error instanceof Error ? error.message : String(error)}`));
-        });
-      return;
-    }
-
     if (eventData.content &&
       typeof eventData.content === 'string' &&
       eventData.content.includes('Success message sent')) return;

@@ -99,6 +99,7 @@ export {
   requestWorldOption,
   replayPendingHitlRequests,
   listPendingHitlPromptEvents,
+  listPendingHitlPromptEventsFromMessages,
   submitWorldHitlResponse,
   submitWorldOptionResponse,
   clearHitlStateForTests,

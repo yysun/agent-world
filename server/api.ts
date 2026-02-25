@@ -70,7 +70,7 @@ import {
   listChats,
   newChat,
   restoreChat,
-  listPendingHitlPromptEvents,
+  listPendingHitlPromptEventsFromMessages,
   deleteChat as deleteChatCore,
   clearAgentMemory,
   listAgents as listAgentsCore,
@@ -1201,9 +1201,14 @@ router.post('/worlds/:worldName/setChat/:chatId', validateWorld, async (req: Req
       return;
     }
 
+    const loadHitlPromptsFromMemory = async (worldId: string, targetChatId: string | null) => {
+      const memory = await coreGetMemory(worldId, targetChatId || undefined);
+      return listPendingHitlPromptEventsFromMessages(memory || [], targetChatId || null);
+    };
+
     const updatedWorld = await worldCtx.setChat(chatId);
     if (!updatedWorld) {
-      const pendingHitlPrompts = listPendingHitlPromptEvents(currentWorld, currentWorld.currentChatId || null);
+      const pendingHitlPrompts = await loadHitlPromptsFromMemory(currentWorld.id, currentWorld.currentChatId || null);
       res.json({
         world: serializeWorld(currentWorld),
         chatId: currentWorld.currentChatId,
@@ -1213,7 +1218,7 @@ router.post('/worlds/:worldName/setChat/:chatId', validateWorld, async (req: Req
       return;
     }
 
-    const pendingHitlPrompts = listPendingHitlPromptEvents(updatedWorld, updatedWorld.currentChatId || null);
+    const pendingHitlPrompts = await loadHitlPromptsFromMemory(updatedWorld.id, updatedWorld.currentChatId || null);
 
     res.json({
       world: serializeWorld(updatedWorld),

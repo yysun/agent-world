@@ -38,6 +38,8 @@ type TestMessage = {
   type?: string;
   optimisticUserPending?: boolean;
   createdAt?: string;
+  isToolStreaming?: boolean;
+  streamType?: string;
 };
 
 function createMessageStateHarness(initial: TestMessage[] = []) {
@@ -353,6 +355,7 @@ describe('createChatSubscriptionEventHandler', () => {
         handleToolStreamChunk: vi.fn(),
         handleToolStreamEnd: vi.fn(),
         isActive: vi.fn((messageId: string) => messageId === 'stream-1'),
+        cleanup: vi.fn(),
       }
     };
 
@@ -884,7 +887,7 @@ describe('createChatSubscriptionEventHandler', () => {
     expect(onSessionSystemEvent).not.toHaveBeenCalled();
   });
 
-  it('ignores hitl-option-request system events when chatId differs', () => {
+  it('ignores system events when chatId differs', () => {
     const harness = createMessageStateHarness();
     const onSessionSystemEvent = vi.fn();
 
@@ -904,13 +907,10 @@ describe('createChatSubscriptionEventHandler', () => {
       worldId: 'world-1',
       chatId: 'chat-2',
       system: {
-        eventType: 'hitl-option-request',
+        eventType: 'chat-title-updated',
         messageId: 'sys-hitl',
         content: {
-          eventType: 'hitl-option-request',
-          requestId: 'req-1',
-          title: 'Approval required',
-          options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }]
+          eventType: 'chat-title-updated',
         }
       }
     });
@@ -918,7 +918,7 @@ describe('createChatSubscriptionEventHandler', () => {
     expect(onSessionSystemEvent).not.toHaveBeenCalled();
   });
 
-  it('forwards unscoped hitl-option-request system events to selected session', () => {
+  it('ignores unscoped system events when a session is selected', () => {
     const harness = createMessageStateHarness();
     const onSessionSystemEvent = vi.fn();
 
@@ -937,21 +937,14 @@ describe('createChatSubscriptionEventHandler', () => {
       subscriptionId: 'sub-1',
       worldId: 'world-1',
       system: {
-        eventType: 'hitl-option-request',
+        eventType: 'chat-title-updated',
         messageId: 'sys-hitl-unscoped',
         content: {
-          eventType: 'hitl-option-request',
-          requestId: 'req-1',
-          title: 'Approval required',
-          options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }]
+          eventType: 'chat-title-updated',
         }
       }
     });
 
-    expect(onSessionSystemEvent).toHaveBeenCalledWith(expect.objectContaining({
-      eventType: 'hitl-option-request',
-      chatId: null,
-      messageId: 'sys-hitl-unscoped'
-    }));
+    expect(onSessionSystemEvent).not.toHaveBeenCalled();
   });
 });

@@ -8,6 +8,7 @@
  * - Uses mocked in-memory storage wrappers only.
  * - Verifies no persistence update occurs for missing chats.
  * - Verifies chat restore replays unresolved HITL prompts for the loaded chat.
+ * - Verifies chat restore triggers pending persisted tool-call resume for the loaded chat.
  *
  * Notes:
  * - Prevents cross-chat leakage via invalid/stale chat IDs during switch flows.
@@ -86,11 +87,22 @@ describe('restoreChat validation', () => {
       };
     });
 
+    const resumePendingToolCallsForChat = vi.fn().mockResolvedValue(1);
+    vi.doMock('../../core/events/memory-manager.js', async () => {
+      const actual = await vi.importActual<typeof import('../../core/events/memory-manager.js')>('../../core/events/memory-manager.js');
+      return {
+        ...actual,
+        resumePendingToolCallsForChat,
+      };
+    });
+
     const managers = await import('../../core/managers.js');
     const restored = await managers.restoreChat('world-1', 'chat-2');
     expect(restored).not.toBeNull();
 
     expect(replayPendingHitlRequests).toHaveBeenCalledTimes(1);
     expect(replayPendingHitlRequests).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-1' }), 'chat-2');
+    expect(resumePendingToolCallsForChat).toHaveBeenCalledTimes(1);
+    expect(resumePendingToolCallsForChat).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-1' }), 'chat-2');
   });
 });

@@ -20,7 +20,6 @@
  * - 2026-02-21: Backfilled tool-stream row metadata on late `tool-start` events so shell cards still resolve command/tool labels even when stream chunks arrive first.
  * - 2026-02-21: Derived shell command labels for tool-stream rows from `tool-start` input (`toolUseId -> command`) and forwarded command metadata into streaming state.
  * - 2026-02-21: Forwarded SSE `toolName` into tool-stream state so tool streaming cards can render tool-specific running labels.
- * - 2026-02-20: Allow `hitl-option-request` system events to bypass strict chatId session filtering so approval prompts remain visible when event scope is stale/unscoped.
  * - 2026-02-19: Reset elapsed activity timer on idle→active session-activity transition so new agent work starts from 0s.
  * - 2026-02-16: Added defensive SSE end/error handling when `messageId` is missing by clearing response state and ending lingering streams.
  * - 2026-02-16: Added selected-session fallback for unscoped SSE/tool completion events so waiting indicators clear when `chatId` is omitted.
@@ -35,7 +34,7 @@
  */
 
 import { createLogMessage, upsertMessageList, type MessageLike } from './message-updates';
-import { clearChatAgents, completeWorkingChatAgents, updateRegistry } from './status-registry';
+import { clearChatAgents, updateRegistry } from './status-registry';
 import { applyEventToRegistry } from './status-updater';
 
 interface BasePayload {
@@ -106,19 +105,6 @@ function isAssistantLikeMessage(message: Record<string, unknown> | null | undefi
   return true;
 }
 
-
-function isHitlRequestPayload(systemPayload: Record<string, unknown>): boolean {
-  const topLevelType = String(systemPayload.eventType || '').trim();
-  if (topLevelType === 'hitl-option-request') {
-    return true;
-  }
-  const nestedContent = systemPayload.content;
-  if (nestedContent && typeof nestedContent === 'object') {
-    const eventType = String((nestedContent as Record<string, unknown>).eventType || '').trim();
-    return eventType === 'hitl-option-request';
-  }
-  return false;
-}
 
 export function createGlobalLogEventHandler({
   loadedWorldId,
@@ -436,14 +422,7 @@ export function createChatSubscriptionEventHandler({
       if (!systemPayload) return;
 
       const systemChatId = String(payload.chatId || systemPayload.chatId || '').trim() || null;
-      const isHitlRequest = isHitlRequestPayload(systemPayload);
-      if (selectedSessionId) {
-        if (isHitlRequest) {
-          if (systemChatId && systemChatId !== selectedSessionId) return;
-        } else if (systemChatId !== selectedSessionId) {
-          return;
-        }
-      }
+      if (selectedSessionId && systemChatId !== selectedSessionId) return;
 
       if (typeof onSessionSystemEvent === 'function') {
         onSessionSystemEvent({
@@ -455,17 +434,6 @@ export function createChatSubscriptionEventHandler({
         });
       }
 
-      if (isHitlRequest) {
-        const hitlAgentName = String(systemPayload.agentName || '').trim() || null;
-        const hitlChatId = systemChatId || selectedSessionId || null;
-        if (loadedWorldId && hitlChatId) {
-          if (hitlAgentName) {
-            updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, hitlChatId, hitlAgentName, 'system', 'hitl-option-request'));
-          } else {
-            updateRegistry((r) => completeWorkingChatAgents(r, loadedWorldId, hitlChatId));
-          }
-        }
-      }
     }
 
     // Activity events drive the working indicator, mirroring the web app's

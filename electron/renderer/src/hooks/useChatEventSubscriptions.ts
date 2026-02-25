@@ -90,18 +90,24 @@ type SessionSystemEventPayload = {
   content?: unknown;
 };
 
-export function enqueueHitlPromptFromSystemEvent(
+export function enqueueHitlPromptFromToolEvent(
   existing: HitlPrompt[],
-  systemEvent: SessionSystemEventPayload,
+  payload: any,
   fallbackChatId: string | null
 ): HitlPrompt[] {
-  const eventType = String(systemEvent?.eventType || '').trim();
-  if (eventType !== 'hitl-option-request') {
+  const toolPayload = payload?.tool && typeof payload.tool === 'object'
+    ? (payload.tool as Record<string, unknown>)
+    : null;
+  const eventType = String(toolPayload?.eventType || '').trim().toLowerCase();
+  if (eventType !== 'tool-progress') {
     return existing;
   }
 
-  const content = systemEvent?.content && typeof systemEvent.content === 'object'
-    ? (systemEvent.content as Record<string, unknown>)
+  const toolMetadata = toolPayload?.metadata && typeof toolPayload.metadata === 'object'
+    ? (toolPayload.metadata as Record<string, unknown>)
+    : null;
+  const content = toolMetadata?.hitlPrompt && typeof toolMetadata.hitlPrompt === 'object'
+    ? (toolMetadata.hitlPrompt as Record<string, unknown>)
     : null;
   const requestId = String(content?.requestId || '').trim();
   if (!requestId) {
@@ -125,7 +131,7 @@ export function enqueueHitlPromptFromSystemEvent(
     return existing;
   }
 
-  const metadata = content?.metadata && typeof content.metadata === 'object'
+  const promptMetadata = content?.metadata && typeof content.metadata === 'object'
     ? (content.metadata as Record<string, unknown>)
     : null;
 
@@ -133,15 +139,15 @@ export function enqueueHitlPromptFromSystemEvent(
     ...existing,
     {
       requestId,
-      chatId: systemEvent?.chatId || fallbackChatId || null,
+      chatId: String(content?.chatId || payload?.chatId || fallbackChatId || '').trim() || null,
       title: String(content?.title || 'Approval required').trim() || 'Approval required',
       message: String(content?.message || '').trim(),
       mode: 'option',
       options,
       ...(typeof content?.defaultOptionId === 'string' ? { defaultOptionId: String(content.defaultOptionId) } : {}),
       metadata: {
-        refreshAfterDismiss: metadata?.refreshAfterDismiss === true,
-        kind: typeof metadata?.kind === 'string' ? metadata.kind : undefined,
+        refreshAfterDismiss: promptMetadata?.refreshAfterDismiss === true,
+        kind: typeof promptMetadata?.kind === 'string' ? promptMetadata.kind : undefined,
       },
     }
   ];
@@ -158,7 +164,7 @@ export function useChatEventSubscriptions({
   resetActivityRuntimeState,
   setHitlPromptQueue,
 }: UseChatEventSubscriptionsArgs) {
-  const pendingHitlEventsRef = useRef<Array<{ systemEvent: any; fallbackChatId: string | null }>>([]);
+  const pendingHitlEventsRef = useRef<Array<{ payload: any; fallbackChatId: string | null }>>([]);
   const pendingHitlFlushTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -181,7 +187,7 @@ export function useChatEventSubscriptions({
     }
 
     const subscriptionId = `chat-${Date.now()}-${chatSubscriptionCounter.current++}`;
-    const removeListener = api.onChatEvent(createChatSubscriptionEventHandler({
+    const chatEventHandler = createChatSubscriptionEventHandler({
       subscriptionId,
       loadedWorldId,
       selectedSessionId,
@@ -195,28 +201,35 @@ export function useChatEventSubscriptions({
           refreshSessions(loadedWorldId, targetChatId).catch(() => { });
           return;
         }
-        if (eventType !== 'hitl-option-request') {
-          return;
-        }
-
-        pendingHitlEventsRef.current.push({ systemEvent, fallbackChatId: selectedSessionId });
-
-        if (pendingHitlFlushTimerRef.current === null) {
-          pendingHitlFlushTimerRef.current = window.setTimeout(() => {
-            const batch = pendingHitlEventsRef.current.splice(0);
-            pendingHitlFlushTimerRef.current = null;
-            if (batch.length === 0) return;
-            setHitlPromptQueue((existing) => {
-              let queue = existing;
-              for (const entry of batch) {
-                queue = enqueueHitlPromptFromSystemEvent(queue, entry.systemEvent, entry.fallbackChatId);
-              }
-              return queue;
-            });
-          }, 0);
-        }
       }
-    }));
+    });
+
+    const removeListener = api.onChatEvent((payload: any) => {
+      chatEventHandler(payload);
+
+      if (payload?.subscriptionId && payload.subscriptionId !== subscriptionId) {
+        return;
+      }
+      if (payload?.worldId && payload.worldId !== loadedWorldId) {
+        return;
+      }
+
+      pendingHitlEventsRef.current.push({ payload, fallbackChatId: selectedSessionId });
+      if (pendingHitlFlushTimerRef.current === null) {
+        pendingHitlFlushTimerRef.current = window.setTimeout(() => {
+          const batch = pendingHitlEventsRef.current.splice(0);
+          pendingHitlFlushTimerRef.current = null;
+          if (batch.length === 0) return;
+          setHitlPromptQueue((existing) => {
+            let queue = existing;
+            for (const entry of batch) {
+              queue = enqueueHitlPromptFromToolEvent(queue, entry.payload, entry.fallbackChatId);
+            }
+            return queue;
+          });
+        }, 0);
+      }
+    });
 
     api.subscribeChatEvents(loadedWorldId, selectedSessionId, subscriptionId).catch(() => { });
 
