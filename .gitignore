@@ -3,6 +3,8 @@ node_modules/
 
 # Build output
 dist/
+release/
+*.tgz
 
 # Environment variables
 .env
@@ -53,3 +55,9 @@ skills-lock.json
 
 .tmp/
 test-results/
+
+# Electron packaging output
+electron/release/
+electron/builder-effective-config.yaml
+electron/.cache/
+electron/.electron-builder/
