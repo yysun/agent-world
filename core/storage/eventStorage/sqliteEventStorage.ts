@@ -180,7 +180,7 @@ async function saveEvent(ctx: SQLiteEventStorageContext, event: StoredEvent): Pr
     event.type,
     JSON.stringify(event.payload),
     event.meta ? JSON.stringify(event.meta) : null,
-    event.createdAt.toISOString()
+    (event.createdAt ? new Date(event.createdAt) : new Date()).toISOString()
   );
 }
 
@@ -211,7 +211,7 @@ async function saveEvents(ctx: SQLiteEventStorageContext, events: StoredEvent[])
         event.type,
         JSON.stringify(event.payload),
         event.meta ? JSON.stringify(event.meta) : null,
-        event.createdAt.toISOString()
+        (event.createdAt ? new Date(event.createdAt) : new Date()).toISOString()
       );
     }
 

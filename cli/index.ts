@@ -95,6 +95,8 @@ import {
 } from '../core/index.js';
 import { World, EventType } from '../core/types.js';
 import { getDefaultRootPath } from '../core/storage/storage-factory.js';
+// Opik integration: optional tracer attach for CLI world subscriptions.
+import { attachOptionalOpikTracer } from '../core/optional-tracers/opik-runtime.js';
 import { processCLIInput, displayChatMessages } from './commands.js';
 import {
   StreamingState,
@@ -505,6 +507,7 @@ interface CLIOptions {
   world?: string;
   command?: string;
   logLevel?: string;
+  opikEnabled?: string;
 }
 
 // Helper to print CLI results in a user-friendly way
@@ -691,6 +694,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
   let worldSubscription: any = null;
   let cliListeners: Map<string, (...args: any[]) => void> | null = null;
   const activityMonitor = new WorldActivityMonitor();
+  const opikEnabledOverride = parseOptionalBoolean(options.opikEnabled);
 
   try {
 
@@ -702,6 +706,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
         process.exit(1);
       }
       world = worldSubscription.world as World;
+      await attachOptionalOpikTracer(world, { source: 'cli', enabledOverride: opikEnabledOverride });
 
       // Attach direct listeners to the world.eventEmitter for pipeline handling
       // Note: Pipeline mode uses non-streaming LLM calls, so SSE events are not needed
@@ -857,6 +862,7 @@ async function handleSubscribe(
   globalState: GlobalState,
   activityMonitor: WorldActivityMonitor,
   statusLine: StatusLineManager,
+  opikEnabledOverride?: boolean,
   rl?: readline.Interface
 ): Promise<WorldState | null> {
   // Subscribe to world lifecycle but do not request forwarding callbacks
@@ -864,6 +870,7 @@ async function handleSubscribe(
   if (!subscription) throw new Error('Failed to load world');
 
   const world = subscription.world as World;
+  await attachOptionalOpikTracer(world, { source: 'cli', enabledOverride: opikEnabledOverride });
 
   // Store world in globalState for access in interactive event handlers.
   if (globalState) {
@@ -1407,6 +1414,7 @@ async function confirmOverwrite(message: string, rl: readline.Interface): Promis
 // Interactive mode: console-based interface
 async function runInteractiveMode(options: CLIOptions): Promise<void> {
   const rootPath = options.root || DEFAULT_ROOT_PATH;
+  const opikEnabledOverride = parseOptionalBoolean(options.opikEnabled);
 
   const globalState: GlobalState = createGlobalState();
   const streaming = createStreamingState();
@@ -1433,7 +1441,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       try {
         activityMonitor.reset();
         statusLine.reset();
-        worldState = await handleSubscribe(rootPath, options.world, streaming, globalState, activityMonitor, statusLine, rl);
+        worldState = await handleSubscribe(rootPath, options.world, streaming, globalState, activityMonitor, statusLine, opikEnabledOverride, rl);
         currentWorldName = options.world;
         console.log(success(`Connected to world: ${currentWorldName}`));
 
@@ -1460,7 +1468,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       try {
         activityMonitor.reset();
         statusLine.reset();
-        worldState = await handleSubscribe(effectiveRootPath, selectedWorld.worldName, streaming, globalState, activityMonitor, statusLine, rl);
+        worldState = await handleSubscribe(effectiveRootPath, selectedWorld.worldName, streaming, globalState, activityMonitor, statusLine, opikEnabledOverride, rl);
         currentWorldName = selectedWorld.worldName;
         console.log(success(`Connected to world: ${currentWorldName}`));
         if (selectedWorld.externalPath) {
@@ -1572,7 +1580,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
             logger.debug(`Subscribing to world: ${selectedWorld.worldName}...`);
             activityMonitor.reset();
             statusLine.reset();
-            worldState = await handleSubscribe(effectiveRootPath, selectedWorld.worldName, streaming, globalState, activityMonitor, statusLine, rl);
+            worldState = await handleSubscribe(effectiveRootPath, selectedWorld.worldName, streaming, globalState, activityMonitor, statusLine, opikEnabledOverride, rl);
             currentWorldName = selectedWorld.worldName;
             console.log(success(`Connected to world: ${currentWorldName}`));
             if (selectedWorld.externalPath) {
@@ -1840,6 +1848,20 @@ function determineStreamingMode(streamingFlag: boolean | undefined, isTTY: boole
   return isTTY;
 }
 
+function parseOptionalBoolean(value: string | undefined): boolean | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (['true', '1', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['false', '0', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+  return undefined;
+}
+
 // Main CLI entry point
 async function main(): Promise<void> {
   // Configure LLM providers from environment variables at startup
@@ -1858,6 +1880,7 @@ async function main(): Promise<void> {
     .option('-c, --command <cmd>', 'Command to execute in pipeline mode')
     .option('-l, --logLevel <level>', 'Set log level (trace, debug, info, warn, error)', 'error')
     .option('--streaming', 'Enable streaming responses (default: auto-detected from TTY)')
+    .option('--opik-enabled <true|false>', 'Override OPIK_ENABLED for this CLI run')
     .option('-s, --server', 'Launch the server before running CLI')
     .allowUnknownOption()
     .allowExcessArguments()

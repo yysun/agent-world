@@ -24,6 +24,7 @@
 import { app, safeHTML } from 'apprun';
 import type { Message } from '../types';
 import { renderMarkdown } from '../utils/markdown';
+import { getCustomRenderer } from './custom-renderers';
 
 export function isToolResultMessage(message: Message): boolean {
   return message.type === 'tool';
@@ -48,6 +49,12 @@ function isStderrOutput(message: Message): boolean {
 }
 
 export function renderMessageContent(message: Message) {
+  // Check for custom renderers first (e.g., sheet music, charts)
+  const customRenderer = getCustomRenderer(message);
+  if (customRenderer) {
+    return customRenderer.render(message);
+  }
+
   if (message.isToolStreaming) {
     return (
       <div className="tool-stream-output">

@@ -35,6 +35,7 @@ import {
 interface MainWindowLike {
   isDestroyed: () => boolean;
   webContents: {
+    isDestroyed?: () => boolean;
     send: (channel: string, payload: unknown) => void;
   };
 }
@@ -110,7 +111,17 @@ export function createRealtimeEventsRuntime(
   function sendRealtimeEventToRenderer(payload: unknown) {
     const mainWindow = getMainWindow();
     if (!mainWindow || mainWindow.isDestroyed()) return;
-    mainWindow.webContents.send(chatEventChannel, payload);
+    const webContents = mainWindow.webContents;
+    if (!webContents) return;
+    if (typeof webContents.isDestroyed === 'function' && webContents.isDestroyed()) return;
+    try {
+      webContents.send(chatEventChannel, payload);
+    } catch (error) {
+      // Guard against "Object has been destroyed" when renderer exits mid-send.
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('Object has been destroyed')) return;
+      throw error;
+    }
   }
 
   function subscribeToLogEvents() {

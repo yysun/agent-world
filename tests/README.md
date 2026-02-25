@@ -24,6 +24,7 @@ tests/
 ├── cli/               # CLI command tests
 ├── db/                # Standalone database tests (migration-tests.ts)
 ├── integration/       # Integration tests (migration-paths.test.ts)
+├── opik/              # LLM Assessment & Robustness tests (LLM-as-a-Judge)
 └── web/               # Web interface tests
 ```
 

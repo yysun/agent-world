@@ -81,6 +81,9 @@ import { createCategoryLogger } from '../logger.js';
 import { beginWorldActivity } from '../activity-tracker.js';
 import { createStorageWithWrappers } from '../storage/storage-factory.js';
 import { generateAgentResponse } from '../llm-manager.js';
+// Opik integration: safety checks and runtime gate consumption in agent response flow.
+import { runGuardrails } from '../security/guardrails.js';
+import { resolveOpikRuntimeConfig } from '../optional-tracers/opik-runtime.js';
 import {
   shouldAutoMention,
   addAutoMention,
@@ -323,6 +326,24 @@ function formatToolCallsMessage(toolCalls: DisplayToolCall[]): string {
   }
 }
 
+// Opik integration: classify tool risk level for trace span tagging.
+function classifyToolRisk(toolName: string): { riskLevel: 'low' | 'medium' | 'high'; riskTags: string[] } {
+  const normalized = String(toolName || '').trim().toLowerCase();
+  if (!normalized) {
+    return { riskLevel: 'low', riskTags: ['tool:unknown'] };
+  }
+
+  if (normalized === 'shell_cmd') {
+    return { riskLevel: 'high', riskTags: ['tool:risky', 'tool:shell_cmd'] };
+  }
+
+  if (normalized.startsWith('fs_') || normalized.includes('delete') || normalized.includes('exec')) {
+    return { riskLevel: 'high', riskTags: ['tool:risky', `tool:${normalized}`] };
+  }
+
+  return { riskLevel: 'low', riskTags: [`tool:${normalized}`] };
+}
+
 function withTrustedShellDirectory(
   toolCalls: DisplayToolCall[],
   trustedWorkingDirectory: string
@@ -467,10 +488,48 @@ export async function processAgentMessage(
 
     // Handle text responses
     if (llmResponse.type === 'text') {
-      const responseText = llmResponse.content || '';
+      let responseText = llmResponse.content || '';
       if (!responseText) {
         loggerAgent.debug('LLM text response is empty', { agentId: agent.id });
         return;
+      }
+
+      // Opik integration: run safety guardrails on LLM output when Opik safety is enabled.
+      const opikRuntime = resolveOpikRuntimeConfig(world);
+      if (opikRuntime.enabled && opikRuntime.safetyEnabled) {
+        const guardrailResult = runGuardrails(responseText, messageEvent.content || '', {
+          redact: opikRuntime.redact,
+          blockOnHighSeverity: opikRuntime.blockOnHighSeverity,
+        });
+
+        if (guardrailResult.flagged) {
+          world.eventEmitter.emit('world', {
+            type: 'guardrail',
+            agentName: agent.id,
+            messageId,
+            chatId: targetChatId,
+            triggered: true,
+            blocked: guardrailResult.blocked,
+            severity: guardrailResult.severity,
+            reasons: guardrailResult.reasons,
+          } as any);
+
+          loggerAgent.warn('Guardrail triggered for LLM output', {
+            agentId: agent.id,
+            severity: guardrailResult.severity,
+            blocked: guardrailResult.blocked,
+            reasons: guardrailResult.reasons,
+          });
+
+          if (guardrailResult.blocked) {
+            const blockedMessage = '[Blocked by safety guardrail due to high-severity policy]';
+            throwIfMessageProcessingStopped(processingHandle?.signal);
+            await handleTextResponse(world, agent, blockedMessage, messageId, messageEvent, targetChatId);
+            return;
+          }
+
+          responseText = guardrailResult.redactedText;
+        }
       }
 
       // Process text response (existing logic below)
@@ -639,6 +698,8 @@ export async function processAgentMessage(
             toolArgs = {};
           }
 
+          // Opik integration: tag tool-start event with risk metadata for trace filtering.
+          const toolRisk = classifyToolRisk(toolCall.function.name);
           publishToolEvent(world, {
             agentName: agent.id,
             type: 'tool-start',
@@ -649,7 +710,9 @@ export async function processAgentMessage(
               toolCallId: toolCall.id,
               input: toolArgs,
               metadata: {
-                isStreaming: isStreamingEnabled()
+                isStreaming: isStreamingEnabled(),
+                riskLevel: toolRisk.riskLevel,
+                riskTags: toolRisk.riskTags,
               }
             }
           });
@@ -1040,13 +1103,15 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
       loggerResponse.debug('No mentions - public message', { agentId: agent.id });
       return true;
     }
-    const shouldRespond = mentions.includes(agent.id.toLowerCase());
-    loggerResponse.debug('HUMAN message mention check', { agentId: agent.id, shouldRespond });
+    const normalizedAgentId = agent.id.toLowerCase().replace(/\s+/g, '-');
+    const shouldRespond = mentions.includes(normalizedAgentId);
+    loggerResponse.debug('HUMAN message mention check', { agentId: agent.id, normalizedAgentId, shouldRespond });
     return shouldRespond;
   }
 
   // For agent messages, only respond if this agent has a paragraph-beginning mention
-  const shouldRespond = mentions.includes(agent.id.toLowerCase());
-  loggerResponse.debug('AGENT message mention check', { agentId: agent.id, shouldRespond });
+  const normalizedAgentId = agent.id.toLowerCase().replace(/\s+/g, '-');
+  const shouldRespond = mentions.includes(normalizedAgentId);
+  loggerResponse.debug('AGENT message mention check', { agentId: agent.id, normalizedAgentId, shouldRespond });
   return shouldRespond;
 }

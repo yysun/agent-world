@@ -14,6 +14,7 @@
  * Recent Changes:
  * - 2026-02-16: Added `AGENT_WORLD_PROJECT_PATH`/`AGENT_WORLD_WORKSPACE_PATH` assignment in workspace setup so project-scope skill discovery follows the active workspace.
  * - 2026-02-16: Added system-setting env wiring for `AGENT_WORLD_ENABLE_GLOBAL_SKILLS` and `AGENT_WORLD_ENABLE_PROJECT_SKILLS`.
+ * - 2026-02-25: Resolve relative `AGENT_WORLD_DATA_PATH` against active workspace path to keep Electron/world discovery consistent with workspace-local data folders.
  * - 2026-02-12: Extracted environment + provider configuration logic from `electron/main.ts`.
  */
 
@@ -138,4 +139,3 @@ export function configureProvidersFromEnv(dependencies: ProviderConfigDependenci
   const ollamaUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434/v1';
   configureLLMProvider(LLMProvider.OLLAMA, { baseUrl: ollamaUrl });
 }
-

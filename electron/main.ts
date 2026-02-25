@@ -63,6 +63,7 @@
  * - 2026-02-10: Removed .agent-world folder concept, use workspace path directly via env
  * - 2026-02-10: Added default workspace path ~/agent-world to match CLI behavior
  * - 2026-02-10: Removed recent workspace functionality (worlds load from environment only)
+ * - 2026-02-25: Guarded `second-instance` window focus path against destroyed BrowserWindow references.
  * - 2026-02-09: Simplified workspace dialog to only return path (no auto-switching)
  * - 2026-02-09: Removed automatic core reload from workspace functions
  * - 2026-02-09: Changed to load all worlds instead of auto-selecting first
@@ -298,13 +299,18 @@ function createMainWindow() {
     }
   });
 
+  // Keep the global window reference in sync with Electron lifecycle.
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+
   loadRenderer(mainWindow).catch((error) => {
     console.error('Failed to load renderer:', error);
   });
 }
 
 app.on('second-instance', () => {
-  if (mainWindow) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) {
       mainWindow.restore();
     }

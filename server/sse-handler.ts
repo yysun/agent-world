@@ -44,6 +44,7 @@ const loggerStream = createCategoryLogger('api.stream');
 
 // Timeout constants for streaming (fallback only)
 const STREAM_TIMEOUT_NO_EVENTS_MS = 15000;
+const STREAM_IDLE_CLOSE_DELAY_MS = 2000;
 // Event payload types
 interface MessageEventPayload {
   sender: string;
@@ -123,6 +124,7 @@ export function createSSEHandler(
   res.setHeader('Access-Control-Allow-Headers', 'Cache-Control');
 
   let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+  let idleCloseTimer: ReturnType<typeof setTimeout> | undefined;
   let hasReceivedEvents = false;
   let isResponseEnded = false;
   let lastEventTime = Date.now();
@@ -157,6 +159,11 @@ export function createSSEHandler(
     if (timeoutTimer) {
       clearTimeout(timeoutTimer);
       timeoutTimer = undefined;
+    }
+
+    if (idleCloseTimer) {
+      clearTimeout(idleCloseTimer);
+      idleCloseTimer = undefined;
     }
 
     loggerStream.debug(`[${context}] Ending SSE response. Stats: events=${hasReceivedEvents}, awaitingWorldIdle=${awaitingWorldIdle}`);
@@ -232,6 +239,10 @@ export function createSSEHandler(
 
     // Handle world activity events for stream completion
     if (eventData?.type === 'response-start') {
+      if (idleCloseTimer) {
+        clearTimeout(idleCloseTimer);
+        idleCloseTimer = undefined;
+      }
       awaitingWorldIdle = true;
       loggerStream.debug(`[${context}] World processing started`, {
         activityId: eventData.activityId,
@@ -241,12 +252,20 @@ export function createSSEHandler(
       loggerStream.debug(`[${context}] World idle detected, ending stream`, {
         activityId: eventData.activityId
       });
-      // Stream all pending events, then end
       sendSSE({ type: EventType.WORLD, data: eventData });
-      // Give a small delay for any final events to be sent
-      setTimeout(() => {
-        endResponse();
-      }, 500);
+      awaitingWorldIdle = false;
+
+      if (idleCloseTimer) {
+        clearTimeout(idleCloseTimer);
+      }
+
+      idleCloseTimer = setTimeout(() => {
+        // If no new response-start arrived during the grace window,
+        // treat this idle as final and close the stream.
+        if (!awaitingWorldIdle) {
+          endResponse();
+        }
+      }, STREAM_IDLE_CLOSE_DELAY_MS);
       return;
     }
 
