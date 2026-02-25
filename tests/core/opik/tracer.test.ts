@@ -21,6 +21,7 @@ function createMockClient() {
       spans.push(state);
       return state;
     },
+    end: () => undefined,
     logFeedbackScore: () => undefined,
   };
 
@@ -66,6 +67,8 @@ describe('opik tracer', () => {
 
   it('captures token usage in llm end span update', () => {
     const { client, spans } = createMockClient();
+    // Wire SSE-path trace so handleSSEEvent can call trace.end()
+    (client as any).__trace_end_called = false;
     const tracer = new OpikTracer({ client });
 
     const world = { eventEmitter: new EventEmitter() };

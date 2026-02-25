@@ -255,6 +255,20 @@ Rules:
 - `OPIK_ENABLED=true`: tracing can attach only if `OPIK_API_KEY` + `OPIK_WORKSPACE` are set.
 - Safety and eval still require their sub-flags (`OPIK_SAFETY_ENABLED`, `OPIK_EVAL_ENABLED`).
 
+#### Fallback Behavior
+
+When Opik is enabled but something is missing, startup always continues normally — no crashes.
+
+| Condition | Result | Log |
+|-----------|--------|-----|
+| `OPIK_ENABLED=false` | No Opik code runs | none |
+| Enabled but `OPIK_API_KEY` or `OPIK_WORKSPACE` missing | Tracer skipped | warning: `Opik enabled but required env is missing` |
+| Enabled + config present but `packages/opik` not installed | Tracer skipped | warning: `Opik enabled but optional dependency is unavailable` |
+| Enabled + config present + module loaded but tracer init fails | Tracer skipped | warning: `Opik module loaded but tracer initialization failed` |
+| Enabled + config present + module loaded + tracer created | Tracer attaches to world | info: `Opik tracer attached` |
+
+Opik is storage-agnostic — it attaches to `world.eventEmitter` and works identically with sqlite, file, or memory storage backends.
+
 ## Testing
 
 **Run all tests:**

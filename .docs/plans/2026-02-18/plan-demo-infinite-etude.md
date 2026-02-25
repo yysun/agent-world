@@ -49,7 +49,7 @@ Target alignment:
   - [x] Implement UI component contract for notation data (`clef`, `notes`, `timeSignature`, `keySignature`).
   - [x] Implement rendering via VexFlow on an SVG element.
   - [x] Handle re-rendering when data changes.
-- [ ] Define or confirm `SheetMusicData` interface in `web/src/types/index.ts`.
+- [x] Define or confirm `SheetMusicData` interface in `web/src/types/index.ts`.
 - [x] Integrate renderer registry path in `web/src/domain/message-content.tsx` + `web/src/domain/custom-renderers.tsx`.
   - [x] Detect `render_sheet_music` capability via tool metadata.
   - [x] Intercept tool-result messages for `render_sheet_music`.
@@ -212,7 +212,7 @@ Dependent duplicate:
 ### Group E: Low-coupling standalone items
 
 These are mostly independent and can be closed in parallel:
-- [ ] Define or confirm `SheetMusicData` interface in `web/src/types/index.ts`. (Req 5.3)
+- [x] Define or confirm `SheetMusicData` interface in `web/src/types/index.ts`. (Req 5.3)
 - [ ] Verify three-agent handoff continuity in scenario output. (Req 5.5)
 - [ ] If alternate dataset is used, document compatibility mapping. (Req 5.8; conditional)
 - [ ] Determinism: document reproducible verification steps and expected outcomes. (Req 7.x)

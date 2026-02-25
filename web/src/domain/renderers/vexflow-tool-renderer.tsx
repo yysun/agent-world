@@ -16,7 +16,7 @@
 
 import { app } from 'apprun';
 import type { CustomRenderer } from '../custom-renderers';
-import type { Message } from '../../types';
+import type { Message, SheetMusicData } from '../../types';
 import { extractToolPayload, isToolMessageFor } from './custom-renderer-utils';
 import SheetMusic from '../../components/demos/sheet-music';
 
@@ -123,7 +123,7 @@ function normalizeNotes(value: unknown): Array<{ keys: string[]; duration: strin
   return normalized;
 }
 
-function normalizeSheetMusicData(data: Record<string, unknown>): Record<string, unknown> {
+function normalizeSheetMusicData(data: Record<string, unknown>): SheetMusicData {
   return {
     clef: typeof data.clef === 'string' ? data.clef : 'treble',
     keySignature: typeof data.keySignature === 'string' ? data.keySignature : 'C',
@@ -132,21 +132,21 @@ function normalizeSheetMusicData(data: Record<string, unknown>): Record<string, 
   };
 }
 
-function toSheetMusicData(payload: unknown): Record<string, unknown> {
+function toSheetMusicData(payload: unknown): SheetMusicData {
   if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
     return normalizeSheetMusicData(payload as Record<string, unknown>);
   }
-  return {};
+  return { notes: [] };
 }
 
-function parseRenderSheetMusicText(text: string): Record<string, unknown> {
+function parseRenderSheetMusicText(text: string): SheetMusicData {
   if (!text || !text.includes('render_sheet_music')) {
-    return {};
+    return { notes: [] };
   }
 
   const match = /render_sheet_music\s*\(\s*({[\s\S]*})\s*\)/i.exec(text);
   if (!match?.[1]) {
-    return {};
+    return { notes: [] };
   }
 
   const objectLiteral = match[1];
@@ -160,11 +160,11 @@ function parseRenderSheetMusicText(text: string): Record<string, unknown> {
     const parsed = JSON.parse(normalizedJson);
     return toSheetMusicData(parsed);
   } catch {
-    return {};
+    return { notes: [] };
   }
 }
 
-function hasSheetMusicShape(data: Record<string, unknown>): boolean {
+function hasSheetMusicShape(data: SheetMusicData): boolean {
   return Array.isArray(data.notes) && data.notes.length > 0;
 }
 

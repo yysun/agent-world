@@ -326,6 +326,7 @@ function formatToolCallsMessage(toolCalls: DisplayToolCall[]): string {
   }
 }
 
+// Opik integration: classify tool risk level for trace span tagging.
 function classifyToolRisk(toolName: string): { riskLevel: 'low' | 'medium' | 'high'; riskTags: string[] } {
   const normalized = String(toolName || '').trim().toLowerCase();
   if (!normalized) {
@@ -493,6 +494,7 @@ export async function processAgentMessage(
         return;
       }
 
+      // Opik integration: run safety guardrails on LLM output when Opik safety is enabled.
       const opikRuntime = resolveOpikRuntimeConfig(world);
       if (opikRuntime.enabled && opikRuntime.safetyEnabled) {
         const guardrailResult = runGuardrails(responseText, messageEvent.content || '', {
@@ -696,6 +698,7 @@ export async function processAgentMessage(
             toolArgs = {};
           }
 
+          // Opik integration: tag tool-start event with risk metadata for trace filtering.
           const toolRisk = classifyToolRisk(toolCall.function.name);
           publishToolEvent(world, {
             agentName: agent.id,

@@ -75,4 +75,83 @@ describe('opik runtime', () => {
 
     expect(status).toBe('missing_dependency');
   });
+
+  // Opik integration: matrix test — disabled + installed (module available but gate off).
+  it('returns disabled when gate is off even if module is available', async () => {
+    const world = createWorld('OPIK_ENABLED=false\nOPIK_API_KEY=abc\nOPIK_WORKSPACE=ws');
+    let attached = false;
+
+    const status = await attachOptionalOpikTracer(world, {
+      source: 'cli',
+      moduleLoader: async () => ({
+        createOpikTracer: async () => ({
+          attachToWorld: () => {
+            attached = true;
+          },
+        }),
+      }),
+    });
+
+    expect(status).toBe('disabled');
+    expect(attached).toBe(false);
+  });
+
+  // Opik integration: matrix test — disabled + missing (module unavailable and gate off).
+  it('returns disabled when gate is off even if module is missing', async () => {
+    const world = createWorld('');
+
+    const status = await attachOptionalOpikTracer(world, {
+      source: 'server',
+      moduleLoader: async () => {
+        throw new Error('missing');
+      },
+    });
+
+    expect(status).toBe('disabled');
+  });
+
+  // Opik integration: sub-flag tests — safety and eval flags respect master gate.
+  describe('sub-flag behavior when OPIK_ENABLED=true', () => {
+    it('safetyEnabled defaults false when master gate is on', () => {
+      const world = createWorld('OPIK_ENABLED=true');
+      const config = resolveOpikRuntimeConfig(world);
+      expect(config.enabled).toBe(true);
+      expect(config.safetyEnabled).toBe(false);
+    });
+
+    it('evalEnabled defaults false when master gate is on', () => {
+      const world = createWorld('OPIK_ENABLED=true');
+      const config = resolveOpikRuntimeConfig(world);
+      expect(config.enabled).toBe(true);
+      expect(config.evalEnabled).toBe(false);
+    });
+
+    it('safetyEnabled is true only when both master and safety flags are on', () => {
+      const world = createWorld('OPIK_ENABLED=true\nOPIK_SAFETY_ENABLED=true');
+      const config = resolveOpikRuntimeConfig(world);
+      expect(config.safetyEnabled).toBe(true);
+    });
+
+    it('evalEnabled is true only when both master and eval flags are on', () => {
+      const world = createWorld('OPIK_ENABLED=true\nOPIK_EVAL_ENABLED=true');
+      const config = resolveOpikRuntimeConfig(world);
+      expect(config.evalEnabled).toBe(true);
+    });
+
+    it('sub-flags are forced false when master gate is off', () => {
+      const world = createWorld('OPIK_ENABLED=false\nOPIK_SAFETY_ENABLED=true\nOPIK_EVAL_ENABLED=true');
+      const config = resolveOpikRuntimeConfig(world);
+      expect(config.enabled).toBe(false);
+      expect(config.safetyEnabled).toBe(false);
+      expect(config.evalEnabled).toBe(false);
+    });
+
+    it('enabledOverride bypasses world and env config', () => {
+      process.env.OPIK_ENABLED = 'false';
+      const world = createWorld('OPIK_ENABLED=false\nOPIK_SAFETY_ENABLED=true');
+      const config = resolveOpikRuntimeConfig(world, { enabledOverride: true });
+      expect(config.enabled).toBe(true);
+      expect(config.safetyEnabled).toBe(true);
+    });
+  });
 });

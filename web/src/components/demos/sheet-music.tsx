@@ -20,6 +20,7 @@
 
 import { app } from 'apprun';
 import { Factory, Voice } from 'vexflow';
+import type { SheetMusicData } from '../../types';
 
 function parseTimeSignature(timeSignature?: string): { numerator: number; denominator: number } {
   const match = /^\s*(\d+)\s*\/\s*(\d+)\s*$/.exec(String(timeSignature || '4/4'));
@@ -71,12 +72,7 @@ function normalizeTimeSignatureForNotes(
 }
 
 export interface SheetMusicProps {
-  data: {
-    clef?: string;
-    keySignature?: string;
-    timeSignature?: string;
-    notes?: Array<{ keys: string[], duration: string }>;
-  };
+  data: SheetMusicData;
   width?: number;
   height?: number;
 }

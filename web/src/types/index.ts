@@ -138,6 +138,16 @@ export interface Message {
 
 }
 
+export interface SheetMusicData {
+  clef?: string;
+  keySignature?: string;
+  timeSignature?: string;
+  notes: Array<{
+    keys: string[];
+    duration: string;
+  }>;
+}
+
 // Web UI Agent Interface - matches server serialization with UI extensions
 export interface Agent {
   id: string;
