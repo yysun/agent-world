@@ -134,21 +134,21 @@ Focus: Repeatable evaluation loop and regression reporting.
 ### Step 6: Validation and Documentation
 Focus: Matrix coverage, demo/isolation validation, and operational docs.
 
-- [ ] **Checkpoint 6**: Validation and documentation complete.
-  - [ ] Add tests for matrix:
+- [x] **Checkpoint 6**: Validation and documentation complete.
+  - [x] Add tests for matrix:
     - disabled + installed
     - disabled + missing
     - enabled + installed
     - enabled + missing
     - enabled + missing `OPIK_API_KEY` and/or `OPIK_WORKSPACE`
-  - [ ] Add tests for safety/eval sub-flag behavior when `OPIK_ENABLED=true`.
-  - [ ] Validate setup flow for both storage types (`sqlite`, `file`) for demo scope.
+  - [x] Add tests for safety/eval sub-flag behavior when `OPIK_ENABLED=true`.
+  - [x] Validate setup flow for both storage types (`sqlite`, `file`) for demo scope.
   - [x] Ensure data-directory fixtures and demo UI assets remain non-production by default.
   - [x] Update `.env.example` and `README.md`.
   - [x] Document required env vars (`OPIK_API_KEY`, `OPIK_WORKSPACE`) and optional `OPIK_PROJECT`.
-  - [ ] Document missing dependency/config fallback behavior.
+  - [x] Document missing dependency/config fallback behavior.
   - [x] Add integration verification script or explicit manual verification flow.
-  - [ ] Confirm exit criteria and acceptance criteria are fully checked.
+  - [x] Confirm exit criteria and acceptance criteria are fully checked.
 
 Future-work backlog for policy/promotion/optional tracer expansion (out of this plan scope):
 - `.docs/next/2026-02-18/next-opik-policy-promotion.md`
