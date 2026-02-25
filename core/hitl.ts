@@ -16,6 +16,7 @@
  * - Runtime is in-memory and process-local by design.
  *
  * Recent Changes:
+ * - 2026-02-25: Added HITL runtime trace logs for request emission, replay, and resolution lifecycle diagnostics.
  * - 2026-02-24: Removed HITL `system` event emission/replay and switched to tool-progress prompt payloads.
  * - 2026-02-24: Added `listPendingHitlPromptEvents` to expose scoped pending HITL prompt payloads for web chat-switch replay.
  * - 2026-02-24: Removed timeout auto-resolution and added deterministic replay helpers for unresolved HITL requests.
@@ -189,6 +190,10 @@ function emitPendingRequest(world: World, pending: PendingHitlOptionRequest): vo
       metadata: toolExecutionMetadata,
     },
   });
+
+  console.log(
+    `[hitl] emit-pending world=${world.id} chat=${pending.chatId || 'n/a'} requestId=${pending.prompt.requestId} toolName=${pending.prompt.toolName} toolCallId=${pending.prompt.toolCallId}`
+  );
 }
 
 function getSortedPendingRequestsForScope(worldId: string, chatId?: string | null): PendingHitlOptionRequest[] {
@@ -292,6 +297,9 @@ export async function requestWorldOption(
     };
 
     pendingHitlRequests.set(pendingKey, pending);
+    console.log(
+      `[hitl] request-queued world=${worldId} chat=${chatId || 'n/a'} requestId=${requestId} options=${normalizedOptions.length}`
+    );
     emitPendingRequest(world, pending);
   });
 }
@@ -427,6 +435,9 @@ export function replayPendingHitlRequests(world: World, chatId?: string | null):
   }
 
   const pendingForScope = getSortedPendingRequestsForScope(worldId, chatId);
+  console.log(
+    `[hitl] replay-pending world=${worldId} chat=${chatId || 'n/a'} count=${pendingForScope.length}`
+  );
   for (const pending of pendingForScope) {
     emitPendingRequest(world, pending);
   }
@@ -469,21 +480,33 @@ export function submitWorldHitlResponse(params: {
   const optionId = String(params.optionId || '').trim();
 
   if (!worldId || !requestId || !optionId) {
+    console.log(
+      `[hitl] submit-rejected-invalid world=${worldId || 'n/a'} requestId=${requestId || 'n/a'} optionId=${optionId || 'n/a'}`
+    );
     return { accepted: false, reason: 'worldId, requestId, and optionId are required.' };
   }
 
   const pendingKey = getPendingKey(worldId, requestId);
   const pending = pendingHitlRequests.get(pendingKey);
   if (!pending) {
+    console.log(
+      `[hitl] submit-rejected-missing world=${worldId} requestId=${requestId} optionId=${optionId}`
+    );
     return { accepted: false, reason: `No pending HITL request found for requestId '${requestId}'.` };
   }
 
   const scopeValidation = validateResponseScope(pending, params.chatId);
   if (!scopeValidation.valid) {
+    console.log(
+      `[hitl] submit-rejected-scope world=${worldId} requestId=${requestId} optionId=${optionId} reason=${scopeValidation.reason}`
+    );
     return { accepted: false, reason: scopeValidation.reason };
   }
 
   if (!pending.optionIds.has(optionId)) {
+    console.log(
+      `[hitl] submit-rejected-option world=${worldId} requestId=${requestId} optionId=${optionId}`
+    );
     return { accepted: false, reason: `Invalid option '${optionId}' for requestId '${requestId}'.` };
   }
 
@@ -498,6 +521,10 @@ export function submitWorldHitlResponse(params: {
       source: 'user',
     },
   });
+
+  console.log(
+    `[hitl] submit-accepted world=${worldId} chat=${pending.chatId || 'n/a'} requestId=${requestId} optionId=${optionId}`
+  );
 
   return { accepted: true, metadata: pending.metadata };
 }

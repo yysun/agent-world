@@ -35,6 +35,7 @@
  * - Complete type safety with proper TypeScript interfaces
  *
  * Recent Changes:
+ * - 2026-02-25: Fixed `listAgents` memory hydration to parse aliased `toolCalls`/`toolCallId` fields so runtime agent memory preserves persisted tool-call metadata.
  * - 2026-02-13: Added atomic compare-and-set chat title update helper (`updateChatNameIfCurrent`).
  * - 2026-02-13: Fixed migration directory resolution so Electron runtimes launched from `electron/` still run root `migrations/`.
  * - 2025-08-01: Added proper TypeScript types for all chat operations
@@ -366,7 +367,8 @@ export async function listAgents(ctx: SQLiteStorageContext, worldId: string): Pr
         createdAt: msg.createdAt ? new Date(msg.createdAt) : new Date(),
         chatId: msg.chatId, // Preserve chatId field
         replyToMessageId: msg.replyToMessageId, // Preserve replyToMessageId field
-        tool_calls: msg.tool_calls ? JSON.parse(msg.tool_calls as any) : undefined // Parse JSON string to object
+        tool_calls: (msg as any).toolCalls ? JSON.parse((msg as any).toolCalls) : undefined,
+        tool_call_id: (msg as any).toolCallId || undefined
       })),
     } as Agent;
     result.push(agent);

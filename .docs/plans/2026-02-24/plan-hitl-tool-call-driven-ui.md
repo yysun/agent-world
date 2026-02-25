@@ -1,5 +1,8 @@
 # Architecture Plan: HITL Tool-Call-Driven UI (Remove System-Event Replay Dependency)
 
+**Last Updated:** 2026-02-25  
+**Status:** Implemented
+
 ## Overview
 
 Refactor HITL prompt delivery so frontend clients derive prompt UI from streamed `human_intervention_request` tool-call data, and restore unresolved prompts by reconstructing pending state from persisted raw tool-call request/response messages. Do not add a dedicated HITL persistence store.
@@ -48,30 +51,37 @@ flowchart LR
 ## Implementation Phases
 
 ### Phase 1: Contract Definition
-- [ ] Define canonical HITL tool-call prompt payload fields required by clients.
-- [ ] Enforce request identity alignment (`requestId === toolCallId`) for deterministic submission pairing.
-- [ ] Define persisted-message pairing contract for pending reconstruction (assistant tool_call id ↔ tool response `tool_call_id`).
+- [x] Define canonical HITL tool-call prompt payload fields required by clients.
+- [x] Enforce request identity alignment (`requestId === toolCallId`) for deterministic submission pairing.
+- [x] Define persisted-message pairing contract for pending reconstruction (assistant tool_call id ↔ tool response `tool_call_id`).
 
 ### Phase 2: Frontend Prompt Source Migration
-- [ ] Add parser for HITL prompt data from streamed tool-call events.
-- [ ] Enqueue/dequeue prompts by request identity with duplicate protection.
-- [ ] Switch prompt display path to tool-call-derived data as primary source.
+- [x] Add parser for HITL prompt data from streamed tool-call events.
+- [x] Enqueue/dequeue prompts by request identity with duplicate protection.
+- [x] Switch prompt display path to tool-call-derived data as primary source.
 
 ### Phase 3: Restoration Path Hardening
-- [ ] Implement restoration by scanning persisted chat messages and reconstructing unresolved HITL prompts.
-- [ ] Ensure restoration does not depend on replayed system events or dedicated HITL store.
-- [ ] Verify active chat scoping and no cross-chat leakage.
+- [x] Implement restoration by scanning persisted chat messages and reconstructing unresolved HITL prompts.
+- [x] Ensure restoration does not depend on replayed system events or dedicated HITL store.
+- [x] Verify active chat scoping and no cross-chat leakage.
 
 ### Phase 4: Event Replay Decoupling
-- [ ] Remove HITL-specific system-event replay bypass logic after migration confidence.
-- [ ] Remove obsolete HITL replay plumbing in API/frontend paths.
-- [ ] Keep non-HITL system events untouched.
+- [x] Remove HITL-specific system-event replay bypass logic after migration confidence.
+- [x] Remove obsolete HITL replay plumbing in API/frontend paths and move chat activation to core snapshot API.
+- [x] Keep non-HITL system events untouched.
 
 ### Phase 5: Validation & Regression Tests
-- [ ] Add/adjust tests for tool-call-driven prompt rendering.
-- [ ] Add/adjust tests for restore-time reconstruction from persisted messages.
-- [ ] Add tests proving pending/resolved status is correct from request/response pairing.
+- [x] Add/adjust tests for tool-call-driven prompt rendering.
+- [x] Add/adjust tests for restore-time reconstruction from persisted messages.
+- [x] Add tests proving pending/resolved status is correct from request/response pairing.
 - [ ] Run targeted HITL/web-domain tests, then full `npm test`.
+
+## Implementation Notes (2026-02-25)
+
+- Added core `activateChatWithSnapshot` to unify restore + memory + pending HITL prompt selection.
+- Updated server/electron chat selection to consume core snapshot output rather than route-local replay reconstruction.
+- Added runtime pending HITL replay for Electron chat subscriptions, with persisted-message reconstruction fallback.
+- Added persisted synthetic `human_intervention_request` tool-call/tool-result messages for `load_skill` approval flow so prompt state survives reconnect/restart.
 
 ## Risks and Mitigations
 

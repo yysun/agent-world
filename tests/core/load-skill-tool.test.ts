@@ -380,7 +380,7 @@ describe('core/load-skill-tool', () => {
     expect(mockedRequestWorldOption).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        metadata: { skillId: 'pdf-extract', scriptPaths: [] },
+        metadata: expect.objectContaining({ skillId: 'pdf-extract', scriptPaths: [] }),
       }),
     );
     expect(mockedExecuteShellCommand).not.toHaveBeenCalled();

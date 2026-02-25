@@ -627,4 +627,65 @@ describe('createRealtimeEventsRuntime', () => {
       })
     );
   });
+
+  it('replays runtime pending HITL prompts on subscribe even without persisted-message reconstruction', async () => {
+    const send = vi.fn();
+    const worldSubscription = createWorldSubscription();
+    const listPendingHitlPromptEvents = vi.fn(() => ([
+      {
+        chatId: 'chat-1',
+        prompt: {
+          requestId: 'req-runtime-1',
+          title: 'Approval required',
+          message: 'Run this skill?',
+          options: [{ id: 'yes_once', label: 'Yes once' }, { id: 'no', label: 'No' }],
+          defaultOptionId: 'no',
+          metadata: { skillId: 'skill-creator' },
+          agentName: 'qwen',
+          toolName: 'load_skill',
+          toolCallId: 'call_runtime_1',
+        }
+      }
+    ]));
+
+    const runtime = createRealtimeEventsRuntime({
+      getMainWindow: () => ({
+        isDestroyed: () => false,
+        webContents: { send }
+      }),
+      chatEventChannel: 'chat:event',
+      addLogStreamCallback: () => () => { },
+      subscribeWorld: async () => worldSubscription,
+      ensureCoreReady: async () => { },
+      listPendingHitlPromptEvents,
+    });
+
+    await runtime.subscribeChatEvents({
+      subscriptionId: 'sub-runtime-replay',
+      worldId: 'world-1',
+      chatId: 'chat-1'
+    });
+
+    expect(listPendingHitlPromptEvents).toHaveBeenCalledWith(worldSubscription.world, 'chat-1');
+    expect(send).toHaveBeenCalledWith(
+      'chat:event',
+      expect.objectContaining({
+        type: 'tool',
+        subscriptionId: 'sub-runtime-replay',
+        worldId: 'world-1',
+        chatId: 'chat-1',
+        tool: expect.objectContaining({
+          eventType: 'tool-progress',
+          toolUseId: 'call_runtime_1',
+          toolName: 'load_skill',
+          metadata: expect.objectContaining({
+            hitlPrompt: expect.objectContaining({
+              requestId: 'req-runtime-1',
+              toolCallId: 'call_runtime_1',
+            })
+          })
+        })
+      })
+    );
+  });
 });

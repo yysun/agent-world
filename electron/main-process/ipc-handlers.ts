@@ -93,6 +93,7 @@ interface MainIpcHandlerFactoryDependencies {
     reason?: string;
   };
   stopMessageProcessing: (worldId: string, chatId: string) => Promise<any> | any;
+  activateChatWithSnapshot: (worldId: string, chatId: string) => Promise<{ world: any; chatId: string; hitlPrompts: any[] } | null>;
   restoreChat: (worldId: string, chatId: string) => Promise<any>;
   updateWorld: (worldId: string, updates: Record<string, unknown>) => Promise<any>;
   editUserMessage: (worldId: string, messageId: string, newContent: string, chatId: string) => Promise<any>;
@@ -127,6 +128,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     publishMessage,
     submitWorldHitlResponse,
     stopMessageProcessing,
+    activateChatWithSnapshot,
     restoreChat,
     updateWorld,
     editUserMessage,
@@ -961,13 +963,19 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!id) throw new Error('World ID is required.');
     if (!sessionId) throw new Error('Session ID is required.');
 
-    const world = await restoreChat(id, sessionId);
-    if (!world) throw new Error(`World or session not found: ${id}/${sessionId}`);
+    const selectStartedAt = Date.now();
+    console.log(`[ipc:selectSession] start world=${id} requestedChat=${sessionId}`);
+
+    const activated = await activateChatWithSnapshot(id, sessionId);
+    if (!activated) throw new Error(`World or session not found: ${id}/${sessionId}`);
     const refreshWarning = await refreshWorldSubscription(id);
+
+    console.log(`[ipc:selectSession] complete world=${id} requestedChat=${sessionId} resolvedChat=${activated.chatId || sessionId} warning=${refreshWarning || 'none'} elapsedMs=${Date.now() - selectStartedAt}`);
 
     return {
       worldId: id,
-      chatId: world.currentChatId || sessionId,
+      chatId: activated.chatId || sessionId,
+      hitlPrompts: Array.isArray(activated.hitlPrompts) ? activated.hitlPrompts : [],
       ...(refreshWarning ? { refreshWarning } : {})
     };
   }
@@ -978,8 +986,11 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!id) throw new Error('World ID is required.');
 
     const requestedChatId = chatId ? String(chatId) : null;
+    console.log(`[ipc:getMessages] start world=${id} chat=${requestedChatId || 'n/a'}`);
     const memory = await getMemory(id, requestedChatId);
     if (!memory) return [];
+
+    console.log(`[ipc:getMessages] loaded world=${id} chat=${requestedChatId || 'n/a'} messages=${memory.length}`);
 
     return normalizeSessionMessages(memory.map((message: any) => serializeMessage(message)));
   }

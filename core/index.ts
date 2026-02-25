@@ -136,7 +136,8 @@ export {
   listChats,
   updateChat,
   deleteChat,
-  restoreChat
+  restoreChat,
+  activateChatWithSnapshot
 } from './managers.js';
 
 // === EVENT SYSTEM ===

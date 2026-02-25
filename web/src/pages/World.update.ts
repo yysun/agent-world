@@ -44,6 +44,7 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2026-02-25: Added frontend resume/load trace logging in `initWorld` for chat switch ordering, persisted-memory hydration counts, and HITL replay source verification.
  * - 2026-02-24: Reconstructed unresolved HITL prompts from persisted raw tool-call request/response pairs during init/chat switch (no event replay dependency).
  * - 2026-02-21: Prevented tool output expand/collapse actions from consuming pending auto-scroll state and jumping to transcript bottom.
  * - 2026-02-21: Switched project-folder selection to browser File API flow and preserved UI-enriched world agent fields after updates.
@@ -544,14 +545,17 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
     return;
   }
   try {
+    const initStartedAt = Date.now();
     const worldName = decodeURIComponent(name);
+    console.log(`[web:initWorld] start world=${worldName} requestedChat=${chatId || 'n/a'}`);
 
     // Default selectedSettingsTarget to 'world' on init (no persistence)
     state.selectedSettingsTarget = 'world';
     state.worldName = worldName;
     state.loading = true;
 
-    const world = await api.getWorld(worldName);
+    let world = await api.getWorld(worldName);
+    console.log(`[web:initWorld] getWorld loaded world=${worldName} backendCurrentChat=${world.currentChatId || 'n/a'} chats=${Array.isArray(world.chats) ? world.chats.length : 0}`);
     if (!world) {
       throw new Error('World not found: ' + worldName);
     }
@@ -560,7 +564,28 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
 
     let replayedHitlQueue = state.hitlPromptQueue || [];
     if (world.currentChatId !== chatId && chatId) {
-      await api.setChat(worldName, chatId);
+      console.log(`[web:initWorld] setChat begin world=${worldName} from=${world.currentChatId || 'n/a'} to=${chatId}`);
+      const setChatResult = await api.setChat(worldName, chatId);
+      if (setChatResult?.world) {
+        world = setChatResult.world;
+        console.log(`[web:initWorld] setChat world-updated world=${worldName} backendCurrentChat=${world.currentChatId || 'n/a'}`);
+      }
+
+      const replayedFromBackend = Array.isArray(setChatResult?.hitlPrompts)
+        ? setChatResult.hitlPrompts
+          .map((entry) => {
+            const envelope = entry && typeof entry === 'object'
+              ? { chatId: entry.chatId ?? chatId ?? null, prompt: entry.prompt }
+              : null;
+            return envelope ? HitlDomain.parseHitlPromptRequest(envelope) : null;
+          })
+          .filter((prompt): prompt is NonNullable<typeof prompt> => Boolean(prompt))
+        : [];
+
+      if (replayedFromBackend.length > 0) {
+        replayedHitlQueue = replayedFromBackend;
+        console.log(`[web:initWorld] setChat hitl-prompts-from-backend count=${replayedFromBackend.length}`);
+      }
     }
 
     let rawMessages: any[] = [];
@@ -581,7 +606,11 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
     // Apply deduplication to loaded messages (same as SSE streaming path)
     // Pass agents array so user messages get correct seenByAgents
     const messages = deduplicateMessages([...rawMessages], agents);
-    replayedHitlQueue = HitlDomain.reconstructPendingHitlPromptsFromMessages(messages as unknown as Array<Record<string, unknown>>, chatId || null);
+    if (!Array.isArray(replayedHitlQueue) || replayedHitlQueue.length === 0) {
+      replayedHitlQueue = HitlDomain.reconstructPendingHitlPromptsFromMessages(messages as unknown as Array<Record<string, unknown>>, chatId || null);
+      console.log(`[web:initWorld] hitl-prompts-reconstructed-from-messages count=${replayedHitlQueue.length}`);
+    }
+    console.log(`[web:initWorld] memory-hydrated world=${worldName} chat=${chatId || world.currentChatId || 'n/a'} rawMessages=${rawMessages.length} dedupMessages=${messages.length} elapsedMs=${Date.now() - initStartedAt}`);
     const selectedProjectPath = getEnvValueFromText(world.variables, 'working_directory');
 
     yield {
@@ -598,6 +627,7 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
     };
 
   } catch (error: any) {
+    console.log(`[web:initWorld] error message=${error?.message || String(error)} requestedChat=${chatId || 'n/a'}`);
     yield {
       ...state,
       error: error.message || 'Failed to load world data',

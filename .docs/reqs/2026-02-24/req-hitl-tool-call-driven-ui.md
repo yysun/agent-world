@@ -1,5 +1,7 @@
 # REQ: HITL UI Driven by Tool Calls (No System-Event Replay Dependency)
 
+**Last Updated:** 2026-02-25
+
 ## Summary
 Move HITL prompt rendering to a tool-call-driven model where frontend clients display HITL UI when they observe `human_intervention_request` tool calls in the live stream, and reconstruct unresolved HITL prompts from persisted raw tool-call request/response messages when restoring chats.
 
@@ -34,6 +36,7 @@ Current HITL UI behavior previously relied on `hitl-option-request` system event
 12. The system MUST NOT introduce a dedicated HITL persistence store/table; restoration MUST derive pending state from existing persisted messages.
 13. Pending/resolved determination MUST be computed by pairing persisted assistant HITL tool-call request IDs with persisted tool response `tool_call_id` values.
 14. HITL response identity MUST align with tool-call identity (either `requestId === toolCallId` or a deterministic reversible mapping persisted in raw tool payloads).
+15. Chat activation/switch APIs MUST return active-chat pending HITL prompts from the same authoritative core snapshot used to restore chat memory so clients can render prompts deterministically without route-local reconstruction logic.
 
 ## Non-Functional Requirements
 - Prompt rendering SHOULD be idempotent (duplicate stream chunks/events do not duplicate prompt queue entries).

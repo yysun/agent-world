@@ -18,6 +18,7 @@
  * - Keeps payload format deterministic for stable downstream parsing
  *
  * Recent Changes:
+ * - 2026-02-25: Added persisted synthetic HITL tool-call/response messages for `load_skill` approval so frontends can reconstruct prompts from memory without relying on transient event timing.
  * - 2026-02-24: Surface non-zero script exits as informational output instead of blocking errors (scripts may be CLI tools requiring args).
  * - 2026-02-24: Execute skill scripts with cwd set to the skill root directory, not the project working directory.
  * - 2026-02-14: Strip SKILL.md YAML front matter from injected `<instructions>` content.
@@ -34,13 +35,15 @@ import {
   getSkillSourceScope,
   waitForInitialSkillSync,
 } from './skill-registry.js';
+import { createStorageWithWrappers } from './storage/storage-factory.js';
 import {
   executeShellCommand,
   formatResultForLLM,
   validateShellCommandScope,
 } from './shell-cmd-tool.js';
 import { parseSkillIdListFromEnv } from './skill-settings.js';
-import { requestWorldOption } from './hitl.js';
+import { requestWorldOption, type HitlOptionResolution } from './hitl.js';
+import { generateId } from './utils.js';
 
 const APPROVAL_OPTION_YES_ONCE = 'yes_once';
 const APPROVAL_OPTION_YES_IN_SESSION = 'yes_in_session';
@@ -53,6 +56,9 @@ type LoadSkillToolContext = {
   chatId?: string | null;
   abortSignal?: AbortSignal;
   workingDirectory?: string;
+  messages?: Array<Record<string, any>>;
+  toolCallId?: string;
+  agentName?: string;
 };
 
 class SkillScriptExecutionError extends Error {
@@ -271,6 +277,140 @@ function createSessionApprovalKey(worldId: string, chatId: string | null, skillI
   return `${worldId}::${chatId ?? 'global'}::${skillId}`;
 }
 
+function getLoadSkillApprovalRequestId(context: LoadSkillToolContext | undefined, skillId: string): string {
+  const parentToolCallId = String(context?.toolCallId || '').trim();
+  if (parentToolCallId) {
+    return `${parentToolCallId}::load_skill_approval`;
+  }
+  const normalizedSkillId = String(skillId || '').trim() || 'skill';
+  return `load_skill_approval::${normalizedSkillId}::${generateId()}`;
+}
+
+async function persistAgentMemoryIfAvailable(context: LoadSkillToolContext | undefined): Promise<void> {
+  const worldId = String(context?.world?.id || '').trim();
+  const agentName = String(context?.agentName || '').trim();
+  const messages = Array.isArray(context?.messages) ? context!.messages : null;
+  const world = context?.world as any;
+
+  if (!worldId || !agentName || !messages || !world?.agents || typeof world.agents.get !== 'function') {
+    return;
+  }
+
+  const agent = world.agents.get(agentName);
+  if (!agent) {
+    return;
+  }
+
+  const storage = await createStorageWithWrappers();
+  await storage.saveAgent(worldId, agent);
+}
+
+async function persistLoadSkillApprovalPromptMessage(options: {
+  context?: LoadSkillToolContext;
+  requestId: string;
+  skillId: string;
+  scriptPaths: string[];
+}): Promise<void> {
+  const messages = Array.isArray(options.context?.messages) ? options.context!.messages : null;
+  if (!messages) {
+    return;
+  }
+
+  const existing = messages.some((message) =>
+    message?.role === 'assistant'
+    && Array.isArray(message?.tool_calls)
+    && message.tool_calls.some((toolCall: any) => String(toolCall?.id || '').trim() === options.requestId)
+  );
+  if (existing) {
+    return;
+  }
+
+  const question = `Skill "${options.skillId}" requested execution.${options.scriptPaths.length > 0 ? ` Referenced scripts:\n${options.scriptPaths.map((scriptPath) => `- ${scriptPath}`).join('\n')}` : ''}\n\nApprove applying this skill now?`;
+  const toolArguments = {
+    question,
+    options: ['Yes once', 'Yes in this session', 'No'],
+    defaultOption: 'No',
+    metadata: {
+      tool: 'human_intervention_request',
+      toolCallId: options.requestId,
+      source: 'load_skill',
+      skillId: options.skillId,
+      scriptPaths: options.scriptPaths,
+    },
+  };
+
+  const chatId = options.context?.chatId ?? options.context?.world?.currentChatId ?? null;
+  const agentName = String(options.context?.agentName || '').trim() || 'assistant';
+  messages.push({
+    role: 'assistant',
+    content: `Calling tool: human_intervention_request (skill_id: "${options.skillId}")`,
+    tool_calls: [{
+      id: options.requestId,
+      type: 'function',
+      function: {
+        name: 'human_intervention_request',
+        arguments: JSON.stringify(toolArguments),
+      },
+    }],
+    sender: agentName,
+    createdAt: new Date(),
+    chatId,
+    messageId: generateId(),
+    replyToMessageId: options.context?.toolCallId,
+    agentId: agentName,
+  });
+
+  await persistAgentMemoryIfAvailable(options.context);
+  console.log(
+    `[load_skill:hitl] persisted-approval-tool-call chat=${chatId || 'n/a'} agent=${agentName} requestId=${options.requestId} skill=${options.skillId}`
+  );
+}
+
+async function persistLoadSkillApprovalResolutionMessage(options: {
+  context?: LoadSkillToolContext;
+  requestId: string;
+  resolution: HitlOptionResolution;
+  skillId: string;
+}): Promise<void> {
+  const messages = Array.isArray(options.context?.messages) ? options.context!.messages : null;
+  if (!messages) {
+    return;
+  }
+
+  const existing = messages.some((message) =>
+    message?.role === 'tool'
+    && String(message?.tool_call_id || '').trim() === options.requestId
+  );
+  if (existing) {
+    return;
+  }
+
+  const chatId = options.context?.chatId ?? options.context?.world?.currentChatId ?? null;
+  const agentName = String(options.context?.agentName || '').trim() || 'assistant';
+  const payload = {
+    requestId: options.resolution.requestId,
+    optionId: options.resolution.optionId,
+    source: options.resolution.source,
+    skillId: options.skillId,
+  };
+
+  messages.push({
+    role: 'tool',
+    content: JSON.stringify(payload),
+    tool_call_id: options.requestId,
+    sender: agentName,
+    createdAt: new Date(),
+    chatId,
+    messageId: generateId(),
+    agentId: agentName,
+  });
+
+  await persistAgentMemoryIfAvailable(options.context);
+  console.log(
+    `[load_skill:hitl] persisted-approval-tool-result chat=${chatId || 'n/a'} agent=${agentName} requestId=${options.requestId} option=${options.resolution.optionId}`
+  );
+}
+
 async function requestSkillExecutionApproval(options: {
   skillId: string;
   scriptPaths: string[];
@@ -278,6 +418,7 @@ async function requestSkillExecutionApproval(options: {
 }): Promise<boolean> {
   const worldId = String(options.context?.world?.id || '').trim();
   const chatId = options.context?.chatId ?? options.context?.world?.currentChatId ?? null;
+  const requestId = getLoadSkillApprovalRequestId(options.context, options.skillId);
   if (!worldId || !options.context?.world) {
     return true;
   }
@@ -291,7 +432,15 @@ async function requestSkillExecutionApproval(options: {
     ? `The skill references local scripts:\n${options.scriptPaths.map((scriptPath) => `- ${scriptPath}`).join('\n')}`
     : 'No instruction-referenced local scripts were detected for this skill.';
 
+  await persistLoadSkillApprovalPromptMessage({
+    context: options.context,
+    requestId,
+    skillId: options.skillId,
+    scriptPaths: options.scriptPaths,
+  });
+
   const approval = await requestWorldOption(options.context.world as any, {
+    requestId,
     title: `Run skill ${options.skillId}?`,
     message: [
       `Skill "${options.skillId}" requested execution.`,
@@ -309,7 +458,21 @@ async function requestSkillExecutionApproval(options: {
       },
       { id: APPROVAL_OPTION_NO, label: 'No', description: 'Do not apply this skill now.' },
     ],
-    metadata: { skillId: options.skillId, scriptPaths: options.scriptPaths },
+    metadata: {
+      tool: 'human_intervention_request',
+      toolCallId: requestId,
+      source: 'load_skill',
+      skillId: options.skillId,
+      scriptPaths: options.scriptPaths,
+    },
+    agentName: options.context?.agentName ?? null,
+  });
+
+  await persistLoadSkillApprovalResolutionMessage({
+    context: options.context,
+    requestId,
+    resolution: approval,
+    skillId: options.skillId,
   });
 
   if (approval.optionId === APPROVAL_OPTION_NO) {

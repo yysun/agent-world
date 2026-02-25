@@ -118,9 +118,11 @@ const {
   newChat,
   branchChatFromMessage,
   publishMessage,
+  listPendingHitlPromptEvents,
   listPendingHitlPromptEventsFromMessages,
   submitWorldHitlResponse,
   stopMessageProcessing,
+  activateChatWithSnapshot,
   restoreChat,
   syncSkills,
   editUserMessage,
@@ -156,6 +158,7 @@ const realtimeEventsRuntime = createRealtimeEventsRuntime({
   subscribeWorld,
   ensureCoreReady: () => ensureCoreReady(),
   getMemory,
+  listPendingHitlPromptEvents,
   listPendingHitlPromptEventsFromMessages,
 });
 
@@ -212,6 +215,7 @@ const ipcHandlers = createMainIpcHandlers({
   publishMessage,
   submitWorldHitlResponse,
   stopMessageProcessing,
+  activateChatWithSnapshot,
   restoreChat,
   updateWorld,
   editUserMessage,

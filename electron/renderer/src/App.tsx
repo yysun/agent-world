@@ -464,6 +464,8 @@ export default function App() {
 
     setLoading((value: { sessions: boolean; messages: boolean }) => ({ ...value, messages: true }));
     try {
+      const activation = await api.selectSession(worldId, sessionId);
+      console.log(`[electron:messages] activate-chat world=${worldId} requestedChat=${sessionId} resolvedChat=${String((activation as any)?.chatId || '').trim() || 'n/a'}`);
       const nextMessages = (await api.getMessages(worldId, sessionId)) as any[];
       if (refreshId !== messageRefreshCounter.current) return;
       setMessages(nextMessages);

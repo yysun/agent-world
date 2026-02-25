@@ -69,8 +69,8 @@ import {
   deleteAgent,
   listChats,
   newChat,
+  activateChatWithSnapshot,
   restoreChat,
-  listPendingHitlPromptEventsFromMessages,
   deleteChat as deleteChatCore,
   clearAgentMemory,
   listAgents as listAgentsCore,
@@ -1201,28 +1201,23 @@ router.post('/worlds/:worldName/setChat/:chatId', validateWorld, async (req: Req
       return;
     }
 
-    const loadHitlPromptsFromMemory = async (worldId: string, targetChatId: string | null) => {
-      const memory = await coreGetMemory(worldId, targetChatId || undefined);
-      return listPendingHitlPromptEventsFromMessages(memory || [], targetChatId || null);
-    };
-
-    const updatedWorld = await worldCtx.setChat(chatId);
-    if (!updatedWorld) {
-      const pendingHitlPrompts = await loadHitlPromptsFromMemory(currentWorld.id, currentWorld.currentChatId || null);
+    const activated = await activateChatWithSnapshot(worldCtx.id, chatId);
+    if (!activated) {
       res.json({
         world: serializeWorld(currentWorld),
         chatId: currentWorld.currentChatId,
-        hitlPrompts: pendingHitlPrompts,
+        hitlPrompts: [],
         success: false
       });
       return;
     }
 
-    const pendingHitlPrompts = await loadHitlPromptsFromMemory(updatedWorld.id, updatedWorld.currentChatId || null);
+    const updatedWorld = activated.world;
+    const pendingHitlPrompts = activated.hitlPrompts;
 
     res.json({
       world: serializeWorld(updatedWorld),
-      chatId: updatedWorld.currentChatId,
+      chatId: activated.chatId,
       hitlPrompts: pendingHitlPrompts,
       success: true
     });

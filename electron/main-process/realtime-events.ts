@@ -11,6 +11,7 @@
  * - Uses dependency injection for window lookup and world subscription API.
  *
  * Recent Changes:
+ * - 2026-02-25: Added runtime pending-HITL replay on chat subscription so prompts created before renderer listener attach are re-delivered deterministically.
  * - 2026-02-24: Switched HITL restore dispatch to persisted message reconstruction (`getMemory` + request/response pairing helper).
  * - 2026-02-24: Replaced HITL replay dependency with pending-prompt read model dispatch over tool events.
  * - 2026-02-24: Restored strict chat-scoped SSE/tool filtering after source-side chatId guarantees were added to streaming emitters.
@@ -61,6 +62,7 @@ interface CreateRealtimeEventsRuntimeDependencies {
   subscribeWorld: (worldId: string, options: Record<string, unknown>) => Promise<WorldSubscriptionLike | null>;
   ensureCoreReady: () => Promise<void> | void;
   getMemory?: (worldId: string, chatId: string | null) => Promise<any[] | null>;
+  listPendingHitlPromptEvents?: (world: any, chatId?: string | null) => Array<{ chatId: string | null; prompt: Record<string, unknown> }>;
   listPendingHitlPromptEventsFromMessages?: (messages: any[], chatId?: string | null) => Array<{ chatId: string | null; prompt: Record<string, unknown> }>;
 }
 
@@ -93,6 +95,7 @@ export function createRealtimeEventsRuntime(
     subscribeWorld,
     ensureCoreReady,
     getMemory,
+    listPendingHitlPromptEvents,
     listPendingHitlPromptEventsFromMessages,
   } = dependencies;
 
@@ -309,10 +312,53 @@ export function createRealtimeEventsRuntime(
       return { subscribed: false, canceled: true, stale: true, subscriptionId, worldId, chatId };
     }
 
+    if (chatId && typeof listPendingHitlPromptEvents === 'function') {
+      try {
+        const runtimePendingPrompts = listPendingHitlPromptEvents(world, chatId);
+        console.log(`[electron:realtime] replay-runtime-hitl world=${worldId} chat=${chatId} count=${Array.isArray(runtimePendingPrompts) ? runtimePendingPrompts.length : 0} subscriptionId=${subscriptionId}`);
+        for (const pending of runtimePendingPrompts || []) {
+          const prompt = pending?.prompt && typeof pending.prompt === 'object'
+            ? pending.prompt
+            : null;
+          if (!prompt) {
+            continue;
+          }
+
+          const toolCallId = String(prompt.toolCallId || prompt.requestId || '').trim();
+          const toolName = String(prompt.toolName || 'human_intervention_request').trim() || 'human_intervention_request';
+          if (!toolCallId) {
+            continue;
+          }
+
+          sendRealtimeEventToRenderer({
+            ...serializeRealtimeToolEvent(worldId, pending?.chatId || chatId, {
+              type: 'tool-progress',
+              chatId: pending?.chatId || chatId,
+              toolExecution: {
+                toolName,
+                toolCallId,
+                metadata: {
+                  hitlPrompt: {
+                    ...prompt,
+                    chatId: pending?.chatId || chatId,
+                  },
+                },
+              },
+            }),
+            subscriptionId,
+          });
+        }
+      } catch (error) {
+        const warningMessage = `Failed to replay runtime pending HITL prompts for world '${worldId}' chat '${chatId}': ${error instanceof Error ? error.message : String(error)}`;
+        console.warn(warningMessage);
+      }
+    }
+
     if (chatId && typeof getMemory === 'function' && typeof listPendingHitlPromptEventsFromMessages === 'function') {
       try {
         const persistedMessages = await getMemory(worldId, chatId);
         const pendingPrompts = listPendingHitlPromptEventsFromMessages(persistedMessages || [], chatId);
+        console.log(`[electron:realtime] replay-persisted-hitl world=${worldId} chat=${chatId} count=${pendingPrompts.length} subscriptionId=${subscriptionId}`);
         for (const pending of pendingPrompts) {
           const prompt = pending?.prompt && typeof pending.prompt === 'object'
             ? pending.prompt

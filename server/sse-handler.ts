@@ -37,7 +37,7 @@
  */
 
 import { Request, Response } from 'express';
-import { createCategoryLogger, World, EventType } from '../core/index.js';
+import { createCategoryLogger, World, EventType, getMemory, listPendingHitlPromptEventsFromMessages } from '../core/index.js';
 
 const loggerStream = createCategoryLogger('api.stream');
 
@@ -199,7 +199,11 @@ export function createSSEHandler(
     return normalizedEventChatId === normalizedScopedChatId;
   };
 
-  // Attach direct listeners to world.eventEmitter
+  // Track already-sent ids to avoid double-emitting synthesized -> live events
+  const sentMessageIds = new Set<string>();
+  const sentToolCallIds = new Set<string>();
+
+  // Attach direct listeners to world.eventEmitter (defined inside attach to allow synth-before-attach)
   const worldListener = (eventData: any) => {
     // Check if this is a tool event (tool-start, tool-result, tool-error, tool-progress)
     const isToolEvent = eventData?.type && ['tool-start', 'tool-result', 'tool-error', 'tool-progress'].includes(eventData.type);
@@ -258,8 +262,6 @@ export function createSSEHandler(
       sendSSE({ type: EventType.WORLD, data: eventData });
     }
   };
-  world.eventEmitter.on(EventType.WORLD, worldListener);
-  listeners.set(EventType.WORLD, worldListener);
 
   const messageListener = (eventData: MessageEventPayload) => {
     if (!isChatEventInScope(eventData?.chatId, false)) {
@@ -280,53 +282,145 @@ export function createSSEHandler(
       tool_calls: eventData.tool_calls
     };
     sendSSE({ type: EventType.MESSAGE, data: messageData });
-  };
-  world.eventEmitter.on(EventType.MESSAGE, messageListener);
-  listeners.set(EventType.MESSAGE, messageListener);
+    const sseListener = (eventData: SSEEventPayload) => {
+      if (!isChatEventInScope(eventData?.chatId, false)) {
+        return;
+      }
+      // Extend fallback timeout for long-running shell stream activity.
+      const isLegacyToolStream = eventData.type === 'tool-stream';
+      const isShellAssistantStream = eventData.toolName === 'shell_cmd' &&
+        (eventData.type === 'start' || eventData.type === 'chunk' || eventData.type === 'end');
+      if (isLegacyToolStream || isShellAssistantStream) {
+        startTimeoutFallback();
+      }
+      sendSSE({ type: EventType.SSE, data: eventData });
+    };
 
-  const sseListener = (eventData: SSEEventPayload) => {
-    if (!isChatEventInScope(eventData?.chatId, false)) {
-      return;
+    // NOTE: listeners are attached after an initial synthesis step below to avoid race
+    // where core resume emits events before the client has subscribed.
+
+    async function attachListeners() {
+      world.eventEmitter.on(EventType.WORLD, worldListener);
+      listeners.set(EventType.WORLD, worldListener);
+
+      world.eventEmitter.on(EventType.MESSAGE, messageListener);
+      listeners.set(EventType.MESSAGE, messageListener);
+
+      world.eventEmitter.on(EventType.SSE, sseListener);
+      listeners.set(EventType.SSE, sseListener);
+
+      const systemListener = (eventData: SystemEventPayload) => {
+        if (!isChatEventInScope(eventData?.chatId, true)) {
+          return;
+        }
+        sendSSE({ type: EventType.SYSTEM, data: eventData });
+      };
+      world.eventEmitter.on(EventType.SYSTEM, systemListener);
+      listeners.set(EventType.SYSTEM, systemListener);
     }
-    // Extend fallback timeout for long-running shell stream activity.
-    const isLegacyToolStream = eventData.type === 'tool-stream';
-    const isShellAssistantStream = eventData.toolName === 'shell_cmd' &&
-      (eventData.type === 'start' || eventData.type === 'chunk' || eventData.type === 'end');
-    if (isLegacyToolStream || isShellAssistantStream) {
-      startTimeoutFallback();
-    }
-    sendSSE({ type: EventType.SSE, data: eventData });
-  };
-  world.eventEmitter.on(EventType.SSE, sseListener);
-  listeners.set(EventType.SSE, sseListener);
 
-  const systemListener = (eventData: SystemEventPayload) => {
-    if (!isChatEventInScope(eventData?.chatId, true)) {
-      return;
-    }
-    sendSSE({ type: EventType.SYSTEM, data: eventData });
-  };
-  world.eventEmitter.on(EventType.SYSTEM, systemListener);
-  listeners.set(EventType.SYSTEM, systemListener);
+    // Synthesis: use persisted memory as the source of truth to restore UI state
+    (async () => {
+      try {
+        // Try to read canonical chat memory using public core helper
+        const memory = await getMemory(world.id, normalizedScopedChatId as any || undefined);
+        if (Array.isArray(memory) && memory.length > 0) {
+          // Send the most recent user message if the last message is a user message
+          const lastMessage = memory[memory.length - 1];
+          if (lastMessage && lastMessage.messageId) {
+            // Mark as sent to avoid double-emitting when live listeners arrive
+            sentMessageIds.add(String(lastMessage.messageId));
 
-  // Cleanup function to remove all listeners
-  const cleanupListeners = () => {
-    for (const [eventType, listener] of listeners.entries()) {
-      world.eventEmitter.removeListener(eventType, listener);
-    }
-    listeners.clear();
-  };
+            if (lastMessage.role === 'user') {
+              const messageData = {
+                type: 'message',
+                sender: lastMessage.sender,
+                content: lastMessage.content,
+                messageId: lastMessage.messageId,
+                chatId: lastMessage.chatId,
+                replyToMessageId: lastMessage.replyToMessageId,
+                createdAt: lastMessage.createdAt || new Date().toISOString(),
+                role: lastMessage.role,
+                tool_calls: lastMessage.tool_calls
+              };
+              sendSSE({ type: EventType.MESSAGE, data: messageData });
+            } else if (lastMessage.role === 'assistant' && Array.isArray(lastMessage.tool_calls) && lastMessage.tool_calls.length > 0) {
+              // Detect unresolved tool calls by scanning persisted memory for completed tool messages
+              const completedToolCallIds = new Set<string>();
+              for (const m of memory) {
+                if (m.role === 'tool' && typeof m.tool_call_id === 'string') {
+                  completedToolCallIds.add(String(m.tool_call_id));
+                }
+              }
 
-  // Handle client disconnect
-  req.on('close', () => {
-    loggerStream.debug(`[${context}] Client disconnected, cleaning up`);
-    cleanupListeners();
-    endResponse();
-  });
+              for (const tc of lastMessage.tool_calls) {
+                const toolCallId = String((tc as any)?.id || '').trim();
+                const toolName = String((tc as any)?.function?.name || '').trim();
+                if (!toolCallId || completedToolCallIds.has(toolCallId)) continue;
+                // Synthesize a tool-start event so the UI can show pending work / HITL
+                sentToolCallIds.add(toolCallId);
+                sendSSE({
+                  type: EventType.SSE,
+                  data: {
+                    type: 'tool-start',
+                    messageId: toolCallId,
+                    agentName: lastMessage.agentId || undefined,
+                    chatId: lastMessage.chatId,
+                    toolExecution: {
+                      toolName,
+                      toolCallId,
+                      input: (tc as any)?.function?.arguments || {}
+                    }
+                  }
+                });
+              }
+            }
 
-  // Start the fallback timeout
-  startTimeoutFallback();
+            // Also synthesize any pending HITL prompts derived from memory
+            try {
+              const pendingHitl = listPendingHitlPromptEventsFromMessages(memory || [], normalizedScopedChatId === undefined ? null : normalizedScopedChatId as any);
+              for (const h of pendingHitl) {
+                sendSSE({ type: EventType.SYSTEM, data: h });
+              }
+            } catch (hitlErr) {
+              loggerStream.debug(`[${context}] failed to synthesize HITL prompts:`, hitlErr);
+            }
+          }
+        }
+      } catch (error) {
+        loggerStream.debug(`[${context}] failed to synthesize persisted state:`, error);
+      } finally {
+        // Attach live listeners after synthesis to avoid race where resume emits before client subscribed
+        attachListeners();
+      }
+    })();
 
+    // Cleanup function to remove all listeners
+    const cleanupListeners = () => {
+      for (const [eventType, listener] of listeners.entries()) {
+        world.eventEmitter.removeListener(eventType, listener);
+      }
+      listeners.clear();
+    };
+
+    // Handle client disconnect
+    req.on('close', () => {
+      loggerStream.debug(`[${context}] Client disconnected, cleaning up`);
+      cleanupListeners();
+      endResponse();
+    });
+
+    // Start the fallback timeout
+    startTimeoutFallback();
+    // Return the SSE handler API for callers
+    return {
+      sendSSE,
+      endResponse,
+      isEnded: () => isResponseEnded
+    };
+  }
+
+  // Also return the handler from the outer factory so callers get the API immediately
   return {
     sendSSE,
     endResponse,
