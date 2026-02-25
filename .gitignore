@@ -3,6 +3,8 @@ node_modules/
 
 # Build output
 dist/
+release/
+*.tgz
 
 # Environment variables
 .env
@@ -42,3 +44,9 @@ docs/ideas/
 docs/done/
 public/
 awesome-agent-world
+
+# Electron packaging output
+electron/release/
+electron/builder-effective-config.yaml
+electron/.cache/
+electron/.electron-builder/

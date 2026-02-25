@@ -1,0 +1,233 @@
+# Electron Release Workflow
+# Features:
+# - Builds and publishes macOS + Windows desktop artifacts on version tags.
+# - Enforces tag/version contract and release channel rules (stable/prerelease).
+# - Fails fast when required signing secrets are missing.
+# Notes:
+# - Uses root package version as release source of truth.
+# - Uses electron-builder GitHub publish provider to upload assets/metadata.
+# Recent changes:
+# - 2026-02-14: Initial workflow added for Phase 3 desktop release automation.
+
+name: Electron Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: electron-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare Release Metadata
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      release_type: ${{ steps.meta.outputs.release_type }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install root deps
+        run: npm ci
+
+      - name: Install electron deps
+        run: npm ci --prefix electron
+
+      - name: Validate tag + version contract
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+
+          if [[ -z "${TAG}" ]]; then
+            echo "Missing tag ref." >&2
+            exit 1
+          fi
+
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z\.-]+)?$ ]]; then
+            echo "Invalid tag format: ${TAG}" >&2
+            echo "Expected: vX.Y.Z or vX.Y.Z-prerelease.N" >&2
+            exit 1
+          fi
+
+          ROOT_VERSION="$(node -p "require('./package.json').version")"
+          if [[ "v${ROOT_VERSION}" != "${TAG}" ]]; then
+            echo "Tag/version mismatch: tag=${TAG}, package.json=${ROOT_VERSION}" >&2
+            exit 1
+          fi
+
+          npm run release:prepare
+
+          if [[ "${TAG}" == *-* ]]; then
+            RELEASE_TYPE="prerelease"
+          else
+            RELEASE_TYPE="release"
+          fi
+
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "release_type=${RELEASE_TYPE}" >> "${GITHUB_OUTPUT}"
+
+      - name: Ensure GitHub release exists with notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.meta.outputs.tag }}"
+          RELEASE_TYPE="${{ steps.meta.outputs.release_type }}"
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists."
+            exit 0
+          fi
+
+          if [[ "${RELEASE_TYPE}" == "prerelease" ]]; then
+            gh release create "${TAG}" \
+              --title "${TAG}" \
+              --generate-notes \
+              --prerelease
+          else
+            gh release create "${TAG}" \
+              --title "${TAG}" \
+              --generate-notes
+          fi
+
+  build-macos:
+    name: Build and Publish macOS
+    runs-on: macos-latest
+    needs: prepare
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install root deps
+        run: npm ci
+
+      - name: Install electron deps
+        run: npm ci --prefix electron
+
+      - name: Validate release contract
+        run: npm run release:prepare
+
+      - name: Guardrail - require mac signing/notarization secrets
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          REQUIRED_VARS=(CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID)
+          for var in "${REQUIRED_VARS[@]}"; do
+            if [[ -z "${!var:-}" ]]; then
+              echo "Missing required secret: ${var}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Build and publish mac artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run package:base --prefix electron
+          npx --prefix electron electron-builder \
+            --mac dmg zip \
+            --publish always \
+            --config.publish.releaseType="${{ needs.prepare.outputs.release_type }}"
+
+      - name: Verify updater metadata (macOS)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f electron/release/latest-mac.yml
+
+  build-windows:
+    name: Build and Publish Windows
+    runs-on: windows-latest
+    needs: prepare
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install root deps
+        run: npm ci
+
+      - name: Install electron deps
+        run: npm ci --prefix electron
+
+      - name: Validate release contract
+        run: npm run release:prepare
+
+      - name: Guardrail - require Windows signing secrets
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          REQUIRED_VARS=(WIN_CSC_LINK WIN_CSC_KEY_PASSWORD)
+          for var in "${REQUIRED_VARS[@]}"; do
+            if [[ -z "${!var:-}" ]]; then
+              echo "Missing required secret: ${var}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Build and publish Windows artifacts (x64)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run package:base --prefix electron
+          npx --prefix electron electron-builder \
+            --win nsis \
+            --x64 \
+            --publish always \
+            --config.publish.releaseType="${{ needs.prepare.outputs.release_type }}"
+
+      - name: Verify updater metadata (Windows)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f electron/release/latest.yml
