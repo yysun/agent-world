@@ -16,6 +16,7 @@ yarn-error.log*
 
 # Runtime data
 data/
+awesome-agent-world/
 
 # IDE specific files
 .idea/
@@ -40,3 +41,4 @@ docs/requirements/
 docs/ideas/
 docs/done/
 public/
+awesome-agent-world

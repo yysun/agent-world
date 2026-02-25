@@ -1103,13 +1103,15 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
       loggerResponse.debug('No mentions - public message', { agentId: agent.id });
       return true;
     }
-    const shouldRespond = mentions.includes(agent.id.toLowerCase());
-    loggerResponse.debug('HUMAN message mention check', { agentId: agent.id, shouldRespond });
+    const normalizedAgentId = agent.id.toLowerCase().replace(/\s+/g, '-');
+    const shouldRespond = mentions.includes(normalizedAgentId);
+    loggerResponse.debug('HUMAN message mention check', { agentId: agent.id, normalizedAgentId, shouldRespond });
     return shouldRespond;
   }
 
   // For agent messages, only respond if this agent has a paragraph-beginning mention
-  const shouldRespond = mentions.includes(agent.id.toLowerCase());
-  loggerResponse.debug('AGENT message mention check', { agentId: agent.id, shouldRespond });
+  const normalizedAgentId = agent.id.toLowerCase().replace(/\s+/g, '-');
+  const shouldRespond = mentions.includes(normalizedAgentId);
+  loggerResponse.debug('AGENT message mention check', { agentId: agent.id, normalizedAgentId, shouldRespond });
   return shouldRespond;
 }

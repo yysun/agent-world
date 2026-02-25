@@ -87,9 +87,9 @@ Focus: Define and maintain the tricky/adversarial dataset baseline.
 ### Step 5: Regression Testing Pipeline
 Focus: Repeatable evaluation loop and regression reporting.
 
-- [ ] **Checkpoint 5**: Regression testing pipeline complete.
+- [x] **Checkpoint 5**: Regression testing pipeline complete.
   - [x] Add evaluation script `tests/opik/eval-robustness.ts`.
-  - [ ] Support LLM-as-a-Judge scoring in robustness evaluation pipeline.
+  - [x] Support LLM-as-a-Judge scoring in robustness evaluation pipeline.
   - [x] Require named metrics in outputs: `Hallucination`, `AnswerRelevance`.
   - [x] Implement trace-to-dataset export CLI path (`--save-to-dataset`).
   - [x] Track aggregate metrics and regression thresholds.
