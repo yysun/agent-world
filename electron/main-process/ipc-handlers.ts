@@ -12,6 +12,7 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-02-25: Added optional `world:import` source support for GitHub shorthand (`@awesome-agent-world/<world-name>`) via secure temp staging.
  * - 2026-02-20: Enforced options-only `hitl:respond` handler payload validation.
  * - 2026-02-19: Simplified desktop world export to file-storage-only (removed SQLite export option).
  * - 2026-02-19: Added CLI-parity world import/export handlers for folder-validated imports, id/name conflict checks, and storage-target export flows.
@@ -100,6 +101,28 @@ interface MainIpcHandlerFactoryDependencies {
   removeMessagesFrom: (worldId: string, messageId: string, chatId: string) => Promise<any>;
   createStorage: (config: any) => Promise<any>;
   createStorageFromEnv: () => Promise<any>;
+  GitHubWorldImportError: new (...args: any[]) => GitHubWorldImportErrorLike;
+  stageGitHubWorldFromShorthand: (shorthand: string) => Promise<GitHubWorldImportStagedResult>;
+}
+
+interface GitHubWorldImportSource {
+  shorthand: string;
+  owner: string;
+  repo: string;
+  branch: string;
+  worldPath: string;
+  commitSha: string | null;
+}
+
+interface GitHubWorldImportStagedResult {
+  stagingRootPath: string;
+  worldFolderPath: string;
+  source: GitHubWorldImportSource;
+  cleanup: () => Promise<void>;
+}
+
+interface GitHubWorldImportErrorLike extends Error {
+  details?: Record<string, unknown>;
 }
 
 export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDependencies) {
@@ -134,7 +157,9 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     editUserMessage,
     removeMessagesFrom,
     createStorage,
-    createStorageFromEnv
+    createStorageFromEnv,
+    GitHubWorldImportError,
+    stageGitHubWorldFromShorthand
   } = dependencies;
 
   interface StorageLike {
@@ -619,10 +644,13 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     return { success: true, worldId };
   }
 
-  async function importWorld() {
+  async function importWorld(payload?: any) {
     const mainWindow = getMainWindow();
     if (!mainWindow) throw new Error('Main window not initialized');
-    const selectedWorldFolder = await pickTargetDirectory(mainWindow, 'Import World Folder', 'Import');
+    const requestedSource = String(payload?.source || '').trim();
+    const selectedWorldFolder = requestedSource
+      || await pickTargetDirectory(mainWindow, 'Import World Folder', 'Import');
+    let stagedGitHubWorld: GitHubWorldImportStagedResult | null = null;
 
     if (!selectedWorldFolder) {
       return {
@@ -635,8 +663,23 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     try {
       await ensureCoreReady();
 
-      const absoluteWorldFolder = path.resolve(path.normalize(selectedWorldFolder));
-      const validationError = getWorldFolderValidationError(absoluteWorldFolder);
+      let resolvedWorldFolder = path.resolve(path.normalize(selectedWorldFolder));
+      let sourceMetadata: {
+        shorthand: string;
+        owner: string;
+        repo: string;
+        branch: string;
+        worldPath: string;
+        commitSha: string | null;
+      } | null = null;
+
+      if (selectedWorldFolder.startsWith('@')) {
+        stagedGitHubWorld = await stageGitHubWorldFromShorthand(selectedWorldFolder);
+        resolvedWorldFolder = path.resolve(path.normalize(stagedGitHubWorld.worldFolderPath));
+        sourceMetadata = stagedGitHubWorld.source;
+      }
+
+      const validationError = getWorldFolderValidationError(resolvedWorldFolder);
       if (validationError) {
         return {
           success: false,
@@ -645,8 +688,8 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
         };
       }
 
-      const sourceWorldId = path.basename(absoluteWorldFolder);
-      const sourceRootPath = path.dirname(absoluteWorldFolder);
+      const sourceWorldId = path.basename(resolvedWorldFolder);
+      const sourceRootPath = path.dirname(resolvedWorldFolder);
       const sourceStorage = await createStorage({
         type: 'file',
         rootPath: sourceRootPath
@@ -755,15 +798,36 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
           agents: sourceAgents.length,
           chats: sourceChats.length,
           events: eventCount
-        }
+        },
+        source: sourceMetadata || undefined
       };
     } catch (error) {
+      if (error instanceof GitHubWorldImportError) {
+        const details = error.details || {};
+        const owner = String(details.owner || '');
+        const repo = String(details.repo || '');
+        const branch = String(details.branch || '');
+        const worldPath = String(details.worldPath || '');
+        const resolvedSource = owner && repo && branch && worldPath
+          ? `${owner}/${repo}@${branch}:${worldPath}`
+          : undefined;
+        return {
+          success: false,
+          error: error.message,
+          message: `Failed to import world: ${error.message}`,
+          source: resolvedSource,
+        };
+      }
       const err = error as Error;
       return {
         success: false,
         error: err.message || 'Unknown error',
         message: `Failed to import world: ${err.message || 'Unknown error occurred'}`
       };
+    } finally {
+      if (stagedGitHubWorld) {
+        await stagedGitHubWorld.cleanup();
+      }
     }
   }
 

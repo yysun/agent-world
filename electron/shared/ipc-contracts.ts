@@ -15,6 +15,7 @@
  * - Runtime validation remains in main-process handlers for behavior parity.
  *
  * Recent Changes:
+ * - 2026-02-25: Extended `world:import` contract with optional source payload for path/shorthand imports.
  * - 2026-02-19: Added `world:export` invoke contract for desktop world save/export flows aligned with CLI storage options.
  * - 2026-02-16: Added `session:branchFromMessage` invoke contract for creating a branched chat from an assistant message.
  * - 2026-02-14: Added `hitl:respond` invoke contract for resolving world HITL option prompts from renderer.
@@ -75,6 +76,10 @@ export interface WorldIdPayload {
 
 export interface WorldExportPayload extends WorldIdPayload {
   targetPath?: string;
+}
+
+export interface WorldImportPayload {
+  source?: string;
 }
 
 export interface WorldChatPayload extends WorldIdPayload {
@@ -157,7 +162,7 @@ export interface DesktopApi {
   pickDirectory: () => Promise<unknown>;
   loadWorldFromFolder: () => Promise<unknown>;
   loadWorld: (worldId: string) => Promise<unknown>;
-  importWorld: () => Promise<unknown>;
+  importWorld: (payload?: WorldImportPayload) => Promise<unknown>;
   exportWorld: (worldId: string) => Promise<unknown>;
   listWorlds: () => Promise<unknown>;
   listSkills: (filters?: SkillListFilterPayload) => Promise<SkillRegistrySummary[]>;

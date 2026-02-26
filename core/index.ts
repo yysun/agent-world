@@ -129,6 +129,14 @@ export {
   type StopMessageProcessingResult
 } from './message-processing-control.js';
 
+export {
+  GitHubWorldImportError,
+  stageGitHubWorldFromShorthand,
+  type GitHubWorldImportErrorCode,
+  type ResolvedGitHubWorldSource,
+  type StagedGitHubWorldResult,
+} from './storage/github-world-import.js';
+
 // === CHAT MANAGEMENT ===
 export {
   newChat,

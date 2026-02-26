@@ -82,7 +82,11 @@ import { resolvePreloadPath, resolveRendererIndexPath } from './main-process/win
 import { setupMainLifecycle } from './main-process/lifecycle.js';
 import { createRealtimeEventsRuntime } from './main-process/realtime-events.js';
 import { createWorkspaceRuntime } from './main-process/workspace-runtime.js';
-import { importCoreModule, importCoreStorageFactoryModule } from './main-process/core-module-loader.js';
+import {
+  importCoreGitHubWorldImportModule,
+  importCoreModule,
+  importCoreStorageFactoryModule
+} from './main-process/core-module-loader.js';
 import {
   applySystemSettings,
   configureProvidersFromEnv,
@@ -134,6 +138,7 @@ const {
   addLogStreamCallback
 } = await importCoreModule(__dirname);
 const { createStorage, createStorageFromEnv } = await importCoreStorageFactoryModule(__dirname);
+const { GitHubWorldImportError, stageGitHubWorldFromShorthand } = await importCoreGitHubWorldImportModule(__dirname);
 
 const CHAT_EVENT_CHANNEL = 'chat:event';
 
@@ -221,7 +226,9 @@ const ipcHandlers = createMainIpcHandlers({
   editUserMessage,
   removeMessagesFrom,
   createStorage,
-  createStorageFromEnv
+  createStorageFromEnv,
+  GitHubWorldImportError,
+  stageGitHubWorldFromShorthand
 });
 
 function registerIpcHandlers() {
