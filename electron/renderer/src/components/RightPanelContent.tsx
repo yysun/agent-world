@@ -13,9 +13,12 @@
  * - Receives all mutation handlers and state via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-26: Simplified import-world actions by removing bottom footer buttons and adding inline source-specific import buttons.
+ * - 2026-02-26: Added `import-world` panel mode with a single import form supporting local-directory and GitHub shorthand sources.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component extraction.
  */
 
+import { useEffect, useState } from 'react';
 import AgentFormFields from './AgentFormFields';
 import SettingsSwitch from './SettingsSwitch';
 import SettingsSkillSwitch from './SettingsSkillSwitch';
@@ -70,7 +73,49 @@ export default function RightPanelContent({
   onCreateWorld,
   creatingWorld,
   setCreatingWorld,
+  onImportWorld,
 }) {
+  const [importSourceType, setImportSourceType] = useState('local');
+  const [githubImportSource, setGithubImportSource] = useState('@awesome-agent-world/');
+  const [importingWorld, setImportingWorld] = useState(false);
+
+  useEffect(() => {
+    if (panelMode !== 'import-world') return;
+    setImportSourceType('local');
+    setGithubImportSource('@awesome-agent-world/');
+    setImportingWorld(false);
+  }, [panelMode]);
+
+  const onImportFromLocal = async () => {
+    if (importingWorld) return;
+
+    setImportingWorld(true);
+    try {
+      const success = await onImportWorld();
+      if (success) {
+        closePanel();
+      }
+    } finally {
+      setImportingWorld(false);
+    }
+  };
+
+  const onImportFromGithub = async () => {
+    if (importingWorld) return;
+    const source = String(githubImportSource || '').trim();
+    if (!source) return;
+
+    setImportingWorld(true);
+    try {
+      const success = await onImportWorld(source);
+      if (success) {
+        closePanel();
+      }
+    } finally {
+      setImportingWorld(false);
+    }
+  };
+
   return (
     <div className="min-h-0 flex flex-1 flex-col overflow-y-auto">
       {panelMode === 'settings' ? (
@@ -265,6 +310,74 @@ export default function RightPanelContent({
             >
               {savingSystemSettings ? 'Saving...' : (settingsNeedRestart ? 'Save & Restart' : 'Save')}
             </button>
+          </div>
+        </div>
+      ) : panelMode === 'import-world' ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+            <p className="text-xs text-sidebar-foreground/70">
+              Choose import source type, then import into the current workspace.
+            </p>
+
+            <div className="space-y-2 rounded-md border border-sidebar-border bg-sidebar-accent p-3">
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-sidebar-foreground">
+                <input
+                  type="radio"
+                  name="import-source-type"
+                  value="local"
+                  checked={importSourceType === 'local'}
+                  onChange={() => setImportSourceType('local')}
+                  disabled={importingWorld}
+                  className="accent-primary"
+                />
+                <span>From local directory</span>
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-sidebar-foreground">
+                <input
+                  type="radio"
+                  name="import-source-type"
+                  value="github"
+                  checked={importSourceType === 'github'}
+                  onChange={() => setImportSourceType('github')}
+                  disabled={importingWorld}
+                  className="accent-primary"
+                />
+                <span>From GitHub shorthand</span>
+              </label>
+            </div>
+
+            {importSourceType === 'github' ? (
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-bold text-sidebar-foreground/90">GitHub Source</label>
+                <input
+                  value={githubImportSource}
+                  onChange={(event) => setGithubImportSource(event.target.value)}
+                  placeholder="@awesome-agent-world/infinite-etude"
+                  className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                  disabled={importingWorld}
+                />
+                <span className="text-[10px] text-sidebar-foreground/60">
+                  Example: @awesome-agent-world/infinite-etude
+                </span>
+                <button
+                  type="button"
+                  onClick={onImportFromGithub}
+                  disabled={importingWorld || !String(githubImportSource || '').trim()}
+                  className="mt-2 w-fit rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {importingWorld ? 'Importing...' : 'Import from GitHub'}
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={onImportFromLocal}
+                disabled={importingWorld}
+                className="w-fit rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {importingWorld ? 'Importing...' : 'Open local world folder'}
+              </button>
+            )}
           </div>
         </div>
       ) : panelMode === 'edit-world' && loadedWorld ? (

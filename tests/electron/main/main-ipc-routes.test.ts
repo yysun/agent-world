@@ -11,6 +11,7 @@
  * - Tests route build + registration helpers together.
  *
  * Recent Changes:
+ * - 2026-02-26: Added payload assertion for `world:import` route wiring with optional `source` input.
  * - 2026-02-19: Added channel/order/payload assertions for `world:export` route wiring.
  * - 2026-02-16: Added channel/order/payload assertions for `session:branchFromMessage` route wiring.
  * - 2026-02-14: Added channel/order/payload assertions for `hitl:respond` route wiring.
@@ -115,6 +116,7 @@ describe('buildMainIpcRoutes', () => {
     await routes.find((route) => route.channel === 'world:saveLastSelected')?.handler({}, 'world-99');
     await routes.find((route) => route.channel === 'workspace:open')?.handler({}, { directoryPath: '/tmp/workspace' });
     await routes.find((route) => route.channel === 'dialog:pickDirectory')?.handler({});
+    await routes.find((route) => route.channel === 'world:import')?.handler({}, { source: '@awesome-agent-world/infinite-etude' });
     await routes.find((route) => route.channel === 'world:export')?.handler({}, { worldId: 'w-9' });
     await routes.find((route) => route.channel === 'skill:list')?.handler({});
     await routes.find((route) => route.channel === 'session:list')?.handler({}, { worldId: 'w-1' });
@@ -130,6 +132,7 @@ describe('buildMainIpcRoutes', () => {
     expect(handlers.writeWorldPreference).toHaveBeenCalledWith('world-99');
     expect(handlers.openWorkspaceDialog).toHaveBeenCalledWith({ directoryPath: '/tmp/workspace' });
     expect(handlers.pickDirectoryDialog).toHaveBeenCalledTimes(1);
+    expect(handlers.importWorld).toHaveBeenCalledWith({ source: '@awesome-agent-world/infinite-etude' });
     expect(handlers.exportWorld).toHaveBeenCalledWith({ worldId: 'w-9' });
     expect(handlers.listSkillRegistry).toHaveBeenCalledTimes(1);
     expect(handlers.listWorldSessions).toHaveBeenCalledWith('w-1');

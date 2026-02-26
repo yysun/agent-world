@@ -12,6 +12,7 @@
  * - Data-only transformations from provided inputs.
  *
  * Recent Changes:
+ * - 2026-02-26: Added right-panel import props wiring (`onImportWorld`) to support import form mode.
  * - 2026-02-21: Added message-list prop wiring for assistant raw-markdown copy action.
  * - 2026-02-20: Added inline HITL message-card props to main message-list wiring (replacing overlay HITL modal usage).
  * - 2026-02-20: Added `activeHeaderAgentIds` wiring so header avatars can reflect active streaming agents.
@@ -125,6 +126,7 @@ export function createMainContentRightPanelContentProps<T extends PropBag>(input
     onCreateWorld: input.onCreateWorld,
     creatingWorld: input.creatingWorld,
     setCreatingWorld: input.setCreatingWorld,
+    onImportWorld: input.onImportWorld,
   };
 }
 

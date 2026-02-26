@@ -13,6 +13,7 @@
  * - Receives all domain state/actions from `App.jsx` orchestration.
  *
  * Recent Changes:
+ * - 2026-02-26: Changed import action to open right-panel import form (local directory or GitHub source).
  * - 2026-02-19: Added world export action button alongside create/import controls.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component decomposition.
  */
@@ -116,7 +117,7 @@ export default function LeftSidebarPanel({
               type="button"
               onClick={onImportWorld}
               className="rounded p-1 text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground"
-              title="Import world from folder"
+              title="Import world"
             >
               <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" strokeLinecap="round" strokeLinejoin="round" />

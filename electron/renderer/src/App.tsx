@@ -772,6 +772,7 @@ export default function App() {
     onCancelSettings,
     onSaveSettings,
     onOpenCreateWorldPanel,
+    onOpenImportWorldPanel,
     onOpenWorldEditPanel,
     onOpenCreateAgentPanel,
     onOpenEditAgentPanel,
@@ -980,6 +981,7 @@ export default function App() {
     onCreateWorld,
     creatingWorld,
     setCreatingWorld,
+    onImportWorld,
   });
 
   const leftSidebarProps = createLeftSidebarProps({
@@ -990,7 +992,7 @@ export default function App() {
     availableWorlds,
     loadedWorld,
     onOpenCreateWorldPanel,
-    onImportWorld,
+    onImportWorld: onOpenImportWorldPanel,
     onExportWorld,
     onSelectWorld,
     loadingWorld,

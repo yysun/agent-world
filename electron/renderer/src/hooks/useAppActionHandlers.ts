@@ -13,6 +13,7 @@
  * - Uses dependency injection for state setters and collaborators.
  *
  * Recent Changes:
+ * - 2026-02-26: Added `onOpenImportWorldPanel` to route world-import action into right-panel import form mode.
  * - 2026-02-20: Blocked Enter-to-send while HITL prompt queue is non-empty.
  * - 2026-02-18: Updated create-agent panel defaults to inherit world chat LLM provider/model and default auto-reply to false.
  * - 2026-02-17: Extracted from App.tsx during CC pass.
@@ -104,6 +105,11 @@ export function useAppActionHandlers({
 
   const onOpenCreateWorldPanel = useCallback(() => {
     setPanelMode('create-world');
+    setPanelOpen(true);
+  }, [setPanelMode, setPanelOpen]);
+
+  const onOpenImportWorldPanel = useCallback(() => {
+    setPanelMode('import-world');
     setPanelOpen(true);
   }, [setPanelMode, setPanelOpen]);
 
@@ -308,6 +314,7 @@ export function useAppActionHandlers({
     onCancelSettings,
     onSaveSettings,
     onOpenCreateWorldPanel,
+    onOpenImportWorldPanel,
     onOpenWorldEditPanel,
     onOpenCreateAgentPanel,
     onOpenEditAgentPanel,
