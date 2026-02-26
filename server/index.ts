@@ -15,6 +15,7 @@
  * Endpoints: /health + API routes from ./api.ts
  * 
  * Recent Changes:
+ * - 2026-02-26: Added specific global API error mapping for oversized JSON payloads, invalid JSON bodies, and readonly database errors to avoid generic INTERNAL_ERROR responses.
  * - 2026-02-08: Fixed auto-run detection to only trigger on direct execution
  * - 2026-02-08: Made browser auto-open configurable via AGENT_WORLD_AUTO_OPEN env var
  * - 2026-02-08: Prevented duplicate process signal handler registration using WeakSet
@@ -36,6 +37,8 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { Server } from 'http';
 import apiRouter from './api.js';
 import { initializeMCPRegistry, shutdownAllMCPServers } from '../core/mcp-server-registry.js';
+import { getErrorResponse } from './error-response.js';
+export { getErrorResponse } from './error-response.js';
 
 // ES modules setup
 const __filename = fileURLToPath(import.meta.url);
@@ -140,7 +143,8 @@ app.get('*', (req, res) => {
 // Error handling middleware
 app.use((error: Error, req: Request, res: Response, next: NextFunction) => {
   console.error('Unhandled error:', error);
-  res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+  const { status, payload } = getErrorResponse(error);
+  res.status(status).json(payload);
 });
 
 // 404 handler
