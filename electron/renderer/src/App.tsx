@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-02-26: Inline working indicator now shows model-aware text (`Contacting <model>...` during handshake and `<agent> (<model>) working...` when active) using real agent model metadata.
  * - 2026-02-22: Status bar completion is now driven by core activity events plus a send-finish no-activity fallback for zero-agent runs.
  * - 2026-02-22: Removed frontend @mention validation/inference from status and pending decisions; renderer now follows core event signals only.
  * - 2026-02-22: Restored immediate working-indicator visibility during send handshake by including per-session sending state in composer activity detection.
@@ -117,6 +118,10 @@ type HitlPrompt = {
     kind?: string;
   };
 };
+
+function normalizeAgentKey(value: unknown): string {
+  return String(value || '').trim().toLowerCase();
+}
 
 export default function App() {
   const api = useMemo(() => getDesktopApi(), []);
@@ -878,9 +883,61 @@ export default function App() {
   const canStopCurrentSession = Boolean(selectedSessionId) && !isCurrentSessionSending && !isCurrentSessionStopping && isCurrentSessionPendingResponse;
   const activeHitlPrompt = hitlPromptQueue.length > 0 ? hitlPromptQueue[0] : null;
   const showInlineWorkingIndicator = !activeHitlPrompt && (chatStatus === 'working' || isCurrentSessionSending);
-  const workingAgentNames = agentStatuses.filter(a => a.status === 'working').map(a => a.name);
+  const workingAgentEntries = agentStatuses.filter((agent) => agent.status === 'working');
+  const workingAgentNames = workingAgentEntries.map((agent) => agent.name);
+  const workingAgentModels = workingAgentEntries
+    .map((agent) => String(worldAgentsById.get(agent.id)?.model || '').trim())
+    .filter(Boolean);
+  const uniqueWorkingAgentModels = [...new Set(workingAgentModels)];
+  const mainAgentModel = useMemo(() => {
+    const normalizedMainAgent = normalizeAgentKey(loadedWorld?.mainAgent);
+    if (!normalizedMainAgent) return '';
+
+    const byId = worldAgents.find(
+      (agent: any) => normalizeAgentKey(agent.id) === normalizedMainAgent
+    );
+    if (byId?.model) {
+      return String(byId.model).trim();
+    }
+
+    const byName = worldAgents.find(
+      (agent: any) => normalizeAgentKey(agent.name) === normalizedMainAgent
+    );
+    return String(byName?.model || '').trim();
+  }, [loadedWorld?.mainAgent, worldAgents]);
+  const fallbackContactModel = String(
+    uniqueWorkingAgentModels[0]
+    || mainAgentModel
+    || worldAgents[0]?.model
+    || loadedWorld?.chatLLMModel
+    || ''
+  ).trim();
+  const inlineStatusText = (() => {
+    if (workingAgentEntries.length === 1) {
+      const singleAgent = workingAgentEntries[0];
+      const singleModel = String(worldAgentsById.get(singleAgent.id)?.model || '').trim();
+      return singleModel
+        ? `${singleAgent.name} (${singleModel}) working...`
+        : `${singleAgent.name} working...`;
+    }
+    if (workingAgentEntries.length > 1) {
+      return `${workingAgentNames.join(', ')} working...`;
+    }
+    if (fallbackContactModel) {
+      return `Contacting ${fallbackContactModel}...`;
+    }
+    return 'Contacting model...';
+  })();
+  const inlineDetailText = workingAgentEntries.length > 1 && uniqueWorkingAgentModels.length > 0
+    ? `models: ${uniqueWorkingAgentModels.join(', ')}`
+    : '';
   const inlineWorkingIndicatorState = showInlineWorkingIndicator
-    ? { primaryText: workingAgentNames.length > 0 ? workingAgentNames.join(', ') : 'Agent', elapsedMs: inlineElapsedMs }
+    ? {
+      primaryText: workingAgentNames.length > 0 ? workingAgentNames.join(', ') : 'Agent',
+      inlineStatusText,
+      detailText: inlineDetailText,
+      elapsedMs: inlineElapsedMs
+    }
     : null;
   const hasConversationMessages = useMemo(() => {
     return messages.some(isRenderableMessageEntry);

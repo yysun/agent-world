@@ -13,6 +13,7 @@
  * - Keeps branch/session refresh semantics aligned with the existing desktop IPC flows.
  *
  * Recent Changes:
+ * - 2026-02-26: Set chat-scoped sending state during edit-save submission so the inline working indicator appears immediately (web parity) and clears in `finally`.
  * - 2026-02-26: Clear chat-scoped transient error/log artifacts when saving user edits so stale failure indicators do not persist into retried turns.
  * - 2026-02-22: Removed renderer-side no-agent inference on send; status now follows core-emitted activity events only.
  * - 2026-02-22: Enforced strict pending semantics: `pendingResponseSessionIds` is now populated only from realtime agent-start signals, never on send.
@@ -317,6 +318,12 @@ export function useMessageManagement({
     setEditingText('');
     setHitlPromptQueue?.([]);
     setSubmittingHitlRequestId?.(null);
+    setPendingResponseSessionIds((prev) => {
+      const next = new Set(prev);
+      next.delete(targetChatId);
+      return next;
+    });
+    setSendingSessionIds((prev) => new Set([...prev, targetChatId]));
 
     try {
       const editResult = await api.editMessage(loadedWorldId, message.messageId, editedText, targetChatId);
@@ -362,6 +369,12 @@ export function useMessageManagement({
       setStatusText(errorMessage, 'error');
       setMessages((existing) => removeOptimisticUserMessage(existing, optimisticEditedMessageId));
       await refreshMessages(loadedWorldId, targetChatId);
+    } finally {
+      setSendingSessionIds((prev) => {
+        const next = new Set(prev);
+        next.delete(targetChatId);
+        return next;
+      });
     }
   }, [
     api,
