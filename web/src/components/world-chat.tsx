@@ -335,6 +335,7 @@ export default function WorldChat(props: WorldChatProps) {
               // Render log events (server logs)
               if (message.logEvent) {
                 const isExpanded = !!message.isLogExpanded;
+                const logSummaryText = String(message.text || message.logEvent.message || '').trim() || 'Log event';
                 let formattedArgs: string | null = null;
                 if (message.logEvent.data !== undefined) {
                   try {
@@ -345,7 +346,7 @@ export default function WorldChat(props: WorldChatProps) {
                 }
 
                 return (
-                  <div key={message.id || 'log-' + index} className="message log-message">
+                  <div key={message.id || 'log-' + index} className="log-message">
                     <button
                       type="button"
                       className="log-header"
@@ -354,7 +355,7 @@ export default function WorldChat(props: WorldChatProps) {
                     >
                       <span className={`log-dot ${message.logEvent.level}`}></span>
                       <span className="log-category">{message.logEvent.category}</span>
-                      <span className="log-content">{message.logEvent.message}</span>
+                      <span className="log-content">{logSummaryText}</span>
                       <span className="log-toggle-icon" aria-hidden="true">
                         {isExpanded ? '▲' : '▼'}
                       </span>

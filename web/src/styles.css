@@ -1469,6 +1469,11 @@ legend {
   font-style: italic;
 }
 
+.error-indicator {
+  font-size: 1rem;
+  line-height: 1.48;
+}
+
 .message-timestamp {
   font-size: 0.8rem;
   opacity: 0.6;
@@ -3317,15 +3322,15 @@ legend {
 
 /* Log message styling - aligned left with colored dots */
 .log-message {
-  align-self: flex-start !important;
-  background: none !important;
-  border: none !important;
-  padding: 0.3rem 0.5rem !important;
-  margin: 0.2rem 0 !important;
-  max-width: 80% !important;
-  font-size: 0.75rem !important;
-  color: var(--text-tertiary) !important;
-  font-family: inherit !important;
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0.3rem 0.5rem;
+  margin: 0.2rem 0;
+  max-width: 80%;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  font-family: inherit;
 }
 
 .log-message .message-sender {

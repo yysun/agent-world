@@ -44,6 +44,7 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2026-02-26: Preserved transient realtime log/system/error messages across same-chat refreshes (`chat-title-updated`, `agent-created`, HITL refresh) so SSE errors remain visible after metadata reload.
  * - 2026-02-25: Added frontend resume/load trace logging in `initWorld` for chat switch ordering, persisted-memory hydration counts, and HITL replay source verification.
  * - 2026-02-24: Reconstructed unresolved HITL prompts from persisted raw tool-call request/response pairs during init/chat switch (no event replay dependency).
  * - 2026-02-21: Prevented tool output expand/collapse actions from consuming pending auto-scroll state and jumping to transcript bottom.
@@ -266,6 +267,61 @@ const deduplicateMessages = (messages: Message[], agents: Agent[] = []): Message
       return roleOrderA - roleOrderB;
     });
 };
+
+function isTransientRealtimeMessage(message: Message): boolean {
+  return Boolean(
+    message?.logEvent ||
+    message?.worldEvent ||
+    message?.hasError ||
+    message?.type === 'error' ||
+    message?.type === 'log' ||
+    message?.type === 'system'
+  );
+}
+
+function preserveTransientMessagesAcrossRefresh(
+  existingMessages: Message[],
+  refreshedMessages: Message[],
+  activeChatId: string | null
+): Message[] {
+  if (!Array.isArray(existingMessages) || existingMessages.length === 0) {
+    return refreshedMessages;
+  }
+
+  const nextMessages = Array.isArray(refreshedMessages) ? [...refreshedMessages] : [];
+  const existingIds = new Set(
+    nextMessages
+      .map((message) => (typeof message?.id === 'string' ? message.id : ''))
+      .filter(Boolean)
+  );
+
+  const transients = existingMessages.filter((message) => {
+    if (!isTransientRealtimeMessage(message)) {
+      return false;
+    }
+
+    const messageChatId = message.chatId ?? null;
+    if (!activeChatId) {
+      return true;
+    }
+    if (messageChatId === null) {
+      return true;
+    }
+    return messageChatId === activeChatId;
+  });
+
+  for (const transient of transients) {
+    if (transient?.id && existingIds.has(transient.id)) {
+      continue;
+    }
+    nextMessages.push(transient);
+    if (transient?.id) {
+      existingIds.add(transient.id);
+    }
+  }
+
+  return nextMessages;
+}
 
 function mergeUpdatedWorldWithUiState(
   currentWorld: WorldComponentState['world'],
@@ -684,7 +740,16 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
     const activeChatId = newState.currentChat?.id || newState.world?.currentChatId || undefined;
     const updates = initWorld(newState, newState.worldName, activeChatId);
     for await (const update of updates) {
-      return { ...newState, ...update };
+      const mergedMessages = preserveTransientMessagesAcrossRefresh(
+        newState.messages || [],
+        (update as any).messages || [],
+        activeChatId || null
+      );
+      return {
+        ...newState,
+        ...update,
+        messages: mergedMessages
+      };
     }
   }
 
@@ -693,7 +758,16 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
     const activeChatId = newState.currentChat?.id || newState.world?.currentChatId || undefined;
     const updates = initWorld(newState, newState.worldName, activeChatId);
     for await (const update of updates) {
-      return { ...newState, ...update };
+      const mergedMessages = preserveTransientMessagesAcrossRefresh(
+        newState.messages || [],
+        (update as any).messages || [],
+        activeChatId || null
+      );
+      return {
+        ...newState,
+        ...update,
+        messages: mergedMessages
+      };
     }
   }
 
@@ -1113,9 +1187,15 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         const activeChatId = state.currentChat?.id || state.world?.currentChatId || undefined;
         const updates = initWorld(state, state.worldName, activeChatId);
         for await (const update of updates) {
+          const mergedMessages = preserveTransientMessagesAcrossRefresh(
+            state.messages || [],
+            (update as any).messages || [],
+            activeChatId || null
+          );
           yield {
             ...state,
             ...update,
+            messages: mergedMessages,
             submittingHitlRequestId: null,
             hitlPromptQueue: HitlDomain.removeHitlPromptByRequestId((update.hitlPromptQueue || state.hitlPromptQueue || []), requestId)
           };
