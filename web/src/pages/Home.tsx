@@ -21,6 +21,9 @@ interface HomeState {
 }
 
 export default class HomeComponent extends Component<HomeState> {
+
+  is_global_event = () => true;
+
   declare props: Readonly<{}>;
 
   state = async () => {

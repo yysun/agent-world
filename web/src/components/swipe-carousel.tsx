@@ -63,6 +63,9 @@ const rotateAt  = (sd: number) =>
 const CARD_MARGIN = (CARD_SLOT - CARD_W) / 2;  // negative → button overflows slot
 
 export default class SwipeCarousel extends Component<SwipeCarouselState> {
+
+  is_global_event = () => true;
+  
   declare props: Readonly<{ worlds: World[] }>;
 
   state: SwipeCarouselState = {
