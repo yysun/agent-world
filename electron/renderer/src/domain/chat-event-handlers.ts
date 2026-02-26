@@ -13,6 +13,7 @@
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
+ * - 2026-02-26: Suppressed redundant error-level log rows when equivalent stream errors are already shown inline on message cards.
  * - 2026-02-24: Removed ActivityRefs/activityStateRef and syncActiveStreamCount —
  *   activity-state.ts deleted as part of working-status simplification.
  * - 2026-02-22: Added activity event handler (response-end/idle) as authoritative
@@ -33,7 +34,12 @@
  * - 2026-02-17: Migrated module from JS to TS with typed payload and dependency interfaces.
  */
 
-import { createLogMessage, upsertMessageList, type MessageLike } from './message-updates';
+import {
+  createLogMessage,
+  shouldSuppressLogForExistingStreamError,
+  upsertMessageList,
+  type MessageLike
+} from './message-updates';
 import { clearChatAgents, updateRegistry } from './status-registry';
 import { applyEventToRegistry } from './status-updater';
 
@@ -126,7 +132,12 @@ export function createGlobalLogEventHandler({
 
     const logChatId = String(payload.chatId || logEvent?.chatId || '').trim();
     if (logChatId && logChatId !== selectedSessionId) return;
-    setMessages((existing) => [...existing, createLogMessage(logEvent, logChatId || (selectedSessionId ?? undefined))]);
+    setMessages((existing) => {
+      if (shouldSuppressLogForExistingStreamError(existing, logEvent)) {
+        return existing;
+      }
+      return [...existing, createLogMessage(logEvent, logChatId || (selectedSessionId ?? undefined))];
+    });
   };
 }
 

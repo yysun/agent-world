@@ -13,6 +13,7 @@
  * - Keeps manager setup/teardown centralized in one hook.
  *
  * Recent Changes:
+ * - 2026-02-26: Added stream-error fallback message creation and redundant error-log cleanup so errors render inline without duplicate log rows.
  * - 2026-02-24: Removed activityStateRef entirely — activity-state.ts deleted
  *   as part of working-status simplification (all callbacks were no-ops).
  * - 2026-02-22: Removed isBusy, elapsedMs, activeTools, activeStreamCount, sessionActivity
@@ -26,7 +27,7 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import { createStreamingState } from '../streaming-state';
-import { upsertMessageList } from '../domain/message-updates';
+import { removeRedundantErrorLogMessages, upsertMessageList } from '../domain/message-updates';
 
 export function useStreamingActivity({ setMessages }) {
   const streamingStateRef = useRef(null);
@@ -76,10 +77,25 @@ export function useStreamingActivity({ setMessages }) {
       onStreamError: (messageId, errorMessage) => {
         setMessages((existing) => {
           const index = existing.findIndex((message) => String(message.messageId || '') === String(messageId));
-          if (index < 0) return existing;
+          if (index < 0) {
+            const fallbackMessageId = String(messageId || `stream-error-${Date.now()}`);
+            const nextWithFallback = upsertMessageList(existing, {
+              id: fallbackMessageId,
+              messageId: fallbackMessageId,
+              role: 'system',
+              sender: 'system',
+              content: '',
+              createdAt: new Date().toISOString(),
+              type: 'error',
+              isStreaming: false,
+              hasError: true,
+              errorMessage,
+            });
+            return removeRedundantErrorLogMessages(nextWithFallback, errorMessage);
+          }
           const next = [...existing];
           next[index] = { ...next[index], isStreaming: false, hasError: true, errorMessage };
-          return next;
+          return removeRedundantErrorLogMessages(next, errorMessage);
         });
       },
       onToolStreamStart: (entry) => {

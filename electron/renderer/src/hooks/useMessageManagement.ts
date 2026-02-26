@@ -13,6 +13,7 @@
  * - Keeps branch/session refresh semantics aligned with the existing desktop IPC flows.
  *
  * Recent Changes:
+ * - 2026-02-26: Clear chat-scoped transient error/log artifacts when saving user edits so stale failure indicators do not persist into retried turns.
  * - 2026-02-22: Removed renderer-side no-agent inference on send; status now follows core-emitted activity events only.
  * - 2026-02-22: Enforced strict pending semantics: `pendingResponseSessionIds` is now populated only from realtime agent-start signals, never on send.
  * - 2026-02-21: Added assistant-message raw-markdown copy action with clipboard API + legacy fallback.
@@ -29,6 +30,7 @@ import { normalizeStringList, sortSessionsByNewest } from '../utils/data-transfo
 import { getRefreshWarning } from '../utils/formatting';
 import { getMessageIdentity, isTrueAgentResponseMessage } from '../utils/message-utils';
 import {
+  clearChatTransientErrors,
   createOptimisticUserMessage,
   reconcileOptimisticUserMessage,
   removeOptimisticUserMessage,
@@ -308,7 +310,8 @@ export function useMessageManagement({
     setMessages((existing) => {
       const editedIndex = existing.findIndex((entry) => getMessageIdentity(entry) === targetIdentity);
       const trimmed = editedIndex >= 0 ? existing.slice(0, editedIndex) : existing;
-      return upsertMessageList(trimmed, optimisticEditedMessage);
+      const clearedTransientErrors = clearChatTransientErrors(trimmed, targetChatId);
+      return upsertMessageList(clearedTransientErrors, optimisticEditedMessage);
     });
     setEditingMessageId(null);
     setEditingText('');

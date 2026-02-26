@@ -11,6 +11,7 @@
  * - Focuses on orchestration behavior, not UI rendering.
  *
  * Recent Changes:
+ * - 2026-02-26: Added coverage for redundant error-log suppression when an equivalent inline stream error is already present.
  * - 2026-02-24: Removed activityStateRef from all tests (activity-state.ts deleted as part of working-status simplification).
  * - 2026-02-22: Removed activity event routing tests and response-state tracking tests as part of status-registry migration (Phase 1).
  * - 2026-02-20: Added optimistic user-message reconciliation coverage for message-event ordering and identical consecutive user sends.
@@ -36,6 +37,8 @@ type TestMessage = {
   chatId?: string;
   content?: string;
   type?: string;
+  hasError?: boolean;
+  errorMessage?: string;
   optimisticUserPending?: boolean;
   createdAt?: string;
   isToolStreaming?: boolean;
@@ -114,6 +117,39 @@ describe('createGlobalLogEventHandler', () => {
     });
 
     expect(harness.getMessages()).toHaveLength(0);
+  });
+
+  it('suppresses redundant error logs when matching stream error exists in session messages', () => {
+    const harness = createMessageStateHarness([{
+      messageId: 'm-stream',
+      chatId: 'chat-1',
+      role: 'assistant',
+      hasError: true,
+      errorMessage: "model 'qwen2.5:14b' not found"
+    } as TestMessage]);
+
+    const handler = createGlobalLogEventHandler({
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      setMessages: harness.setMessages as Parameters<typeof createGlobalLogEventHandler>[0]['setMessages'],
+    });
+
+    handler({
+      type: 'log',
+      chatId: 'chat-1',
+      logEvent: {
+        message: 'LLM non-streaming failure',
+        level: 'error',
+        category: 'llm.generation',
+        data: {
+          error: "404 model 'qwen2.5:14b' not found"
+        },
+        timestamp: '2026-02-26T02:00:00.000Z'
+      }
+    });
+
+    expect(harness.getMessages()).toHaveLength(1);
+    expect((harness.getMessages()[0] as Record<string, unknown>).messageId).toBe('m-stream');
   });
 });
 

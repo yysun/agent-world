@@ -13,6 +13,7 @@
  * - Helper functions are scoped to this module because only this component uses them.
  *
  * Recent Changes:
+ * - 2026-02-26: Added inline message error indicator rendering for `hasError/errorMessage` so stream failures show inside message cards (web-parity behavior).
  * - 2026-02-21: Added shell command header labeling (`Running command: <name>`) from tool-stream command metadata and unified stderr/stdout tool output styling to dark background with light text.
  * - 2026-02-21: Prefer tool name from `tool_calls` metadata and treat assistant messages with `tool_calls` as explicit tool requests in header labeling.
  * - 2026-02-16: Extracted from `App.jsx` as part of renderer refactor Phase 2.
@@ -159,10 +160,20 @@ export default function MessageContent({ message, collapsed = false }) {
 
   if (collapsed) return null;
 
+  const inlineErrorText = String(message?.errorMessage || '').trim();
+  const shouldShowInlineError = message?.hasError === true && inlineErrorText.length > 0;
+
   return (
-    <div
-      className="prose prose-invert max-w-none break-words text-foreground"
-      dangerouslySetInnerHTML={{ __html: renderedContent }}
-    />
+    <div className="flex flex-col gap-2">
+      <div
+        className="prose prose-invert max-w-none break-words text-foreground"
+        dangerouslySetInnerHTML={{ __html: renderedContent }}
+      />
+      {shouldShowInlineError ? (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+          Error: {inlineErrorText}
+        </div>
+      ) : null}
+    </div>
   );
 }

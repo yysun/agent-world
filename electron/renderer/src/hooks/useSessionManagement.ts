@@ -13,12 +13,14 @@
  * - Integrates with shared loading/message state via injected setters.
  *
  * Recent Changes:
+ * - 2026-02-26: Remove transient error/log artifacts immediately on session switch start so stale failures do not linger during history prefetch.
  * - 2026-02-25: Added history-first session-switch prefetch from persisted memory and detailed renderer logs for session select/restore diagnostics.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 3 custom hook migration.
  */
 
 import { useCallback, useMemo, useState } from 'react';
 import { safeMessage } from '../domain/desktop-api';
+import { clearChatTransientErrors } from '../domain/message-updates';
 import { resolveSelectedSessionId } from '../domain/session-selection';
 import { sortSessionsByNewest } from '../utils/data-transform';
 import { getRefreshWarning } from '../utils/formatting';
@@ -102,6 +104,7 @@ export function useSessionManagement({
     const previousSessionId = selectedSessionId;
     console.log(`[electron:session] select-start world=${loadedWorldId} requestedChat=${chatId} previousChat=${previousSessionId || 'n/a'}`);
     messageRefreshCounter.current += 1;
+    setMessages((existing) => clearChatTransientErrors(existing, String(previousSessionId || '').trim() || null));
     setSelectedSessionId(chatId);
 
     void (async () => {
