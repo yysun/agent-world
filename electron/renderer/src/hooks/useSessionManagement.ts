@@ -13,6 +13,7 @@
  * - Integrates with shared loading/message state via injected setters.
  *
  * Recent Changes:
+ * - 2026-02-26: Replaced session-switch console traces with categorized renderer logger output controlled by env-derived log config.
  * - 2026-02-26: Remove transient error/log artifacts immediately on session switch start so stale failures do not linger during history prefetch.
  * - 2026-02-25: Added history-first session-switch prefetch from persisted memory and detailed renderer logs for session select/restore diagnostics.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 3 custom hook migration.
@@ -24,6 +25,7 @@ import { clearChatTransientErrors } from '../domain/message-updates';
 import { resolveSelectedSessionId } from '../domain/session-selection';
 import { sortSessionsByNewest } from '../utils/data-transform';
 import { getRefreshWarning } from '../utils/formatting';
+import { rendererLogger } from '../utils/logger';
 
 export function useSessionManagement({
   api,
@@ -102,7 +104,11 @@ export function useSessionManagement({
     if (!loadedWorldId) return;
     const selectStartedAt = Date.now();
     const previousSessionId = selectedSessionId;
-    console.log(`[electron:session] select-start world=${loadedWorldId} requestedChat=${chatId} previousChat=${previousSessionId || 'n/a'}`);
+    rendererLogger.debug('electron.renderer.session', 'Session selection started', {
+      worldId: loadedWorldId,
+      requestedChatId: chatId,
+      previousChatId: previousSessionId || null
+    });
     messageRefreshCounter.current += 1;
     setMessages((existing) => clearChatTransientErrors(existing, String(previousSessionId || '').trim() || null));
     setSelectedSessionId(chatId);
@@ -110,23 +116,42 @@ export function useSessionManagement({
     void (async () => {
       try {
         const history = await api.getMessages(loadedWorldId, chatId);
-        console.log(`[electron:session] prefetch-history world=${loadedWorldId} chat=${chatId} messages=${Array.isArray(history) ? history.length : 0}`);
+        rendererLogger.debug('electron.renderer.session', 'Session history prefetched', {
+          worldId: loadedWorldId,
+          chatId,
+          messageCount: Array.isArray(history) ? history.length : 0
+        });
         setMessages(Array.isArray(history) ? history : []);
       } catch (prefetchError) {
-        console.log(`[electron:session] prefetch-history-error world=${loadedWorldId} chat=${chatId} error=${safeMessage(prefetchError, 'unknown')}`);
+        rendererLogger.warn('electron.renderer.session', 'Session history prefetch failed', {
+          worldId: loadedWorldId,
+          chatId,
+          error: safeMessage(prefetchError, 'unknown')
+        });
       }
     })();
 
     try {
       const result = await api.selectSession(loadedWorldId, chatId);
       const warning = getRefreshWarning(result);
-      console.log(`[electron:session] select-complete world=${loadedWorldId} requestedChat=${chatId} resolvedChat=${String((result as any)?.chatId || '').trim() || 'n/a'} warning=${warning || 'none'} elapsedMs=${Date.now() - selectStartedAt}`);
+      rendererLogger.debug('electron.renderer.session', 'Session selection completed', {
+        worldId: loadedWorldId,
+        requestedChatId: chatId,
+        resolvedChatId: String((result as any)?.chatId || '').trim() || null,
+        warning: warning || null,
+        elapsedMs: Date.now() - selectStartedAt
+      });
       if (warning) {
         setStatusText(`Session selected. ${warning}`, 'error');
       }
     } catch (error) {
       setSelectedSessionId(previousSessionId);
-      console.log(`[electron:session] select-error world=${loadedWorldId} requestedChat=${chatId} restoreTo=${previousSessionId || 'n/a'} error=${safeMessage(error, 'unknown')}`);
+      rendererLogger.warn('electron.renderer.session', 'Session selection failed and previous session restored', {
+        worldId: loadedWorldId,
+        requestedChatId: chatId,
+        restoreToChatId: previousSessionId || null,
+        error: safeMessage(error, 'unknown')
+      });
       setStatusText(safeMessage(error, 'Failed to select session.'), 'error');
     }
   }, [api, loadedWorldId, messageRefreshCounter, selectedSessionId, setMessages, setStatusText]);

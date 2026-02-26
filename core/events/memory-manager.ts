@@ -20,6 +20,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-26: Replaced `resumePendingToolCallsForChat` console traces with categorized structured logger events (`chat.restore.resume.tools`) for env-controlled restore diagnostics.
  * - 2026-02-24: Commented out hardcoded Infinite-Etude handoff safeguard to respect separation of concerns (logic moved to agent prompt).
  * - 2026-02-25: Added detailed resume tracing in `resumePendingToolCallsForChat` (start/skip/execute/error/continue) for cross-layer restore diagnostics.
  * - 2026-02-25: Added duplicate messageId guard in `saveIncomingMessageToMemory` so chat-restore replay can re-emit pending user messages without duplicating persisted agent memory.
@@ -85,6 +86,7 @@ const loggerAgent = createCategoryLogger('agent');
 const loggerTurnLimit = createCategoryLogger('turnlimit');
 const loggerChatTitle = createCategoryLogger('chattitle');
 const loggerAutoMention = createCategoryLogger('automention');
+const loggerRestoreResumeTools = createCategoryLogger('chat.restore.resume.tools');
 const TITLE_PROMPT_MAX_TURNS = 24;
 const TITLE_PROMPT_MAX_CHARS_PER_TURN = 240;
 
@@ -299,9 +301,11 @@ export async function resumePendingToolCallsForChat(
   }
 
   const resumeStartedAt = Date.now();
-  console.log(
-    `[resumePendingToolCallsForChat] start world=${world.id} chat=${chatId} targetAssistantMessageId=${targetAssistantMessageId || 'n/a'}`
-  );
+  loggerRestoreResumeTools.debug('Resume pending tool calls started', {
+    worldId: world.id,
+    chatId,
+    targetAssistantMessageId: targetAssistantMessageId || null,
+  });
 
   const { getMCPToolsForWorld } = await import('../mcp-server-registry.js');
   const mcpTools = await getMCPToolsForWorld(world.id);
@@ -312,9 +316,11 @@ export async function resumePendingToolCallsForChat(
   for (const agent of world.agents.values()) {
     const pending = getLatestUnresolvedToolCallForChat(agent, chatId);
     if (!pending) {
-      console.log(
-        `[resumePendingToolCallsForChat] no-pending world=${world.id} chat=${chatId} agent=${agent.id}`
-      );
+      loggerRestoreResumeTools.debug('Resume pending tool calls skipped agent with no pending tool call', {
+        worldId: world.id,
+        chatId,
+        agentId: agent.id,
+      });
       continue;
     }
 
@@ -323,23 +329,37 @@ export async function resumePendingToolCallsForChat(
       && pending.assistantMessage.messageId
       && pending.assistantMessage.messageId !== targetAssistantMessageId
     ) {
-      console.log(
-        `[resumePendingToolCallsForChat] skip-target-mismatch world=${world.id} chat=${chatId} agent=${agent.id} pendingAssistantMessageId=${pending.assistantMessage.messageId || 'n/a'} targetAssistantMessageId=${targetAssistantMessageId}`
-      );
+      loggerRestoreResumeTools.debug('Resume pending tool calls skipped assistant target mismatch', {
+        worldId: world.id,
+        chatId,
+        agentId: agent.id,
+        pendingAssistantMessageId: pending.assistantMessage.messageId || null,
+        targetAssistantMessageId,
+      });
       continue;
     }
 
     const { assistantMessage, toolCall } = pending;
-    console.log(
-      `[resumePendingToolCallsForChat] pending-found world=${world.id} chat=${chatId} agent=${agent.id} tool=${toolCall.function.name} toolCallId=${toolCall.id} assistantMessageId=${assistantMessage.messageId || 'n/a'}`
-    );
+    loggerRestoreResumeTools.debug('Resume pending tool calls found pending tool call', {
+      worldId: world.id,
+      chatId,
+      agentId: agent.id,
+      toolName: toolCall.function.name,
+      toolCallId: toolCall.id,
+      assistantMessageId: assistantMessage.messageId || null,
+    });
     let toolArgs: Record<string, any> = {};
     try {
       toolArgs = parseToolCallArguments(toolCall.function.arguments);
     } catch (parseError) {
-      console.log(
-        `[resumePendingToolCallsForChat] parse-args-error world=${world.id} chat=${chatId} agent=${agent.id} tool=${toolCall.function.name} toolCallId=${toolCall.id} error=${parseError instanceof Error ? parseError.message : String(parseError)}`
-      );
+      loggerRestoreResumeTools.warn('Resume pending tool calls failed to parse tool arguments', {
+        worldId: world.id,
+        chatId,
+        agentId: agent.id,
+        toolName: toolCall.function.name,
+        toolCallId: toolCall.id,
+        error: parseError instanceof Error ? parseError.message : String(parseError),
+      });
       const errorContent = `Error executing tool: Invalid JSON in tool arguments: ${parseError instanceof Error ? parseError.message : String(parseError)}`;
       const toolErrorMessage: AgentMessage = {
         role: 'tool',
@@ -358,18 +378,25 @@ export async function resumePendingToolCallsForChat(
       }
       await storage.saveAgent(world.id, agent);
       await continueLLMAfterToolExecution(world, agent, chatId);
-      console.log(
-        `[resumePendingToolCallsForChat] continued-after-parse-error world=${world.id} chat=${chatId} agent=${agent.id} toolCallId=${toolCall.id}`
-      );
+      loggerRestoreResumeTools.debug('Resume pending tool calls continued after parse error', {
+        worldId: world.id,
+        chatId,
+        agentId: agent.id,
+        toolCallId: toolCall.id,
+      });
       resumedCount += 1;
       continue;
     }
 
     const toolDef = mcpTools[toolCall.function.name];
     if (!toolDef) {
-      console.log(
-        `[resumePendingToolCallsForChat] tool-not-found world=${world.id} chat=${chatId} agent=${agent.id} tool=${toolCall.function.name} toolCallId=${toolCall.id}`
-      );
+      loggerRestoreResumeTools.warn('Resume pending tool calls tool definition missing', {
+        worldId: world.id,
+        chatId,
+        agentId: agent.id,
+        toolName: toolCall.function.name,
+        toolCallId: toolCall.id,
+      });
       const errorContent = `Error executing tool: Tool not found: ${toolCall.function.name}`;
       const toolErrorMessage: AgentMessage = {
         role: 'tool',
@@ -400,16 +427,23 @@ export async function resumePendingToolCallsForChat(
       });
       await storage.saveAgent(world.id, agent);
       await continueLLMAfterToolExecution(world, agent, chatId);
-      console.log(
-        `[resumePendingToolCallsForChat] continued-after-tool-missing world=${world.id} chat=${chatId} agent=${agent.id} toolCallId=${toolCall.id}`
-      );
+      loggerRestoreResumeTools.debug('Resume pending tool calls continued after missing tool definition', {
+        worldId: world.id,
+        chatId,
+        agentId: agent.id,
+        toolCallId: toolCall.id,
+      });
       resumedCount += 1;
       continue;
     }
 
-    console.log(
-      `[resumePendingToolCallsForChat] executing-tool world=${world.id} chat=${chatId} agent=${agent.id} tool=${toolCall.function.name} toolCallId=${toolCall.id}`
-    );
+    loggerRestoreResumeTools.debug('Resume pending tool calls executing tool', {
+      worldId: world.id,
+      chatId,
+      agentId: agent.id,
+      toolName: toolCall.function.name,
+      toolCallId: toolCall.id,
+    });
 
     publishToolEvent(world, {
       agentName: agent.id,
@@ -483,13 +517,23 @@ export async function resumePendingToolCallsForChat(
           resultSize: serializedToolResult.length,
         },
       });
-      console.log(
-        `[resumePendingToolCallsForChat] tool-result world=${world.id} chat=${chatId} agent=${agent.id} tool=${toolCall.function.name} toolCallId=${toolCall.id} resultSize=${serializedToolResult.length}`
-      );
+      loggerRestoreResumeTools.debug('Resume pending tool calls tool execution result persisted', {
+        worldId: world.id,
+        chatId,
+        agentId: agent.id,
+        toolName: toolCall.function.name,
+        toolCallId: toolCall.id,
+        resultSize: serializedToolResult.length,
+      });
     } catch (toolError) {
-      console.log(
-        `[resumePendingToolCallsForChat] tool-error world=${world.id} chat=${chatId} agent=${agent.id} tool=${toolCall.function.name} toolCallId=${toolCall.id} error=${toolError instanceof Error ? toolError.message : String(toolError)}`
-      );
+      loggerRestoreResumeTools.warn('Resume pending tool calls tool execution failed', {
+        worldId: world.id,
+        chatId,
+        agentId: agent.id,
+        toolName: toolCall.function.name,
+        toolCallId: toolCall.id,
+        error: toolError instanceof Error ? toolError.message : String(toolError),
+      });
       const errorContent = `Error executing tool: ${toolError instanceof Error ? toolError.message : String(toolError)}`;
       const toolErrorMessage: AgentMessage = {
         role: 'tool',
@@ -526,19 +570,28 @@ export async function resumePendingToolCallsForChat(
     }
 
     await storage.saveAgent(world.id, agent);
-    console.log(
-      `[resumePendingToolCallsForChat] saved-agent world=${world.id} chat=${chatId} agent=${agent.id} toolCallId=${toolCall.id}`
-    );
+    loggerRestoreResumeTools.debug('Resume pending tool calls saved agent state', {
+      worldId: world.id,
+      chatId,
+      agentId: agent.id,
+      toolCallId: toolCall.id,
+    });
     await continueLLMAfterToolExecution(world, agent, chatId);
-    console.log(
-      `[resumePendingToolCallsForChat] continued-after-tool world=${world.id} chat=${chatId} agent=${agent.id} toolCallId=${toolCall.id}`
-    );
+    loggerRestoreResumeTools.debug('Resume pending tool calls continued LLM after tool execution', {
+      worldId: world.id,
+      chatId,
+      agentId: agent.id,
+      toolCallId: toolCall.id,
+    });
     resumedCount += 1;
   }
 
-  console.log(
-    `[resumePendingToolCallsForChat] done world=${world.id} chat=${chatId} resumedCount=${resumedCount} elapsedMs=${Date.now() - resumeStartedAt}`
-  );
+  loggerRestoreResumeTools.debug('Resume pending tool calls completed', {
+    worldId: world.id,
+    chatId,
+    resumedCount,
+    elapsedMs: Date.now() - resumeStartedAt,
+  });
 
   return resumedCount;
 }

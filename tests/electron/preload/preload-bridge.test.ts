@@ -12,6 +12,7 @@
  * - Keeps all assertions in-memory with no file-system dependencies.
  *
  * Recent Changes:
+ * - 2026-02-26: Added coverage for `getLoggingConfig()` IPC bridge wiring.
  * - 2026-02-26: Added coverage for `importWorld({ source })` payload forwarding to `world:import`.
  * - 2026-02-19: Added coverage for `exportWorld` bridge wiring and `world:export` invoke payload contract.
  * - 2026-02-16: Added coverage for `branchSessionFromMessage` bridge wiring and invoke payload contract.
@@ -63,6 +64,7 @@ describe('electron preload bridge', () => {
       stopMessage: expect.any(Function),
       subscribeChatEvents: expect.any(Function),
       unsubscribeChatEvents: expect.any(Function),
+      getLoggingConfig: expect.any(Function),
       onChatEvent: expect.any(Function)
     });
   });
@@ -88,6 +90,7 @@ describe('electron preload bridge', () => {
     api.stopMessage('world-1', 'chat-1');
     api.subscribeChatEvents('world-1', 'chat-1', 'sub-1');
     api.unsubscribeChatEvents('sub-1');
+    api.getLoggingConfig();
 
     expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'chat:sendMessage', sendPayload);
     expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'dialog:pickDirectory');
@@ -126,6 +129,7 @@ describe('electron preload bridge', () => {
     expect(mocks.invoke).toHaveBeenNthCalledWith(12, 'chat:unsubscribeEvents', {
       subscriptionId: 'sub-1'
     });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(13, 'logging:getConfig');
   });
 
   it('wires chat event listener callback and cleanup correctly', () => {

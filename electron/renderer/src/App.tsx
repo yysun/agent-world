@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-02-26: Added renderer categorized logger initialization via preload logging config and replaced message activation console tracing with env-controlled logger output.
  * - 2026-02-26: Inline working indicator now shows model-aware text (`Contacting <model>...` during handshake and `<agent> (<model>) working...` when active) using real agent model metadata.
  * - 2026-02-22: Status bar completion is now driven by core activity events plus a send-finish no-activity fallback for zero-agent runs.
  * - 2026-02-22: Removed frontend @mention validation/inference from status and pending decisions; renderer now follows core event signals only.
@@ -89,6 +90,7 @@ import {
   createMainContentRightPanelShellProps,
   createMainHeaderProps,
 } from './utils/app-layout-props';
+import { initializeRendererLogger, rendererLogger } from './utils/logger';
 
 type WorkspaceState = {
   workspacePath: string | null;
@@ -169,6 +171,10 @@ export default function App() {
 
   const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [notification, setNotification] = useState<{ text: string; kind: 'error' | 'success' | 'info' } | null>(null);
+
+  useEffect(() => {
+    void initializeRendererLogger(api);
+  }, [api]);
 
   useEffect(() => {
     return () => {
@@ -470,7 +476,11 @@ export default function App() {
     setLoading((value: { sessions: boolean; messages: boolean }) => ({ ...value, messages: true }));
     try {
       const activation = await api.selectSession(worldId, sessionId);
-      console.log(`[electron:messages] activate-chat world=${worldId} requestedChat=${sessionId} resolvedChat=${String((activation as any)?.chatId || '').trim() || 'n/a'}`);
+      rendererLogger.debug('electron.renderer.messages', 'Session activation resolved while refreshing messages', {
+        worldId,
+        requestedChatId: sessionId,
+        resolvedChatId: String((activation as any)?.chatId || '').trim() || null
+      });
       const nextMessages = (await api.getMessages(worldId, sessionId)) as any[];
       if (refreshId !== messageRefreshCounter.current) return;
       setMessages(nextMessages);

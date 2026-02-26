@@ -13,6 +13,7 @@
  * - Accepts state setters/callbacks via dependency injection.
  *
  * Recent Changes:
+ * - 2026-02-26: Replaced chat-subscription lifecycle console traces with categorized renderer logger output controlled by env-derived log config.
  * - 2026-02-25: Added subscription lifecycle trace logs (subscribe/unsubscribe/HITL ingest) for resume timing diagnostics.
  * - 2026-02-24: Fixed subscription cycling: changed loadedWorld dependency to loadedWorld?.id
  *   so world metadata refreshes (HITL response, chat switch) no longer tear down and
@@ -38,6 +39,7 @@ import {
 } from '../domain/chat-event-handlers';
 import type { DesktopApi } from '../types/desktop-api';
 import type { MessageLike } from '../domain/message-updates';
+import { rendererLogger } from '../utils/logger';
 
 type HitlOption = {
   id: string;
@@ -188,7 +190,11 @@ export function useChatEventSubscriptions({
     }
 
     const subscriptionId = `chat-${Date.now()}-${chatSubscriptionCounter.current++}`;
-    console.log(`[electron:chat-subscription] subscribe-start world=${loadedWorldId} chat=${selectedSessionId} subscriptionId=${subscriptionId}`);
+    rendererLogger.debug('electron.renderer.subscription', 'Chat subscription setup started', {
+      worldId: loadedWorldId,
+      chatId: selectedSessionId,
+      subscriptionId
+    });
     const chatEventHandler = createChatSubscriptionEventHandler({
       subscriptionId,
       loadedWorldId,
@@ -222,7 +228,12 @@ export function useChatEventSubscriptions({
           const batch = pendingHitlEventsRef.current.splice(0);
           pendingHitlFlushTimerRef.current = null;
           if (batch.length === 0) return;
-          console.log(`[electron:chat-subscription] hitl-batch-ingest world=${loadedWorldId} chat=${selectedSessionId} events=${batch.length}`);
+          rendererLogger.debug('electron.renderer.subscription', 'Ingesting HITL prompt batch from realtime events', {
+            worldId: loadedWorldId,
+            chatId: selectedSessionId,
+            eventCount: batch.length,
+            subscriptionId
+          });
           setHitlPromptQueue((existing) => {
             let queue = existing;
             for (const entry of batch) {
@@ -235,10 +246,18 @@ export function useChatEventSubscriptions({
     });
 
     api.subscribeChatEvents(loadedWorldId, selectedSessionId, subscriptionId).catch(() => { });
-    console.log(`[electron:chat-subscription] subscribe-requested world=${loadedWorldId} chat=${selectedSessionId} subscriptionId=${subscriptionId}`);
+    rendererLogger.debug('electron.renderer.subscription', 'Chat subscription request dispatched', {
+      worldId: loadedWorldId,
+      chatId: selectedSessionId,
+      subscriptionId
+    });
 
     return () => {
-      console.log(`[electron:chat-subscription] unsubscribe world=${loadedWorldId} chat=${selectedSessionId} subscriptionId=${subscriptionId}`);
+      rendererLogger.debug('electron.renderer.subscription', 'Chat subscription teardown started', {
+        worldId: loadedWorldId,
+        chatId: selectedSessionId,
+        subscriptionId
+      });
       removeListener();
       api.unsubscribeChatEvents(subscriptionId).catch(() => { });
       if (streamingStateRef.current) {

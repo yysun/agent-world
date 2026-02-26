@@ -12,6 +12,7 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-02-26: Added env-derived renderer logging config endpoint and replaced session/message console traces with categorized injected logger calls.
  * - 2026-02-25: Added optional `world:import` source support for GitHub shorthand (`@awesome-agent-world/<world-name>`) via secure temp staging.
  * - 2026-02-20: Enforced options-only `hitl:respond` handler payload validation.
  * - 2026-02-19: Simplified desktop world export to file-storage-only (removed SQLite export option).
@@ -58,6 +59,61 @@ interface WorkspaceStateLike {
   coreInitialized: boolean;
 }
 
+type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
+
+interface LoggerLike {
+  debug: (message: string, data?: unknown) => void;
+  info: (message: string, data?: unknown) => void;
+  warn: (message: string, data?: unknown) => void;
+  error: (message: string, data?: unknown) => void;
+}
+
+const NOOP_LOGGER: LoggerLike = {
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined
+};
+
+const VALID_LOG_LEVELS: LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error'];
+const VALID_LOG_LEVEL_SET = new Set<LogLevel>(VALID_LOG_LEVELS);
+
+function normalizeCategoryKey(raw: string): string {
+  if (!raw) return '';
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9.]+/g, '.')
+    .replace(/\.+/g, '.')
+    .replace(/^\.|\.$/g, '');
+}
+
+function toLogLevel(value: unknown): LogLevel | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase() as LogLevel;
+  return VALID_LOG_LEVEL_SET.has(normalized) ? normalized : null;
+}
+
+function getRendererLoggingConfigFromEnv(): {
+  globalLevel: LogLevel;
+  categoryLevels: Record<string, LogLevel>;
+  nodeEnv: string;
+} {
+  const globalLevel = toLogLevel(process.env.LOG_LEVEL) || 'error';
+  const categoryLevels: Record<string, LogLevel> = {};
+
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!key.startsWith('LOG_') || key === 'LOG_LEVEL') continue;
+    const level = toLogLevel(value);
+    if (!level) continue;
+    const category = normalizeCategoryKey(key.slice(4).toLowerCase().replace(/_/g, '.'));
+    if (!category) continue;
+    categoryLevels[category] = level;
+  }
+
+  const nodeEnv = String(process.env.NODE_ENV || 'development').trim() || 'development';
+  return { globalLevel, categoryLevels, nodeEnv };
+}
+
 interface MainIpcHandlerFactoryDependencies {
   ensureCoreReady: () => Promise<void> | void;
   getWorkspaceState: () => WorkspaceStateLike;
@@ -101,6 +157,9 @@ interface MainIpcHandlerFactoryDependencies {
   removeMessagesFrom: (worldId: string, messageId: string, chatId: string) => Promise<any>;
   createStorage: (config: any) => Promise<any>;
   createStorageFromEnv: () => Promise<any>;
+  loggerIpc?: LoggerLike;
+  loggerIpcSession?: LoggerLike;
+  loggerIpcMessages?: LoggerLike;
   GitHubWorldImportError: new (...args: any[]) => GitHubWorldImportErrorLike;
   stageGitHubWorldFromShorthand: (shorthand: string) => Promise<GitHubWorldImportStagedResult>;
 }
@@ -158,6 +217,9 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     removeMessagesFrom,
     createStorage,
     createStorageFromEnv,
+    loggerIpc = NOOP_LOGGER,
+    loggerIpcSession = NOOP_LOGGER,
+    loggerIpcMessages = NOOP_LOGGER,
     GitHubWorldImportError,
     stageGitHubWorldFromShorthand
   } = dependencies;
@@ -1028,13 +1090,22 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!sessionId) throw new Error('Session ID is required.');
 
     const selectStartedAt = Date.now();
-    console.log(`[ipc:selectSession] start world=${id} requestedChat=${sessionId}`);
+    loggerIpcSession.debug('Session selection started', {
+      worldId: id,
+      requestedChatId: sessionId
+    });
 
     const activated = await activateChatWithSnapshot(id, sessionId);
     if (!activated) throw new Error(`World or session not found: ${id}/${sessionId}`);
     const refreshWarning = await refreshWorldSubscription(id);
 
-    console.log(`[ipc:selectSession] complete world=${id} requestedChat=${sessionId} resolvedChat=${activated.chatId || sessionId} warning=${refreshWarning || 'none'} elapsedMs=${Date.now() - selectStartedAt}`);
+    loggerIpcSession.debug('Session selection completed', {
+      worldId: id,
+      requestedChatId: sessionId,
+      resolvedChatId: activated.chatId || sessionId,
+      refreshWarning: refreshWarning || null,
+      elapsedMs: Date.now() - selectStartedAt
+    });
 
     return {
       worldId: id,
@@ -1050,11 +1121,18 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!id) throw new Error('World ID is required.');
 
     const requestedChatId = chatId ? String(chatId) : null;
-    console.log(`[ipc:getMessages] start world=${id} chat=${requestedChatId || 'n/a'}`);
+    loggerIpcMessages.debug('Session messages load started', {
+      worldId: id,
+      chatId: requestedChatId
+    });
     const memory = await getMemory(id, requestedChatId);
     if (!memory) return [];
 
-    console.log(`[ipc:getMessages] loaded world=${id} chat=${requestedChatId || 'n/a'} messages=${memory.length}`);
+    loggerIpcMessages.debug('Session messages loaded', {
+      worldId: id,
+      chatId: requestedChatId,
+      messageCount: memory.length
+    });
 
     return normalizeSessionMessages(memory.map((message: any) => serializeMessage(message)));
   }
@@ -1204,6 +1282,16 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     });
   }
 
+  function getLoggingConfig() {
+    const config = getRendererLoggingConfigFromEnv();
+    loggerIpc.debug('Resolved renderer logging config', {
+      globalLevel: config.globalLevel,
+      categoryCount: Object.keys(config.categoryLevels).length,
+      nodeEnv: config.nodeEnv
+    });
+    return config;
+  }
+
   async function openFileDialog() {
     const mainWindow = getMainWindow();
     if (!mainWindow) throw new Error('Main window not initialized');
@@ -1242,6 +1330,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     sendChatMessage,
     editMessageInChat,
     respondHitlOption,
+    getLoggingConfig,
     stopChatMessage,
     deleteMessageFromChat,
     getChatEvents

@@ -307,6 +307,9 @@ LOG_MCP=debug npm run web:dev
 
 # Agent response debugging
 LOG_EVENTS_AGENT=debug LOG_LLM=debug npm run web:dev
+
+# Chat restore/HITL replay debugging
+LOG_CHAT_RESTORE=debug LOG_CHAT_RESTORE_RESUME=debug LOG_CHAT_RESTORE_RESUME_TOOLS=debug LOG_HITL=debug npm run web:dev
 ```
 
 **For complete logging documentation**, see [Logging Guide](docs/logging-guide.md).

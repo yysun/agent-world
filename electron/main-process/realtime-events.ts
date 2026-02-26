@@ -11,6 +11,7 @@
  * - Uses dependency injection for window lookup and world subscription API.
  *
  * Recent Changes:
+ * - 2026-02-26: Replaced realtime console traces/warnings/errors with categorized injected logger calls.
  * - 2026-02-25: Added runtime pending-HITL replay on chat subscription so prompts created before renderer listener attach are re-delivered deterministically.
  * - 2026-02-24: Switched HITL restore dispatch to persisted message reconstruction (`getMemory` + request/response pairing helper).
  * - 2026-02-24: Replaced HITL replay dependency with pending-prompt read model dispatch over tool events.
@@ -55,6 +56,18 @@ interface WorldSubscriptionLike {
   refresh: () => Promise<void>;
 }
 
+interface LoggerLike {
+  debug: (message: string, data?: unknown) => void;
+  warn: (message: string, data?: unknown) => void;
+  error: (message: string, data?: unknown) => void;
+}
+
+const NOOP_LOGGER: LoggerLike = {
+  debug: () => undefined,
+  warn: () => undefined,
+  error: () => undefined
+};
+
 interface CreateRealtimeEventsRuntimeDependencies {
   getMainWindow: () => MainWindowLike | null;
   chatEventChannel: string;
@@ -64,6 +77,7 @@ interface CreateRealtimeEventsRuntimeDependencies {
   getMemory?: (worldId: string, chatId: string | null) => Promise<any[] | null>;
   listPendingHitlPromptEvents?: (world: any, chatId?: string | null) => Array<{ chatId: string | null; prompt: Record<string, unknown> }>;
   listPendingHitlPromptEventsFromMessages?: (messages: any[], chatId?: string | null) => Array<{ chatId: string | null; prompt: Record<string, unknown> }>;
+  loggerRealtime?: LoggerLike;
 }
 
 interface ChatEventSubscription {
@@ -97,6 +111,7 @@ export function createRealtimeEventsRuntime(
     getMemory,
     listPendingHitlPromptEvents,
     listPendingHitlPromptEventsFromMessages,
+    loggerRealtime = NOOP_LOGGER
   } = dependencies;
 
   const chatEventSubscriptions = new Map<string, ChatEventSubscription>();
@@ -315,7 +330,12 @@ export function createRealtimeEventsRuntime(
     if (chatId && typeof listPendingHitlPromptEvents === 'function') {
       try {
         const runtimePendingPrompts = listPendingHitlPromptEvents(world, chatId);
-        console.log(`[electron:realtime] replay-runtime-hitl world=${worldId} chat=${chatId} count=${Array.isArray(runtimePendingPrompts) ? runtimePendingPrompts.length : 0} subscriptionId=${subscriptionId}`);
+        loggerRealtime.debug('Replaying runtime pending HITL prompts', {
+          worldId,
+          chatId,
+          pendingPromptCount: Array.isArray(runtimePendingPrompts) ? runtimePendingPrompts.length : 0,
+          subscriptionId
+        });
         for (const pending of runtimePendingPrompts || []) {
           const prompt = pending?.prompt && typeof pending.prompt === 'object'
             ? pending.prompt
@@ -350,7 +370,11 @@ export function createRealtimeEventsRuntime(
         }
       } catch (error) {
         const warningMessage = `Failed to replay runtime pending HITL prompts for world '${worldId}' chat '${chatId}': ${error instanceof Error ? error.message : String(error)}`;
-        console.warn(warningMessage);
+        loggerRealtime.warn(warningMessage, {
+          worldId,
+          chatId,
+          subscriptionId
+        });
       }
     }
 
@@ -358,7 +382,12 @@ export function createRealtimeEventsRuntime(
       try {
         const persistedMessages = await getMemory(worldId, chatId);
         const pendingPrompts = listPendingHitlPromptEventsFromMessages(persistedMessages || [], chatId);
-        console.log(`[electron:realtime] replay-persisted-hitl world=${worldId} chat=${chatId} count=${pendingPrompts.length} subscriptionId=${subscriptionId}`);
+        loggerRealtime.debug('Replaying persisted pending HITL prompts', {
+          worldId,
+          chatId,
+          pendingPromptCount: pendingPrompts.length,
+          subscriptionId
+        });
         for (const pending of pendingPrompts) {
           const prompt = pending?.prompt && typeof pending.prompt === 'object'
             ? pending.prompt
@@ -393,7 +422,11 @@ export function createRealtimeEventsRuntime(
         }
       } catch (error) {
         const warningMessage = `Failed to reconstruct pending HITL prompts for world '${worldId}' chat '${chatId}': ${error instanceof Error ? error.message : String(error)}`;
-        console.warn(warningMessage);
+        loggerRealtime.warn(warningMessage, {
+          worldId,
+          chatId,
+          subscriptionId
+        });
       }
     }
 
@@ -427,7 +460,7 @@ export function createRealtimeEventsRuntime(
       await subscription.refresh();
     } catch (error) {
       const warningMessage = `Failed to refresh world subscription for '${worldId}': ${error instanceof Error ? error.message : String(error)}`;
-      console.warn(warningMessage);
+      loggerRealtime.warn(warningMessage, { worldId });
       return warningMessage;
     }
 
@@ -448,7 +481,11 @@ export function createRealtimeEventsRuntime(
       const failedSubscriptionIds = restoreFailures.map((item) => item.subscriptionId).join(', ');
       const details = restoreFailures.map((item) => `${item.subscriptionId}: ${item.message}`).join('; ');
       const warningMessage = `Failed to restore chat subscriptions for world '${worldId}' [${failedSubscriptionIds}]. Details: ${details}`;
-      console.warn(warningMessage);
+      loggerRealtime.warn(warningMessage, {
+        worldId,
+        failedSubscriptionIds,
+        failureCount: restoreFailures.length
+      });
       return warningMessage;
     }
 
@@ -487,7 +524,10 @@ export function createRealtimeEventsRuntime(
       try {
         await subscription.unsubscribe();
       } catch (error) {
-        console.error(`Failed to unsubscribe world ${worldId}:`, error);
+        loggerRealtime.error('Failed to unsubscribe world during realtime reset', {
+          worldId,
+          error: error instanceof Error ? error.message : String(error)
+        });
       }
     }
 

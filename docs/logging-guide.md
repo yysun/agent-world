@@ -1,7 +1,7 @@
 # Agent World Logging Guide
 
-**Last Updated**: 2025-10-31  
-**Version**: 1.0
+**Last Updated**: 2026-02-26  
+**Version**: 1.1
 
 ## Table of Contents
 
@@ -93,6 +93,28 @@ LOG_STORAGE_QUERY=debug npm run web:dev
 - Memory aggregation
 - File I/O errors
 
+#### 6. Chat Restore + Auto-Resume Diagnostics
+
+```bash
+LOG_CHAT_RESTORE=debug LOG_CHAT_RESTORE_RESUME=debug LOG_CHAT_RESTORE_RESUME_TOOLS=debug npm run web:dev
+```
+
+**What you'll see:**
+- Restore lifecycle start/switch/complete
+- Last-message auto-resume decisions
+- Pending tool-call resume execution flow
+
+#### 7. HITL Replay / Approval Diagnostics
+
+```bash
+LOG_HITL=debug npm run web:dev
+```
+
+**What you'll see:**
+- Pending request queue/replay counts
+- Prompt emission metadata (request/tool IDs)
+- Response accept/reject reasons and scope validation
+
 ---
 
 ## Available Categories
@@ -121,6 +143,9 @@ LOG_STORAGE_QUERY=debug npm run web:dev
 | `chat.session` | Chat session management | Chat not saving | `LOG_CHAT_SESSION=info` |
 | `chat.title` | Chat title updates | Title generation issues | `LOG_CHAT_TITLE=debug` |
 | `chat.history` | Message history | Missing messages | `LOG_CHAT_HISTORY=debug` |
+| `chat.restore` | Chat restore lifecycle | Restore chat switch/load ordering issues | `LOG_CHAT_RESTORE=debug` |
+| `chat.restore.resume` | Restore auto-resume decisions | Pending user/tool-call-last resume diagnostics | `LOG_CHAT_RESTORE_RESUME=debug` |
+| `chat.restore.resume.tools` | Restore pending tool-call execution | Tool resume parse/execute/continue diagnostics | `LOG_CHAT_RESTORE_RESUME_TOOLS=debug` |
 | **World/Agent** | | | |
 | `world.lifecycle` | World start/stop | World not running | `LOG_WORLD_LIFECYCLE=info` |
 | `world.state` | State changes | State transitions | `LOG_WORLD_STATE=debug` |
@@ -137,10 +162,16 @@ LOG_STORAGE_QUERY=debug npm run web:dev
 | `events.message` | Message delivery | Messages lost | `LOG_EVENTS_MESSAGE=debug` |
 | `events.error` | Error handling | Error recovery | `LOG_EVENTS_ERROR=info` |
 | `events.deletion` | Event deletion | Cleanup issues | `LOG_EVENTS_DELETION=info` |
+| **HITL** | | | |
+| `hitl` | Human-in-the-loop request lifecycle | HITL prompt replay/submit diagnostics | `LOG_HITL=debug` |
 | **Infrastructure** | | | |
 | `infrastructure.server` | HTTP server | Server startup issues | `LOG_INFRASTRUCTURE_SERVER=info` |
 | `infrastructure.api` | API endpoints | Endpoint errors | `LOG_INFRASTRUCTURE_API=debug` |
 | `infrastructure.middleware` | Middleware processing | Request handling | `LOG_INFRASTRUCTURE_MIDDLEWARE=debug` |
+| `electron.main.ipc` | Electron main IPC flow | Session/message IPC timing and payload flow | `LOG_ELECTRON_MAIN_IPC=debug` |
+| `electron.main.realtime` | Electron main realtime subscription flow | Subscription replay/restore issues | `LOG_ELECTRON_MAIN_REALTIME=debug` |
+| `electron.renderer.session` | Electron renderer session flow | Session select/prefetch diagnostics | `LOG_ELECTRON_RENDERER_SESSION=debug` |
+| `electron.renderer.subscription` | Electron renderer chat subscription flow | Subscribe/unsubscribe/HITL ingest diagnostics | `LOG_ELECTRON_RENDERER_SUBSCRIPTION=debug` |
 
 ### Hierarchical Control
 
@@ -199,6 +230,9 @@ LOG_LEVEL=debug npm run web:dev
 |----------|---------|------------|-------------|
 | `chat` | All chat operations | - | `LOG_CHAT=debug` |
 | `chat.session` | Session management | Create, delete, title updates | `LOG_CHAT_SESSION=info` |
+| `chat.restore` | Restore lifecycle | Start, current/switch branch, complete | `LOG_CHAT_RESTORE=debug` |
+| `chat.restore.resume` | Restore auto-resume | Pending user-last/tool-call-last detection and submission | `LOG_CHAT_RESTORE_RESUME=debug` |
+| `chat.restore.resume.tools` | Resume pending tool calls | Parse errors, tool execution, continuation, completion | `LOG_CHAT_RESTORE_RESUME_TOOLS=debug` |
 
 ### World/Agent Operations
 
@@ -221,6 +255,12 @@ LOG_LEVEL=debug npm run web:dev
 | `events.response` | Response generation | LLM calls, result processing | `LOG_EVENTS_RESPONSE=debug` |
 | `events.memory` | Memory operations | Save, load, persistence | `LOG_EVENTS_MEMORY=debug` |
 
+### HITL Operations
+
+| Category | Purpose | Key Events | Enable With |
+|----------|---------|------------|-------------|
+| `hitl` | HITL request lifecycle | Queue, emit, replay, submit accept/reject | `LOG_HITL=debug` |
+
 ### Infrastructure
 
 | Category | Purpose | Key Events | Enable With |
@@ -229,6 +269,16 @@ LOG_LEVEL=debug npm run web:dev
 | `server` | Express server | Server start, middleware, routing | `LOG_SERVER=info` |
 | `cli` | CLI commands | Command execution, arguments | `LOG_CLI=debug` |
 | `ws` | WebSocket | Connections, messages, errors | `LOG_WS=debug` |
+| `electron.main` | Electron main process | App lifecycle, workspace boot, IPC/realtime domains | `LOG_ELECTRON_MAIN=debug` |
+| `electron.main.ipc` | Electron main IPC | Session select/getMessages and logging-config IPC diagnostics | `LOG_ELECTRON_MAIN_IPC=debug` |
+| `electron.main.realtime` | Electron main realtime | Subscription replay/refresh/reset diagnostics | `LOG_ELECTRON_MAIN_REALTIME=debug` |
+| `electron.main.workspace` | Electron workspace runtime | Core-ready/workspace switch diagnostics | `LOG_ELECTRON_MAIN_WORKSPACE=debug` |
+| `electron.renderer` | Electron renderer process | Renderer-side logging umbrella category | `LOG_ELECTRON_RENDERER=debug` |
+| `electron.renderer.session` | Electron renderer sessions | Session selection/prefetch/restore diagnostics | `LOG_ELECTRON_RENDERER_SESSION=debug` |
+| `electron.renderer.subscription` | Electron renderer subscriptions | Realtime subscription/HITL ingestion diagnostics | `LOG_ELECTRON_RENDERER_SUBSCRIPTION=debug` |
+| `electron.renderer.messages` | Electron renderer message refresh | Message refresh/session activation diagnostics | `LOG_ELECTRON_RENDERER_MESSAGES=debug` |
+| `electron.renderer.message-edit` | Electron renderer edit backups | Edit backup save/clear warnings | `LOG_ELECTRON_RENDERER_MESSAGE_EDIT=warn` |
+| `electron.renderer.markdown` | Electron renderer markdown | Markdown render fallback errors | `LOG_ELECTRON_RENDERER_MARKDOWN=error` |
 
 ---
 
@@ -552,6 +602,23 @@ LOG_STORAGE_INIT=info LOG_STORAGE_MIGRATION=info npm run web:dev
 - Module loading messages
 - Directory creation logs
 - Permission errors
+
+---
+
+### Scenario 7: "Chat restore doesn't replay/resume as expected"
+
+**Symptoms:** Chat switches but pending HITL prompt or pending tool-call continuation appears stuck  
+**Solution:**
+
+```bash
+LOG_CHAT_RESTORE=debug LOG_CHAT_RESTORE_RESUME=debug LOG_CHAT_RESTORE_RESUME_TOOLS=debug LOG_HITL=debug npm run web:dev
+```
+
+**Look for:**
+- `chat.restore`: restore lifecycle and switching decisions
+- `chat.restore.resume`: last-message resume inspection/submit flow
+- `chat.restore.resume.tools`: pending tool-call parse/execute/continue sequence
+- `hitl`: replay counts, pending prompt emission, submit acceptance/rejections
 
 ---
 

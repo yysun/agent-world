@@ -13,6 +13,7 @@
  * - Keeps branch/session refresh semantics aligned with the existing desktop IPC flows.
  *
  * Recent Changes:
+ * - 2026-02-26: Replaced edit-backup localStorage warning console traces with categorized renderer logger output controlled by env-derived log config.
  * - 2026-02-26: Set chat-scoped sending state during edit-save submission so the inline working indicator appears immediately (web parity) and clears in `finally`.
  * - 2026-02-26: Clear chat-scoped transient error/log artifacts when saving user edits so stale failure indicators do not persist into retried turns.
  * - 2026-02-22: Removed renderer-side no-agent inference on send; status now follows core-emitted activity events only.
@@ -37,6 +38,7 @@ import {
   removeOptimisticUserMessage,
   upsertMessageList,
 } from '../domain/message-updates';
+import { rendererLogger } from '../utils/logger';
 
 export function useMessageManagement({
   api,
@@ -287,7 +289,9 @@ export function useMessageManagement({
     try {
       localStorage.setItem('agent-world-desktop-edit-backup', JSON.stringify(backup));
     } catch (error) {
-      console.warn('Failed to save edit backup:', error);
+      rendererLogger.warn('electron.renderer.message-edit', 'Failed to save edit backup', {
+        error: safeMessage(error, 'unknown')
+      });
     }
 
     // Stop any active streaming before trimming so stale SSE chunk/update callbacks
@@ -351,7 +355,9 @@ export function useMessageManagement({
       try {
         localStorage.removeItem('agent-world-desktop-edit-backup');
       } catch (error) {
-        console.warn('Failed to clear edit backup:', error);
+        rendererLogger.warn('electron.renderer.message-edit', 'Failed to clear edit backup', {
+          error: safeMessage(error, 'unknown')
+        });
       }
 
       setStatusText('Message edited successfully', 'success');

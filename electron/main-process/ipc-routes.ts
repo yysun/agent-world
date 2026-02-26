@@ -10,6 +10,7 @@
  * - Keeps channel naming and payload routing in one module.
  *
  * Recent Changes:
+ * - 2026-02-26: Added `logging:getConfig` route wiring for renderer-safe env-derived logging configuration.
  * - 2026-02-25: Updated `world:import` route to pass optional source payload through to main handler.
  * - 2026-02-19: Added `world:export` route wiring for desktop world save/export flows.
  * - 2026-02-16: Added `session:branchFromMessage` route wiring for creating branch sessions from assistant messages.
@@ -68,6 +69,7 @@ export interface MainIpcHandlers {
   deleteMessageFromChat: (payload: unknown) => Promise<unknown> | unknown;
   subscribeChatEvents: (payload: unknown) => Promise<unknown> | unknown;
   unsubscribeChatEvents: (payload: unknown) => Promise<unknown> | unknown;
+  getLoggingConfig: () => Promise<unknown> | unknown;
   getSystemSettings: () => Promise<unknown> | unknown;
   saveSystemSettings: (payload: unknown) => Promise<unknown> | unknown;
   openFileDialog: () => Promise<unknown> | unknown;
@@ -167,6 +169,7 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
       channel: DESKTOP_INVOKE_CHANNELS.CHAT_UNSUBSCRIBE_EVENTS,
       handler: async (_event, payload) => handlers.unsubscribeChatEvents(payload as ChatUnsubscribePayload)
     },
+    { channel: DESKTOP_INVOKE_CHANNELS.LOGGING_GET_CONFIG, handler: async () => handlers.getLoggingConfig() },
     { channel: DESKTOP_INVOKE_CHANNELS.SETTINGS_GET, handler: async () => handlers.getSystemSettings() },
     { channel: DESKTOP_INVOKE_CHANNELS.SETTINGS_SAVE, handler: async (_event, payload) => handlers.saveSystemSettings(payload) },
     { channel: DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_FILE, handler: async () => handlers.openFileDialog() }

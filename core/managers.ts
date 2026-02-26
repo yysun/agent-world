@@ -25,8 +25,8 @@
  * - Error log persistence with 100-entry retention policy
  *
  * Recent Changes:
+ * - 2026-02-26: Consolidated `restoreChat` and restore auto-resume tracing under categorized core loggers (`chat.restore`, `chat.restore.resume`) with structured metadata (removed direct `console.log` traces).
  * - 2026-02-25: Added comprehensive restore/resume trace logging in `restoreChat` to verify chat-switch ordering, memory sync completion, and auto-resume trigger timing.
- * - 2026-02-25: Added explicit `console.log` traces for restore-time auto-resume branches (pending user-last vs pending tool-call-last) and tool-resume completion counts.
  * - 2026-02-25: `restoreChat` now refreshes runtime agent memory from storage before auto-resume checks so loaded-chat pending tool calls can resume reliably.
  * - 2026-02-25: Added last-message auto-resume during `restoreChat` so pending user-last messages are auto-submitted and pending assistant tool-call-last messages auto-resume tool execution.
  * - 2026-02-25: Added non-blocking pending tool-call resume trigger during `restoreChat` so unresolved persisted tool calls continue after chat load/switch.
@@ -74,7 +74,8 @@
  *   - logEditError/getEditErrors: Error persistence in edit-errors.json
  *
  * Note: Export functionality has been moved to core/export.ts
- */// Core module imports
+ */
+// Core module imports
 import { createCategoryLogger, initializeLogger } from './logger.js';
 import { EventEmitter } from 'events';
 import { type StorageAPI, createStorageWithWrappers } from './storage/storage-factory.js'
@@ -97,6 +98,8 @@ import type {
 
 // Initialize logger and storage
 const logger = createCategoryLogger('core.managers');
+const loggerRestore = createCategoryLogger('chat.restore');
+const loggerRestoreResume = createCategoryLogger('chat.restore.resume');
 let storageWrappers: StorageAPI | null = null;
 let moduleInitialization: Promise<void> | null = null;
 
@@ -155,11 +158,14 @@ function triggerPendingToolCallResume(world: World, chatId: string, targetAssist
   void (async () => {
     try {
       const resumedCount = await resumePendingToolCallsForChat(world, chatId, targetAssistantMessageId);
-      console.log(
-        `[restoreChat:auto-resume] tool-call resume attempted world=${world.id} chat=${chatId} assistantMessageId=${targetAssistantMessageId || 'n/a'} resumedCount=${resumedCount}`
-      );
+      loggerRestoreResume.debug('Attempted pending tool-call resume after chat restore', {
+        worldId: world.id,
+        chatId,
+        targetAssistantMessageId: targetAssistantMessageId || null,
+        resumedCount,
+      });
       if (resumedCount > 0) {
-        logger.debug('Resumed pending persisted tool calls after chat restore', {
+        loggerRestoreResume.debug('Resumed pending persisted tool calls after chat restore', {
           worldId: world.id,
           chatId,
           targetAssistantMessageId,
@@ -167,7 +173,7 @@ function triggerPendingToolCallResume(world: World, chatId: string, targetAssist
         });
       }
     } catch (error) {
-      logger.warn('Failed to resume pending persisted tool calls after chat restore', {
+      loggerRestoreResume.warn('Failed to resume pending persisted tool calls after chat restore', {
         worldId: world.id,
         chatId,
         targetAssistantMessageId,
@@ -236,9 +242,11 @@ function triggerPendingUserMessageResume(world: World, chatId: string, userMessa
   void (async () => {
     try {
       const { publishMessageWithId } = await import('./events/index.js');
-      console.log(
-        `[restoreChat:auto-resume] submitting pending user-last message world=${world.id} chat=${chatId} messageId=${userMessage.messageId}`
-      );
+      loggerRestoreResume.debug('Submitting pending user-last message after chat restore', {
+        worldId: world.id,
+        chatId,
+        messageId: userMessage.messageId,
+      });
       publishMessageWithId(
         world,
         userMessage.content,
@@ -248,13 +256,13 @@ function triggerPendingUserMessageResume(world: World, chatId: string, userMessa
         userMessage.replyToMessageId
       );
 
-      logger.debug('Auto-submitted pending user-last message after chat restore', {
+      loggerRestoreResume.debug('Auto-submitted pending user-last message after chat restore', {
         worldId: world.id,
         chatId,
         messageId: userMessage.messageId,
       });
     } catch (error) {
-      logger.warn('Failed to auto-submit pending user-last message after chat restore', {
+      loggerRestoreResume.warn('Failed to auto-submit pending user-last message after chat restore', {
         worldId: world.id,
         chatId,
         messageId: userMessage.messageId,
@@ -280,21 +288,25 @@ function triggerPendingLastMessageResume(world: World, chatId: string): void {
 
       const lastMessage = chatMemory[chatMemory.length - 1];
       if (lastMessage.role === 'user') {
-        console.log(
-          `[restoreChat:auto-resume] detected pending user-last message world=${world.id} chat=${chatId} messageId=${lastMessage.messageId || 'n/a'}`
-        );
+        loggerRestoreResume.debug('Detected pending user-last message during chat-restore inspection', {
+          worldId: world.id,
+          chatId,
+          messageId: lastMessage.messageId || null,
+        });
         triggerPendingUserMessageResume(world, chatId, lastMessage);
         return;
       }
 
       if (hasPendingToolCallsOnLastAssistantMessage(lastMessage, chatMemory)) {
-        console.log(
-          `[restoreChat:auto-resume] detected pending tool-call-last message world=${world.id} chat=${chatId} messageId=${lastMessage.messageId || 'n/a'}`
-        );
+        loggerRestoreResume.debug('Detected pending tool-call-last message during chat-restore inspection', {
+          worldId: world.id,
+          chatId,
+          messageId: lastMessage.messageId || null,
+        });
         triggerPendingToolCallResume(world, chatId, lastMessage.messageId);
       }
     } catch (error) {
-      logger.warn('Failed to inspect last message for chat-restore auto-resume', {
+      loggerRestoreResume.warn('Failed to inspect last message for chat-restore auto-resume', {
         worldId: world.id,
         chatId,
         error: error instanceof Error ? error.message : String(error),
@@ -1302,34 +1314,42 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
   const resolvedWorldId = await getResolvedWorldId(worldId);
   const restoreStartedAt = Date.now();
 
-  console.log(
-    `[restoreChat] start world=${resolvedWorldId} requestedChat=${chatId}`
-  );
+  loggerRestore.debug('Restore chat started', {
+    worldId: resolvedWorldId,
+    requestedChatId: chatId,
+  });
 
   let world = await getWorld(resolvedWorldId);
   if (!world) {
-    console.log(
-      `[restoreChat] world-missing world=${resolvedWorldId} requestedChat=${chatId}`
-    );
+    loggerRestore.debug('Restore chat aborted: world missing', {
+      worldId: resolvedWorldId,
+      requestedChatId: chatId,
+    });
     return null;
   }
 
   if (world.currentChatId === chatId) {
-    console.log(
-      `[restoreChat] already-current world=${world.id} chat=${chatId} action=sync-memory+resume`
-    );
+    loggerRestore.debug('Restore chat detected already-current chat', {
+      worldId: world.id,
+      chatId,
+      action: 'sync-memory+resume',
+    });
     await syncRuntimeAgentMemoryFromStorage(world, resolvedWorldId);
-    console.log(
-      `[restoreChat] memory-sync-complete world=${world.id} chat=${chatId}`
-    );
+    loggerRestore.debug('Restore chat memory sync complete', {
+      worldId: world.id,
+      chatId,
+    });
     replayPendingHitlRequests(world, chatId);
-    console.log(
-      `[restoreChat] hitl-replay-triggered world=${world.id} chat=${chatId}`
-    );
+    loggerRestore.debug('Restore chat pending HITL replay triggered', {
+      worldId: world.id,
+      chatId,
+    });
     triggerPendingLastMessageResume(world, chatId);
-    console.log(
-      `[restoreChat] resume-inspection-triggered world=${world.id} chat=${chatId} elapsedMs=${Date.now() - restoreStartedAt}`
-    );
+    loggerRestore.debug('Restore chat resume inspection triggered', {
+      worldId: world.id,
+      chatId,
+      elapsedMs: Date.now() - restoreStartedAt,
+    });
     return world;
   }
 
@@ -1339,40 +1359,53 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
     : !!(await storageWrappers!.loadChatData(resolvedWorldId, chatId));
 
   if (!persistedChatExists) {
-    console.log(
-      `[restoreChat] chat-missing world=${resolvedWorldId} requestedChat=${chatId} runtimeExists=${runtimeChatExists}`
-    );
+    loggerRestore.debug('Restore chat aborted: chat missing', {
+      worldId: resolvedWorldId,
+      requestedChatId: chatId,
+      runtimeChatExists,
+    });
     return null;
   }
 
-  console.log(
-    `[restoreChat] switching-current-chat world=${resolvedWorldId} from=${world.currentChatId || 'n/a'} to=${chatId}`
-  );
+  loggerRestore.debug('Restore chat switching current chat', {
+    worldId: resolvedWorldId,
+    fromChatId: world.currentChatId || null,
+    toChatId: chatId,
+  });
   world = await updateWorld(resolvedWorldId, {
     currentChatId: chatId
   });
   if (world) {
     await syncRuntimeAgentMemoryFromStorage(world, resolvedWorldId);
-    console.log(
-      `[restoreChat] memory-sync-complete world=${world.id} chat=${chatId}`
-    );
+    loggerRestore.debug('Restore chat memory sync complete', {
+      worldId: world.id,
+      chatId,
+    });
     replayPendingHitlRequests(world, chatId);
-    console.log(
-      `[restoreChat] hitl-replay-triggered world=${world.id} chat=${chatId}`
-    );
+    loggerRestore.debug('Restore chat pending HITL replay triggered', {
+      worldId: world.id,
+      chatId,
+    });
     triggerPendingLastMessageResume(world, chatId);
-    console.log(
-      `[restoreChat] resume-inspection-triggered world=${world.id} chat=${chatId} elapsedMs=${Date.now() - restoreStartedAt}`
-    );
+    loggerRestore.debug('Restore chat resume inspection triggered', {
+      worldId: world.id,
+      chatId,
+      elapsedMs: Date.now() - restoreStartedAt,
+    });
   } else {
-    console.log(
-      `[restoreChat] update-world-returned-null world=${resolvedWorldId} requestedChat=${chatId}`
-    );
+    loggerRestore.warn('Restore chat update-world returned null', {
+      worldId: resolvedWorldId,
+      requestedChatId: chatId,
+      elapsedMs: Date.now() - restoreStartedAt,
+    });
   }
 
-  console.log(
-    `[restoreChat] done world=${resolvedWorldId} requestedChat=${chatId} restoredCurrentChat=${world?.currentChatId || 'n/a'} elapsedMs=${Date.now() - restoreStartedAt}`
-  );
+  loggerRestore.debug('Restore chat completed', {
+    worldId: resolvedWorldId,
+    requestedChatId: chatId,
+    restoredCurrentChatId: world?.currentChatId || null,
+    elapsedMs: Date.now() - restoreStartedAt,
+  });
   return world;
 }
 
@@ -1395,9 +1428,12 @@ export async function activateChatWithSnapshot(worldId: string, chatId: string):
     ? runtimePending
     : listPendingHitlPromptEventsFromMessages(safeMemory, resolvedChatId);
 
-  console.log(
-    `[activateChatWithSnapshot] world=${world.id} chat=${resolvedChatId} memoryCount=${safeMemory.length} hitlPrompts=${hitlPrompts.length}`
-  );
+  loggerRestore.debug('Activate chat snapshot assembled', {
+    worldId: world.id,
+    chatId: resolvedChatId,
+    memoryCount: safeMemory.length,
+    hitlPromptCount: hitlPrompts.length,
+  });
 
   return {
     world,

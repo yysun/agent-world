@@ -14,6 +14,7 @@
  * - Payload normalization helpers preserve existing invoke payload formats.
  *
  * Recent Changes:
+ * - 2026-02-26: Added `getLoggingConfig()` bridge method for renderer-safe env-controlled logging category/level configuration.
  * - 2026-02-25: Updated `importWorld()` bridge method to accept optional source payload.
  * - 2026-02-20: Enforced options-only HITL bridge surface (`respondHitlOption` only).
  * - 2026-02-19: Added `exportWorld(worldId)` bridge method for desktop world save/export workflow.
@@ -34,6 +35,7 @@ import {
   DESKTOP_INVOKE_CHANNELS,
   type ChatEventPayload,
   type DesktopApi,
+  type RendererLoggingConfig,
   type SkillRegistrySummary
 } from '../shared/ipc-contracts.js';
 import { invokeDesktopChannel } from './invoke.js';
@@ -224,6 +226,10 @@ export function createDesktopApi(ipcRendererLike: IpcRendererLike = ipcRenderer)
         toUnsubscribePayload(subscriptionId)
       ),
     onChatEvent: (callback) => onChatEvent(ipcRendererLike, callback),
+    getLoggingConfig: () => invokeDesktopChannel<RendererLoggingConfig>(
+      ipcRendererLike,
+      DESKTOP_INVOKE_CHANNELS.LOGGING_GET_CONFIG
+    ),
     getSettings: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.SETTINGS_GET),
     saveSettings: (settings) => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.SETTINGS_SAVE, settings),
     pickFile: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_FILE)
