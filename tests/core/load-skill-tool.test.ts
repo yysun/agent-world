@@ -88,6 +88,20 @@ const mockedExecuteShellCommand = vi.mocked(executeShellCommand);
 const mockedFormatResultForLLM = vi.mocked(formatResultForLLM);
 const mockedValidateShellCommandScope = vi.mocked(validateShellCommandScope);
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForMockCallCount(mockFn: { mock: { calls: unknown[] } }, count: number, timeoutMs = 200): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (mockFn.mock.calls.length >= count) {
+      return;
+    }
+    await delay(10);
+  }
+}
+
 describe('core/load-skill-tool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -536,6 +550,170 @@ describe('core/load-skill-tool', () => {
 
     expect(result).toContain('<instructions>');
     expect(result).not.toContain('skill root:');
+  });
+
+  it('auto-suppresses repeated load_skill for same skill across active run hops', async () => {
+    mockedGetSkill.mockReturnValue({
+      skill_id: 'skill-installer',
+      description: 'Install skills',
+      hash: 'abc123',
+      lastUpdated: '2026-02-27T12:00:00.000Z',
+    });
+    mockedGetSkillSourcePath.mockReturnValue('/skills/skill-installer/SKILL.md');
+    vi.mocked(fs.readFile).mockResolvedValue('# Skill Installer\nUse installer flow.' as any);
+    mockedRequestWorldOption.mockResolvedValue({
+      worldId: 'world-1',
+      requestId: 'req-same-turn',
+      chatId: 'chat-1',
+      optionId: 'yes_once',
+      source: 'user',
+    });
+
+    const messages: Array<Record<string, unknown>> = [{
+      role: 'user',
+      content: 'Please install the skill',
+      chatId: 'chat-1',
+      messageId: 'user-turn-1',
+      createdAt: new Date('2026-02-27T12:00:00.000Z'),
+    }];
+
+    const context = {
+      world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+      chatId: 'chat-1',
+      messages,
+      agentName: 'a1',
+      toolCallId: 'load-skill-call-1',
+    };
+
+    const tool = createLoadSkillToolDefinition();
+    const firstResult = await tool.execute({ skill_id: 'skill-installer' }, undefined, undefined, context);
+
+    messages.push(
+      {
+        role: 'assistant',
+        content: 'Continuing...',
+        chatId: 'chat-1',
+        messageId: 'assistant-hop-1',
+        createdAt: new Date('2026-02-27T12:00:02.000Z'),
+      },
+      {
+        role: 'tool',
+        content: '{"ok":true}',
+        chatId: 'chat-1',
+        messageId: 'tool-hop-1',
+        tool_call_id: 'some-other-tool',
+        createdAt: new Date('2026-02-27T12:00:03.000Z'),
+      },
+    );
+
+    const secondResult = await tool.execute({ skill_id: 'skill-installer' }, undefined, undefined, context);
+
+    expect(firstResult).toContain('<skill_context id="skill-installer">');
+    expect(secondResult).toContain('<skill_context id="skill-installer">');
+    expect(mockedRequestWorldOption).toHaveBeenCalledTimes(1);
+    expect(fs.readFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('deduplicates in-flight approvals for concurrent same-turn load_skill calls', async () => {
+    mockedGetSkill.mockReturnValue({
+      skill_id: 'skill-installer',
+      description: 'Install skills',
+      hash: 'abc123',
+      lastUpdated: '2026-02-27T12:00:00.000Z',
+    });
+    mockedGetSkillSourcePath.mockReturnValue('/skills/skill-installer/SKILL.md');
+    vi.mocked(fs.readFile).mockResolvedValue('# Skill Installer\nUse installer flow.' as any);
+
+    let resolveApproval!: (value: any) => void;
+    const approvalPromise = new Promise((resolve) => {
+      resolveApproval = resolve;
+    });
+    mockedRequestWorldOption.mockImplementation(() => approvalPromise as any);
+
+    const messages: Array<Record<string, unknown>> = [{
+      role: 'user',
+      content: 'Please install the skill',
+      chatId: 'chat-1',
+      messageId: 'user-turn-2',
+      createdAt: new Date('2026-02-27T12:01:00.000Z'),
+    }];
+
+    const context = {
+      world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+      chatId: 'chat-1',
+      messages,
+      agentName: 'a1',
+    };
+
+    const tool = createLoadSkillToolDefinition();
+    const firstCall = tool.execute({ skill_id: 'skill-installer' }, undefined, undefined, context);
+    const secondCall = tool.execute({ skill_id: 'skill-installer' }, undefined, undefined, context);
+
+    await waitForMockCallCount(mockedRequestWorldOption, 1);
+    expect(mockedRequestWorldOption).toHaveBeenCalledTimes(1);
+
+    resolveApproval({
+      worldId: 'world-1',
+      requestId: 'req-concurrent',
+      chatId: 'chat-1',
+      optionId: 'yes_once',
+      source: 'user',
+    });
+
+    const [firstResult, secondResult] = await Promise.all([firstCall, secondCall]);
+    expect(firstResult).toContain('<skill_context id="skill-installer">');
+    expect(secondResult).toContain('<skill_context id="skill-installer">');
+    expect(mockedRequestWorldOption).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows retry after declined load_skill in the same run', async () => {
+    mockedGetSkill.mockReturnValue({
+      skill_id: 'skill-installer',
+      description: 'Install skills',
+      hash: 'abc123',
+      lastUpdated: '2026-02-27T12:00:00.000Z',
+    });
+    mockedGetSkillSourcePath.mockReturnValue('/skills/skill-installer/SKILL.md');
+    vi.mocked(fs.readFile).mockResolvedValue('# Skill Installer\nUse installer flow.' as any);
+    mockedRequestWorldOption
+      .mockResolvedValueOnce({
+        worldId: 'world-1',
+        requestId: 'req-decline',
+        chatId: 'chat-1',
+        optionId: 'no',
+        source: 'user',
+      })
+      .mockResolvedValueOnce({
+        worldId: 'world-1',
+        requestId: 'req-approve',
+        chatId: 'chat-1',
+        optionId: 'yes_once',
+        source: 'user',
+      });
+
+    const messages: Array<Record<string, unknown>> = [{
+      role: 'user',
+      content: 'Please install the skill',
+      chatId: 'chat-1',
+      messageId: 'user-turn-retry-1',
+      createdAt: new Date('2026-02-27T12:02:00.000Z'),
+    }];
+
+    const context = {
+      world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+      chatId: 'chat-1',
+      messages,
+      agentName: 'a1',
+    };
+
+    const tool = createLoadSkillToolDefinition();
+    const firstResult = await tool.execute({ skill_id: 'skill-installer' }, undefined, undefined, context);
+    const secondResult = await tool.execute({ skill_id: 'skill-installer' }, undefined, undefined, context);
+
+    expect(firstResult).toContain('User declined HITL approval for skill');
+    expect(secondResult).toContain('<skill_context id="skill-installer">');
+    expect(secondResult).toContain('<instructions>');
+    expect(mockedRequestWorldOption).toHaveBeenCalledTimes(2);
   });
 
 });

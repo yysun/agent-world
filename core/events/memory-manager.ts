@@ -20,6 +20,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-27: Added per-chat/agent continuation run lock in `continueLLMAfterToolExecution` to skip concurrent duplicate continuation runs while tools are pending/executing (prevents duplicate HITL approval prompts).
  * - 2026-02-26: Replaced `resumePendingToolCallsForChat` console traces with categorized structured logger events (`chat.restore.resume.tools`) for env-controlled restore diagnostics.
  * - 2026-02-24: Commented out hardcoded Infinite-Etude handoff safeguard to respect separation of concerns (logic moved to agent prompt).
  * - 2026-02-25: Added detailed resume tracing in `resumePendingToolCallsForChat` (start/skip/execute/error/continue) for cross-layer restore diagnostics.
@@ -97,6 +98,49 @@ async function getStorageWrappers(): Promise<StorageAPI> {
     storageWrappers = await createStorageWithWrappers();
   }
   return storageWrappers!;
+}
+
+type ActiveContinuationRun = {
+  runId: string;
+  depth: number;
+};
+
+const activeContinuationRuns = new Map<string, ActiveContinuationRun>();
+
+function normalizeContinuationChatId(chatId: string | null | undefined): string {
+  if (chatId === undefined || chatId === null) {
+    return '__null__';
+  }
+  const normalized = String(chatId).trim();
+  return normalized || '__null__';
+}
+
+function getContinuationScopeKey(worldId: string, agentId: string, chatId: string | null | undefined): string {
+  return `${worldId}::${agentId}::${normalizeContinuationChatId(chatId)}`;
+}
+
+function enterContinuationScope(scopeKey: string, runId: string): boolean {
+  const activeRun = activeContinuationRuns.get(scopeKey);
+  if (!activeRun) {
+    activeContinuationRuns.set(scopeKey, { runId, depth: 1 });
+    return true;
+  }
+  if (activeRun.runId !== runId) {
+    return false;
+  }
+  activeRun.depth += 1;
+  return true;
+}
+
+function leaveContinuationScope(scopeKey: string, runId: string): void {
+  const activeRun = activeContinuationRuns.get(scopeKey);
+  if (!activeRun || activeRun.runId !== runId) {
+    return;
+  }
+  activeRun.depth -= 1;
+  if (activeRun.depth <= 0) {
+    activeContinuationRuns.delete(scopeKey);
+  }
 }
 
 type TitlePromptMessage = {
@@ -841,8 +885,28 @@ export async function continueLLMAfterToolExecution(
     hopCount?: number;
     emptyTextRetryCount?: number;
     emptyToolCallRetryCount?: number;
+    continuationRunId?: string;
   }
 ): Promise<void> {
+  const continuationChatId = chatId !== undefined ? chatId : world.currentChatId ?? null;
+  const continuationRunId = String(options?.continuationRunId || '').trim() || generateId();
+  const continuationScopeKey = getContinuationScopeKey(world.id, agent.id, continuationChatId);
+  const enteredScope = enterContinuationScope(continuationScopeKey, continuationRunId);
+  if (!enteredScope) {
+    loggerAgent.debug('Skipping duplicate continuation run while another run is active', {
+      worldId: world.id,
+      agentId: agent.id,
+      chatId: continuationChatId,
+    });
+    logToolBridge('CONTINUE SKIP_INFLIGHT', {
+      worldId: world.id,
+      agentId: agent.id,
+      chatId: continuationChatId,
+      responseType: 'skipped',
+    });
+    return;
+  }
+
   const completeActivity = beginWorldActivity(world, `agent:${agent.id}`, chatId ?? undefined);
   try {
     let hopCount = options?.hopCount ?? 0;
@@ -1213,6 +1277,7 @@ export async function continueLLMAfterToolExecution(
             ...options,
             hopCount: hopCount + 1,
             emptyToolCallRetryCount: emptyToolCallRetryCount + 1,
+            continuationRunId,
           });
           return;
         }
@@ -1308,6 +1373,7 @@ export async function continueLLMAfterToolExecution(
         await continueLLMAfterToolExecution(world, agent, targetChatId, {
           ...options,
           hopCount: hopCount + 1,
+          continuationRunId,
         });
         return;
       }
@@ -1353,6 +1419,7 @@ export async function continueLLMAfterToolExecution(
         await continueLLMAfterToolExecution(world, agent, targetChatId, {
           ...options,
           hopCount: hopCount + 1,
+          continuationRunId,
         });
         return;
       }
@@ -1479,6 +1546,7 @@ export async function continueLLMAfterToolExecution(
       await continueLLMAfterToolExecution(world, agent, targetChatId, {
         ...options,
         hopCount: hopCount + 1,
+        continuationRunId,
       });
       return;
     }
@@ -1505,6 +1573,7 @@ export async function continueLLMAfterToolExecution(
         await continueLLMAfterToolExecution(world, agent, targetChatId, {
           ...options,
           emptyTextRetryCount: emptyTextRetryCount + 1,
+          continuationRunId,
         });
         return;
       }
@@ -1608,6 +1677,7 @@ export async function continueLLMAfterToolExecution(
       error: error instanceof Error ? error.message : String(error),
     });
   } finally {
+    leaveContinuationScope(continuationScopeKey, continuationRunId);
     completeActivity();
   }
 }
