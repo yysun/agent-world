@@ -13,6 +13,7 @@
  * - Defaults to verbose logging in dev builds until bridge config is loaded.
  *
  * Recent Changes:
+ * - 2026-02-27: Added renderer log subscription support so UI can consume gated/sanitized renderer log events in realtime.
  * - 2026-02-26: Added initial renderer logging adapter for env-controlled categorized logs.
  */
 
@@ -35,9 +36,23 @@ const DEFAULT_RENDERER_LOGGING_CONFIG: RendererLoggingConfig = {
   nodeEnv: 'unknown'
 };
 
+export type RendererLogProcess = 'renderer';
+
+export type RendererLogEntry = {
+  process: RendererLogProcess;
+  level: LogLevel;
+  category: string;
+  message: string;
+  timestamp: string;
+  data?: unknown;
+};
+
+type RendererLogSubscriber = (entry: RendererLogEntry) => void;
+
 let currentLoggingConfig: RendererLoggingConfig = DEFAULT_RENDERER_LOGGING_CONFIG;
 let loggerInitialized = false;
 let initializePromise: Promise<void> | null = null;
+const rendererLogSubscribers = new Set<RendererLogSubscriber>();
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -130,17 +145,33 @@ function shouldLog(level: LogLevel, category: string): boolean {
   return LOG_LEVEL_VALUES[level] >= LOG_LEVEL_VALUES[resolveCategoryLogLevel(category)];
 }
 
+function notifyRendererLogSubscribers(entry: RendererLogEntry): void {
+  if (rendererLogSubscribers.size === 0) return;
+  for (const subscriber of rendererLogSubscribers) {
+    try {
+      subscriber(entry);
+    } catch {
+      // Keep logger emission robust even if a subscriber throws.
+    }
+  }
+}
+
 function emitRendererLog(level: LogLevel, category: string, message: string, data?: unknown): void {
   const normalizedCategory = normalizeCategoryKey(category);
   if (!shouldLog(level, normalizedCategory)) return;
 
   const label = `[${level.toUpperCase()}] ${normalizedCategory || 'renderer'}`;
-  const payload = {
+  const timestamp = new Date().toISOString();
+  const payload: RendererLogEntry = {
     process: 'renderer',
+    level,
     category: normalizedCategory,
     message,
+    timestamp,
     data: data === undefined ? undefined : sanitizeLogData(data)
   };
+
+  notifyRendererLogSubscribers(payload);
 
   if (level === 'error') {
     console.error(label, payload);
@@ -190,5 +221,14 @@ export const rendererLogger = {
   debug: (category: string, message: string, data?: unknown) => emitRendererLog('debug', category, message, data),
   info: (category: string, message: string, data?: unknown) => emitRendererLog('info', category, message, data),
   warn: (category: string, message: string, data?: unknown) => emitRendererLog('warn', category, message, data),
-  error: (category: string, message: string, data?: unknown) => emitRendererLog('error', category, message, data)
+  error: (category: string, message: string, data?: unknown) => emitRendererLog('error', category, message, data),
+  subscribe: (subscriber: RendererLogSubscriber): (() => void) => {
+    if (typeof subscriber !== 'function') {
+      return () => undefined;
+    }
+    rendererLogSubscribers.add(subscriber);
+    return () => {
+      rendererLogSubscribers.delete(subscriber);
+    };
+  }
 };

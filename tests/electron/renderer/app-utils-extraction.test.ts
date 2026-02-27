@@ -12,6 +12,7 @@
  * - No filesystem or network dependencies.
  *
  * Recent Changes:
+ * - 2026-02-27: Added regression coverage ensuring log-event rows are not treated as renderable chat messages.
  * - 2026-02-22: Added regression for pending-only inline status to avoid fallback agent names on invalid mention flows.
  * - 2026-02-22: Added coverage for end-of-run processed-agent status summary text helper.
  * - 2026-02-22: Added regression coverage to prevent fallback agent attribution when no concrete agent activity state exists.
@@ -168,6 +169,11 @@ describe('extracted message utils', () => {
     expect(getMessageIdentity(message)).toBe('msg-1');
     expect(isRenderableMessageEntry(message)).toBe(true);
     expect(isRenderableMessageEntry({ role: 'assistant' })).toBe(false);
+    expect(isRenderableMessageEntry({
+      messageId: 'log-row-1',
+      type: 'log',
+      logEvent: { level: 'info', category: 'main', message: 'bridge event' }
+    })).toBe(false);
     const className = getMessageCardClassName(message, new Map(), [message], 0);
     expect(className).toContain('rounded-lg');
   });

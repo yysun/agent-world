@@ -1,7 +1,7 @@
 # Agent World Logging Guide
 
-**Last Updated**: 2026-02-26  
-**Version**: 1.1
+**Last Updated**: 2026-02-27  
+**Version**: 1.2
 
 ## Table of Contents
 
@@ -115,6 +115,17 @@ LOG_HITL=debug npm run web:dev
 - Prompt emission metadata (request/tool IDs)
 - Response accept/reject reasons and scope validation
 
+#### 8. LLM Tool-Bridge Payload Handoff
+
+```bash
+LOG_LLM_TOOL_BRIDGE=debug npm run web:dev
+```
+
+**What you'll see:**
+- Structured handoff logs for LLM -> tool, tool -> LLM, and tool error flows
+- Truncated payload previews for arguments/results/content
+- Category-tagged events under `llm.tool.bridge`
+
 ---
 
 ## Available Categories
@@ -137,6 +148,7 @@ LOG_HITL=debug npm run web:dev
 | `llm.openai` | OpenAI provider | OpenAI API issues | `LOG_LLM_OPENAI=debug` |
 | `llm.anthropic` | Anthropic provider | Claude API issues | `LOG_LLM_ANTHROPIC=debug` |
 | `llm.google` | Google provider | Gemini API issues | `LOG_LLM_GOOGLE=debug` |
+| `llm.tool.bridge` | LLM↔tool handoff payloads | Tool invocation/result bridge diagnostics | `LOG_LLM_TOOL_BRIDGE=debug` |
 | `llm.manager` | Provider management | Provider selection issues | `LOG_LLM_MANAGER=debug` |
 | `llm.config` | LLM configuration | Config errors | `LOG_LLM_CONFIG=info` |
 | **Chat** | | | |
@@ -223,6 +235,7 @@ LOG_LEVEL=debug npm run web:dev
 | `llm.openai` | OpenAI provider | API calls, streaming, errors | `LOG_LLM_OPENAI=debug` |
 | `llm.anthropic` | Anthropic provider | Claude API calls, tool use | `LOG_LLM_ANTHROPIC=debug` |
 | `llm.google` | Google provider | Gemini API calls, responses | `LOG_LLM_GOOGLE=debug` |
+| `llm.tool.bridge` | LLM↔tool handoff logging | LLM->tool, tool->LLM, and tool error bridge payload previews | `LOG_LLM_TOOL_BRIDGE=debug` |
 
 ### Chat Operations
 
@@ -481,6 +494,22 @@ LOG_MCP=debug npm run web:dev
 LOG_MCP=debug LOG_MCP_LIFECYCLE=info npm run web:dev
 ```
 
+### Special Category Gate: `LOG_LLM_TOOL_BRIDGE`
+
+`LOG_LLM_TOOL_BRIDGE` is a dedicated bridge-debug control for the `llm.tool.bridge` category.
+
+Supported values:
+- `trace|debug|info|warn|error` to set an explicit level
+- `1|true|on` as aliases for `debug`
+- `0|false|off` to disable bridge logs
+
+Examples:
+
+```bash
+LOG_LLM_TOOL_BRIDGE=debug npm run web:dev
+LOG_LLM_TOOL_BRIDGE=trace npm run web:dev
+```
+
 ### Configuration File
 
 Create a `.env` file in your project root:
@@ -497,6 +526,7 @@ LOG_CHAT_SESSION=info
 # Debug specific issues
 LOG_LLM_OPENAI=debug
 LOG_EVENTS_AGENT=debug
+LOG_LLM_TOOL_BRIDGE=debug
 ```
 
 ---

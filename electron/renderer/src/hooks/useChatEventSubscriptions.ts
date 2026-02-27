@@ -13,6 +13,8 @@
  * - Accepts state setters/callbacks via dependency injection.
  *
  * Recent Changes:
+ * - 2026-02-27: Global log listener now routes events only to logs-panel ingestion; chat message list is no longer mutated for realtime log events.
+ * - 2026-02-27: Added app-level main log callback wiring so global log events can feed the logs panel independently of chat message rendering.
  * - 2026-02-26: Replaced chat-subscription lifecycle console traces with categorized renderer logger output controlled by env-derived log config.
  * - 2026-02-25: Added subscription lifecycle trace logs (subscribe/unsubscribe/HITL ingest) for resume timing diagnostics.
  * - 2026-02-24: Fixed subscription cycling: changed loadedWorld dependency to loadedWorld?.id
@@ -36,6 +38,7 @@ import { Dispatch, MutableRefObject, SetStateAction, useEffect, useRef } from 'r
 import {
   createChatSubscriptionEventHandler,
   createGlobalLogEventHandler,
+  type MainProcessLogEntry,
 } from '../domain/chat-event-handlers';
 import type { DesktopApi } from '../types/desktop-api';
 import type { MessageLike } from '../domain/message-updates';
@@ -85,6 +88,7 @@ type UseChatEventSubscriptionsArgs = {
   refreshSessions: (worldId: string, preferredSessionId?: string | null) => Promise<void>;
   resetActivityRuntimeState: () => void;
   setHitlPromptQueue: Dispatch<SetStateAction<HitlPrompt[]>>;
+  onMainLogEvent?: (entry: MainProcessLogEntry) => void;
 };
 
 type SessionSystemEventPayload = {
@@ -166,21 +170,20 @@ export function useChatEventSubscriptions({
   refreshSessions,
   resetActivityRuntimeState,
   setHitlPromptQueue,
+  onMainLogEvent,
 }: UseChatEventSubscriptionsArgs) {
   const pendingHitlEventsRef = useRef<Array<{ payload: any; fallbackChatId: string | null }>>([]);
   const pendingHitlFlushTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     const removeListener = api.onChatEvent(createGlobalLogEventHandler({
-      loadedWorldId: loadedWorld?.id,
-      selectedSessionId,
-      setMessages
+      onMainLogEvent,
     }));
 
     return () => {
       removeListener();
     };
-  }, [api, loadedWorld?.id, selectedSessionId, setMessages]);
+  }, [api, onMainLogEvent]);
 
   const loadedWorldId = loadedWorld?.id;
 

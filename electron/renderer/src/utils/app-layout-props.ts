@@ -12,6 +12,7 @@
  * - Data-only transformations from provided inputs.
  *
  * Recent Changes:
+ * - 2026-02-27: Added right-panel logs props wiring (`panelLogs`, `onClearPanelLogs`) and replaced header refresh wiring with `onOpenLogsPanel`.
  * - 2026-02-26: Added right-panel import props wiring (`onImportWorld`) to support import form mode.
  * - 2026-02-21: Added message-list prop wiring for assistant raw-markdown copy action.
  * - 2026-02-20: Added inline HITL message-card props to main message-list wiring (replacing overlay HITL modal usage).
@@ -127,6 +128,8 @@ export function createMainContentRightPanelContentProps<T extends PropBag>(input
     creatingWorld: input.creatingWorld,
     setCreatingWorld: input.setCreatingWorld,
     onImportWorld: input.onImportWorld,
+    panelLogs: input.panelLogs,
+    onClearPanelLogs: input.onClearPanelLogs,
   };
 }
 
@@ -174,8 +177,8 @@ export function createMainHeaderProps<T extends PropBag>(input: T) {
     activeHeaderAgentIds: input.activeHeaderAgentIds,
     onOpenEditAgentPanel: input.onOpenEditAgentPanel,
     onOpenCreateAgentPanel: input.onOpenCreateAgentPanel,
+    onOpenLogsPanel: input.onOpenLogsPanel,
     onOpenSettingsPanel: input.onOpenSettingsPanel,
-    onRefreshWorld: input.onRefreshWorldInfo,
     panelMode: input.panelMode,
     panelOpen: input.panelOpen,
     dragRegionStyle: input.DRAG_REGION_STYLE,

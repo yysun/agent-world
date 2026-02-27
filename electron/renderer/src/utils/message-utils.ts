@@ -13,6 +13,7 @@
  * - Helper functions are intentionally colocated to preserve behavior parity.
  *
  * Recent Changes:
+ * - 2026-02-27: Excluded realtime log rows (`type='log'` / `logEvent`) from renderable chat entries so logs appear only in the logs panel.
  * - 2026-02-21: Classified assistant messages with `tool_calls` as tool-related so tool-request rows render reliably even when text lacks `Calling tool: ...`.
  * - 2026-02-20: Added `isRenderableMessageEntry` so welcome-state and list rendering share identical message-presence logic.
  * - 2026-02-16: Extracted from App.jsx into dedicated utility module.
@@ -99,6 +100,10 @@ export function getMessageIdentity(message) {
 }
 
 export function isRenderableMessageEntry(message) {
+  const messageType = String(message?.type || '').trim().toLowerCase();
+  if (messageType === 'log' || Boolean(message?.logEvent)) {
+    return false;
+  }
   return getMessageIdentity(message).length > 0;
 }
 

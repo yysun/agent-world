@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-02-27: Replaced header refresh with a logs action and added a unified right-panel logs stream (main + renderer) with bounded in-memory buffering.
  * - 2026-02-27: Passed UI-selected project folder into world-management create flow so new worlds can inherit `working_directory`; load/switch continue to mirror world `cwd`.
  * - 2026-02-26: Added renderer categorized logger initialization via preload logging config and replaced message activation console tracing with env-controlled logger output.
  * - 2026-02-26: Inline working indicator now shows model-aware text (`Contacting <model>...` during handshake and `<agent> (<model>) working...` when active) using real agent model metadata.
@@ -81,6 +82,7 @@ import {
   parseOptionalInteger,
 } from './utils/app-helpers';
 import { useChatEventSubscriptions } from './hooks/useChatEventSubscriptions';
+import type { MainProcessLogEntry } from './domain/chat-event-handlers';
 import { clearChatAgents, finalizeReplayedChat, getChatStatus, syncWorldRoster, updateRegistry } from './domain/status-registry';
 import { applyEventToRegistry, parseStoredEventReplayArgs } from './domain/status-updater';
 import {
@@ -91,7 +93,7 @@ import {
   createMainContentRightPanelShellProps,
   createMainHeaderProps,
 } from './utils/app-layout-props';
-import { initializeRendererLogger, rendererLogger } from './utils/logger';
+import { initializeRendererLogger, rendererLogger, type RendererLogEntry } from './utils/logger';
 
 type WorkspaceState = {
   workspacePath: string | null;
@@ -122,8 +124,49 @@ type HitlPrompt = {
   };
 };
 
+type UnifiedLogProcess = 'main' | 'renderer';
+
+type UnifiedLogEntry = {
+  id: string;
+  process: UnifiedLogProcess;
+  level: string;
+  category: string;
+  message: string;
+  timestamp: string;
+  data?: unknown;
+};
+
+const MAX_LOG_PANEL_ENTRIES = 600;
+
 function normalizeAgentKey(value: unknown): string {
   return String(value || '').trim().toLowerCase();
+}
+
+function createLogEntryId() {
+  return `panel-log-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function normalizeLogProcess(value: unknown): UnifiedLogProcess {
+  return String(value || '').trim().toLowerCase() === 'renderer' ? 'renderer' : 'main';
+}
+
+function normalizeUnifiedLogEntry(entry: {
+  process?: unknown;
+  level?: unknown;
+  category?: unknown;
+  message?: unknown;
+  timestamp?: unknown;
+  data?: unknown;
+}): UnifiedLogEntry {
+  return {
+    id: createLogEntryId(),
+    process: normalizeLogProcess(entry?.process),
+    level: String(entry?.level || '').trim().toLowerCase() || 'info',
+    category: String(entry?.category || '').trim() || 'runtime',
+    message: String(entry?.message || '').trim() || '(empty log message)',
+    timestamp: String(entry?.timestamp || '').trim() || new Date().toISOString(),
+    ...(entry?.data !== undefined ? { data: entry.data } : {}),
+  };
 }
 
 export default function App() {
@@ -168,6 +211,7 @@ export default function App() {
   // HITL option prompt queue (generic world option requests)
   const [hitlPromptQueue, setHitlPromptQueue] = useState<HitlPrompt[]>([]);
   const [submittingHitlRequestId, setSubmittingHitlRequestId] = useState<string | null>(null);
+  const [panelLogs, setPanelLogs] = useState<UnifiedLogEntry[]>([]);
   const hasActiveHitlPrompt = hitlPromptQueue.length > 0;
 
   const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -196,6 +240,41 @@ export default function App() {
       notificationTimerRef.current = null;
     }, 5000);
   }, []);
+
+  const appendUnifiedLogEntry = useCallback((incoming: {
+    process?: unknown;
+    level?: unknown;
+    category?: unknown;
+    message?: unknown;
+    timestamp?: unknown;
+    data?: unknown;
+  }) => {
+    const nextEntry = normalizeUnifiedLogEntry(incoming);
+    setPanelLogs((existing) => {
+      const next = [...existing, nextEntry];
+      if (next.length <= MAX_LOG_PANEL_ENTRIES) {
+        return next;
+      }
+      return next.slice(next.length - MAX_LOG_PANEL_ENTRIES);
+    });
+  }, []);
+
+  const onMainProcessLogEvent = useCallback((entry: MainProcessLogEntry) => {
+    appendUnifiedLogEntry(entry);
+  }, [appendUnifiedLogEntry]);
+
+  const onClearPanelLogs = useCallback(() => {
+    setPanelLogs([]);
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = rendererLogger.subscribe((entry: RendererLogEntry) => {
+      appendUnifiedLogEntry(entry);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [appendUnifiedLogEntry]);
 
   const {
     loadedWorld,
@@ -733,6 +812,7 @@ export default function App() {
     refreshSessions,
     resetActivityRuntimeState,
     setHitlPromptQueue,
+    onMainLogEvent: onMainProcessLogEvent,
   });
 
   const hasUnsavedWorldChanges = useCallback(() => {
@@ -790,6 +870,7 @@ export default function App() {
     onSaveSettings,
     onOpenCreateWorldPanel,
     onOpenImportWorldPanel,
+    onOpenLogsPanel,
     onOpenWorldEditPanel,
     onOpenCreateAgentPanel,
     onOpenEditAgentPanel,
@@ -810,6 +891,8 @@ export default function App() {
       hasUnsavedAgentChanges,
       hasUnsavedSystemSettingsChanges,
     },
+    panelMode,
+    panelOpen,
     setPanelOpen,
     setPanelMode,
     setSelectedAgentId,
@@ -1051,6 +1134,8 @@ export default function App() {
     creatingWorld,
     setCreatingWorld,
     onImportWorld,
+    panelLogs,
+    onClearPanelLogs,
   });
 
   const leftSidebarProps = createLeftSidebarProps({
@@ -1094,8 +1179,8 @@ export default function App() {
     activeHeaderAgentIds: [],
     onOpenEditAgentPanel,
     onOpenCreateAgentPanel,
+    onOpenLogsPanel,
     onOpenSettingsPanel,
-    onRefreshWorldInfo,
     panelMode,
     panelOpen,
     DRAG_REGION_STYLE,

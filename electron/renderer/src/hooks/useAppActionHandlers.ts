@@ -13,6 +13,8 @@
  * - Uses dependency injection for state setters and collaborators.
  *
  * Recent Changes:
+ * - 2026-02-27: Updated `onOpenLogsPanel` to toggle the right panel when logs mode is already active.
+ * - 2026-02-27: Added `onOpenLogsPanel` action to open the right panel in unified logs mode from the header.
  * - 2026-02-26: Added `onOpenImportWorldPanel` to route world-import action into right-panel import form mode.
  * - 2026-02-20: Blocked Enter-to-send while HITL prompt queue is non-empty.
  * - 2026-02-18: Updated create-agent panel defaults to inherit world chat LLM provider/model and default auto-reply to false.
@@ -38,6 +40,8 @@ export function useAppActionHandlers({
   creatingAgent,
   setStatusText,
   closePanelNeeds,
+  panelMode,
+  panelOpen,
   setPanelOpen,
   setPanelMode,
   setSelectedAgentId,
@@ -112,6 +116,15 @@ export function useAppActionHandlers({
     setPanelMode('import-world');
     setPanelOpen(true);
   }, [setPanelMode, setPanelOpen]);
+
+  const onOpenLogsPanel = useCallback(() => {
+    if (panelOpen && panelMode === 'logs') {
+      setPanelOpen(false);
+      return;
+    }
+    setPanelMode('logs');
+    setPanelOpen(true);
+  }, [panelMode, panelOpen, setPanelMode, setPanelOpen]);
 
   const onOpenWorldEditPanel = useCallback(() => {
     if (!loadedWorld) return;
@@ -315,6 +328,7 @@ export function useAppActionHandlers({
     onSaveSettings,
     onOpenCreateWorldPanel,
     onOpenImportWorldPanel,
+    onOpenLogsPanel,
     onOpenWorldEditPanel,
     onOpenCreateAgentPanel,
     onOpenEditAgentPanel,

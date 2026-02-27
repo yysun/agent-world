@@ -11,6 +11,8 @@
  * - Focuses on orchestration behavior, not UI rendering.
  *
  * Recent Changes:
+ * - 2026-02-27: Updated global-log coverage to assert logs are routed only to panel callbacks (no chat-message insertion).
+ * - 2026-02-27: Added coverage for unified main-process log callback routing independent of active-session message-list updates.
  * - 2026-02-26: Added coverage for redundant error-log suppression when an equivalent inline stream error is already present.
  * - 2026-02-24: Removed activityStateRef from all tests (activity-state.ts deleted as part of working-status simplification).
  * - 2026-02-22: Removed activity event routing tests and response-state tracking tests as part of status-registry migration (Phase 1).
@@ -75,36 +77,11 @@ function makeFullStreamingRef() {
 }
 
 describe('createGlobalLogEventHandler', () => {
-  it('appends log messages when an active session is selected', () => {
-    const harness = createMessageStateHarness();
+  it('publishes main log callbacks for log events', () => {
+    const onMainLogEvent = vi.fn();
 
     const handler = createGlobalLogEventHandler({
-      loadedWorldId: 'world-1',
-      selectedSessionId: 'chat-1',
-      setMessages: harness.setMessages as Parameters<typeof createGlobalLogEventHandler>[0]['setMessages'],
-    });
-
-    handler({
-      type: 'log',
-      logEvent: {
-        message: 'Runtime warning',
-        level: 'warn',
-        category: 'runtime',
-        timestamp: '2026-02-12T12:00:00.000Z'
-      }
-    });
-
-    expect(harness.getMessages()).toHaveLength(1);
-    expect((harness.getMessages()[0] as Record<string, unknown>).type).toBe('log');
-  });
-
-  it('does not append log messages when no active session is selected', () => {
-    const harness = createMessageStateHarness();
-
-    const handler = createGlobalLogEventHandler({
-      loadedWorldId: null,
-      selectedSessionId: null,
-      setMessages: harness.setMessages as Parameters<typeof createGlobalLogEventHandler>[0]['setMessages'],
+      onMainLogEvent,
     });
 
     handler({
@@ -112,44 +89,51 @@ describe('createGlobalLogEventHandler', () => {
       logEvent: {
         message: 'Something happened',
         level: 'info',
-        category: 'system'
+        category: 'system',
+        timestamp: '2026-02-27T10:00:00.000Z'
       }
     });
 
-    expect(harness.getMessages()).toHaveLength(0);
+    expect(onMainLogEvent).toHaveBeenCalledTimes(1);
+    expect(onMainLogEvent).toHaveBeenCalledWith({
+      process: 'main',
+      level: 'info',
+      category: 'system',
+      message: 'Something happened',
+      timestamp: '2026-02-27T10:00:00.000Z',
+    });
   });
 
-  it('suppresses redundant error logs when matching stream error exists in session messages', () => {
-    const harness = createMessageStateHarness([{
-      messageId: 'm-stream',
-      chatId: 'chat-1',
-      role: 'assistant',
-      hasError: true,
-      errorMessage: "model 'qwen2.5:14b' not found"
-    } as TestMessage]);
-
+  it('normalizes missing log fields and ignores non-log payloads', () => {
+    const onMainLogEvent = vi.fn();
     const handler = createGlobalLogEventHandler({
-      loadedWorldId: 'world-1',
-      selectedSessionId: 'chat-1',
-      setMessages: harness.setMessages as Parameters<typeof createGlobalLogEventHandler>[0]['setMessages'],
+      onMainLogEvent,
     });
 
     handler({
+      type: 'message',
+      message: {
+        messageId: 'm-1',
+      }
+    } as any);
+
+    handler({
       type: 'log',
-      chatId: 'chat-1',
       logEvent: {
-        message: 'LLM non-streaming failure',
-        level: 'error',
-        category: 'llm.generation',
-        data: {
-          error: "404 model 'qwen2.5:14b' not found"
-        },
-        timestamp: '2026-02-26T02:00:00.000Z'
+        message: '',
+        level: '',
+        category: '',
       }
     });
 
-    expect(harness.getMessages()).toHaveLength(1);
-    expect((harness.getMessages()[0] as Record<string, unknown>).messageId).toBe('m-stream');
+    expect(onMainLogEvent).toHaveBeenCalledTimes(1);
+    expect(onMainLogEvent.mock.calls[0]?.[0]).toMatchObject({
+      process: 'main',
+      level: 'info',
+      category: 'main',
+      message: '(empty log message)',
+    });
+    expect(typeof onMainLogEvent.mock.calls[0]?.[0]?.timestamp).toBe('string');
   });
 });
 

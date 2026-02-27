@@ -4,7 +4,7 @@
  * - Encapsulate chat/log realtime event routing logic used by App effects.
  *
  * Features:
- * - Global log event handler for status or message timeline updates
+ * - Global log event handler for right-panel diagnostics stream updates
  * - Session-scoped realtime handler for message/sse/tool events
  * - Stream synchronization helpers
  *
@@ -13,6 +13,8 @@
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
+ * - 2026-02-27: Stopped injecting realtime `type='log'` events into chat message timelines; logs are routed to the dedicated logs panel stream only.
+ * - 2026-02-27: Added unified main-process log callback support so logs are available in the right-panel diagnostics view even when no chat is selected.
  * - 2026-02-26: Suppressed redundant error-level log rows when equivalent stream errors are already shown inline on message cards.
  * - 2026-02-24: Removed ActivityRefs/activityStateRef and syncActiveStreamCount —
  *   activity-state.ts deleted as part of working-status simplification.
@@ -34,12 +36,7 @@
  * - 2026-02-17: Migrated module from JS to TS with typed payload and dependency interfaces.
  */
 
-import {
-  createLogMessage,
-  shouldSuppressLogForExistingStreamError,
-  upsertMessageList,
-  type MessageLike
-} from './message-updates';
+import { upsertMessageList, type MessageLike } from './message-updates';
 import { clearChatAgents, updateRegistry } from './status-registry';
 import { applyEventToRegistry } from './status-updater';
 
@@ -82,6 +79,15 @@ interface ChatHandlerOptions {
   }) => void;
 }
 
+export interface MainProcessLogEntry {
+  process: 'main';
+  level: string;
+  category: string;
+  message: string;
+  timestamp: string;
+  data?: unknown;
+}
+
 function toToolContent(value: unknown): string {
   if (typeof value === 'string') {
     return value;
@@ -113,31 +119,25 @@ function isAssistantLikeMessage(message: Record<string, unknown> | null | undefi
 
 
 export function createGlobalLogEventHandler({
-  loadedWorldId,
-  selectedSessionId,
-  setMessages,
+  onMainLogEvent,
 }: {
-  loadedWorldId: string | null | undefined;
-  selectedSessionId: string | null | undefined;
-  setMessages: (updater: (existing: MessageLike[]) => MessageLike[]) => void;
+  onMainLogEvent?: (entry: MainProcessLogEntry) => void;
 }) {
   return (payload: BasePayload & { logEvent?: Record<string, unknown> }) => {
     if (!payload || payload.type !== 'log') return;
 
     const logEvent = payload.logEvent;
     if (!logEvent) return;
-
-    const hasActiveSession = Boolean(loadedWorldId && selectedSessionId);
-    if (!hasActiveSession) return;
-
-    const logChatId = String(payload.chatId || logEvent?.chatId || '').trim();
-    if (logChatId && logChatId !== selectedSessionId) return;
-    setMessages((existing) => {
-      if (shouldSuppressLogForExistingStreamError(existing, logEvent)) {
-        return existing;
-      }
-      return [...existing, createLogMessage(logEvent, logChatId || (selectedSessionId ?? undefined))];
-    });
+    if (typeof onMainLogEvent === 'function') {
+      onMainLogEvent({
+        process: 'main',
+        level: String(logEvent.level || '').trim().toLowerCase() || 'info',
+        category: String(logEvent.category || '').trim() || 'main',
+        message: String(logEvent.message || '').trim() || '(empty log message)',
+        timestamp: String(logEvent.timestamp || '').trim() || new Date().toISOString(),
+        ...(logEvent.data !== undefined ? { data: logEvent.data } : {}),
+      });
+    }
   };
 }
 

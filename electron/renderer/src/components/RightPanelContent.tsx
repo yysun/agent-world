@@ -13,12 +13,14 @@
  * - Receives all mutation handlers and state via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-27: Logs panel now streams in chronological order and auto-scrolls to latest entry while open.
+ * - 2026-02-27: Added `logs` panel mode UI with unified main/renderer runtime logs and clear-list control.
  * - 2026-02-26: Simplified import-world actions by removing bottom footer buttons and adding inline source-specific import buttons.
  * - 2026-02-26: Added `import-world` panel mode with a single import form supporting local-directory and GitHub shorthand sources.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component extraction.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import AgentFormFields from './AgentFormFields';
 import SettingsSwitch from './SettingsSwitch';
 import SettingsSkillSwitch from './SettingsSkillSwitch';
@@ -27,6 +29,51 @@ import {
   MIN_TURN_LIMIT,
   WORLD_PROVIDER_OPTIONS,
 } from '../constants/app-constants';
+
+function formatLogTimestamp(value: unknown): string {
+  const rawValue = String(value || '').trim();
+  if (!rawValue) return '';
+  const parsed = new Date(rawValue);
+  if (Number.isNaN(parsed.getTime())) {
+    return rawValue;
+  }
+  return parsed.toLocaleTimeString();
+}
+
+function stringifyLogData(value: unknown): string {
+  if (value === undefined) return '';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function getProcessBadgeStyle(process: string) {
+  const accentColor = process === 'renderer'
+    ? 'var(--color-chart-2)'
+    : 'var(--color-chart-1)';
+
+  return {
+    color: 'var(--color-sidebar-foreground)',
+    backgroundColor: `color-mix(in oklab, ${accentColor} 16%, var(--color-sidebar-accent))`,
+    borderColor: `color-mix(in oklab, ${accentColor} 42%, var(--color-sidebar-border))`,
+  };
+}
+
+function getLevelBadgeStyle(level: string) {
+  let accentColor = 'var(--color-chart-2)';
+  if (level === 'error') accentColor = 'var(--color-destructive)';
+  if (level === 'warn') accentColor = 'var(--color-chart-3)';
+  if (level === 'debug' || level === 'trace') accentColor = 'var(--color-chart-5)';
+
+  return {
+    color: 'var(--color-sidebar-foreground)',
+    backgroundColor: `color-mix(in oklab, ${accentColor} 16%, var(--color-sidebar-accent))`,
+    borderColor: `color-mix(in oklab, ${accentColor} 42%, var(--color-sidebar-border))`,
+  };
+}
 
 export default function RightPanelContent({
   panelMode,
@@ -74,10 +121,13 @@ export default function RightPanelContent({
   creatingWorld,
   setCreatingWorld,
   onImportWorld,
+  panelLogs,
+  onClearPanelLogs,
 }) {
   const [importSourceType, setImportSourceType] = useState('local');
   const [githubImportSource, setGithubImportSource] = useState('@awesome-agent-world/');
   const [importingWorld, setImportingWorld] = useState(false);
+  const logsContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (panelMode !== 'import-world') return;
@@ -85,6 +135,18 @@ export default function RightPanelContent({
     setGithubImportSource('@awesome-agent-world/');
     setImportingWorld(false);
   }, [panelMode]);
+
+  useEffect(() => {
+    if (panelMode !== 'logs') return;
+    const container = logsContainerRef.current;
+    if (!container) return;
+    requestAnimationFrame(() => {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: 'auto',
+      });
+    });
+  }, [panelLogs, panelMode]);
 
   const onImportFromLocal = async () => {
     if (importingWorld) return;
@@ -118,7 +180,66 @@ export default function RightPanelContent({
 
   return (
     <div className="min-h-0 flex flex-1 flex-col overflow-y-auto">
-      {panelMode === 'settings' ? (
+      {panelMode === 'logs' ? (
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
+          <div className="flex items-center justify-between rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2">
+            <div className="text-xs text-sidebar-foreground/80">
+              {Array.isArray(panelLogs) && panelLogs.length > 0 ? `${panelLogs.length} entries` : 'No log entries yet'}
+            </div>
+            <button
+              type="button"
+              onClick={onClearPanelLogs}
+              disabled={!Array.isArray(panelLogs) || panelLogs.length === 0}
+              className="rounded border border-sidebar-border px-2 py-0.5 text-[11px] text-sidebar-foreground/80 transition-colors hover:bg-sidebar-foreground/10 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Clear
+            </button>
+          </div>
+          <div ref={logsContainerRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+            {Array.isArray(panelLogs) && panelLogs.length > 0 ? (
+              panelLogs.map((entry) => {
+                const process = String(entry?.process || '').trim().toLowerCase() === 'renderer' ? 'renderer' : 'main';
+                const level = String(entry?.level || 'info').trim().toLowerCase() || 'info';
+                const category = String(entry?.category || 'runtime').trim() || 'runtime';
+                const message = String(entry?.message || '').trim() || '(empty log message)';
+                const timestamp = formatLogTimestamp(entry?.timestamp);
+                const dataText = stringifyLogData(entry?.data);
+
+                return (
+                  <article key={String(entry?.id || `${timestamp}-${category}-${message}`)} className="space-y-2 rounded-md border border-sidebar-border bg-sidebar-accent/80 p-3">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span
+                        className="rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                        style={getProcessBadgeStyle(process)}
+                      >
+                        {process}
+                      </span>
+                      <span
+                        className="rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                        style={getLevelBadgeStyle(level)}
+                      >
+                        {level}
+                      </span>
+                      <span className="text-[10px] text-sidebar-foreground/60">{timestamp}</span>
+                    </div>
+                    <div className="text-[11px] font-semibold text-sidebar-foreground/70">{category}</div>
+                    <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-sidebar-foreground">{message}</pre>
+                    {dataText ? (
+                      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded border border-sidebar-border/70 bg-sidebar px-2 py-1 font-mono text-[10px] text-sidebar-foreground/80">
+                        {dataText}
+                      </pre>
+                    ) : null}
+                  </article>
+                );
+              })
+            ) : (
+              <div className="rounded-md border border-dashed border-sidebar-border bg-sidebar-accent/30 px-3 py-4 text-xs text-sidebar-foreground/60">
+                Logs from both Electron processes will appear here.
+              </div>
+            )}
+          </div>
+        </div>
+      ) : panelMode === 'settings' ? (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex-1 space-y-4 overflow-y-auto">
             <div className="flex items-center justify-between">

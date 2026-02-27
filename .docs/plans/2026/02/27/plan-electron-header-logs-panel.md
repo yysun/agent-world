@@ -45,35 +45,35 @@ flowchart TD
 ## Implementation Phases
 
 ### Phase 1: Panel Mode and Header Action Wiring
-- [ ] Add `logs` panel mode support in right-panel title and mode handling.
-- [ ] Replace header refresh icon/button behavior with a logs button that opens logs mode.
-- [ ] Add/route `onOpenLogsPanel` action from app action handlers into header props.
-- [ ] Ensure left-sidebar `WorldInfoCard` refresh remains untouched and functional.
+- [x] Add `logs` panel mode support in right-panel title and mode handling.
+- [x] Replace header refresh icon/button behavior with a logs button that opens logs mode.
+- [x] Add/route `onOpenLogsPanel` action from app action handlers into header props.
+- [x] Ensure left-sidebar `WorldInfoCard` refresh remains untouched and functional.
 
 ### Phase 2: Unified Logs State in App Orchestration
-- [ ] Introduce app-level logs state for panel rendering.
-- [ ] Define normalized log entry type/shape for UI rendering.
-- [ ] Add bounded append helper (cap, e.g. 300–1000 entries) to control memory/paint cost.
+- [x] Introduce app-level logs state for panel rendering.
+- [x] Define normalized log entry type/shape for UI rendering.
+- [x] Add bounded append helper (cap, e.g. 300–1000 entries) to control memory/paint cost.
 
 ### Phase 3: Main-Process Log Ingestion for Panel
-- [ ] Extend global log event handling path to also publish main logs into unified logs state.
-- [ ] Remove active-session dependency for the panel log collector path so main logs are visible even when no chat is selected.
-- [ ] Keep existing chat message log behavior intact (session filtering and suppression logic for message timeline remains unchanged).
+- [x] Extend global log event handling path to also publish main logs into unified logs state.
+- [x] Remove active-session dependency for the panel log collector path so main logs are visible even when no chat is selected.
+- [x] Keep existing chat message log behavior intact (session filtering and suppression logic for message timeline remains unchanged).
 
 ### Phase 4: Renderer Log Ingestion for Panel
-- [ ] Add `rendererLogger` subscribe/unsubscribe API for UI consumers.
-- [ ] Emit normalized renderer log events to subscribers after category/level gating and sanitization.
-- [ ] Subscribe in App lifecycle and append renderer logs to unified logs state; clean up on unmount.
+- [x] Add `rendererLogger` subscribe/unsubscribe API for UI consumers.
+- [x] Emit normalized renderer log events to subscribers after category/level gating and sanitization.
+- [x] Subscribe in App lifecycle and append renderer logs to unified logs state; clean up on unmount.
 
 ### Phase 5: Right-Panel Logs UI
-- [ ] Add a `logs` render branch in `RightPanelContent`.
-- [ ] Render unified logs with source-process, level, timestamp, category, and message.
-- [ ] Render structured data payload safely (`JSON.stringify` guarded) with readable formatting.
-- [ ] Add minimal controls needed for diagnostics usability (for example clear list) if low-risk.
+- [x] Add a `logs` render branch in `RightPanelContent`.
+- [x] Render unified logs with source-process, level, timestamp, category, and message.
+- [x] Render structured data payload safely (`JSON.stringify` guarded) with readable formatting.
+- [x] Add minimal controls needed for diagnostics usability (for example clear list) if low-risk.
 
 ### Phase 6: Verification and Regression Coverage
-- [ ] Update/add tests for main-log collector behavior in `chat-event-handlers` domain tests.
-- [ ] Update/add tests for renderer logger subscriptions and emitted payload shape.
+- [x] Update/add tests for main-log collector behavior in `chat-event-handlers` domain tests.
+- [x] Update/add tests for renderer logger subscriptions and emitted payload shape.
 - [ ] Verify header action now opens logs panel and no longer triggers world refresh.
 - [ ] Verify left sidebar world refresh still triggers `onRefreshWorldInfo`.
 
@@ -108,7 +108,7 @@ flowchart TD
 - [ ] Manual: Confirm left sidebar world refresh still refreshes world info.
 - [ ] Manual: Trigger known renderer log and confirm it appears in logs panel with `process=renderer`.
 - [ ] Manual: Trigger known main log and confirm it appears in logs panel with `process=main`.
-- [ ] Automated: renderer domain tests pass for log collector + renderer logger subscriber behavior.
+- [x] Automated: renderer domain tests pass for log collector + renderer logger subscriber behavior.
 
 ## AR Review (AP Stage)
 
