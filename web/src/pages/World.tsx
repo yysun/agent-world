@@ -15,13 +15,14 @@
  * - Custom CSS for agent sprites, animations, and message styling
  * 
  * Recent Changes:
+ * - 2026-02-27: Removed stale HITL modal wording; web HITL prompts are inline chat-flow cards.
  * - 2026-02-21: Moved mobile world action buttons into the right-panel header row so they align with the close button.
  * - 2026-02-21: Removed mobile Chats/World tabs, kept world action buttons pinned at the top of the panel, and simplified right-panel content visibility.
  * - 2026-02-22: Added responsive right-panel state/toggle/tabs with desktop side panel + tablet/mobile overlay behaviors.
  * - 2026-02-21: Passed selected project-folder context into chat composer for Electron-style `Project` button parity.
  * - 2026-02-20: Moved HITL prompts from modal overlays to inline chat-flow cards (options-only).
  * - 2026-02-20: Highlighted the world main agent in the top agent row.
- * - 2026-02-14: Added generic HITL approval modal for option-list system prompts with web response submission wiring.
+ * - 2026-02-14: Added generic HITL option prompt wiring with web response submission support.
  * - 2026-02-14: Added web send/stop composer wiring via `currentChatId` and `isStopping` props.
  * - 2026-02-08: Removed legacy manual tool-intervention dialog rendering and state wiring
  * - 2026-02-08: Pass world agents into WorldChat for correct per-agent message avatars

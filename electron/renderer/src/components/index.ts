@@ -27,7 +27,6 @@ export { default as MessageContent } from './MessageContent';
 export { default as MessageListPanel } from './MessageListPanel';
 export { default as RightPanelContent } from './RightPanelContent';
 export { default as WorkingStatusBar } from './WorkingStatusBar';
-export { default as HitlPromptModal } from './HitlPromptModal';
 export { default as EditorModalsHost } from './EditorModalsHost';
 export { default as LeftSidebarPanel } from './LeftSidebarPanel';
 export { default as MainHeaderBar } from './MainHeaderBar';

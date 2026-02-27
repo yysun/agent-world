@@ -2,12 +2,11 @@
  * HITL Request Tool Module - Built-in tool for generic human-in-the-loop input
  *
  * Purpose:
- * - Expose a built-in `human_intervention_request` tool that lets the model ask questions, offer options, and require explicit confirmation.
+ * - Expose a built-in `human_intervention_request` tool that lets the model ask questions and offer options.
  *
  * Key Features:
  * - Supports option-only response mode for deterministic user selection.
  * - Uses existing world-scoped HITL option runtime.
- * - Supports explicit confirmation/cancel flow with deterministic timeout behavior.
  * - Returns structured JSON payloads for stable downstream model parsing.
  *
  * Implementation Notes:
@@ -16,6 +15,7 @@
  * - Tool execution requires world context; no external side effects beyond HITL events.
  *
  * Recent Changes:
+ * - 2026-02-27: Removed built-in post-selection confirmation stage and removed deprecated confirmation parameters from the tool contract.
  * - 2026-02-20: Removed free-text mode from `human_intervention_request`; tool now enforces options-only interactions.
  * - 2026-02-20: Added initial built-in `human_intervention_request` tool implementation.
  */
@@ -24,15 +24,11 @@ import { requestWorldOption, type HitlOption } from './hitl.js';
 import { type World } from './types.js';
 
 const MODE_OPTION = 'option';
-const CONFIRM_OPTION_ID = 'confirm';
-const CANCEL_OPTION_ID = 'cancel';
-const DEFAULT_TIMEOUT_MESSAGE = 'HITL request timed out before user confirmation.';
+const DEFAULT_TIMEOUT_MESSAGE = 'HITL request timed out before user selection.';
 
 type HitlRequestToolArgs = {
   question?: unknown;
   options?: unknown;
-  requireConfirmation?: unknown;
-  confirmationMessage?: unknown;
   timeoutMs?: unknown;
   defaultOption?: unknown;
   metadata?: unknown;
@@ -48,8 +44,6 @@ type HitlRequestToolContext = {
 type NormalizedHitlRequestArgs = {
   question: string;
   options: string[];
-  requireConfirmation: boolean;
-  confirmationMessage: string | null;
   timeoutMs: number | null;
   defaultOption: string | null;
   metadata: Record<string, unknown> | null;
@@ -114,10 +108,6 @@ function validateAndNormalizeArgs(args: HitlRequestToolArgs): {
   }
 
   const options = normalizeOptionList(args.options);
-  const requireConfirmation = args.requireConfirmation === true;
-  const confirmationMessage = typeof args.confirmationMessage === 'string' && args.confirmationMessage.trim()
-    ? args.confirmationMessage.trim()
-    : null;
   const timeoutMs = normalizeTimeoutMs(args.timeoutMs);
   const defaultOption = typeof args.defaultOption === 'string' && args.defaultOption.trim()
     ? args.defaultOption.trim()
@@ -148,8 +138,6 @@ function validateAndNormalizeArgs(args: HitlRequestToolArgs): {
     args: {
       question,
       options,
-      requireConfirmation,
-      confirmationMessage,
       timeoutMs,
       defaultOption,
       metadata,
@@ -207,53 +195,6 @@ async function requestPrimaryResolution(options: {
   };
 }
 
-function buildConfirmationSummary(resolution: PrimaryResolution): string {
-  return `Selected option: ${resolution.selectedOption ?? ''}`;
-}
-
-async function requestConfirmation(options: {
-  world: World;
-  chatId: string | null;
-  question: string;
-  resolution: PrimaryResolution;
-  timeoutMs: number | null;
-  confirmationMessage: string | null;
-  metadata: Record<string, unknown> | null;
-  toolCallId?: string;
-}): Promise<{ confirmed: boolean; source: 'user' | 'timeout' }> {
-  const confirmation = await requestWorldOption(options.world, {
-    title: 'Confirm response',
-    message: [
-      options.question,
-      '',
-      buildConfirmationSummary(options.resolution),
-      '',
-      options.confirmationMessage || 'Please confirm to continue.',
-    ].join('\n'),
-    chatId: options.chatId,
-    timeoutMs: options.timeoutMs ?? undefined,
-    defaultOptionId: CANCEL_OPTION_ID,
-    options: [
-      { id: CONFIRM_OPTION_ID, label: 'Confirm', description: 'Use this response and continue.' },
-      { id: CANCEL_OPTION_ID, label: 'Cancel', description: 'Cancel this HITL request.' },
-    ],
-    metadata: {
-      ...(options.metadata || {}),
-      tool: 'human_intervention_request',
-      mode: 'confirmation',
-      requestId: options.resolution.requestId,
-      ...(typeof options.toolCallId === 'string' && options.toolCallId.trim()
-        ? { toolCallId: options.toolCallId.trim() }
-        : {}),
-    },
-  });
-
-  if (confirmation.optionId === CONFIRM_OPTION_ID) {
-    return { confirmed: true, source: confirmation.source };
-  }
-  return { confirmed: false, source: confirmation.source };
-}
-
 function buildFinalResult(options: {
   requestId: string;
   selectedOption: string | null;
@@ -276,7 +217,7 @@ function buildFinalResult(options: {
 export function createHitlToolDefinition() {
   return {
     description:
-      'Ask a human a question, offer choices, and optionally require confirmation before returning the result.',
+      'Ask a human a question and offer choices; returns after a single option selection.',
     parameters: {
       type: 'object',
       properties: {
@@ -288,14 +229,6 @@ export function createHitlToolDefinition() {
           type: 'array',
           items: { type: 'string' },
           description: 'Required list of selectable options.',
-        },
-        requireConfirmation: {
-          type: 'boolean',
-          description: 'When true, human must explicitly confirm before completion.',
-        },
-        confirmationMessage: {
-          type: 'string',
-          description: 'Optional extra text shown in confirmation prompt.',
         },
         timeoutMs: {
           type: 'number',
@@ -350,29 +283,7 @@ export function createHitlToolDefinition() {
           toolCallId: context.toolCallId,
         });
 
-        if (normalized.args.requireConfirmation) {
-          const confirmation = await requestConfirmation({
-            world,
-            chatId,
-            question: normalized.args.question,
-            resolution: primaryResolution,
-            timeoutMs: normalized.args.timeoutMs,
-            confirmationMessage: normalized.args.confirmationMessage,
-            metadata: normalized.args.metadata,
-            toolCallId: context.toolCallId,
-          });
-          if (!confirmation.confirmed) {
-            return buildFinalResult({
-              requestId: primaryResolution.requestId,
-              selectedOption: primaryResolution.selectedOption,
-              status: confirmation.source === 'timeout' ? 'timeout' : 'canceled',
-              source: confirmation.source,
-              message: confirmation.source === 'timeout'
-                ? DEFAULT_TIMEOUT_MESSAGE
-                : 'HITL request was canceled.',
-            });
-          }
-        } else if (primaryResolution.source === 'timeout') {
+        if (primaryResolution.source === 'timeout') {
           return buildFinalResult({
             requestId: primaryResolution.requestId,
             selectedOption: primaryResolution.selectedOption,
@@ -386,7 +297,7 @@ export function createHitlToolDefinition() {
           requestId: primaryResolution.requestId,
           selectedOption: primaryResolution.selectedOption,
           status: 'confirmed',
-          source: 'user',
+          source: primaryResolution.source,
         });
       } catch (error) {
         return buildFinalResult({

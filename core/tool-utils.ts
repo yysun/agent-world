@@ -17,7 +17,8 @@
  *
  * Recent Changes:
  * - 2026-02-20: Enforced JSON-schema `additionalProperties: false` by rejecting unknown tool arguments during validation.
- * - 2026-02-20: Added `human_intervention_request` parameter alias normalization for `prompt` -> `question` and snake/kebab-case confirmation/input fields.
+ * - 2026-02-27: Added backward-compat cleanup for removed HITL confirmation args by stripping them before schema validation.
+ * - 2026-02-27: Removed deprecated `human_intervention_request` confirmation argument alias normalization; kept `prompt` -> `question` and `default_option` -> `defaultOption`.
  * - 2026-02-20: Added `create_agent` alias normalization for `auto-reply`/`auto_reply` -> `autoReply` and `next agent` variants -> `nextAgent`.
  * - 2026-02-19: Added parameter alias normalization for `read_file`/`read_files` (`path` -> `filePath`) and `grep` path aliases (`path` -> `directoryPath`) to align with shell-style path handling.
  * - 2026-02-06: Removed legacy manual tool-intervention functionality
@@ -109,28 +110,34 @@ function normalizeKnownParameterAliases(toolName: string, args: any): {
       normalizedArgs.question = normalizedArgs.prompt;
       corrections.push("prompt -> question");
     }
-    if (normalizedArgs.requireConfirmation === undefined && normalizedArgs.require_confirmation !== undefined) {
-      normalizedArgs.requireConfirmation = normalizedArgs.require_confirmation;
-      corrections.push("require_confirmation -> requireConfirmation");
-    }
-    if (normalizedArgs.requireConfirmation === undefined && normalizedArgs['require-confirmation'] !== undefined) {
-      normalizedArgs.requireConfirmation = normalizedArgs['require-confirmation'];
-      corrections.push("require-confirmation -> requireConfirmation");
-    }
-    if (normalizedArgs.confirmationMessage === undefined && normalizedArgs.confirmation_message !== undefined) {
-      normalizedArgs.confirmationMessage = normalizedArgs.confirmation_message;
-      corrections.push("confirmation_message -> confirmationMessage");
-    }
     if (normalizedArgs.defaultOption === undefined && normalizedArgs.default_option !== undefined) {
       normalizedArgs.defaultOption = normalizedArgs.default_option;
       corrections.push("default_option -> defaultOption");
     }
 
+    if (normalizedArgs.requireConfirmation !== undefined) {
+      corrections.push("requireConfirmation removed (deprecated)");
+    }
+    if (normalizedArgs.require_confirmation !== undefined) {
+      corrections.push("require_confirmation removed (deprecated)");
+    }
+    if (normalizedArgs['require-confirmation'] !== undefined) {
+      corrections.push("require-confirmation removed (deprecated)");
+    }
+    if (normalizedArgs.confirmationMessage !== undefined) {
+      corrections.push("confirmationMessage removed (deprecated)");
+    }
+    if (normalizedArgs.confirmation_message !== undefined) {
+      corrections.push("confirmation_message removed (deprecated)");
+    }
+
     delete normalizedArgs.prompt;
+    delete normalizedArgs.default_option;
+    delete normalizedArgs.requireConfirmation;
     delete normalizedArgs.require_confirmation;
     delete normalizedArgs['require-confirmation'];
+    delete normalizedArgs.confirmationMessage;
     delete normalizedArgs.confirmation_message;
-    delete normalizedArgs.default_option;
   }
 
   return { normalizedArgs, corrections };
