@@ -20,6 +20,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-27: Switched idle title generation targeting to event-scoped `chatId` and ignored unscoped idle events to prevent cross-chat renames after chat switches.
  * - 2026-02-22: Persist incoming human messages to agent memory even when agents do not respond (e.g., invalid @mention), preventing UI-only unsaved messages.
  * - 2026-02-20: Publish chat-title update notifications as structured `system` events (`chat-title-updated`).
  * - 2026-02-13: Added no-activity user-message fallback title scheduling to cover edited chats with no agent response.
@@ -338,8 +339,16 @@ export function setupWorldActivityListener(world: World): () => void {
   const handler = async (event: any) => {
     // Only update title when world becomes idle (all agents done)
     if (event.type === 'idle' && event.pendingOperations === 0) {
-      const targetChatId = world.currentChatId;
-      if (!targetChatId) return;
+      const targetChatIdRaw = typeof event?.chatId === 'string' ? event.chatId.trim() : '';
+      const targetChatId = targetChatIdRaw || null;
+      if (!targetChatId) {
+        loggerChatTitle.debug('Skipping idle title update due to missing chatId on activity event', {
+          worldId: world.id,
+          eventType: event?.type,
+          pendingOperations: event?.pendingOperations
+        });
+        return;
+      }
       try {
         await tryGenerateAndApplyTitle(world, targetChatId, '', 'idle');
       } catch (err) {

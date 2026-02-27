@@ -1,3 +1,21 @@
+/**
+ * World Activity Tracker
+ *
+ * Purpose:
+ * - Track world-level processing lifecycle and emit activity events.
+ *
+ * Key Features:
+ * - Emits `response-start`, `response-end`, and `idle` events.
+ * - Tracks active sources and active chat IDs for concurrent chat operations.
+ * - Maintains `world.isProcessing` based on lifecycle transitions.
+ *
+ * Implementation Notes:
+ * - Activity state is stored on the world instance via a private symbol key.
+ * - Events include a chat context (`chatId`) captured from the originating operation.
+ *
+ * Recent Changes:
+ * - 2026-02-27: Added chat-scoped `chatId` metadata to world activity events to prevent cross-chat idle-side effects.
+ */
 import { World } from './types.js';
 import { createCategoryLogger } from './logger.js';
 import { getLLMQueueStatus } from './llm-manager.js';
@@ -18,6 +36,7 @@ export interface WorldActivityEventPayload {
   activityId: number;
   timestamp: string;
   source?: string;
+  chatId?: string | null; // Chat context for the activity lifecycle event
   activeSources: string[];
   activeChatIds: string[]; // Chat IDs currently being processed
   queue: ReturnType<typeof getLLMQueueStatus>;
@@ -48,7 +67,8 @@ function emitActivityEvent(
   type: WorldActivityEventType,
   pendingOperations: number,
   activityId: number,
-  source?: string
+  source?: string,
+  chatId?: string
 ): void {
   const activityState = getActivityState(world);
   const payload: WorldActivityEventPayload = {
@@ -57,6 +77,7 @@ function emitActivityEvent(
     activityId,
     timestamp: new Date().toISOString(),
     source,
+    chatId: chatId ?? null,
     activeSources: Array.from(activityState.activeSources.keys()),
     activeChatIds: Array.from(activityState.activeChatOps.keys()),
     queue: getLLMQueueStatus(),
@@ -90,7 +111,7 @@ export function beginWorldActivity(world: World, source?: string, chatId?: strin
   }
 
   // Emit response-start for all operation starts
-  emitActivityEvent(world, 'response-start', activityState.pendingOperations, activityState.lastActivityId, source);
+  emitActivityEvent(world, 'response-start', activityState.pendingOperations, activityState.lastActivityId, source, chatId);
 
   let finished = false;
   const currentActivityId = activityState.lastActivityId;
@@ -123,9 +144,9 @@ export function beginWorldActivity(world: World, source?: string, chatId?: strin
 
     // Emit idle when all operations complete, otherwise response-end
     if (state.pendingOperations === 0) {
-      emitActivityEvent(world, 'idle', 0, currentActivityId, source);
+      emitActivityEvent(world, 'idle', 0, currentActivityId, source, chatId);
     } else {
-      emitActivityEvent(world, 'response-end', state.pendingOperations, state.lastActivityId, source);
+      emitActivityEvent(world, 'response-end', state.pendingOperations, state.lastActivityId, source, chatId);
     }
   };
 }

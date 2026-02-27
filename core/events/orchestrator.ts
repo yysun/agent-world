@@ -37,6 +37,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-27: Passed explicit `chatId` when publishing `tool-execution` system events so event routing never falls back to `world.currentChatId`.
  * - 2026-02-27: Seeded continuation runs with already-loaded `load_skill` IDs from initial tool execution so immediate duplicate `load_skill` calls are suppressed in continuation.
  * - 2026-02-21: Passed `agentName` + minimal shell `llmResultMode` in initial tool-execution context so `shell_cmd` tool results stay status-only for LLM continuation and stdout assistant attribution remains consistent.
  * - 2026-02-16: Added `LOG_LLM_TOOL_BRIDGE` gate for LLM↔tool console bridge logs.
@@ -830,7 +831,7 @@ export async function processAgentMessage(
             ...(toolArgs.parameters && { parameters: toolArgs.parameters }),
             ...(toolCall.function.name === 'shell_cmd' && { directory: trustedWorkingDirectory }),
             ...(toolCall.function.name !== 'shell_cmd' && toolArgs.directory && { directory: toolArgs.directory })
-          });
+          }, targetChatId);
           const serializedToolResult = typeof toolResult === 'string'
             ? toolResult
             : JSON.stringify(toolResult) ?? String(toolResult);

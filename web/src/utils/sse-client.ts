@@ -23,6 +23,7 @@
  * - Extracts error details from log data for better error visibility in UI
  * 
  * Created: 2025-10-25 - Initial SSE client implementation
+ * Updated: 2026-02-27 - Enforced strict active-chat filtering for realtime log events (drop unscoped and mismatched logs when a chat is selected).
  * Updated: 2026-02-20 - Removed stale CRUD SSE routing branch to align with runtime event channels.
  * Updated: 2026-02-26 - Normalized object-shaped error details in log rendering to avoid "[object Object]" output.
  * Updated: 2026-02-26 - Suppressed redundant error-level log messages when equivalent stream error indicators are present.
@@ -828,7 +829,7 @@ export const handleLogEvent = <T extends SSEComponentState>(state: T, data: any)
   const stateAny = state as any;
   const activeChatId = stateAny.currentChat?.id || stateAny.world?.currentChatId || null;
   const incomingChatId = data?.chatId ?? null;
-  if (activeChatId && incomingChatId && incomingChatId !== activeChatId) {
+  if (activeChatId && (!incomingChatId || incomingChatId !== activeChatId)) {
     return state;
   }
 

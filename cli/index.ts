@@ -14,6 +14,7 @@
  * - Work with loaded world without importing (uses external storage path)
  * 
  * Changes:
+ * - 2026-02-27: Added active-chat event scoping in CLI listeners to prevent cross-chat message/system/SSE/tool leakage.
  * - 2026-02-25: Added fallback shorthand attempt `@awesome-agent-world/<input>` when a provided local path does not exist.
  * - 2026-02-25: Added GitHub shorthand world source import support (`@awesome-agent-world/<world-name>`) with safe remote staging and automatic import mode.
  * - 2026-02-20: Enforced options-only HITL handling in interactive and pipeline modes.
@@ -549,9 +550,44 @@ function attachCLIListeners(
   const listeners = new Map<string, (...args: any[]) => void>();
   let hitlPromptChain: Promise<void> = Promise.resolve();
   const handledHitlRequestIds = new Set<string>();
+  const getActiveChatId = (): string | null => {
+    const value = String(world.currentChatId || '').trim();
+    return value || null;
+  };
+  const isChatEventInScope = (
+    eventChatId: unknown,
+    includeUnscopedWhenScoped: boolean = false
+  ): boolean => {
+    const activeChatId = getActiveChatId();
+    if (!activeChatId) {
+      return true;
+    }
+    if (eventChatId === undefined || eventChatId === null) {
+      return includeUnscopedWhenScoped;
+    }
+    const normalizedEventChatId = String(eventChatId).trim();
+    if (!normalizedEventChatId) {
+      return includeUnscopedWhenScoped;
+    }
+    return normalizedEventChatId === activeChatId;
+  };
+  const shouldHandleWorldEvent = (eventData: WorldActivityEventPayload): boolean => {
+    const eventType = String((eventData as any)?.type || '').trim().toLowerCase();
+    if (eventType === 'response-start' || eventType === 'response-end' || eventType === 'idle' || eventType === 'info') {
+      return isChatEventInScope((eventData as any)?.chatId, true);
+    }
+    if (eventType.startsWith('tool-')) {
+      return isChatEventInScope((eventData as any)?.chatId, false);
+    }
+    return isChatEventInScope((eventData as any)?.chatId, true);
+  };
 
   // World activity events
   const worldListener = (eventData: WorldActivityEventPayload) => {
+    if (!shouldHandleWorldEvent(eventData)) {
+      return;
+    }
+
     const hitlRequest = parseHitlPromptFromToolEvent(eventData);
     if (hitlRequest) {
       if (!markHitlRequestHandled(handledHitlRequestIds, hitlRequest.requestId)) {
@@ -614,6 +650,9 @@ function attachCLIListeners(
 
   // Message events
   const messageListener = (eventData: MessageEventPayload) => {
+    if (!isChatEventInScope((eventData as any)?.chatId, false)) {
+      return;
+    }
     if (eventData.content &&
       typeof eventData.content === 'string' &&
       eventData.content.includes('Success message sent')) return;
@@ -637,6 +676,9 @@ function attachCLIListeners(
   // SSE events (interactive mode only - pipeline mode uses non-streaming LLM calls)
   if (streaming && globalState && rl && statusLine) {
     const sseListener = (eventData: any) => {
+      if (!isChatEventInScope(eventData?.chatId, false)) {
+        return;
+      }
       // Extend timeout when long-running shell stream activity arrives.
       const isLegacyToolStream = eventData.type === 'tool-stream';
       const isShellAssistantStream = eventData.toolName === 'shell_cmd' &&
@@ -652,6 +694,9 @@ function attachCLIListeners(
   } else {
     // Pipeline mode: listen for shell stream events to extend timeout on long-running commands.
     const sseTimeoutListener = (eventData: any) => {
+      if (!isChatEventInScope(eventData?.chatId, false)) {
+        return;
+      }
       const isLegacyToolStream = eventData.type === 'tool-stream';
       const isShellAssistantStream = eventData.toolName === 'shell_cmd' &&
         (eventData.type === 'start' || eventData.type === 'chunk' || eventData.type === 'end');
@@ -665,6 +710,9 @@ function attachCLIListeners(
 
   // System events
   const systemListener = (eventData: SystemEventPayload) => {
+    if (!isChatEventInScope((eventData as any)?.chatId, false)) {
+      return;
+    }
     if (eventData.content &&
       typeof eventData.content === 'string' &&
       eventData.content.includes('Success message sent')) return;

@@ -20,6 +20,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-27: Passed explicit chat scope to continuation system events (`publishEvent`) to prevent fallback routing to `world.currentChatId` during chat switches.
  * - 2026-02-27: Suppress repeated identical `load_skill` tool calls within the same continuation run once a prior same-run load succeeded.
  * - 2026-02-27: Added per-chat/agent continuation run lock in `continueLLMAfterToolExecution` to skip concurrent duplicate continuation runs while tools are pending/executing (prevents duplicate HITL approval prompts).
  * - 2026-02-26: Replaced `resumePendingToolCallsForChat` console traces with categorized structured logger events (`chat.restore.resume.tools`) for env-controlled restore diagnostics.
@@ -944,6 +945,7 @@ export async function continueLLMAfterToolExecution(
   }
 ): Promise<void> {
   const continuationChatId = chatId !== undefined ? chatId : world.currentChatId ?? null;
+  const targetChatId = continuationChatId;
   const continuationRunId = String(options?.continuationRunId || '').trim() || generateId();
   const continuationScopeKey = getContinuationScopeKey(world.id, agent.id, continuationChatId);
   const enteredScope = enterContinuationScope(continuationScopeKey, continuationRunId);
@@ -962,7 +964,7 @@ export async function continueLLMAfterToolExecution(
     return;
   }
 
-  const completeActivity = beginWorldActivity(world, `agent:${agent.id}`, chatId ?? undefined);
+  const completeActivity = beginWorldActivity(world, `agent:${agent.id}`, targetChatId ?? undefined);
   const loadedSkillsForRun = getLoadedSkillsForContinuationRun(continuationRunId);
   for (const preloadedSkillId of options?.preloadedSkillIds || []) {
     const normalizedSkillId = String(preloadedSkillId || '').trim();
@@ -985,7 +987,7 @@ export async function continueLLMAfterToolExecution(
 
       loggerAgent.error('Tool continuation hop limit reached; reporting error and continuing loop', {
         agentId: agent.id,
-        chatId: chatId ?? world.currentChatId ?? null,
+        chatId: targetChatId,
         hopCount,
         maxToolHops,
       });
@@ -993,13 +995,13 @@ export async function continueLLMAfterToolExecution(
       publishEvent(world, 'system', {
         message: guardrailErrorMessage,
         type: 'error',
-      });
+      }, targetChatId);
 
       publishToolEvent(world, {
         agentName: agent.id,
         type: 'tool-error',
         messageId: guardrailToolCallId,
-        chatId: chatId ?? world.currentChatId ?? null,
+        chatId: targetChatId,
         toolExecution: {
           toolName: '__tool_continuation_guardrail__',
           toolCallId: guardrailToolCallId,
@@ -1010,7 +1012,7 @@ export async function continueLLMAfterToolExecution(
       logToolBridge('CONTINUE HOP_GUARDRAIL', {
         worldId: world.id,
         agentId: agent.id,
-        chatId: chatId ?? world.currentChatId ?? null,
+        chatId: targetChatId,
         hopCount,
         maxToolHops,
         guardrailToolCallId,
@@ -1022,9 +1024,6 @@ export async function continueLLMAfterToolExecution(
     }
 
     throwIfMessageProcessingStopped(options?.abortSignal);
-
-    // Use explicit chatId when provided, fallback to world.currentChatId.
-    const targetChatId = chatId !== undefined ? chatId : world.currentChatId;
 
     // Filter memory to current chat only
     const currentChatMessages = agent.memory.filter(m => m.chatId === targetChatId);
@@ -1347,7 +1346,7 @@ export async function continueLLMAfterToolExecution(
         publishEvent(world, 'system', {
           message: '[Warning] Agent repeatedly returned invalid tool calls after tool execution. Please refine the prompt.',
           type: 'warning',
-        });
+        }, targetChatId);
         return;
       }
 
@@ -1694,7 +1693,7 @@ export async function continueLLMAfterToolExecution(
         publishEvent(world, 'system', {
           message: '[Warning] Agent returned empty follow-up after tool execution. Please retry or refine the prompt.',
           type: 'warning'
-        });
+        }, targetChatId);
 
         logToolBridge('CONTINUE EMPTY_TEXT_STOP', {
           worldId: world.id,
@@ -1749,14 +1748,14 @@ export async function continueLLMAfterToolExecution(
     if (isMessageProcessingCanceledError(error) || options?.abortSignal?.aborted) {
       loggerAgent.info('Skipped continuation after stop request', {
         agentId: agent.id,
-        chatId: chatId ?? world.currentChatId ?? null,
+        chatId: targetChatId,
         error: error instanceof Error ? error.message : String(error)
       });
 
       logToolBridge('CONTINUE CANCELED', {
         worldId: world.id,
         agentId: agent.id,
-        chatId: chatId ?? world.currentChatId ?? null,
+        chatId: targetChatId,
         error: error instanceof Error ? error.message : String(error),
       });
       return;
@@ -1769,12 +1768,12 @@ export async function continueLLMAfterToolExecution(
     publishEvent(world, 'system', {
       message: `[Error] ${(error as Error).message}`,
       type: 'error'
-    });
+    }, targetChatId);
 
     logToolBridge('CONTINUE ERROR', {
       worldId: world.id,
       agentId: agent.id,
-      chatId: chatId ?? world.currentChatId ?? null,
+      chatId: targetChatId,
       error: error instanceof Error ? error.message : String(error),
     });
   } finally {

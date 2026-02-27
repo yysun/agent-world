@@ -44,6 +44,7 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2026-02-27: Enforced active-chat scoping for system-event ingestion (drop unscoped/mismatched system events when a chat is selected).
  * - 2026-02-26: Preserved transient realtime log/system/error messages across same-chat refreshes (`chat-title-updated`, `agent-created`, HITL refresh) so SSE errors remain visible after metadata reload.
  * - 2026-02-25: Added frontend resume/load trace logging in `initWorld` for chat switch ordering, persisted-memory hydration counts, and HITL replay source verification.
  * - 2026-02-24: Reconstructed unresolved HITL prompts from persisted raw tool-call request/response pairs during init/chat switch (no event replay dependency).
@@ -701,6 +702,23 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
   const contentPayload = envelope && 'content' in envelope ? envelope.content : data;
   const structuredPayload =
     contentPayload && typeof contentPayload === 'object' ? contentPayload : null;
+  const activeChatId = state.currentChat?.id || state.world?.currentChatId || null;
+  const scopedSystemChatIdRaw =
+    structuredPayload && 'chatId' in structuredPayload
+      ? (structuredPayload as Record<string, unknown>).chatId
+      : envelope && 'chatId' in envelope
+        ? envelope.chatId
+        : undefined;
+  const scopedSystemChatId =
+    typeof scopedSystemChatIdRaw === 'string'
+      ? scopedSystemChatIdRaw.trim() || null
+      : scopedSystemChatIdRaw === null
+        ? null
+        : undefined;
+  if (activeChatId && (!scopedSystemChatId || scopedSystemChatId !== activeChatId)) {
+    return state;
+  }
+
   const eventType =
     (structuredPayload && typeof structuredPayload.eventType === 'string' && structuredPayload.eventType) ||
     (typeof contentPayload === 'string' ? contentPayload : null) ||

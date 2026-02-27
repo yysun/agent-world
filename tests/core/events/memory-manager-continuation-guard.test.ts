@@ -14,6 +14,7 @@
  * - Avoids any real provider/tool execution and filesystem-backed state.
  *
  * Recent Changes:
+ * - 2026-02-27: Added regression coverage ensuring continuation system events include explicit chatId scope.
  * - 2026-02-27: Added coverage to suppress repeated identical `load_skill` tool calls within one continuation run.
  * - 2026-02-27: Added initial concurrency guard coverage for continuation runs.
  */
@@ -27,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   prepareMessagesForLLM: vi.fn(async () => []),
   generateAgentResponse: vi.fn(),
   publishMessageWithId: vi.fn(),
+  publishEvent: vi.fn(),
   getMCPToolsForWorld: vi.fn(),
   loadSkillExecute: vi.fn(),
 }));
@@ -61,7 +63,7 @@ vi.mock('../../../core/events/publishers.js', () => ({
   publishMessage: vi.fn(),
   publishMessageWithId: mocks.publishMessageWithId,
   publishSSE: vi.fn(),
-  publishEvent: vi.fn(),
+  publishEvent: mocks.publishEvent,
   publishToolEvent: vi.fn(),
   isStreamingEnabled: vi.fn().mockReturnValue(false),
 }));
@@ -296,5 +298,47 @@ describe('continueLLMAfterToolExecution guard', () => {
     );
     expect(loadSkillAssistantCalls).toHaveLength(0);
     expect(mocks.publishMessageWithId).toHaveBeenCalledTimes(1);
+  });
+
+  it('publishes empty-follow-up warning to explicit chat scope', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    mocks.generateAgentResponse.mockImplementationOnce(async () => {
+      world.currentChatId = 'chat-2';
+      return buildTextResponse('assistant-empty', '');
+    });
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    await continueLLMAfterToolExecution(world, agent, 'chat-1', {
+      emptyTextRetryCount: 2,
+    });
+
+    expect(mocks.publishEvent).toHaveBeenCalledWith(
+      world,
+      'system',
+      expect.objectContaining({ type: 'warning' }),
+      'chat-1',
+    );
+  });
+
+  it('publishes continuation errors to explicit chat scope', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    mocks.generateAgentResponse.mockImplementationOnce(async () => {
+      world.currentChatId = 'chat-2';
+      throw new Error('forced continuation failure');
+    });
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    await continueLLMAfterToolExecution(world, agent, 'chat-1');
+
+    expect(mocks.publishEvent).toHaveBeenCalledWith(
+      world,
+      'system',
+      expect.objectContaining({ type: 'error' }),
+      'chat-1',
+    );
   });
 });

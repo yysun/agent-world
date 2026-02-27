@@ -29,6 +29,7 @@
  * ```
  *
  * Created: 2025-11-10 - Extracted from api.ts for reusability
+ * Updated: 2026-02-27 - Scoped realtime log forwarding by world/chat to prevent cross-chat log leakage in chat-scoped streams.
  * Updated: 2026-02-26 - Added realtime log-stream forwarding (`type: 'log'`) to SSE clients to align web error visibility with Electron.
  * Updated: 2026-02-20 - Removed stale legacy event-channel SSE forwarding from this handler.
  * Updated: 2026-02-21 - Refresh fallback timeout on shell assistant-stream SSE activity (`start`/`chunk`/`end` + `toolName='shell_cmd'`) as well as legacy `tool-stream`.
@@ -97,6 +98,7 @@ interface LogStreamEventPayload {
   data?: any;
   messageId?: string;
   chatId?: string | null;
+  worldId?: string;
 }
 
 export interface SSEHandler {
@@ -327,11 +329,23 @@ export function createSSEHandler(
   // stream backend logger events as SSE `type: 'log'` payloads during the active request.
   const logListener = (logEvent: LogStreamEventPayload) => {
     const logData = logEvent?.data && typeof logEvent.data === 'object' ? logEvent.data : null;
+    const logWorldId =
+      (typeof logEvent?.worldId === 'string' && logEvent.worldId.trim()) ? logEvent.worldId.trim()
+        : (typeof (logData as any)?.worldId === 'string' && String((logData as any).worldId).trim())
+          ? String((logData as any).worldId).trim()
+          : undefined;
+    if (logWorldId && logWorldId !== world.id) {
+      return;
+    }
+
     const logChatId =
       (typeof logEvent?.chatId === 'string' && logEvent.chatId.trim()) ? logEvent.chatId.trim()
         : (logEvent?.chatId === null ? null
           : (typeof logData?.chatId === 'string' && logData.chatId.trim()) ? logData.chatId.trim()
             : (logData?.chatId === null ? null : undefined));
+    if (!isChatEventInScope(logChatId, false)) {
+      return;
+    }
 
     sendSSE({
       type: EventType.SSE,
