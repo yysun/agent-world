@@ -13,6 +13,7 @@
  * - Receives all mutation handlers and state via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-27: Adjusted logs autoscroll to only stick when already near bottom so manual scrolling stays usable during live streaming.
  * - 2026-02-27: Logs panel now streams in chronological order and auto-scrolls to latest entry while open.
  * - 2026-02-27: Added `logs` panel mode UI with unified main/renderer runtime logs and clear-list control.
  * - 2026-02-26: Simplified import-world actions by removing bottom footer buttons and adding inline source-specific import buttons.
@@ -75,6 +76,11 @@ function getLevelBadgeStyle(level: string) {
   };
 }
 
+function isNearBottom(container: HTMLDivElement, threshold = 24) {
+  const remaining = container.scrollHeight - container.scrollTop - container.clientHeight;
+  return remaining <= threshold;
+}
+
 export default function RightPanelContent({
   panelMode,
   loadedWorld,
@@ -128,6 +134,7 @@ export default function RightPanelContent({
   const [githubImportSource, setGithubImportSource] = useState('@awesome-agent-world/');
   const [importingWorld, setImportingWorld] = useState(false);
   const logsContainerRef = useRef<HTMLDivElement | null>(null);
+  const shouldStickLogsToBottomRef = useRef(true);
 
   useEffect(() => {
     if (panelMode !== 'import-world') return;
@@ -138,8 +145,14 @@ export default function RightPanelContent({
 
   useEffect(() => {
     if (panelMode !== 'logs') return;
+    shouldStickLogsToBottomRef.current = true;
+  }, [panelMode]);
+
+  useEffect(() => {
+    if (panelMode !== 'logs') return;
     const container = logsContainerRef.current;
     if (!container) return;
+    if (!shouldStickLogsToBottomRef.current) return;
     requestAnimationFrame(() => {
       container.scrollTo({
         top: container.scrollHeight,
@@ -147,6 +160,12 @@ export default function RightPanelContent({
       });
     });
   }, [panelLogs, panelMode]);
+
+  const onLogsContainerScroll = () => {
+    const container = logsContainerRef.current;
+    if (!container) return;
+    shouldStickLogsToBottomRef.current = isNearBottom(container);
+  };
 
   const onImportFromLocal = async () => {
     if (importingWorld) return;
@@ -195,7 +214,11 @@ export default function RightPanelContent({
               Clear
             </button>
           </div>
-          <div ref={logsContainerRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+          <div
+            ref={logsContainerRef}
+            onScroll={onLogsContainerScroll}
+            className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1"
+          >
             {Array.isArray(panelLogs) && panelLogs.length > 0 ? (
               panelLogs.map((entry) => {
                 const process = String(entry?.process || '').trim().toLowerCase() === 'renderer' ? 'renderer' : 'main';
