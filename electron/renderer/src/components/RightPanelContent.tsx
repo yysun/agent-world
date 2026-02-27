@@ -13,6 +13,7 @@
  * - Receives all mutation handlers and state via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-27: Hid per-skill rows for global/project sections when their parent section toggle is off.
  * - 2026-02-27: Added `Show tool messages` settings toggle above skill options to control tool-card visibility in the main transcript area.
  * - 2026-02-27: Adjusted logs autoscroll to only stick when already near bottom so manual scrolling stays usable during live streaming.
  * - 2026-02-27: Logs panel now streams in chronological order and auto-scrolls to latest entry while open.
@@ -402,42 +403,46 @@ export default function RightPanelContent({
                     checked={systemSettings.enableGlobalSkills !== false}
                     onClick={() => setSystemSettings((settings) => ({ ...settings, enableGlobalSkills: settings.enableGlobalSkills === false }))}
                   />
-                  <div className="ml-1 space-y-0.5">
-                    {globalSkillEntries.length > 0 ? (
-                      globalSkillEntries.map((entry) => (
-                        <SettingsSkillSwitch
-                          key={`global-${entry.skillId}`}
-                          label={entry.skillId}
-                          checked={!disabledGlobalSkillIdSet.has(entry.skillId)}
-                          onClick={() => toggleSkillEnabled('global', entry.skillId)}
-                          disabled={systemSettings.enableGlobalSkills === false}
-                        />
-                      ))
-                    ) : (
-                      <p className="px-1 py-1 text-[11px] text-sidebar-foreground/50">No global skills discovered.</p>
-                    )}
-                  </div>
+                  {systemSettings.enableGlobalSkills !== false ? (
+                    <div className="ml-1 space-y-0.5">
+                      {globalSkillEntries.length > 0 ? (
+                        globalSkillEntries.map((entry) => (
+                          <SettingsSkillSwitch
+                            key={`global-${entry.skillId}`}
+                            label={entry.skillId}
+                            checked={!disabledGlobalSkillIdSet.has(entry.skillId)}
+                            onClick={() => toggleSkillEnabled('global', entry.skillId)}
+                            disabled={false}
+                          />
+                        ))
+                      ) : (
+                        <p className="px-1 py-1 text-[11px] text-sidebar-foreground/50">No global skills discovered.</p>
+                      )}
+                    </div>
+                  ) : null}
 
                   <SettingsSwitch
                     label="Enable Project Skills"
                     checked={systemSettings.enableProjectSkills !== false}
                     onClick={() => setSystemSettings((settings) => ({ ...settings, enableProjectSkills: settings.enableProjectSkills === false }))}
                   />
-                  <div className="ml-1 space-y-0.5">
-                    {projectSkillEntries.length > 0 ? (
-                      projectSkillEntries.map((entry) => (
-                        <SettingsSkillSwitch
-                          key={`project-${entry.skillId}`}
-                          label={entry.skillId}
-                          checked={!disabledProjectSkillIdSet.has(entry.skillId)}
-                          onClick={() => toggleSkillEnabled('project', entry.skillId)}
-                          disabled={systemSettings.enableProjectSkills === false}
-                        />
-                      ))
-                    ) : (
-                      <p className="px-1 py-1 text-[11px] text-sidebar-foreground/50">No project skills discovered.</p>
-                    )}
-                  </div>
+                  {systemSettings.enableProjectSkills !== false ? (
+                    <div className="ml-1 space-y-0.5">
+                      {projectSkillEntries.length > 0 ? (
+                        projectSkillEntries.map((entry) => (
+                          <SettingsSkillSwitch
+                            key={`project-${entry.skillId}`}
+                            label={entry.skillId}
+                            checked={!disabledProjectSkillIdSet.has(entry.skillId)}
+                            onClick={() => toggleSkillEnabled('project', entry.skillId)}
+                            disabled={false}
+                          />
+                        ))
+                      ) : (
+                        <p className="px-1 py-1 text-[11px] text-sidebar-foreground/50">No project skills discovered.</p>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
