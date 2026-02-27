@@ -13,6 +13,7 @@
  * - Accepts required collaborators (session/message setters and panel controls) via args.
  *
  * Recent Changes:
+ * - 2026-02-27: Applied UI-selected project folder as world `working_directory` only during world creation, while keeping load/switch as world-driven mirror; world create/load status now includes cwd.
  * - 2026-02-26: Normalized GitHub shorthand import source for `@awesome-agent-world/<world-name>` to lowercase world segment to prevent case-mismatch path failures.
  * - 2026-02-26: Added optional GitHub shorthand source support to `onImportWorld(source?)` so renderer can trigger `world:import` with `{ source }` payload.
  * - 2026-02-19: Added `onExportWorld` action for desktop world save/export workflow via IPC bridge.
@@ -22,7 +23,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { safeMessage } from '../domain/desktop-api';
 import { resolveSelectedSessionId } from '../domain/session-selection';
-import { sortSessionsByNewest } from '../utils/data-transform';
+import { sortSessionsByNewest, upsertEnvVariable } from '../utils/data-transform';
+import { getEnvValueFromText } from '../utils/app-helpers';
 import { getRefreshWarning } from '../utils/formatting';
 import { validateWorldForm } from '../utils/validation';
 
@@ -58,6 +60,7 @@ export function useWorldManagement({
   setPanelMode,
   getDefaultWorldForm,
   getWorldFormFromWorld,
+  selectedProjectPath,
 }) {
   const [loadedWorld, setLoadedWorld] = useState<any>(null);
   const [worldLoadError, setWorldLoadError] = useState<string | null>(null);
@@ -99,7 +102,8 @@ export function useWorldManagement({
           })
         );
         setWorldLoadError(null);
-        setStatusText(`World loaded: ${result.world.id}`, 'success');
+        const loadedCwd = getEnvValueFromText(result.world?.variables, 'working_directory') || '(not set)';
+        setStatusText(`World loaded: ${result.world.id} (cwd: ${loadedCwd})`, 'success');
         await api.saveLastSelectedWorld(worldId);
       } else {
         setLoadedWorld(null);
@@ -126,13 +130,28 @@ export function useWorldManagement({
 
     try {
       const created = await api.createWorld(validation.data);
-      setCreatingWorld(getDefaultWorldForm());
-      setAvailableWorlds((worlds) => [...worlds, { id: created.id, name: created.name }]);
+      const selectedProjectCwd = String(selectedProjectPath || '').trim();
+      let createdWorld = created;
+      let createWarning = '';
 
-      setLoadedWorld(created);
+      if (selectedProjectCwd) {
+        const existingCwd = getEnvValueFromText(created?.variables, 'working_directory');
+        if (!existingCwd) {
+          const nextVariables = upsertEnvVariable(created?.variables || '', 'working_directory', selectedProjectCwd);
+          const updated = await api.updateWorld(created.id, { variables: nextVariables });
+          createWarning = getRefreshWarning(updated);
+          createdWorld = { ...updated };
+          delete createdWorld.refreshWarning;
+        }
+      }
+
+      setCreatingWorld(getDefaultWorldForm());
+      setAvailableWorlds((worlds) => [...worlds, { id: createdWorld.id, name: createdWorld.name }]);
+
+      setLoadedWorld(createdWorld);
       setSelectedAgentId(null);
-      const nextSessions = sortSessionsByNewest(await api.listSessions(created.id));
-      const backendCurrentChatId = String(created?.currentChatId || '').trim();
+      const nextSessions = sortSessionsByNewest(await api.listSessions(createdWorld.id));
+      const backendCurrentChatId = String(createdWorld?.currentChatId || '').trim();
       setSessions(nextSessions);
       setSelectedSessionId(
         resolveSelectedSessionId({
@@ -142,15 +161,30 @@ export function useWorldManagement({
         })
       );
       setWorldLoadError(null);
-      await api.saveLastSelectedWorld(created.id);
+      await api.saveLastSelectedWorld(createdWorld.id);
 
       setPanelOpen(false);
       setPanelMode('create-world');
-      setStatusText(`World created: ${created.name}`, 'success');
+      const createdCwd = getEnvValueFromText(createdWorld?.variables, 'working_directory') || '(not set)';
+      const createdStatus = createWarning
+        ? `World created: ${createdWorld.name} (cwd: ${createdCwd}). ${createWarning}`
+        : `World created: ${createdWorld.name} (cwd: ${createdCwd})`;
+      setStatusText(createdStatus, createWarning ? 'error' : 'success');
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to create world.'), 'error');
     }
-  }, [api, creatingWorld, getDefaultWorldForm, setPanelMode, setPanelOpen, setSelectedAgentId, setSelectedSessionId, setSessions, setStatusText]);
+  }, [
+    api,
+    creatingWorld,
+    getDefaultWorldForm,
+    selectedProjectPath,
+    setPanelMode,
+    setPanelOpen,
+    setSelectedAgentId,
+    setSelectedSessionId,
+    setSessions,
+    setStatusText,
+  ]);
 
   const refreshWorldDetails = useCallback(async (worldId) => {
     const result = await api.loadWorld(worldId);
