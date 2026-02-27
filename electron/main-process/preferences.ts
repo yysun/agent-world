@@ -10,6 +10,7 @@
  * - Uses tolerant JSON parsing and returns safe defaults on corruption.
  *
  * Recent Changes:
+ * - 2026-02-27: Added persisted `showToolMessages` system setting for desktop chat transcript filtering.
  * - 2026-02-12: Extracted preference read/write helpers from `electron/main.ts`.
  */
 
@@ -76,6 +77,7 @@ export interface SystemSettings {
   storageType?: string;
   dataPath?: string;
   sqliteDatabase?: string;
+  showToolMessages?: boolean;
   enableGlobalSkills?: boolean;
   enableProjectSkills?: boolean;
   disabledGlobalSkillIds?: string[];
@@ -96,4 +98,3 @@ export function writeSystemSettings(appLike: AppUserDataLike, settings: SystemSe
   prefs.systemSettings = settings;
   writePreferences(appLike, prefs);
 }
-

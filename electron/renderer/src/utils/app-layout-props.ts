@@ -12,6 +12,7 @@
  * - Data-only transformations from provided inputs.
  *
  * Recent Changes:
+ * - 2026-02-27: Added `showToolMessages` wiring to message-list props for transcript-level tool-row visibility control.
  * - 2026-02-27: Added right-panel logs props wiring (`panelLogs`, `onClearPanelLogs`) and replaced header refresh wiring with `onOpenLogsPanel`.
  * - 2026-02-26: Added right-panel import props wiring (`onImportWorld`) to support import form mode.
  * - 2026-02-21: Added message-list prop wiring for assistant raw-markdown copy action.
@@ -35,6 +36,7 @@ export function createMainContentMessageListProps<T extends PropBag>(input: T) {
     loadingSkillRegistry: input.loadingSkillRegistry,
     visibleSkillRegistryEntries: input.visibleSkillRegistryEntries,
     skillRegistryError: input.skillRegistryError,
+    showToolMessages: input.showToolMessages,
     messages: input.messages,
     messagesById: input.messagesById,
     worldAgentsById: input.worldAgentsById,

@@ -13,6 +13,7 @@
  * - Receives all mutation handlers and state via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-27: Added `Show tool messages` settings toggle above skill options to control tool-card visibility in the main transcript area.
  * - 2026-02-27: Adjusted logs autoscroll to only stick when already near bottom so manual scrolling stays usable during live streaming.
  * - 2026-02-27: Logs panel now streams in chronological order and auto-scrolls to latest entry while open.
  * - 2026-02-27: Added `logs` panel mode UI with unified main/renderer runtime logs and clear-list control.
@@ -391,6 +392,11 @@ export default function RightPanelContent({
                 )}
 
                 <div className="mt-2 border-t border-sidebar-border pt-2">
+                  <SettingsSwitch
+                    label="Show tool messages"
+                    checked={systemSettings.showToolMessages !== false}
+                    onClick={() => setSystemSettings((settings) => ({ ...settings, showToolMessages: settings.showToolMessages === false }))}
+                  />
                   <SettingsSwitch
                     label="Enable Global Skills"
                     checked={systemSettings.enableGlobalSkills !== false}

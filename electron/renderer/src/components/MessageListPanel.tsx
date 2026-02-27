@@ -13,6 +13,7 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-27: Added `showToolMessages` prop-driven filtering so tool-related rows can be hidden from the main transcript.
  * - 2026-02-27: Added collapse/expand toggles for assistant message cards (tool-parity interaction).
  * - 2026-02-27: Reintroduced assistant-card user prompt preview above the `<model> ......` wait row for pre-chunk context.
  * - 2026-02-27: Limited tool request/result merge to tool-styled rows only so assistant cards and tool cards can both remain visible.
@@ -242,6 +243,7 @@ export default function MessageListPanel({
   loadingSkillRegistry,
   visibleSkillRegistryEntries,
   skillRegistryError,
+  showToolMessages = true,
   messages,
   messagesById,
   worldAgentsById,
@@ -270,7 +272,11 @@ export default function MessageListPanel({
   ).trim();
   const inlineDetailText = String(inlineWorkingIndicatorState?.detailText || '').trim();
   const inlineElapsedMs = Number(inlineWorkingIndicatorState?.elapsedMs || 0);
-  const renderableMessages = buildCombinedRenderableMessages(messages.filter(isRenderableMessageEntry));
+  const renderableMessages = buildCombinedRenderableMessages(
+    messages
+      .filter(isRenderableMessageEntry)
+      .filter((message) => showToolMessages || !isToolRelatedMessage(message))
+  );
   const shouldShowLoading = messagesLoading && renderableMessages.length === 0;
   const [messageCollapseOverrides, setMessageCollapseOverrides] = useState<Record<string, boolean>>({});
   const toggleMessageCollapsed = (messageId: string, currentCollapsed: boolean) => {

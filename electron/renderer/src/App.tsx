@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-02-27: Added system setting support to show/hide tool-related transcript rows in the main message area.
  * - 2026-02-27: Replaced header refresh with a logs action and added a unified right-panel logs stream (main + renderer) with bounded in-memory buffering.
  * - 2026-02-27: Passed UI-selected project folder into world-management create flow so new worlds can inherit `working_directory`; load/switch continue to mirror world `cwd`.
  * - 2026-02-26: Added renderer categorized logger initialization via preload logging config and replaced message activation console tracing with env-controlled logger output.
@@ -72,6 +73,7 @@ import {
 import {
   isHumanMessage,
   isRenderableMessageEntry,
+  isToolRelatedMessage,
 } from './utils/message-utils';
 import {
   getAgentDisplayName,
@@ -1035,8 +1037,13 @@ export default function App() {
     }
     : null;
   const hasConversationMessages = useMemo(() => {
-    return messages.some(isRenderableMessageEntry);
-  }, [messages]);
+    const shouldShowToolMessages = systemSettings.showToolMessages !== false;
+    return messages.some((message) => {
+      if (!isRenderableMessageEntry(message)) return false;
+      if (shouldShowToolMessages) return true;
+      return !isToolRelatedMessage(message);
+    });
+  }, [messages, systemSettings.showToolMessages]);
 
   const mainContentMessageListProps = createMainContentMessageListProps({
     messagesContainerRef,
@@ -1047,6 +1054,7 @@ export default function App() {
     loadingSkillRegistry,
     visibleSkillRegistryEntries,
     skillRegistryError,
+    showToolMessages: systemSettings.showToolMessages !== false,
     messages,
     messagesById,
     worldAgentsById,

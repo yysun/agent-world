@@ -12,6 +12,7 @@
  * - No filesystem or network dependencies.
  *
  * Recent Changes:
+ * - 2026-02-27: Added normalization assertions for persisted `showToolMessages` desktop setting.
  * - 2026-02-27: Updated tool-classification expectations so assistant tool-call request messages remain assistant cards.
  * - 2026-02-27: Added regression coverage ensuring log-event rows are not treated as renderable chat messages.
  * - 2026-02-22: Added regression for pending-only inline status to avoid fallback agent names on invalid mention flows.
@@ -65,9 +66,15 @@ describe('extracted data-transform utils', () => {
     });
 
     expect(result.storageType).toBe('sqlite');
+    expect(result.showToolMessages).toBe(true);
     expect(result.enableGlobalSkills).toBe(false);
     expect(result.enableProjectSkills).toBe(true);
     expect(result.disabledGlobalSkillIds).toEqual(['a', 'z']);
+  });
+
+  it('normalizes showToolMessages when explicitly disabled', () => {
+    const result = normalizeSystemSettings({ showToolMessages: false });
+    expect(result.showToolMessages).toBe(false);
   });
 
   it('sorts sessions by newest timestamp', () => {

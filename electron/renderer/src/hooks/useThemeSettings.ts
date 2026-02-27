@@ -13,6 +13,7 @@
  * - Preserves existing App.jsx behavior by returning state + action helpers.
  *
  * Recent Changes:
+ * - 2026-02-27: Added unsaved-change tracking support for `showToolMessages` desktop setting.
  * - 2026-02-17: Extracted theme/settings logic from `App.jsx` for Phase 3.
  */
 
@@ -93,6 +94,7 @@ export function useThemeSettings({
       current.storageType !== saved.storageType ||
       current.dataPath !== saved.dataPath ||
       current.sqliteDatabase !== saved.sqliteDatabase ||
+      current.showToolMessages !== saved.showToolMessages ||
       current.enableGlobalSkills !== saved.enableGlobalSkills ||
       current.enableProjectSkills !== saved.enableProjectSkills ||
       normalizeStringList(current.disabledGlobalSkillIds).join('|') !== normalizeStringList(saved.disabledGlobalSkillIds).join('|') ||
