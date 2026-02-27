@@ -12,6 +12,7 @@
  * - No filesystem or network dependencies.
  *
  * Recent Changes:
+ * - 2026-02-27: Updated tool-classification expectations so assistant tool-call request messages remain assistant cards.
  * - 2026-02-27: Added regression coverage ensuring log-event rows are not treated as renderable chat messages.
  * - 2026-02-22: Added regression for pending-only inline status to avoid fallback agent names on invalid mention flows.
  * - 2026-02-22: Added coverage for end-of-run processed-agent status summary text helper.
@@ -159,7 +160,7 @@ describe('extracted message utils', () => {
     expect(isToolRelatedMessage({
       role: 'assistant',
       tool_calls: [{ type: 'function', function: { name: 'shell_cmd', arguments: '{}' } }]
-    })).toBe(true);
+    })).toBe(false);
     expect(isTrueAgentResponseMessage({ role: 'assistant', sender: 'agent-a', content: 'hello' })).toBe(true);
     expect(isTrueAgentResponseMessage({ role: 'assistant', content: 'Calling tool: shell_cmd' })).toBe(false);
   });

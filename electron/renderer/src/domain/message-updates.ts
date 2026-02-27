@@ -345,8 +345,9 @@ export function upsertMessageList(existingMessages: MessageLike[], incomingMessa
   const existingIndex = next.findIndex((message) => String(message?.messageId || '').trim() === incomingId);
 
   if (existingIndex >= 0) {
+    const existingMessage = next[existingIndex];
     next[existingIndex] = {
-      ...next[existingIndex],
+      ...existingMessage,
       ...incomingMessage,
       id: incomingId,
       messageId: incomingId,

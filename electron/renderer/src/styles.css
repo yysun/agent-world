@@ -442,6 +442,13 @@ body {
 .agent-streaming-dots {
   min-height: 1rem;
   color: var(--color-muted-foreground);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.agent-streaming-dots-label {
+  color: var(--color-muted-foreground);
 }
 
 .agent-streaming-dots-text::after {

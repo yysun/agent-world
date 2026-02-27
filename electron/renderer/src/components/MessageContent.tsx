@@ -13,6 +13,10 @@
  * - Helper functions are scoped to this module because only this component uses them.
  *
  * Recent Changes:
+ * - 2026-02-27: Restored bold user prompt preview above the `<model> ......` pre-chunk wait row on assistant cards.
+ * - 2026-02-27: Removed embedded user-preview box rendering so user context remains in the original user message card.
+ * - 2026-02-27: Tool cards no longer render embedded HUMAN preview sections.
+ * - 2026-02-27: Pre-chunk assistant streaming placeholder now renders as `<model> ......` with animated accumulating dots.
  * - 2026-02-27: Added animated accumulating `...` placeholder for streaming assistant messages before first response chunk arrives.
  * - 2026-02-27: Removed assistant-card `a1 is working` inline indicator text during streaming; activity remains visible through card/tool animations and status rows.
  * - 2026-02-27: Removed request-phase `Calling <tool>...` indicator block while pending; waiting state is represented only by top-row status (`running`).
@@ -238,7 +242,14 @@ function buildCombinedRequestAndResultContent(message, combinedResults) {
   return `Args:\n${requestText}\n\nResult:\n${resultText}`;
 }
 
-export default function MessageContent({ message, collapsed = false, isToolCallPending = false, showToolHeader = true }) {
+export default function MessageContent({
+  message,
+  collapsed = false,
+  isToolCallPending = false,
+  showToolHeader = true,
+  streamingDotsLabel = 'model',
+  streamingInputPreview = '',
+}) {
   const isToolMessage = isToolRelatedMessage(message);
   const MAX_TOOL_OUTPUT_LENGTH = 50000;
   const isAssistantStreaming = message?.isStreaming === true && !isToolMessage;
@@ -337,8 +348,16 @@ export default function MessageContent({ message, collapsed = false, isToolCallP
   return (
     <div className="flex flex-col gap-2">
       {shouldShowStreamingDots ? (
-        <div className="agent-streaming-dots" role="status" aria-live="polite" aria-label="Waiting for response">
-          <span className="agent-streaming-dots-text" aria-hidden="true" />
+        <div className="flex flex-col gap-1">
+          {String(streamingInputPreview || '').trim() ? (
+            <div className="text-xs font-bold text-foreground line-clamp-2 break-words">
+              {String(streamingInputPreview || '').trim()}
+            </div>
+          ) : null}
+          <div className="agent-streaming-dots text-xs" role="status" aria-live="polite" aria-label="Waiting for response">
+            <span className="agent-streaming-dots-label">{streamingDotsLabel}</span>
+            <span className="agent-streaming-dots-text" aria-hidden="true" />
+          </div>
         </div>
       ) : null}
       {displayContent ? (

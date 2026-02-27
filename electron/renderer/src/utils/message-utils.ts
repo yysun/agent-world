@@ -13,8 +13,8 @@
  * - Helper functions are intentionally colocated to preserve behavior parity.
  *
  * Recent Changes:
+ * - 2026-02-27: Stopped classifying assistant tool-call request messages as tool cards so assistant bubbles stay visible during tool phases.
  * - 2026-02-27: Excluded realtime log rows (`type='log'` / `logEvent`) from renderable chat entries so logs appear only in the logs panel.
- * - 2026-02-21: Classified assistant messages with `tool_calls` as tool-related so tool-request rows render reliably even when text lacks `Calling tool: ...`.
  * - 2026-02-20: Added `isRenderableMessageEntry` so welcome-state and list rendering share identical message-presence logic.
  * - 2026-02-16: Extracted from App.jsx into dedicated utility module.
  */
@@ -34,6 +34,9 @@ export function isToolRelatedMessage(message) {
   const role = String(message?.role || '').trim().toLowerCase();
   if (role === 'tool' || Boolean(message?.isToolStreaming)) {
     return true;
+  }
+  if (role === 'assistant') {
+    return false;
   }
   if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
     return true;
@@ -88,6 +91,9 @@ export function isTrueAgentResponseMessage(message) {
   }
 
   const content = String(message?.content || '').trim().toLowerCase();
+  if (content.startsWith('calling tool:') || content.startsWith('calling tool ')) {
+    return false;
+  }
   if (content.startsWith('[error]') || content.startsWith('error:')) {
     return false;
   }

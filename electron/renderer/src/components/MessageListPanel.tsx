@@ -13,6 +13,13 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-27: Added collapse/expand toggles for assistant message cards (tool-parity interaction).
+ * - 2026-02-27: Reintroduced assistant-card user prompt preview above the `<model> ......` wait row for pre-chunk context.
+ * - 2026-02-27: Limited tool request/result merge to tool-styled rows only so assistant cards and tool cards can both remain visible.
+ * - 2026-02-27: Restored user message header label as `You` in blue user cards.
+ * - 2026-02-27: Removed embedded input-preview handoff so user context stays in the original blue user message card.
+ * - 2026-02-27: Hidden `HUMAN` title text in user message headers while preserving timestamp/actions.
+ * - 2026-02-27: Streaming placeholder now passes model label to message content so pre-chunk wait text renders as `<model> ......`.
  * - 2026-02-27: Hidden branch/copy actions for non-finalized assistant messages (`isStreaming`/`isToolStreaming`) to avoid controls on in-progress cards.
  * - 2026-02-27: Tool cards now show `sender + tool-status` in the top metadata row and suppress duplicate in-body tool header text.
  * - 2026-02-27: Combined tool-request and matching tool-result rows into a single rendered card by merging matched tool outputs into the request card.
@@ -139,7 +146,7 @@ function buildCombinedRenderableMessages(messages) {
 
   return messages
     .map((message) => {
-      if (!isToolRequestMessage(message)) {
+      if (!isToolRelatedMessage(message) || !isToolRequestMessage(message)) {
         return message;
       }
 
@@ -180,6 +187,50 @@ function buildCombinedRenderableMessages(messages) {
       }
       return !consumedToolResultIds.has(messageId);
     });
+}
+
+function resolveMessageModelLabel(message, worldAgentsById, worldAgentsByName) {
+  const fromAgentId = String(message?.fromAgentId || '').trim();
+  if (fromAgentId && worldAgentsById?.has(fromAgentId)) {
+    const fromAgent = worldAgentsById.get(fromAgentId);
+    const modelById = String(fromAgent?.model || '').trim();
+    if (modelById) return modelById;
+  }
+
+  const sender = String(message?.sender || '').trim().toLowerCase();
+  if (sender && worldAgentsByName?.has(sender)) {
+    const fromName = worldAgentsByName.get(sender);
+    const modelByName = String(fromName?.model || '').trim();
+    if (modelByName) return modelByName;
+  }
+
+  return 'model';
+}
+
+function extractStreamingInputPreview(message, messagesById, messages, messageIndex) {
+  const replyToMessageId = String(message?.replyToMessageId || '').trim();
+  if (replyToMessageId) {
+    const parent = messagesById.get(replyToMessageId);
+    if (isHumanMessage(parent)) {
+      const text = String(parent?.content || '').trim();
+      if (text) {
+        return text;
+      }
+    }
+  }
+
+  for (let index = messageIndex - 1; index >= 0; index -= 1) {
+    const candidate = messages[index];
+    if (!isHumanMessage(candidate)) {
+      continue;
+    }
+    const text = String(candidate?.content || '').trim();
+    if (text) {
+      return text;
+    }
+  }
+
+  return '';
 }
 
 export default function MessageListPanel({
@@ -334,6 +385,8 @@ export default function MessageListPanel({
             const isPendingOptimisticUserMessage = isHuman && message?.optimisticUserPending === true;
             const messageRole = String(message?.role || '').toLowerCase();
             const isToolMessage = isToolRelatedMessage(message);
+            const messageModelLabel = resolveMessageModelLabel(message, worldAgentsById, worldAgentsByName);
+            const streamingInputPreview = extractStreamingInputPreview(message, messagesById, renderableMessages, messageIndex);
             const shouldRightAlignMessage = isHuman || isToolMessage || messageRole === 'assistant';
             const hasToolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
             const isToolCallRequestMessage = isToolRequestMessage(message);
@@ -346,7 +399,8 @@ export default function MessageListPanel({
               && isFinalizedAssistantMessage
               && isTrueAgentResponseMessage(message)
               && Boolean(message.messageId);
-            const isCollapsible = isBranchableAgentMessage || isToolMessage;
+            const isAssistantMessage = messageRole === 'assistant' && !isToolMessage;
+            const isCollapsible = isToolMessage || (isAssistantMessage && Boolean(messageKey));
             const isCollapsed = isMessageCollapsed(message, messageKey, isCollapsible);
             const normalizedEditedText = editingText.trim();
             const normalizedOriginalText = String(message?.content || '').trim();
@@ -374,7 +428,7 @@ export default function MessageListPanel({
                         <span className="font-medium text-foreground/80">{toolStatusLabel}</span>
                       </span>
                     ) : (
-                      <span>{senderLabel}</span>
+                      <span>{isHuman ? 'You' : senderLabel}</span>
                     )}
                     <div className="flex items-center gap-1">
                       <span>{formatTime(message.createdAt)}</span>
@@ -439,6 +493,8 @@ export default function MessageListPanel({
                       collapsed={isCollapsed}
                       isToolCallPending={isPendingToolCallRequest}
                       showToolHeader={!isToolMessage}
+                      streamingDotsLabel={messageModelLabel}
+                      streamingInputPreview={streamingInputPreview}
                     />
                   )}
 

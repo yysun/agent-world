@@ -261,4 +261,5 @@ describe('message-updates domain helpers', () => {
     expect(afterSecondEcho.map((item) => item.messageId)).toEqual(['server-user-1', 'server-user-2']);
     expect(afterSecondEcho.every((item) => item.optimisticUserPending !== true)).toBe(true);
   });
+
 });
