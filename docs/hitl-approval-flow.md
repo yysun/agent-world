@@ -52,9 +52,8 @@ When `requestWorldOption()` is called:
    - else `no` if present
    - else first option.
 5. Pending entry is inserted into the map.
-6. A world `system` event is emitted with payload:
-   - `eventType: "hitl-option-request"`
-  - request metadata (`requestId`, title, message, options, defaultOptionId, metadata).
+6. A world `tool-progress` event is emitted with payload:
+   - `toolExecution.metadata.hitlPrompt` containing request metadata (`requestId`, title, message, options, defaultOptionId, metadata).
 7. The Promise remains pending until an explicit response is submitted.
 
 ### Resolution Lifecycle
@@ -69,7 +68,7 @@ When `submitWorldOptionResponse()` or `submitWorldHitlResponse()` is called:
 
 ### Replay on Chat Load
 
-- When a chat is restored/loaded, unresolved HITL requests for that world/chat scope are replayed as `hitl-option-request` system events.
+- When a chat is restored/loaded, unresolved HITL requests for that world/chat scope are replayed as `tool-progress` events containing `toolExecution.metadata.hitlPrompt`.
 - Replay preserves original `requestId` so frontend responses resolve the original pending request.
 - Replay is deterministic (stable order) and replay-only events are not re-persisted.
 
@@ -116,9 +115,9 @@ Relevant files:
 
 Flow:
 
-1. Core emits world `system` event with `hitl-option-request`.
-2. Electron main serializes and forwards as `chat:event` payload type `system`.
-3. Renderer subscription handler parses system payload and enqueues prompt.
+1. Core emits world `tool-progress` event with `toolExecution.metadata.hitlPrompt`.
+2. Electron main serializes and forwards as `chat:event` payload type `tool`.
+3. Renderer subscription handler parses tool payload and enqueues prompt.
 4. Inline HITL card is rendered in the message flow from queue (`hitlPromptQueue`).
 5. User selects option.
 6. Renderer calls preload bridge `respondHitlOption(...)`.
@@ -140,8 +139,8 @@ Relevant files:
 
 Flow:
 
-1. Web receives `system` event over SSE stream.
-2. `parseHitlPromptRequest()` validates/enriches request payload.
+1. Web receives `tool-progress` world event over SSE stream.
+2. `parseHitlPromptFromToolEvent()` validates/enriches request payload from `toolExecution.metadata.hitlPrompt`.
 3. Request is added to `hitlPromptQueue`.
 4. User responds via inline HITL card (current approval flows are option-based).
 5. Web calls `api.respondHitlOption(...)`.
@@ -157,8 +156,8 @@ Relevant files:
 
 Flow:
 
-1. CLI listens to world `system` events.
-2. `parseHitlPromptRequest()` parses HITL requests.
+1. CLI listens to world `tool-progress` events.
+2. `parseHitlPromptFromToolEvent()` parses HITL requests.
 3. Interactive mode:
    - prompts user to choose by index or option ID,
    - submits via `submitWorldHitlResponse`.
@@ -175,7 +174,7 @@ sequenceDiagram
     participant Bridge as IPC or REST
 
     Feature->>Core: requestWorldOption(world, request)
-    Core-->>Client: world system event (hitl-option-request)
+    Core-->>Client: world tool-progress event (metadata.hitlPrompt)
     Client->>Client: render queue + prompt user
     Client->>Bridge: submit selected option
     Bridge->>Core: submitWorldHitlResponse(worldId, requestId, optionId)

@@ -15,7 +15,7 @@
  * - 2026-02-24: Removed activityStateRef from all tests (activity-state.ts deleted as part of working-status simplification).
  * - 2026-02-22: Removed activity event routing tests and response-state tracking tests as part of status-registry migration (Phase 1).
  * - 2026-02-20: Added optimistic user-message reconciliation coverage for message-event ordering and identical consecutive user sends.
- * - 2026-02-20: Added coverage that `hitl-option-request` system events bypass chatId filtering so approval prompts are not dropped.
+ * - 2026-02-20: Added coverage for chat-scoped HITL prompt delivery via tool-progress metadata.
  * - 2026-02-13: Updated system-event coverage to structured payload content (`eventType` + metadata object).
  * - 2026-02-13: Added coverage for session-scoped realtime system events (chat title update notifications).
  * - 2026-02-13: Added coverage for tool lifecycle response-state transitions and chat-id filtering.

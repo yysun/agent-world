@@ -6,11 +6,12 @@
  *
  * Coverage:
  * - Each event type produces the correct agent status transition.
- * - HITL full cycle: working → complete (hitl-request) → working (sse:start) → complete (sse:end).
+ * - Tool + SSE cycle: working → complete (tool-result) → working (sse:start) → complete (sse:end).
  * - Chat switch: clearChatAgents then replay produces correct final status.
  * - parseStoredEventReplayArgs: agent messages pass through; human/user messages are filtered.
  *
  * Recent Changes:
+ * - 2026-02-26: Removed legacy system HITL assertions and aligned cycle coverage to active tool + SSE transitions.
  * - 2026-02-24: Rewrote counter-based tests (counters removed); added message event type tests
  *   and parseStoredEventReplayArgs tests for the human/user sender filter.
  * - 2026-02-22: Created as part of status-registry migration (Phase 4).
@@ -99,24 +100,14 @@ describe('applyEventToRegistry — message events', () => {
   });
 });
 
-describe('applyEventToRegistry — system events', () => {
-  it('hitl-option-request → complete', () => {
+describe('applyEventToRegistry — tool + SSE cycle', () => {
+  it('working → complete (tool-result) → working (sse:start) → complete (sse:end)', () => {
     let r = createStatusRegistry();
-    r = applyEventToRegistry(r, 'w1', 'c1', 'a1', 'sse', 'start');
     r = applyEventToRegistry(r, 'w1', 'c1', 'a1', 'tool', 'tool-start');
-    r = applyEventToRegistry(r, 'w1', 'c1', 'a1', 'system', 'hitl-option-request');
-    expect(getAgentStatus(r, 'w1', 'c1', 'a1')).toBe('complete');
-  });
-});
-
-describe('applyEventToRegistry — HITL full cycle', () => {
-  it('working → complete (hitl-request) → working (sse:start) → complete (sse:end)', () => {
-    let r = createStatusRegistry();
-    r = applyEventToRegistry(r, 'w1', 'c1', 'a1', 'sse', 'start');
     expect(getAgentStatus(r, 'w1', 'c1', 'a1')).toBe('working');
-    r = applyEventToRegistry(r, 'w1', 'c1', 'a1', 'system', 'hitl-option-request');
+    r = applyEventToRegistry(r, 'w1', 'c1', 'a1', 'tool', 'tool-result');
     expect(getAgentStatus(r, 'w1', 'c1', 'a1')).toBe('complete');
-    // Agent resumes after HITL response (new sse:start)
+    // Agent starts another stream cycle.
     r = applyEventToRegistry(r, 'w1', 'c1', 'a1', 'sse', 'start');
     expect(getAgentStatus(r, 'w1', 'c1', 'a1')).toBe('working');
     r = applyEventToRegistry(r, 'w1', 'c1', 'a1', 'sse', 'end');
@@ -246,7 +237,7 @@ describe('parseStoredEventReplayArgs — skipped event types', () => {
   it('system event → returns null', () => {
     const result = parseStoredEventReplayArgs({
       type: 'system',
-      payload: { agentName: 'granite', type: 'hitl-option-request' },
+      payload: { eventType: 'chat-title-updated', title: 'Chat title' },
     });
     expect(result).toBeNull();
   });

@@ -15,7 +15,6 @@
  * | sse       | end / error       | status → complete            |
  * | tool      | tool-start        | status → working             |
  * | tool      | tool-result/error | status → complete            |
- * | system    | hitl-option-req.  | status → complete            |
  * | message   | (any)             | status → complete            |
  *
  * Implementation Notes:
@@ -28,6 +27,7 @@
  * - Ensures registry world/chat/agent entries exist before mutation.
  *
  * Recent Changes:
+ * - 2026-02-26: Removed legacy system HITL transition path after HITL migrated to tool-progress prompt transport.
  * - 2026-02-24: Removed inFlightSse/inFlightTools counter arithmetic; status is
  *   now set directly on start events and cleared by activity events via
  *   clearChatAgents (matches web app's pendingOperations-driven approach).
@@ -36,7 +36,7 @@
 
 import type { AgentStatusEntry, ChatStatusEntry, StatusRegistry, WorldStatusEntry } from './status-types';
 
-export type RegistryEventType = 'sse' | 'tool' | 'system' | 'message';
+export type RegistryEventType = 'sse' | 'tool' | 'message';
 
 export type ReplayEventArgs = {
   agentName: string;
@@ -76,7 +76,6 @@ export function parseStoredEventReplayArgs(storedEvent: unknown): ReplayEventArg
 export type RegistryEventSubtype =
   | 'start' | 'end' | 'error'
   | 'tool-start' | 'tool-result' | 'tool-error'
-  | 'hitl-option-request'
   | string;
 
 function ensureAgent(registry: StatusRegistry, worldId: string, chatId: string, agentId: string): {
@@ -118,9 +117,6 @@ export function applyEventToRegistry(
   } else if (eventType === 'tool' && subtype === 'tool-start') {
     agent.status = 'working';
   } else if (eventType === 'tool' && (subtype === 'tool-result' || subtype === 'tool-error')) {
-    agent.status = 'complete';
-  } else if (eventType === 'system' && subtype === 'hitl-option-request') {
-    // Agent is paused waiting for human input — mark complete until activity event resets.
     agent.status = 'complete';
   } else if (eventType === 'message') {
     agent.status = 'complete';

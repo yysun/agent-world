@@ -16,7 +16,7 @@
  * - 2026-02-24: Switched HITL restore dispatch to persisted message reconstruction (`getMemory` + request/response pairing helper).
  * - 2026-02-24: Replaced HITL replay dependency with pending-prompt read model dispatch over tool events.
  * - 2026-02-24: Restored strict chat-scoped SSE/tool filtering after source-side chatId guarantees were added to streaming emitters.
- * - 2026-02-20: Allow `hitl-option-request` system events to bypass strict chatId filtering so approval prompts are not dropped by chat-scope mismatch.
+ * - 2026-02-20: Added chat-scoped HITL prompt replay safeguards for prompt delivery during subscription attach timing races.
  * - 2026-02-16: Fixed activity events (response-start, idle) being filtered out when subscription has a chatId — activity events are world-level and carry no chatId.
  * - 2026-02-13: Added system-event forwarding for chat-title update notifications to renderer subscribers.
  * - 2026-02-13: Preserved unsubscribe tombstones across runtime resets and lifecycle cleanup to keep subscription IDs non-reusable.

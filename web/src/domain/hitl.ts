@@ -15,7 +15,7 @@
  * - Default option falls back to `no` when present, otherwise first option.
  *
  * Recent Changes:
- * - 2026-02-20: Enforced options-only parsing for `hitl-option-request` payloads.
+ * - 2026-02-26: Clarified helper support for tool-progress `hitlPrompt` payloads and pending prompt envelopes.
  * - 2026-02-14: Added initial HITL prompt parsing/queue helpers for web client flows.
  */
 
