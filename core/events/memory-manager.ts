@@ -20,6 +20,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-27: Suppress repeated identical `load_skill` tool calls within the same continuation run once a prior same-run load succeeded.
  * - 2026-02-27: Added per-chat/agent continuation run lock in `continueLLMAfterToolExecution` to skip concurrent duplicate continuation runs while tools are pending/executing (prevents duplicate HITL approval prompts).
  * - 2026-02-26: Replaced `resumePendingToolCallsForChat` console traces with categorized structured logger events (`chat.restore.resume.tools`) for env-controlled restore diagnostics.
  * - 2026-02-24: Commented out hardcoded Infinite-Etude handoff safeguard to respect separation of concerns (logic moved to agent prompt).
@@ -106,6 +107,7 @@ type ActiveContinuationRun = {
 };
 
 const activeContinuationRuns = new Map<string, ActiveContinuationRun>();
+const continuationRunLoadedSkills = new Map<string, Set<string>>();
 
 function normalizeContinuationChatId(chatId: string | null | undefined): string {
   if (chatId === undefined || chatId === null) {
@@ -141,6 +143,32 @@ function leaveContinuationScope(scopeKey: string, runId: string): void {
   if (activeRun.depth <= 0) {
     activeContinuationRuns.delete(scopeKey);
   }
+}
+
+function isContinuationRunActive(runId: string): boolean {
+  for (const activeRun of activeContinuationRuns.values()) {
+    if (activeRun.runId === runId) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function getLoadedSkillsForContinuationRun(runId: string): Set<string> {
+  const existing = continuationRunLoadedSkills.get(runId);
+  if (existing) {
+    return existing;
+  }
+  const created = new Set<string>();
+  continuationRunLoadedSkills.set(runId, created);
+  return created;
+}
+
+function cleanupContinuationRunState(runId: string): void {
+  if (isContinuationRunActive(runId)) {
+    return;
+  }
+  continuationRunLoadedSkills.delete(runId);
 }
 
 type TitlePromptMessage = {
@@ -285,6 +313,21 @@ function parseToolCallArguments(rawArguments: unknown): Record<string, any> {
   }
 
   return {};
+}
+
+function getLoadSkillIdFromToolArgs(toolArgs: Record<string, any>): string | null {
+  const skillId = typeof toolArgs?.skill_id === 'string' ? toolArgs.skill_id.trim() : '';
+  return skillId || null;
+}
+
+function getLoadSkillIdFromRawToolArguments(rawArguments: unknown): string | null {
+  const parsed = parseToolCallArguments(rawArguments);
+  return getLoadSkillIdFromToolArgs(parsed);
+}
+
+function isSuccessfulLoadSkillResult(toolResult: string): boolean {
+  const normalized = String(toolResult || '');
+  return /<skill_context\b/i.test(normalized) && !/<error>/i.test(normalized);
 }
 
 function getLatestUnresolvedToolCallForChat(
@@ -488,6 +531,7 @@ export async function resumePendingToolCallsForChat(
       toolName: toolCall.function.name,
       toolCallId: toolCall.id,
     });
+    let seededLoadSkillIdForContinuation: string | null = null;
 
     publishToolEvent(world, {
       agentName: agent.id,
@@ -520,6 +564,12 @@ export async function resumePendingToolCallsForChat(
       const serializedToolResult = typeof toolResult === 'string'
         ? toolResult
         : JSON.stringify(toolResult) ?? String(toolResult);
+      if (toolCall.function.name === 'load_skill') {
+        const requestedSkillId = getLoadSkillIdFromToolArgs(toolArgs);
+        if (requestedSkillId && isSuccessfulLoadSkillResult(serializedToolResult)) {
+          seededLoadSkillIdForContinuation = requestedSkillId;
+        }
+      }
 
       const toolResultMessage: AgentMessage = {
         role: 'tool',
@@ -620,12 +670,15 @@ export async function resumePendingToolCallsForChat(
       agentId: agent.id,
       toolCallId: toolCall.id,
     });
-    await continueLLMAfterToolExecution(world, agent, chatId);
+    await continueLLMAfterToolExecution(world, agent, chatId, {
+      ...(seededLoadSkillIdForContinuation ? { preloadedSkillIds: [seededLoadSkillIdForContinuation] } : {}),
+    });
     loggerRestoreResumeTools.debug('Resume pending tool calls continued LLM after tool execution', {
       worldId: world.id,
       chatId,
       agentId: agent.id,
       toolCallId: toolCall.id,
+      ...(seededLoadSkillIdForContinuation ? { seededLoadSkillIdForContinuation } : {}),
     });
     resumedCount += 1;
   }
@@ -886,6 +939,8 @@ export async function continueLLMAfterToolExecution(
     emptyTextRetryCount?: number;
     emptyToolCallRetryCount?: number;
     continuationRunId?: string;
+    transientContinuationInstruction?: string;
+    preloadedSkillIds?: string[];
   }
 ): Promise<void> {
   const continuationChatId = chatId !== undefined ? chatId : world.currentChatId ?? null;
@@ -908,6 +963,13 @@ export async function continueLLMAfterToolExecution(
   }
 
   const completeActivity = beginWorldActivity(world, `agent:${agent.id}`, chatId ?? undefined);
+  const loadedSkillsForRun = getLoadedSkillsForContinuationRun(continuationRunId);
+  for (const preloadedSkillId of options?.preloadedSkillIds || []) {
+    const normalizedSkillId = String(preloadedSkillId || '').trim();
+    if (normalizedSkillId) {
+      loadedSkillsForRun.add(normalizedSkillId);
+    }
+  }
   try {
     let hopCount = options?.hopCount ?? 0;
     const maxToolHops = 50;
@@ -915,7 +977,7 @@ export async function continueLLMAfterToolExecution(
     const maxEmptyTextRetries = 2;
     const emptyToolCallRetryCount = options?.emptyToolCallRetryCount ?? 0;
     const maxEmptyToolCallRetries = 2;
-    let transientGuardrailError: string | undefined;
+    let transientGuardrailError: string | undefined = options?.transientContinuationInstruction;
 
     if (hopCount > maxToolHops) {
       const guardrailErrorMessage = `[Error] Tool continuation exceeded ${maxToolHops} hops. Guardrail triggered; reporting error and continuing.`;
@@ -1289,6 +1351,36 @@ export async function continueLLMAfterToolExecution(
         return;
       }
 
+      let requestedLoadSkillId: string | null = null;
+      if (toolCall.function.name === 'load_skill') {
+        try {
+          requestedLoadSkillId = getLoadSkillIdFromRawToolArguments(toolCall.function.arguments);
+        } catch {
+          requestedLoadSkillId = null;
+        }
+      }
+
+      if (requestedLoadSkillId && loadedSkillsForRun.has(requestedLoadSkillId)) {
+        loggerAgent.debug('Suppressing duplicate load_skill call in continuation run', {
+          worldId: world.id,
+          agentId: agent.id,
+          chatId: targetChatId,
+          continuationRunId,
+          skillId: requestedLoadSkillId,
+          toolCallId: toolCall.id,
+        });
+
+        throwIfMessageProcessingStopped(options?.abortSignal);
+        await continueLLMAfterToolExecution(world, agent, targetChatId, {
+          ...options,
+          hopCount: hopCount + 1,
+          continuationRunId,
+          transientContinuationInstruction:
+            `System notice: Suppressed duplicate load_skill("${requestedLoadSkillId}") in this run because the skill was already loaded. Continue the task using the existing skill context without calling load_skill again for this skill.`,
+        });
+        return;
+      }
+
       const assistantToolCallMessage: AgentMessage = {
         role: 'assistant',
         content: llmResponse.content || `Calling tool: ${toolCall.function.name}`,
@@ -1381,6 +1473,7 @@ export async function continueLLMAfterToolExecution(
       let toolArgs: Record<string, any> = {};
       try {
         toolArgs = parseToolCallArguments(toolCall.function.arguments);
+        requestedLoadSkillId = requestedLoadSkillId || getLoadSkillIdFromToolArgs(toolArgs);
       } catch (parseError) {
         const parseErrorResult: AgentMessage = {
           role: 'tool',
@@ -1455,6 +1548,14 @@ export async function continueLLMAfterToolExecution(
         const serializedToolResult = typeof toolResult === 'string'
           ? toolResult
           : JSON.stringify(toolResult) ?? String(toolResult);
+
+        if (
+          toolCall.function.name === 'load_skill'
+          && requestedLoadSkillId
+          && isSuccessfulLoadSkillResult(serializedToolResult)
+        ) {
+          loadedSkillsForRun.add(requestedLoadSkillId);
+        }
 
         const toolResultMessage: AgentMessage = {
           role: 'tool',
@@ -1678,6 +1779,7 @@ export async function continueLLMAfterToolExecution(
     });
   } finally {
     leaveContinuationScope(continuationScopeKey, continuationRunId);
+    cleanupContinuationRunState(continuationRunId);
     completeActivity();
   }
 }

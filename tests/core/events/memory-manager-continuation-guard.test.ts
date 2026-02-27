@@ -14,6 +14,7 @@
  * - Avoids any real provider/tool execution and filesystem-backed state.
  *
  * Recent Changes:
+ * - 2026-02-27: Added coverage to suppress repeated identical `load_skill` tool calls within one continuation run.
  * - 2026-02-27: Added initial concurrency guard coverage for continuation runs.
  */
 
@@ -26,6 +27,8 @@ const mocks = vi.hoisted(() => ({
   prepareMessagesForLLM: vi.fn(async () => []),
   generateAgentResponse: vi.fn(),
   publishMessageWithId: vi.fn(),
+  getMCPToolsForWorld: vi.fn(),
+  loadSkillExecute: vi.fn(),
 }));
 
 vi.mock('../../../core/storage/storage-factory.js', () => ({
@@ -49,6 +52,10 @@ vi.mock('../../../core/llm-manager.js', async () => {
     generateAgentResponse: mocks.generateAgentResponse,
   };
 });
+
+vi.mock('../../../core/mcp-server-registry.js', () => ({
+  getMCPToolsForWorld: mocks.getMCPToolsForWorld,
+}));
 
 vi.mock('../../../core/events/publishers.js', () => ({
   publishMessage: vi.fn(),
@@ -125,12 +132,36 @@ function buildTextResponse(messageId: string, content = 'done') {
   };
 }
 
+function buildToolCallResponse(messageId: string, toolCallId: string, toolName: string, args: Record<string, unknown>, content?: string) {
+  return {
+    response: {
+      type: 'tool_calls' as const,
+      content: content ?? `Calling tool: ${toolName}`,
+      tool_calls: [{
+        id: toolCallId,
+        type: 'function' as const,
+        function: {
+          name: toolName,
+          arguments: JSON.stringify(args),
+        },
+      }],
+      assistantMessage: {
+        role: 'assistant' as const,
+        content: content ?? `Calling tool: ${toolName}`,
+      },
+    },
+    messageId,
+  };
+}
+
 describe('continueLLMAfterToolExecution guard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
     mocks.saveAgent.mockResolvedValue(undefined);
     mocks.prepareMessagesForLLM.mockResolvedValue([]);
+    mocks.getMCPToolsForWorld.mockResolvedValue({});
+    mocks.loadSkillExecute.mockReset();
   });
 
   it('skips duplicate concurrent continuation run for same scope', async () => {
@@ -178,5 +209,92 @@ describe('continueLLMAfterToolExecution guard', () => {
 
     expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(2);
     expect(mocks.publishMessageWithId).toHaveBeenCalledTimes(2);
+  });
+
+  it('suppresses repeated identical load_skill calls in the same continuation run', async () => {
+    mocks.generateAgentResponse
+      .mockResolvedValueOnce(
+        buildToolCallResponse(
+          'assistant-tool-1',
+          'call-load-skill-1',
+          'load_skill',
+          { skill_id: 'find-skills' },
+          'Calling tool: load_skill (skill_id: "find-skills")',
+        ),
+      )
+      .mockResolvedValueOnce(
+        buildToolCallResponse(
+          'assistant-tool-2',
+          'call-load-skill-2',
+          'load_skill',
+          { skill_id: 'find-skills' },
+          'Calling tool: load_skill',
+        ),
+      )
+      .mockResolvedValueOnce(buildTextResponse('assistant-final', 'final answer'));
+
+    mocks.loadSkillExecute.mockResolvedValue('<skill_context id="find-skills"><instructions># Find Skills</instructions></skill_context>');
+    mocks.getMCPToolsForWorld.mockResolvedValue({
+      load_skill: {
+        execute: mocks.loadSkillExecute,
+      },
+    });
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    const world = createWorld();
+    const agent = createAgent();
+
+    await continueLLMAfterToolExecution(world, agent, 'chat-1');
+
+    expect(mocks.loadSkillExecute).toHaveBeenCalledTimes(1);
+    expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(3);
+
+    const loadSkillAssistantCalls = agent.memory.filter((message: any) =>
+      message.role === 'assistant'
+      && Array.isArray(message.tool_calls)
+      && message.tool_calls.some((toolCall: any) => toolCall?.function?.name === 'load_skill')
+    );
+    expect(loadSkillAssistantCalls).toHaveLength(1);
+    expect(mocks.publishMessageWithId).toHaveBeenCalledTimes(1);
+  });
+
+  it('suppresses immediate duplicate load_skill when skill is preloaded before continuation starts', async () => {
+    mocks.generateAgentResponse
+      .mockResolvedValueOnce(
+        buildToolCallResponse(
+          'assistant-tool-1',
+          'call-load-skill-dup',
+          'load_skill',
+          { skill_id: 'find-skills' },
+          'Calling tool: load_skill',
+        ),
+      )
+      .mockResolvedValueOnce(buildTextResponse('assistant-final-2', 'done without duplicate'));
+
+    mocks.loadSkillExecute.mockResolvedValue('<skill_context id="find-skills"><instructions># Find Skills</instructions></skill_context>');
+    mocks.getMCPToolsForWorld.mockResolvedValue({
+      load_skill: {
+        execute: mocks.loadSkillExecute,
+      },
+    });
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    const world = createWorld();
+    const agent = createAgent();
+
+    await continueLLMAfterToolExecution(world, agent, 'chat-1', {
+      preloadedSkillIds: ['find-skills'],
+    });
+
+    expect(mocks.loadSkillExecute).toHaveBeenCalledTimes(0);
+    expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(2);
+
+    const loadSkillAssistantCalls = agent.memory.filter((message: any) =>
+      message.role === 'assistant'
+      && Array.isArray(message.tool_calls)
+      && message.tool_calls.some((toolCall: any) => toolCall?.function?.name === 'load_skill')
+    );
+    expect(loadSkillAssistantCalls).toHaveLength(0);
+    expect(mocks.publishMessageWithId).toHaveBeenCalledTimes(1);
   });
 });
