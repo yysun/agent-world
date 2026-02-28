@@ -13,6 +13,8 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-02-28: Skill scope and per-skill settings toggles now autosave immediately when changed.
+ * - 2026-02-28: Opening System Settings now triggers a skill-registry refresh to keep the settings skill list current.
  * - 2026-02-27: Added system setting support to show/hide tool-related transcript rows in the main message area.
  * - 2026-02-27: Replaced header refresh with a logs action and added a unified right-panel logs stream (main + renderer) with bounded in-memory buffering.
  * - 2026-02-27: Passed UI-selected project folder into world-management create flow so new worlds can inherit `working_directory`; load/switch continue to mirror world `cwd`.
@@ -601,6 +603,8 @@ export default function App() {
     visibleSkillRegistryEntries,
     globalSkillEntries,
     projectSkillEntries,
+    setGlobalSkillsEnabled,
+    setProjectSkillsEnabled,
     toggleSkillEnabled,
     loadSystemSettings,
     resetSystemSettings,
@@ -917,6 +921,7 @@ export default function App() {
     loadSystemSettings,
     resetSystemSettings,
     saveSystemSettings,
+    refreshSkillRegistry,
   });
 
   const agentStatusInput = useMemo(
@@ -1108,9 +1113,11 @@ export default function App() {
     api,
     globalSkillEntries,
     disabledGlobalSkillIdSet,
+    setGlobalSkillsEnabled,
     toggleSkillEnabled,
     projectSkillEntries,
     disabledProjectSkillIdSet,
+    setProjectSkillsEnabled,
     onCancelSettings,
     savingSystemSettings,
     onSaveSettings,

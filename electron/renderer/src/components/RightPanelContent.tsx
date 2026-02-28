@@ -13,6 +13,7 @@
  * - Receives all mutation handlers and state via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-28: Skill scope and per-skill switches now persist immediately (autosave) instead of waiting for footer Save.
  * - 2026-02-27: Hid per-skill rows for global/project sections when their parent section toggle is off.
  * - 2026-02-27: Added `Show tool messages` settings toggle above skill options to control tool-card visibility in the main transcript area.
  * - 2026-02-27: Adjusted logs autoscroll to only stick when already near bottom so manual scrolling stays usable during live streaming.
@@ -95,9 +96,11 @@ export default function RightPanelContent({
   api,
   globalSkillEntries,
   disabledGlobalSkillIdSet,
+  setGlobalSkillsEnabled,
   toggleSkillEnabled,
   projectSkillEntries,
   disabledProjectSkillIdSet,
+  setProjectSkillsEnabled,
   onCancelSettings,
   savingSystemSettings,
   onSaveSettings,
@@ -401,7 +404,8 @@ export default function RightPanelContent({
                   <SettingsSwitch
                     label="Enable Global Skills"
                     checked={systemSettings.enableGlobalSkills !== false}
-                    onClick={() => setSystemSettings((settings) => ({ ...settings, enableGlobalSkills: settings.enableGlobalSkills === false }))}
+                    onClick={() => setGlobalSkillsEnabled(systemSettings.enableGlobalSkills === false)}
+                    disabled={savingSystemSettings}
                   />
                   {systemSettings.enableGlobalSkills !== false ? (
                     <div className="ml-1 space-y-0.5">
@@ -412,7 +416,7 @@ export default function RightPanelContent({
                             label={entry.skillId}
                             checked={!disabledGlobalSkillIdSet.has(entry.skillId)}
                             onClick={() => toggleSkillEnabled('global', entry.skillId)}
-                            disabled={false}
+                            disabled={savingSystemSettings}
                           />
                         ))
                       ) : (
@@ -424,7 +428,8 @@ export default function RightPanelContent({
                   <SettingsSwitch
                     label="Enable Project Skills"
                     checked={systemSettings.enableProjectSkills !== false}
-                    onClick={() => setSystemSettings((settings) => ({ ...settings, enableProjectSkills: settings.enableProjectSkills === false }))}
+                    onClick={() => setProjectSkillsEnabled(systemSettings.enableProjectSkills === false)}
+                    disabled={savingSystemSettings}
                   />
                   {systemSettings.enableProjectSkills !== false ? (
                     <div className="ml-1 space-y-0.5">
@@ -435,7 +440,7 @@ export default function RightPanelContent({
                             label={entry.skillId}
                             checked={!disabledProjectSkillIdSet.has(entry.skillId)}
                             onClick={() => toggleSkillEnabled('project', entry.skillId)}
-                            disabled={false}
+                            disabled={savingSystemSettings}
                           />
                         ))
                       ) : (

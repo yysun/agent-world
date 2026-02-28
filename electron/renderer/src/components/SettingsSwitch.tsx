@@ -12,10 +12,11 @@
  * - `onClick` is required for toggling behavior.
  *
  * Recent Changes:
+ * - 2026-02-28: Added optional disabled state to support autosave-in-progress guards for skill switches.
  * - 2026-02-16: Extracted from `App.jsx` as part of renderer refactor Phase 2.
  */
 
-export default function SettingsSwitch({ label, checked, onClick }) {
+export default function SettingsSwitch({ label, checked, onClick, disabled = false }) {
   return (
     <div className="flex items-center justify-between rounded-md pr-1 py-1">
       <span className="text-xs font-bold text-sidebar-foreground/90">{label}</span>
@@ -25,7 +26,8 @@ export default function SettingsSwitch({ label, checked, onClick }) {
         aria-label={label}
         aria-checked={checked}
         onClick={onClick}
-        className="rounded-full"
+        disabled={disabled}
+        className="rounded-full disabled:cursor-not-allowed disabled:opacity-60"
       >
         <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${checked ? 'bg-sidebar-primary/62' : 'bg-sidebar-foreground/24'}`}>
           <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${checked ? 'translate-x-4' : 'translate-x-1'}`} />

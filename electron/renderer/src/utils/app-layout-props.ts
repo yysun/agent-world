@@ -12,6 +12,7 @@
  * - Data-only transformations from provided inputs.
  *
  * Recent Changes:
+ * - 2026-02-28: Added right-panel settings autosave handlers wiring for skill scope toggles.
  * - 2026-02-27: Added `showToolMessages` wiring to message-list props for transcript-level tool-row visibility control.
  * - 2026-02-27: Added right-panel logs props wiring (`panelLogs`, `onClearPanelLogs`) and replaced header refresh wiring with `onOpenLogsPanel`.
  * - 2026-02-26: Added right-panel import props wiring (`onImportWorld`) to support import form mode.
@@ -96,9 +97,11 @@ export function createMainContentRightPanelContentProps<T extends PropBag>(input
     api: input.api,
     globalSkillEntries: input.globalSkillEntries,
     disabledGlobalSkillIdSet: input.disabledGlobalSkillIdSet,
+    setGlobalSkillsEnabled: input.setGlobalSkillsEnabled,
     toggleSkillEnabled: input.toggleSkillEnabled,
     projectSkillEntries: input.projectSkillEntries,
     disabledProjectSkillIdSet: input.disabledProjectSkillIdSet,
+    setProjectSkillsEnabled: input.setProjectSkillsEnabled,
     onCancelSettings: input.onCancelSettings,
     savingSystemSettings: input.savingSystemSettings,
     onSaveSettings: input.onSaveSettings,

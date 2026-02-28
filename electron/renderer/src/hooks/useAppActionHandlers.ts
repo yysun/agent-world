@@ -13,6 +13,8 @@
  * - Uses dependency injection for state setters and collaborators.
  *
  * Recent Changes:
+ * - 2026-02-28: Updated settings-header action to toggle the right panel closed when settings mode is already active.
+ * - 2026-02-28: Added settings-open flow helper that refreshes skill registry when System Settings panel is opened.
  * - 2026-02-27: Updated `onOpenLogsPanel` to toggle the right panel when logs mode is already active.
  * - 2026-02-27: Added `onOpenLogsPanel` action to open the right panel in unified logs mode from the header.
  * - 2026-02-26: Added `onOpenImportWorldPanel` to route world-import action into right-panel import form mode.
@@ -31,6 +33,43 @@ import { safeMessage } from '../domain/desktop-api';
 import { upsertEnvVariable } from '../utils/data-transform';
 import { getRefreshWarning } from '../utils/formatting';
 import { validateAgentForm } from '../utils/validation';
+
+type OpenSettingsPanelArgs = {
+  setPanelMode: (mode: string) => void;
+  setPanelOpen: (open: boolean) => void;
+  loadSystemSettings: () => Promise<void>;
+  refreshSkillRegistry?: () => Promise<void>;
+  panelMode?: string;
+  panelOpen?: boolean;
+};
+
+async function runBestEffortAsync(task: (() => Promise<void>) | undefined): Promise<void> {
+  if (!task) return;
+  try {
+    await task();
+  } catch { }
+}
+
+export async function openSettingsPanel({
+  setPanelMode,
+  setPanelOpen,
+  loadSystemSettings,
+  refreshSkillRegistry,
+  panelMode,
+  panelOpen,
+}: OpenSettingsPanelArgs): Promise<void> {
+  if (panelOpen && panelMode === 'settings') {
+    setPanelOpen(false);
+    return;
+  }
+
+  setPanelMode('settings');
+  setPanelOpen(true);
+  await Promise.all([
+    runBestEffortAsync(loadSystemSettings),
+    runBestEffortAsync(refreshSkillRegistry),
+  ]);
+}
 
 export function useAppActionHandlers({
   api,
@@ -64,6 +103,7 @@ export function useAppActionHandlers({
   loadSystemSettings,
   resetSystemSettings,
   saveSystemSettings,
+  refreshSkillRegistry,
 }) {
   const closePanel = useCallback(() => {
     const {
@@ -87,12 +127,15 @@ export function useAppActionHandlers({
   }, [closePanelNeeds, setPanelMode, setPanelOpen, setSelectedAgentId]);
 
   const onOpenSettingsPanel = useCallback(async () => {
-    setPanelMode('settings');
-    setPanelOpen(true);
-    try {
-      await loadSystemSettings();
-    } catch { }
-  }, [loadSystemSettings, setPanelMode, setPanelOpen]);
+    await openSettingsPanel({
+      setPanelMode,
+      setPanelOpen,
+      loadSystemSettings,
+      refreshSkillRegistry,
+      panelMode,
+      panelOpen,
+    });
+  }, [loadSystemSettings, panelMode, panelOpen, refreshSkillRegistry, setPanelMode, setPanelOpen]);
 
   const onCancelSettings = useCallback(() => {
     resetSystemSettings();
