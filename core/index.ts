@@ -76,7 +76,12 @@ export {
 
 // === MCP MANAGEMENT ===
 export {
-  clearToolsCache
+  clearToolsCache,
+  isUiCapableTool,
+  getMcpUiResourceUri,
+  readMcpUiResource,
+  getMcpServerInfo,
+  callMcpTool,
 } from './mcp-server-registry.js';
 
 export {

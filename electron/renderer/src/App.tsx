@@ -1060,6 +1060,7 @@ export default function App() {
   }, [messages, systemSettings.showToolMessages]);
 
   const mainContentMessageListProps = createMainContentMessageListProps({
+    worldId: loadedWorld?.id,
     messagesContainerRef,
     messagesLoading: loading.messages,
     hasConversationMessages,

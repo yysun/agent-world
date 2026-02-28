@@ -21,13 +21,29 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { copyFileSync, mkdirSync } from 'node:fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Plugin: copy mcp-sandbox-proxy.html from electron/assets/ to renderer dist after build.
+const copyMcpSandboxProxy = {
+  name: 'copy-mcp-sandbox-proxy',
+  writeBundle() {
+    const src = path.resolve(__dirname, 'assets/mcp-sandbox-proxy.html');
+    const dest = path.resolve(__dirname, 'renderer/dist/mcp-sandbox-proxy.html');
+    try {
+      mkdirSync(path.dirname(dest), { recursive: true });
+      copyFileSync(src, dest);
+    } catch (err) {
+      console.warn('[copy-mcp-sandbox-proxy] Failed to copy:', err);
+    }
+  }
+};
+
 export default defineConfig({
   root: path.resolve(__dirname, 'renderer'),
-  plugins: [react()],
+  plugins: [react(), copyMcpSandboxProxy],
   base: './',
   server: {
     host: '127.0.0.1',

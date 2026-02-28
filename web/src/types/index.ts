@@ -136,6 +136,10 @@ export interface Message {
   // Phase 5: Collapsible tool output
   isToolOutputExpanded?: boolean;
 
+  // MCP App UI panel fields (set when tool result has an associated interactive UI)
+  uiResourceUri?: string;
+  serverKey?: string;
+
 }
 
 export interface SheetMusicData {
@@ -223,6 +227,7 @@ export interface ToolEntry {
 // World Chat Component Props
 export interface WorldChatProps {
   worldName: string;
+  worldId?: string;
   messages?: Message[];
   rawMessages?: Message[]; // Raw messages before deduplication for filtering
   userInput?: string;
@@ -251,6 +256,10 @@ export interface WorldChatProps {
   // HITL inline prompt card
   activeHitlPrompt?: HitlPromptRequest | null;
   submittingHitlRequestId?: string | null;
+
+  // MCP App UI panel state (passed from World component)
+  mcpUiBundles?: Record<string, string>;
+  dismissedMcpPanelIds?: string[];
 }
 
 // World Settings Component Props
@@ -391,6 +400,10 @@ export interface WorldComponentState extends SSEComponentState {
   rightPanelTab: RightPanelTab;
   isRightPanelOpen: boolean;
   viewportMode: WorldViewportMode;
+
+  // MCP App UI panel state
+  mcpUiBundles: Record<string, string>;      // resourceUri → HTML bundle
+  dismissedMcpPanelIds: string[];            // Dismissed panel keys
 }
 
 // ========================================

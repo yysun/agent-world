@@ -66,7 +66,9 @@ export const DESKTOP_INVOKE_CHANNELS = {
   SETTINGS_GET: 'settings:get',
   SETTINGS_SAVE: 'settings:save',
   DIALOG_PICK_FILE: 'dialog:pickFile',
-  CHAT_GET_EVENTS: 'chat:getEvents'
+  CHAT_GET_EVENTS: 'chat:getEvents',
+  MCP_READ_UI_RESOURCE: 'mcp:readUiResource',
+  MCP_PROXY_TOOL_CALL: 'mcp:proxyToolCall',
 } as const;
 
 export type DesktopInvokeChannel =
@@ -166,6 +168,19 @@ export interface RendererLoggingConfig {
   nodeEnv: string;
 }
 
+export interface McpReadUiResourcePayload {
+  worldId: string;
+  serverKey: string;
+  resourceUri: string;
+}
+
+export interface McpProxyToolCallPayload {
+  worldId: string;
+  serverKey: string;
+  toolName: string;
+  args: unknown;
+}
+
 export interface DesktopApi {
   getWorkspace: () => Promise<unknown>;
   openWorkspace: (directoryPath?: string) => Promise<unknown>;
@@ -204,4 +219,6 @@ export interface DesktopApi {
   saveSettings: (settings: Record<string, unknown>) => Promise<unknown>;
   pickFile: () => Promise<unknown>;
   getChatEvents: (worldId: string, chatId: string) => Promise<unknown>;
+  mcpReadUiResource: (payload: McpReadUiResourcePayload) => Promise<{ html: string }>;
+  mcpProxyToolCall: (payload: McpProxyToolCallPayload) => Promise<unknown>;
 }

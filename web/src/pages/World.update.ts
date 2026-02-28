@@ -191,6 +191,9 @@ const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): M
     // Pass through tool_calls and tool_call_id for frontend formatting
     tool_calls: memoryData.tool_calls || memoryData.toolCalls,
     tool_call_id: memoryData.tool_call_id || memoryData.toolCallId,
+    // MCP App UI fields (only present on tool-result messages from UI-capable tools)
+    uiResourceUri: typeof memoryData.uiResourceUri === 'string' ? memoryData.uiResourceUri : undefined,
+    serverKey: typeof memoryData.serverKey === 'string' ? memoryData.serverKey : undefined,
   } as Message;
 };
 
@@ -856,6 +859,9 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
     chatId: messageData.chatId,
     replyToMessageId: messageData.replyToMessageId,
     role: messageData.role, // Preserve role for filtering
+    // MCP App UI fields (only present on tool-result messages from UI-capable tools)
+    uiResourceUri: typeof messageData.uiResourceUri === 'string' ? messageData.uiResourceUri : undefined,
+    serverKey: typeof messageData.serverKey === 'string' ? messageData.serverKey : undefined,
   };
 
   const existingMessages = state.messages || [];
@@ -1621,4 +1627,18 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
 
   'clear-world-messages': async (state: WorldComponentState): Promise<WorldComponentState> =>
     AgentManagementDomain.clearWorldMessages(state, state.worldName),
+
+  // ========================================
+  // MCP APP UI PANELS
+  // ========================================
+
+  'mcp-ui-bundle-loaded': (state: WorldComponentState, { resourceUri, html }: { resourceUri: string; html: string }): WorldComponentState => ({
+    ...state,
+    mcpUiBundles: { ...state.mcpUiBundles, [resourceUri]: html },
+  }),
+
+  'mcp-ui-panel-dismiss': (state: WorldComponentState, panelId: string): WorldComponentState => ({
+    ...state,
+    dismissedMcpPanelIds: [...(state.dismissedMcpPanelIds || []), panelId],
+  }),
 };

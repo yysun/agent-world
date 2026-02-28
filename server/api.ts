@@ -98,6 +98,7 @@ import {
   getMCPRegistryStats,
   MCPServerInstance
 } from '../core/mcp-server-registry.js';
+import { readMcpUiResource, callMcpTool } from '../core/index.js';
 
 // Function-specific loggers for granular debugging control
 const loggerWorld = createCategoryLogger('api.world');
@@ -1331,6 +1332,51 @@ router.get('/mcp/health', async (req: Request, res: Response): Promise<void> => 
       timestamp: new Date().toISOString(),
       error: 'Failed to get MCP system health'
     });
+  }
+});
+
+// MCP App: read a UI resource HTML bundle for a world's MCP server.
+const McpReadUiResourceSchema = z.object({
+  serverKey: z.string().min(1),
+  resourceUri: z.string().min(1)
+});
+
+router.post('/worlds/:worldName/mcp/ui-resource', validateWorld, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const validation = McpReadUiResourceSchema.safeParse(req.body);
+    if (!validation.success) {
+      sendError(res, 400, 'serverKey and resourceUri are required', 'INVALID_REQUEST');
+      return;
+    }
+    const { serverKey, resourceUri } = validation.data;
+    const html = await readMcpUiResource(serverKey, resourceUri);
+    res.json({ html });
+  } catch (error) {
+    loggerMcp.error('Error reading MCP UI resource', { error: error instanceof Error ? error.message : error });
+    sendError(res, 500, 'Failed to read MCP UI resource', 'MCP_UI_RESOURCE_ERROR');
+  }
+});
+
+// MCP App: proxy a tool call from a sandboxed MCP App UI.
+const McpProxyToolCallSchema = z.object({
+  serverKey: z.string().min(1),
+  toolName: z.string().min(1),
+  args: z.unknown().optional()
+});
+
+router.post('/worlds/:worldName/mcp/tool-proxy', validateWorld, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const validation = McpProxyToolCallSchema.safeParse(req.body);
+    if (!validation.success) {
+      sendError(res, 400, 'serverKey and toolName are required', 'INVALID_REQUEST');
+      return;
+    }
+    const { serverKey, toolName, args } = validation.data;
+    const result = await callMcpTool(serverKey, toolName, args ?? {});
+    res.json({ result });
+  } catch (error) {
+    loggerMcp.error('Error proxying MCP tool call', { error: error instanceof Error ? error.message : error });
+    sendError(res, 500, 'Failed to proxy MCP tool call', 'MCP_TOOL_PROXY_ERROR');
   }
 });
 

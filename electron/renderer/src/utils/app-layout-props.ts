@@ -29,6 +29,7 @@ type PropBag = Record<string, unknown>;
 
 export function createMainContentMessageListProps<T extends PropBag>(input: T) {
   return {
+    worldId: input.worldId,
     messagesContainerRef: input.messagesContainerRef,
     messagesLoading: input.messagesLoading,
     hasConversationMessages: input.hasConversationMessages,

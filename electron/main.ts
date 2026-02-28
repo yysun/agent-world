@@ -73,7 +73,7 @@
  * - 2026-02-09: Added automatic world loading from folders with error handling
  * - 2026-02-08: Added real-time chat event streaming with multi-subscription support
  */
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, net, protocol } from 'electron';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -146,6 +146,8 @@ const {
   subscribeWorld,
   updateWorld,
   removeMessagesFrom,
+  readMcpUiResource,
+  callMcpTool,
   LLMProvider,
   configureLLMProvider,
   addLogStreamCallback,
@@ -247,6 +249,8 @@ const ipcHandlers = createMainIpcHandlers({
   removeMessagesFrom,
   createStorage,
   createStorageFromEnv,
+  readMcpUiResource,
+  callMcpTool,
   GitHubWorldImportError,
   stageGitHubWorldFromShorthand,
   loggerIpc: mainIpcLogger,
@@ -304,7 +308,9 @@ function registerIpcHandlers() {
       }
       return true;
     },
-    openFileDialog: ipcHandlers.openFileDialog
+    openFileDialog: ipcHandlers.openFileDialog,
+    mcpReadUiResource: ipcHandlers.mcpReadUiResource,
+    mcpProxyToolCall: ipcHandlers.mcpProxyToolCall
   });
   registerIpcRoutes(ipcMain, routes);
 }
@@ -377,6 +383,15 @@ function setupAppLifecycle() {
 
 async function bootstrap() {
   await app.whenReady();
+
+  // Register the app:// custom protocol so the MCP sandbox proxy page is served at
+  // app://host/mcp-sandbox-proxy.html — giving it a stable, consistent origin for
+  // postMessage validation inside the double-iframe sandbox pattern.
+  protocol.handle('app', (request) => {
+    const url = new URL(request.url);
+    const filePath = path.join(__dirname, 'assets', url.pathname.replace(/^\//, ''));
+    return net.fetch(`file://${filePath}`);
+  });
 
   // Re-apply persisted settings after Electron is ready to ensure userData-backed
   // preferences are resolved consistently across startup environments.

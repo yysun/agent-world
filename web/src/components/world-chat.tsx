@@ -27,6 +27,28 @@ import { shouldHideWorldChatMessage } from '../domain/message-visibility';
 import { isToolResultMessage, renderMessageContent } from '../domain/message-content';
 import { ActivityPulse, ElapsedTimeCounter } from './activity-indicators';
 import { AgentQueueDisplay } from './agent-queue-display';
+import McpAppPanel from './mcp-app-panel';
+
+/** Module-level set to track in-flight UI bundle fetches and avoid duplicates. */
+const mcpBundleFetchPending = new Set<string>();
+
+function triggerMcpBundleFetch(worldId: string, serverKey: string, resourceUri: string): void {
+  if (mcpBundleFetchPending.has(resourceUri)) return;
+  mcpBundleFetchPending.add(resourceUri);
+  fetch(`/api/worlds/${encodeURIComponent(worldId)}/mcp/ui-resource`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serverKey, resourceUri }),
+  })
+    .then((r) => r.json())
+    .then(({ html }: { html: string }) => {
+      if (typeof html === 'string') {
+        app.run('mcp-ui-bundle-loaded', { resourceUri, html });
+      }
+    })
+    .catch(() => {})
+    .finally(() => mcpBundleFetchPending.delete(resourceUri));
+}
 
 const debug = false;
 const SYSTEM_AVATAR_SPRITE_INDEX = 4;
@@ -99,6 +121,7 @@ export function getComposerActionState(params: {
 export default function WorldChat(props: WorldChatProps) {
   const {
     worldName,
+    worldId,
     messages = [], // Default to empty array if undefined
     rawMessages = [], // Raw messages before deduplication for filtering
     userInput = '', // Default to empty string if undefined
@@ -119,6 +142,8 @@ export default function WorldChat(props: WorldChatProps) {
     isStopping = false,
     activeHitlPrompt = null,
     submittingHitlRequestId = null,
+    mcpUiBundles = {},
+    dismissedMcpPanelIds = [],
   } = props;
 
   const { canStopCurrentSession, composerDisabled, actionButtonDisabled, actionButtonClass, actionButtonLabel } = getComposerActionState({
@@ -454,8 +479,20 @@ export default function WorldChat(props: WorldChatProps) {
                 displayLabel = message.sender;
               }
 
+              // MCP App UI panel: check if this tool-result message has a UI-capable tool.
+              const uiResourceUri = (message as any).uiResourceUri as string | undefined;
+              const msgServerKey = (message as any).serverKey as string | undefined;
+              const panelId = `mcp-${message.messageId || message.id}`;
+              const hasMcpPanel = Boolean(worldId && uiResourceUri && msgServerKey && !dismissedMcpPanelIds.includes(panelId));
+              const mcpHtmlBundle = hasMcpPanel ? mcpUiBundles[uiResourceUri!] : undefined;
+
+              if (hasMcpPanel && !mcpHtmlBundle) {
+                triggerMcpBundleFetch(worldId!, msgServerKey!, uiResourceUri!);
+              }
+
               return (
-                <div key={message.id || 'msg-' + index} className={`message-row ${rowAlignmentClass}`}>
+                <div key={message.id || 'msg-' + index} style={{ display: 'contents' }}>
+                <div className={`message-row ${rowAlignmentClass}`}>
                   <div className="message-avatar-container" title={avatarTitle}>
                     <div className={isHumanAvatar ? 'message-avatar message-avatar-empty' : `message-avatar agent-sprite sprite-${avatarSpriteIndex}`}></div>
                   </div>
@@ -543,6 +580,15 @@ export default function WorldChat(props: WorldChatProps) {
                       hasMessageId: !!message.messageId,
                     })}</div>}
                   </div>
+                </div>
+                {hasMcpPanel && mcpHtmlBundle && (
+                  <McpAppPanel
+                    worldId={worldId!}
+                    serverKey={msgServerKey!}
+                    htmlBundle={mcpHtmlBundle}
+                    onClose={() => app.run('mcp-ui-panel-dismiss', panelId)}
+                  />
+                )}
                 </div>
               );
             })

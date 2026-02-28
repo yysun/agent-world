@@ -168,6 +168,8 @@ export function serializeMessage(message: any): Record<string, unknown> | null {
     toolCallStatus: message?.toolCallStatus && typeof message.toolCallStatus === 'object'
       ? message.toolCallStatus
       : undefined,
+    uiResourceUri: typeof message?.uiResourceUri === 'string' ? message.uiResourceUri : undefined,
+    serverKey: typeof message?.serverKey === 'string' ? message.serverKey : undefined,
   };
 }
 

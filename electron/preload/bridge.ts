@@ -35,6 +35,8 @@ import {
   DESKTOP_INVOKE_CHANNELS,
   type ChatEventPayload,
   type DesktopApi,
+  type McpProxyToolCallPayload,
+  type McpReadUiResourcePayload,
   type RendererLoggingConfig,
   type SkillRegistrySummary
 } from '../shared/ipc-contracts.js';
@@ -232,7 +234,11 @@ export function createDesktopApi(ipcRendererLike: IpcRendererLike = ipcRenderer)
     ),
     getSettings: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.SETTINGS_GET),
     saveSettings: (settings) => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.SETTINGS_SAVE, settings),
-    pickFile: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_FILE)
+    pickFile: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_FILE),
+    mcpReadUiResource: (payload: McpReadUiResourcePayload) =>
+      invokeDesktopChannel<{ html: string }>(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.MCP_READ_UI_RESOURCE, payload),
+    mcpProxyToolCall: (payload: McpProxyToolCallPayload) =>
+      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.MCP_PROXY_TOOL_CALL, payload)
   };
 }
 

@@ -103,6 +103,7 @@
  * Scenario-based logging: Split into lifecycle, connection, tools, execution (October 2025)
  * Lifecycle management: Connection resilience and automatic reconnection (November 2025)
  * Explicit execution safety system: Replaced heuristic detection with structured metadata (November 2025)
+ * 2026-02-28: Added MCP App UI support: isUiCapableTool, getMcpUiResourceUri, readMcpUiResource, getMcpServerInfo. Preserved _meta on AI tool definitions.
  * 2026-02-20: Added built-in `human_intervention_request` tool registration for generic human-in-the-loop prompts.
  * 2026-02-20: Added built-in `create_agent` tool registration for approval-gated agent creation.
  * 2026-02-14: Added built-in `load_skill` tool registration for progressive skill instruction loading.
@@ -982,8 +983,12 @@ export async function mcpToolsToAiTools(
       description: enhancedDescription,
       parameters: finalSchema,
 
-      // Tool metadata  
+      // Tool metadata
       location: 'server' as const,
+      // Preserve MCP App UI metadata (_meta.ui.resourceUri) so callers can detect UI-capable tools.
+      _meta: (t as any)._meta ?? undefined,
+      // Server key for MCP App panel tool-call proxying.
+      serverKey: serverName,
 
       execute: async (args: any, sequenceId?: string, parentToolCall?: string, context?: ToolExecutionContext) => {
         const startTime = performance.now();
@@ -2091,6 +2096,89 @@ export async function refreshServerToolsCache(serverName: string): Promise<boole
 }
 
 /** Get MCP system health status */
+// === MCP APP UI SUPPORT ===
+
+/**
+ * Returns true when the given AI tool definition carries MCP App UI metadata.
+ * The raw MCP Tool object's _meta field is preserved in the AI tool definition
+ * by mcpToolsToAiTools. Use getToolUiResourceUri from the SDK for extraction.
+ */
+export function isUiCapableTool(toolDef: Record<string, unknown>): boolean {
+  const meta = (toolDef as any)?._meta;
+  if (!meta) return false;
+  // Support both new nested format (_meta.ui.resourceUri) and deprecated flat format (_meta["ui/resourceUri"]).
+  const resourceUri = meta?.ui?.resourceUri ?? meta?.['ui/resourceUri'];
+  return typeof resourceUri === 'string' && resourceUri.startsWith('ui://');
+}
+
+/**
+ * Extracts the MCP App UI resource URI from an AI tool definition, or null if absent.
+ */
+export function getMcpUiResourceUri(toolDef: Record<string, unknown>): string | null {
+  const meta = (toolDef as any)?._meta;
+  if (!meta) return null;
+  const resourceUri = meta?.ui?.resourceUri ?? meta?.['ui/resourceUri'];
+  return typeof resourceUri === 'string' && resourceUri.startsWith('ui://') ? resourceUri : null;
+}
+
+/**
+ * Reads a ui:// resource from the cached MCP client for the given server name.
+ * Returns the HTML text content of the first resource blob.
+ * Throws if the server is not cached, not connected, or the resource cannot be read.
+ */
+export async function readMcpUiResource(serverName: string, resourceUri: string): Promise<string> {
+  const cacheKey = getToolCacheKey(serverName);
+  const entry = toolsCache.get(cacheKey);
+  if (!entry) {
+    throw new Error(`MCP server "${serverName}" not found in tools cache. Ensure the server is connected.`);
+  }
+  const client = entry.clientRef.current;
+  if (!client) {
+    throw new Error(`MCP client for server "${serverName}" is not connected.`);
+  }
+  const response = await client.readResource({ uri: resourceUri });
+  const blob = response?.contents?.[0];
+  if (!blob) {
+    throw new Error(`MCP server "${serverName}" returned no content for resource "${resourceUri}".`);
+  }
+  const text = (blob as any).text;
+  if (typeof text !== 'string') {
+    throw new Error(`MCP resource "${resourceUri}" from server "${serverName}" does not contain text content.`);
+  }
+  return text;
+}
+
+/**
+ * Returns server identity info for use as the hostInfo argument to AppBridge.
+ * Derives name and version from the cached server config. Returns null if server not found.
+ */
+export function getMcpServerInfo(serverName: string): { name: string; version: string } | null {
+  const cacheKey = getToolCacheKey(serverName);
+  const entry = toolsCache.get(cacheKey);
+  if (!entry) return null;
+  return { name: entry.serverConfig.name, version: '1.0.0' };
+}
+
+/**
+ * callMcpTool
+ * Directly invokes a named tool on an already-connected MCP server.
+ * Used by the MCP App tool-call proxy to execute tool requests originating from
+ * sandboxed MCP App UIs without going through the full agent message loop.
+ */
+export async function callMcpTool(
+  serverName: string,
+  toolName: string,
+  args: unknown
+): Promise<unknown> {
+  const cacheKey = getToolCacheKey(serverName);
+  const entry = toolsCache.get(cacheKey);
+  if (!entry) throw new Error(`MCP server "${serverName}" not found in tools cache.`);
+  const client = entry.clientRef.current;
+  if (!client) throw new Error(`MCP client for server "${serverName}" is not connected.`);
+  const response = await client.callTool({ name: toolName, arguments: args as Record<string, unknown> });
+  return response;
+}
+
 export function getMCPSystemHealth(): {
   status: 'healthy' | 'degraded' | 'unhealthy';
   details: {

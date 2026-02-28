@@ -428,3 +428,55 @@ describe('createMainIpcHandlers.sendChatMessage', () => {
     }
   });
 });
+
+describe('createMainIpcHandlers.mcpReadUiResource', () => {
+  it('calls readMcpUiResource with serverKey and resourceUri and returns html', async () => {
+    const readMcpUiResource = vi.fn(async () => '<html><body>MCP App</body></html>');
+    const { handlers } = await createHandlers({ readMcpUiResource });
+
+    const result = await handlers.mcpReadUiResource({
+      worldId: 'w-1',
+      serverKey: 'my-server',
+      resourceUri: 'ui://my-server/app.html'
+    });
+
+    expect(readMcpUiResource).toHaveBeenCalledWith('my-server', 'ui://my-server/app.html');
+    expect(result).toEqual({ html: '<html><body>MCP App</body></html>' });
+  });
+
+  it('propagates errors thrown by readMcpUiResource', async () => {
+    const readMcpUiResource = vi.fn(async () => { throw new Error('server not found'); });
+    const { handlers } = await createHandlers({ readMcpUiResource });
+
+    await expect(
+      handlers.mcpReadUiResource({ worldId: 'w-1', serverKey: 'missing', resourceUri: 'ui://missing/app' })
+    ).rejects.toThrow('server not found');
+  });
+});
+
+describe('createMainIpcHandlers.mcpProxyToolCall', () => {
+  it('calls callMcpTool with serverKey, toolName, and args and returns result', async () => {
+    const toolResult = { content: [{ type: 'text', text: 'done' }] };
+    const callMcpTool = vi.fn(async () => toolResult);
+    const { handlers } = await createHandlers({ callMcpTool });
+
+    const result = await handlers.mcpProxyToolCall({
+      worldId: 'w-1',
+      serverKey: 'my-server',
+      toolName: 'do_thing',
+      args: { input: 'hello' }
+    });
+
+    expect(callMcpTool).toHaveBeenCalledWith('my-server', 'do_thing', { input: 'hello' });
+    expect(result).toEqual(toolResult);
+  });
+
+  it('propagates errors thrown by callMcpTool', async () => {
+    const callMcpTool = vi.fn(async () => { throw new Error('tool call failed'); });
+    const { handlers } = await createHandlers({ callMcpTool });
+
+    await expect(
+      handlers.mcpProxyToolCall({ worldId: 'w-1', serverKey: 'my-server', toolName: 'bad_tool', args: {} })
+    ).rejects.toThrow('tool call failed');
+  });
+});

@@ -126,6 +126,10 @@ export default class WorldComponent extends Component<WorldComponentState, World
     rightPanelTab: 'chats' as RightPanelTab,
     isRightPanelOpen: this.initialViewportMode === 'desktop',
     viewportMode: this.initialViewportMode,
+
+    // MCP App UI panel state
+    mcpUiBundles: {} as Record<string, string>,
+    dismissedMcpPanelIds: [] as string[],
   };
 
   override view = (state: WorldComponentState) => {
@@ -262,6 +266,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
 
             <WorldChat
               worldName={state.worldName}
+              worldId={state.world?.id}
               messages={state.messages}
               rawMessages={state.rawMessages}
               userInput={state.userInput}
@@ -284,6 +289,8 @@ export default class WorldComponent extends Component<WorldComponentState, World
               isStopping={state.isStopping}
               activeHitlPrompt={activeHitlPrompt}
               submittingHitlRequestId={state.submittingHitlRequestId}
+              mcpUiBundles={state.mcpUiBundles}
+              dismissedMcpPanelIds={state.dismissedMcpPanelIds}
             />
           </div>
 

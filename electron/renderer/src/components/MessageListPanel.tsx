@@ -42,8 +42,9 @@
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component extraction.
  */
 
-import { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import MessageContent, { getToolStatusLabel } from './MessageContent';
+import McpAppPanel from './McpAppPanel';
 import ElapsedTimeCounter from './ElapsedTimeCounter';
 import { compactSkillDescription, formatTime } from '../utils/formatting';
 import {
@@ -240,6 +241,7 @@ function extractStreamingInputPreview(message, messagesById, messages, messageIn
 }
 
 export default function MessageListPanel({
+  worldId,
   messagesContainerRef,
   messagesLoading,
   hasConversationMessages,
@@ -268,6 +270,9 @@ export default function MessageListPanel({
   activeHitlPrompt,
   submittingHitlRequestId,
   onRespondHitlOption,
+}: {
+  worldId?: string;
+  [key: string]: any;
 }) {
   const inlinePrimaryText = String(inlineWorkingIndicatorState?.primaryText || 'Agent');
   const inlineStatusText = String(
@@ -284,6 +289,38 @@ export default function MessageListPanel({
   );
   const shouldShowLoading = messagesLoading && renderableMessages.length === 0;
   const [messageCollapseOverrides, setMessageCollapseOverrides] = useState<Record<string, boolean>>({});
+  const [dismissedPanels, setDismissedPanels] = useState<Set<string>>(new Set());
+  const [htmlBundleCache, setHtmlBundleCache] = useState<Map<string, string>>(new Map());
+  const pendingFetchesRef = React.useRef<Set<string>>(new Set());
+
+  const dismissMcpPanel = useCallback((panelKey: string) => {
+    setDismissedPanels((prev) => {
+      const next = new Set(prev);
+      next.add(panelKey);
+      return next;
+    });
+  }, []);
+
+  const fetchHtmlBundle = useCallback((resourceUri: string, serverKey: string) => {
+    if (htmlBundleCache.has(resourceUri)) return;
+    if (pendingFetchesRef.current.has(resourceUri)) return;
+    const desktop = (window as any).agentWorldDesktop;
+    if (!worldId || !desktop?.mcpReadUiResource) return;
+    pendingFetchesRef.current.add(resourceUri);
+    desktop.mcpReadUiResource({ worldId, serverKey, resourceUri }).then(({ html }: { html: string }) => {
+      if (typeof html === 'string') {
+        setHtmlBundleCache((prev) => {
+          const next = new Map(prev);
+          next.set(resourceUri, html);
+          return next;
+        });
+      }
+    }).catch(() => {
+      // Ignore fetch errors; the panel simply won't show.
+    }).finally(() => {
+      pendingFetchesRef.current.delete(resourceUri);
+    });
+  }, [worldId, htmlBundleCache]);
   const toggleMessageCollapsed = (messageId: string, currentCollapsed: boolean) => {
     setMessageCollapseOverrides((prev) => ({
       ...prev,
@@ -423,8 +460,8 @@ export default function MessageListPanel({
             const normalizedOriginalText = String(message?.content || '').trim();
             const isEditChanged = Boolean(normalizedEditedText) && normalizedEditedText !== normalizedOriginalText;
             return (
+              <React.Fragment key={messageKey}>
               <div
-                key={messageKey}
                 className={`flex min-w-0 w-full items-start gap-2 ${shouldRightAlignMessage ? 'justify-end' : 'justify-start'}`}
               >
                 {messageAvatar ? (
@@ -586,6 +623,67 @@ export default function MessageListPanel({
                   ) : null}
                 </article>
               </div>
+              {worldId ? (() => {
+                // Collect UI-capable tool results for this message to render McpAppPanel.
+                const panels: Array<{ panelKey: string; resourceUri: string; serverKey: string; toolArgs?: Record<string, unknown>; toolResultContent?: string }> = [];
+
+                // Combined tool request: iterate tool calls and their matched results.
+                if (Array.isArray(message?.combinedToolResults)) {
+                  for (const result of message.combinedToolResults) {
+                    const resourceUri = String((result as any)?.uiResourceUri || '').trim();
+                    const resultServerKey = String((result as any)?.serverKey || '').trim();
+                    if (!resourceUri || !resultServerKey) continue;
+                    const panelKey = `${messageKey || ''}-${String((result as any)?.messageId || (result as any)?.tool_call_id || '')}`;
+                    if (!panelKey || dismissedPanels.has(panelKey)) continue;
+                    // Fetch html bundle lazily.
+                    if (!htmlBundleCache.has(resourceUri)) {
+                      fetchHtmlBundle(resourceUri, resultServerKey);
+                    }
+                    const toolCallId = String((result as any)?.tool_call_id || '');
+                    let toolArgs: Record<string, unknown> | undefined;
+                    if (toolCallId && Array.isArray(message.tool_calls)) {
+                      const matchingCall = message.tool_calls.find((tc: any) => tc?.id === toolCallId);
+                      if (matchingCall?.function?.arguments) {
+                        try { toolArgs = JSON.parse(matchingCall.function.arguments); } catch { /* ignore */ }
+                      }
+                    }
+                    panels.push({ panelKey, resourceUri, serverKey: resultServerKey, toolArgs, toolResultContent: String((result as any)?.content || '') });
+                  }
+                }
+
+                // Standalone tool result (not merged into combined).
+                if (isToolMessage && !Array.isArray(message?.combinedToolResults)) {
+                  const resourceUri = String((message as any)?.uiResourceUri || '').trim();
+                  const resultServerKey = String((message as any)?.serverKey || '').trim();
+                  if (resourceUri && resultServerKey) {
+                    const panelKey = messageKey || '';
+                    if (panelKey && !dismissedPanels.has(panelKey)) {
+                      if (!htmlBundleCache.has(resourceUri)) {
+                        fetchHtmlBundle(resourceUri, resultServerKey);
+                      }
+                      panels.push({ panelKey, resourceUri, serverKey: resultServerKey, toolResultContent: String(message?.content || '') });
+                    }
+                  }
+                }
+
+                if (panels.length === 0) return null;
+                return panels.map(({ panelKey, resourceUri, serverKey: pServerKey, toolArgs, toolResultContent }) => {
+                  const htmlBundle = htmlBundleCache.get(resourceUri);
+                  if (!htmlBundle) return null;
+                  return (
+                    <McpAppPanel
+                      key={panelKey}
+                      worldId={worldId}
+                      serverKey={pServerKey}
+                      htmlBundle={htmlBundle}
+                      toolArgs={toolArgs}
+                      toolResult={toolResultContent ? { content: [{ type: 'text', text: toolResultContent }] } : undefined}
+                      onClose={() => dismissMcpPanel(panelKey)}
+                    />
+                  );
+                });
+              })() : null}
+              </React.Fragment>
             );
           })
         )}

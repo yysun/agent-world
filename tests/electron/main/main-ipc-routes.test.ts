@@ -63,7 +63,9 @@ function createHandlerMocks() {
     getLoggingConfig: vi.fn(async () => ({ globalLevel: 'error', categoryLevels: {}, nodeEnv: 'test' })),
     getSystemSettings: vi.fn(async () => ({})),
     saveSystemSettings: vi.fn(async () => true),
-    openFileDialog: vi.fn(async () => ({ canceled: true, filePath: null }))
+    openFileDialog: vi.fn(async () => ({ canceled: true, filePath: null })),
+    mcpReadUiResource: vi.fn(async () => ({ html: '<html></html>' })),
+    mcpProxyToolCall: vi.fn(async () => ({ content: [] }))
   };
 }
 
@@ -108,7 +110,9 @@ describe('buildMainIpcRoutes', () => {
       'logging:getConfig',
       'settings:get',
       'settings:save',
-      'dialog:pickFile'
+      'dialog:pickFile',
+      'mcp:readUiResource',
+      'mcp:proxyToolCall'
     ]);
   });
 
@@ -132,6 +136,8 @@ describe('buildMainIpcRoutes', () => {
     await routes.find((route) => route.channel === 'settings:get')?.handler({});
     await routes.find((route) => route.channel === 'settings:save')?.handler({}, { storageType: 'sqlite' });
     await routes.find((route) => route.channel === 'dialog:pickFile')?.handler({});
+    await routes.find((route) => route.channel === 'mcp:readUiResource')?.handler({}, { worldId: 'w-1', serverKey: 'my-server', resourceUri: 'ui://my-server/app' });
+    await routes.find((route) => route.channel === 'mcp:proxyToolCall')?.handler({}, { worldId: 'w-1', serverKey: 'my-server', toolName: 'do_thing', args: {} });
 
     expect(handlers.writeWorldPreference).toHaveBeenCalledWith('world-99');
     expect(handlers.openWorkspaceDialog).toHaveBeenCalledWith({ directoryPath: '/tmp/workspace' });
@@ -149,6 +155,8 @@ describe('buildMainIpcRoutes', () => {
     expect(handlers.getSystemSettings).toHaveBeenCalledTimes(1);
     expect(handlers.saveSystemSettings).toHaveBeenCalledWith({ storageType: 'sqlite' });
     expect(handlers.openFileDialog).toHaveBeenCalledTimes(1);
+    expect(handlers.mcpReadUiResource).toHaveBeenCalledWith({ worldId: 'w-1', serverKey: 'my-server', resourceUri: 'ui://my-server/app' });
+    expect(handlers.mcpProxyToolCall).toHaveBeenCalledWith({ worldId: 'w-1', serverKey: 'my-server', toolName: 'do_thing', args: {} });
   });
 });
 
@@ -168,7 +176,7 @@ describe('registerIpcRoutes', () => {
     );
     expect(ipcMainLike.handle).toHaveBeenNthCalledWith(
       routes.length,
-      'dialog:pickFile',
+      'mcp:proxyToolCall',
       expect.any(Function)
     );
   });

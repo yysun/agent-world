@@ -1569,6 +1569,12 @@ export async function continueLLMAfterToolExecution(
           replyToMessageId: messageId,
           agentId: agent.id,
         };
+        // Annotate with MCP App UI metadata so the renderer can show McpAppPanel for UI-capable tools.
+        const uiResourceUri = toolDef ? (toolDef as any)._meta?.ui?.resourceUri ?? (toolDef as any)._meta?.['ui/resourceUri'] : undefined;
+        if (typeof uiResourceUri === 'string' && uiResourceUri.startsWith('ui://')) {
+          (toolResultMessage as any).uiResourceUri = uiResourceUri;
+          (toolResultMessage as any).serverKey = (toolDef as any).serverKey || '';
+        }
         agent.memory.push(toolResultMessage);
 
         if (assistantToolCallMessage.toolCallStatus) {

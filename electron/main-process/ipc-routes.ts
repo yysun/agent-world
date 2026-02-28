@@ -29,6 +29,8 @@ import {
   type ChatSubscribePayload,
   type ChatUnsubscribePayload,
   type HitlResponsePayload,
+  type McpProxyToolCallPayload,
+  type McpReadUiResourcePayload,
   type MessageEditPayload,
   type MessageDeletePayload,
   type WorldExportPayload,
@@ -73,6 +75,8 @@ export interface MainIpcHandlers {
   getSystemSettings: () => Promise<unknown> | unknown;
   saveSystemSettings: (payload: unknown) => Promise<unknown> | unknown;
   openFileDialog: () => Promise<unknown> | unknown;
+  mcpReadUiResource: (payload: unknown) => Promise<unknown> | unknown;
+  mcpProxyToolCall: (payload: unknown) => Promise<unknown> | unknown;
 }
 
 export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
@@ -172,6 +176,14 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
     { channel: DESKTOP_INVOKE_CHANNELS.LOGGING_GET_CONFIG, handler: async () => handlers.getLoggingConfig() },
     { channel: DESKTOP_INVOKE_CHANNELS.SETTINGS_GET, handler: async () => handlers.getSystemSettings() },
     { channel: DESKTOP_INVOKE_CHANNELS.SETTINGS_SAVE, handler: async (_event, payload) => handlers.saveSystemSettings(payload) },
-    { channel: DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_FILE, handler: async () => handlers.openFileDialog() }
+    { channel: DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_FILE, handler: async () => handlers.openFileDialog() },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.MCP_READ_UI_RESOURCE,
+      handler: async (_event, payload) => handlers.mcpReadUiResource(payload as McpReadUiResourcePayload)
+    },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.MCP_PROXY_TOOL_CALL,
+      handler: async (_event, payload) => handlers.mcpProxyToolCall(payload as McpProxyToolCallPayload)
+    }
   ];
 }

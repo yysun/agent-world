@@ -264,7 +264,17 @@ export type WorldEvents =
   | { name: 'export-world-markdown'; payload: { worldName: string } }
 
   /** View world markdown in new tab */
-  | { name: 'view-world-markdown'; payload: { worldName: string } };
+  | { name: 'view-world-markdown'; payload: { worldName: string } }
+
+  // ========================================
+  // MCP APP UI PANEL EVENTS
+  // ========================================
+
+  /** HTML bundle loaded for a UI-capable tool result */
+  | { name: 'mcp-ui-bundle-loaded'; payload: { resourceUri: string; html: string } }
+
+  /** Dismiss a specific MCP App UI panel */
+  | { name: 'mcp-ui-panel-dismiss'; payload: string };
 
 // ========================================
 // HELPER TYPES

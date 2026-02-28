@@ -158,6 +158,8 @@ interface MainIpcHandlerFactoryDependencies {
   removeMessagesFrom: (worldId: string, messageId: string, chatId: string) => Promise<any>;
   createStorage: (config: any) => Promise<any>;
   createStorageFromEnv: () => Promise<any>;
+  readMcpUiResource: (serverName: string, resourceUri: string) => Promise<string>;
+  callMcpTool: (serverName: string, toolName: string, args: unknown) => Promise<unknown>;
   loggerIpc?: LoggerLike;
   loggerIpcSession?: LoggerLike;
   loggerIpcMessages?: LoggerLike;
@@ -218,6 +220,8 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     removeMessagesFrom,
     createStorage,
     createStorageFromEnv,
+    readMcpUiResource,
+    callMcpTool,
     loggerIpc = NOOP_LOGGER,
     loggerIpcSession = NOOP_LOGGER,
     loggerIpcMessages = NOOP_LOGGER,
@@ -1307,6 +1311,19 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     return { canceled: false, filePath: result.filePaths[0] || null };
   }
 
+  async function mcpReadUiResource(payload: { worldId: string; serverKey: string; resourceUri: string }): Promise<{ html: string }> {
+    await ensureCoreReady();
+    const { serverKey, resourceUri } = payload;
+    const html = await readMcpUiResource(serverKey, resourceUri);
+    return { html };
+  }
+
+  async function mcpProxyToolCall(payload: { worldId: string; serverKey: string; toolName: string; args: unknown }): Promise<unknown> {
+    await ensureCoreReady();
+    const { serverKey, toolName, args } = payload;
+    return callMcpTool(serverKey, toolName, args);
+  }
+
   return {
     loadWorldsFromWorkspace,
     loadSpecificWorld,
@@ -1335,6 +1352,8 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     getLoggingConfig,
     stopChatMessage,
     deleteMessageFromChat,
-    getChatEvents
+    getChatEvents,
+    mcpReadUiResource,
+    mcpProxyToolCall
   };
 }
