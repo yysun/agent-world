@@ -368,16 +368,9 @@ export default function MessageContent({
   return (
     <div className="flex flex-col gap-2">
       {shouldShowStreamingDots ? (
-        <div className="flex flex-col gap-1">
-          {String(streamingInputPreview || '').trim() ? (
-            <div className="text-xs font-bold text-foreground line-clamp-2 break-words">
-              {String(streamingInputPreview || '').trim()}
-            </div>
-          ) : null}
-          <div className="agent-streaming-dots text-xs" role="status" aria-live="polite" aria-label="Waiting for response">
-            <span className="agent-streaming-dots-label">{streamingDotsLabel}</span>
-            <span className="agent-streaming-dots-text" aria-hidden="true" />
-          </div>
+        <div className="agent-streaming-dots text-xs" role="status" aria-live="polite" aria-label="Waiting for response">
+          <span className="agent-streaming-dots-label">{streamingDotsLabel}</span>
+          <span className="agent-streaming-dots-text" aria-hidden="true" />
         </div>
       ) : null}
       {displayContent ? (
