@@ -13,6 +13,7 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-28: Backfilled tool-result rows with matching assistant tool-request metadata so combined tool cards can show request args with results.
  * - 2026-02-28: Added tool-name backfill for persisted tool-result rows (via linked assistant `tool_calls`) so status labels render `tool - <name> - <status>`.
  * - 2026-02-27: Added `showToolMessages` prop-driven filtering so tool-related rows can be hidden from the main transcript.
  * - 2026-02-27: Added collapse/expand toggles for assistant message cards (tool-parity interaction).
@@ -48,6 +49,7 @@ import {
   getMessageCardClassName,
   getMessageIdentity,
   getMessageSenderLabel,
+  findToolRequestMessageForToolResult,
   isRenderableMessageEntry,
   isHumanMessage,
   isToolRelatedMessage,
@@ -452,6 +454,9 @@ export default function MessageListPanel({
             const isToolCallRequestMessage = isToolRequestMessage(message);
             const isPendingToolCallRequest = isToolCallRequestMessage && hasPendingToolCalls(message, renderableMessages, messageIndex);
             const toolStatusLabel = isToolMessage ? getToolStatusLabel(message, isPendingToolCallRequest, resolvedToolName) : '';
+            const linkedToolRequestMessage = isToolMessage
+              ? findToolRequestMessageForToolResult(message, messagesById, renderableMessages, messageIndex)
+              : null;
             const isStreamingAssistantMessage = Boolean(message?.isStreaming) && messageRole === 'assistant' && !isToolMessage;
             const isFinalizedAssistantMessage = message?.isStreaming !== true && message?.isToolStreaming !== true;
             const isActiveToolMessage = isToolMessage && (Boolean(message?.isToolStreaming) || isPendingToolCallRequest);
@@ -549,9 +554,16 @@ export default function MessageListPanel({
                     </div>
                   ) : (
                     <MessageContent
-                      message={resolvedToolName && !String(message?.toolName || '').trim()
-                        ? { ...message, toolName: resolvedToolName }
-                        : message}
+                      message={(() => {
+                        let nextMessage = message;
+                        if (resolvedToolName && !String(message?.toolName || '').trim()) {
+                          nextMessage = { ...nextMessage, toolName: resolvedToolName };
+                        }
+                        if (linkedToolRequestMessage && !(Array.isArray(message?.tool_calls) && message.tool_calls.length > 0)) {
+                          nextMessage = { ...nextMessage, linkedToolRequest: linkedToolRequestMessage };
+                        }
+                        return nextMessage;
+                      })()}
                       collapsed={isCollapsed}
                       isToolCallPending={isPendingToolCallRequest}
                       showToolHeader={!isToolMessage}

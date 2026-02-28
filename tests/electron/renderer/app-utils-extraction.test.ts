@@ -12,6 +12,7 @@
  * - No filesystem or network dependencies.
  *
  * Recent Changes:
+ * - 2026-02-28: Added regression coverage for locating assistant tool-request metadata from tool-result rows by `tool_call_id`.
  * - 2026-02-28: Added regression ensuring assistant `Calling tool: human_intervention_request` placeholder rows are hidden from renderable transcript entries.
  * - 2026-02-27: Added normalization assertions for persisted `showToolMessages` desktop setting.
  * - 2026-02-27: Updated tool-classification expectations so assistant tool-call request messages remain assistant cards.
@@ -47,6 +48,7 @@ import {
   getMessageCardClassName,
   getMessageIdentity,
   getMessageSenderLabel,
+  findToolRequestMessageForToolResult,
   isHumanMessage,
   isRenderableMessageEntry,
   isToolRelatedMessage,
@@ -219,5 +221,37 @@ describe('extracted message utils', () => {
     const message = { role: 'assistant', sender: 'Planner', fromAgentId: 'a1', messageId: 'm1' };
     expect(getMessageSenderLabel(message, new Map(), [message], 0, agentById, agentByName)).toBe('Planner');
     expect(resolveMessageAvatar(message, agentById, agentByName)).toEqual({ name: 'Planner', initials: 'PL' });
+  });
+
+  it('finds matching assistant tool request for tool result rows', () => {
+    const messages = [
+      {
+        messageId: 'assistant-tool-request-1',
+        role: 'assistant',
+        sender: 'a1',
+        tool_calls: [{
+          id: 'call_shell_1',
+          type: 'function',
+          function: { name: 'shell_cmd', arguments: '{"command":"ls -la"}' }
+        }]
+      },
+      {
+        messageId: 'tool-result-1',
+        role: 'tool',
+        sender: 'shell_cmd',
+        tool_call_id: 'call_shell_1',
+        content: '{"status":"failed","exit_code":1}'
+      }
+    ];
+    const messagesById = new Map(messages.map((message) => [message.messageId, message]));
+
+    const linkedRequest = findToolRequestMessageForToolResult(
+      messages[1],
+      messagesById,
+      messages,
+      1
+    );
+
+    expect(linkedRequest?.messageId).toBe('assistant-tool-request-1');
   });
 });

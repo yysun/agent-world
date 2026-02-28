@@ -13,6 +13,7 @@
  * - Helper functions are intentionally colocated to preserve behavior parity.
  *
  * Recent Changes:
+ * - 2026-02-28: Added tool-request lookup helper to map tool-result rows back to matching assistant `tool_calls` by `tool_call_id`.
  * - 2026-02-28: Hidden assistant `Calling tool: human_intervention_request` placeholder rows from transcript rendering so only HITL prompt cards remain visible.
  * - 2026-02-27: Stopped classifying assistant tool-call request messages as tool cards so assistant bubbles stay visible during tool phases.
  * - 2026-02-27: Excluded realtime log rows (`type='log'` / `logEvent`) from renderable chat entries so logs appear only in the logs panel.
@@ -133,6 +134,66 @@ export function isRenderableMessageEntry(message) {
     return false;
   }
   return getMessageIdentity(message).length > 0;
+}
+
+function collectToolCallIds(message) {
+  if (!Array.isArray(message?.tool_calls)) {
+    return [];
+  }
+
+  return message.tool_calls
+    .map((toolCall) => String(toolCall?.id || '').trim())
+    .filter(Boolean);
+}
+
+function messageIncludesToolCallId(message, toolCallId) {
+  if (!message || !toolCallId) {
+    return false;
+  }
+  const toolCallIds = collectToolCallIds(message);
+  return toolCallIds.includes(toolCallId);
+}
+
+/**
+ * Resolve assistant tool-call request metadata for a tool-result row.
+ * This lets tool result cards render both request args and result body.
+ */
+export function findToolRequestMessageForToolResult(message, messagesById, messages, currentIndex) {
+  const role = String(message?.role || '').trim().toLowerCase();
+  if (role !== 'tool') {
+    return null;
+  }
+
+  const toolCallId = String(message?.tool_call_id || message?.toolCallId || '').trim();
+  if (!toolCallId) {
+    return null;
+  }
+
+  const replyToMessageId = String(message?.replyToMessageId || '').trim();
+  if (replyToMessageId) {
+    const parent = messagesById?.get(replyToMessageId);
+    if (messageIncludesToolCallId(parent, toolCallId)) {
+      return parent;
+    }
+  }
+
+  const directByToolCallId = messagesById?.get?.(toolCallId);
+  if (messageIncludesToolCallId(directByToolCallId, toolCallId)) {
+    return directByToolCallId;
+  }
+
+  for (let index = currentIndex - 1; index >= 0; index -= 1) {
+    const candidate = messages[index];
+    const candidateRole = String(candidate?.role || '').trim().toLowerCase();
+    if (candidateRole !== 'assistant') {
+      continue;
+    }
+    if (messageIncludesToolCallId(candidate, toolCallId)) {
+      return candidate;
+    }
+  }
+
+  return null;
 }
 
 function isCrossAgentAssistantMessage(message, messagesById, messages, currentIndex) {

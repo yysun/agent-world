@@ -13,6 +13,7 @@
  * - Helper functions are scoped to this module because only this component uses them.
  *
  * Recent Changes:
+ * - 2026-02-28: Added linked tool-request backfill support so tool-result cards render combined `Args` + `Result` even when `tool_calls` live on a separate assistant row.
  * - 2026-02-28: Updated tool status label format to `tool - <name> - <status>` and added optional resolved-name override for history rows missing direct tool metadata.
  * - 2026-02-27: Restored bold user prompt preview above the `<model> ......` pre-chunk wait row on assistant cards.
  * - 2026-02-27: Removed embedded user-preview box rendering so user context remains in the original user message card.
@@ -214,7 +215,11 @@ function buildCombinedToolResultContent(results) {
 }
 
 function buildToolRequestContent(message) {
-  const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+  const directToolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+  const linkedToolCalls = Array.isArray(message?.linkedToolRequest?.tool_calls)
+    ? message.linkedToolRequest.tool_calls
+    : [];
+  const toolCalls = directToolCalls.length > 0 ? directToolCalls : linkedToolCalls;
   if (toolCalls.length > 0) {
     return toolCalls
       .map((toolCall, index) => {
@@ -246,6 +251,22 @@ function buildCombinedRequestAndResultContent(message, combinedResults) {
   const requestText = buildToolRequestContent(message);
   const resultText = buildCombinedToolResultContent(combinedResults) || '(no output)';
   return `Args:\n${requestText}\n\nResult:\n${resultText}`;
+}
+
+export function getToolBodyContent(message) {
+  const combinedToolResults = Array.isArray(message?.combinedToolResults) ? message.combinedToolResults : [];
+  const hasCombinedResult = combinedToolResults.length > 0;
+  const isToolCallRequest = isToolCallRequestMessage(message);
+  const hasLinkedToolRequest = Array.isArray(message?.linkedToolRequest?.tool_calls)
+    && message.linkedToolRequest.tool_calls.length > 0;
+  const shouldRenderRequestAndResult = hasCombinedResult || isToolCallRequest || hasLinkedToolRequest;
+
+  if (shouldRenderRequestAndResult) {
+    const resultRows = hasCombinedResult ? combinedToolResults : [message];
+    return buildCombinedRequestAndResultContent(message, resultRows);
+  }
+
+  return String(message?.content || '');
 }
 
 export default function MessageContent({
@@ -300,14 +321,7 @@ export default function MessageContent({
   }
 
   if (isToolMessage) {
-    const combinedToolResults = Array.isArray(message?.combinedToolResults) ? message.combinedToolResults : [];
-    const hasCombinedResult = combinedToolResults.length > 0;
-    const isToolCallRequest = isToolCallRequestMessage(message);
-    const mergedToolContent = buildCombinedRequestAndResultContent(message, combinedToolResults);
-    const requestOnlyContent = `Args:\n${buildToolRequestContent(message)}`;
-    const toolContent = hasCombinedResult
-      ? mergedToolContent
-      : (isToolCallRequest ? requestOnlyContent : String(message.content || ''));
+    const toolContent = getToolBodyContent(message);
     const isTruncated = toolContent.length > MAX_TOOL_OUTPUT_LENGTH;
     const visibleContent = isTruncated ? toolContent.slice(0, MAX_TOOL_OUTPUT_LENGTH) : toolContent;
     const toolHeaderLabel = `⚙️ ${getToolStatusLabel(message, isToolCallPending)}`;
