@@ -18,6 +18,7 @@
  * - Keeps payload format deterministic for stable downstream parsing
  *
  * Recent Changes:
+ * - 2026-02-28: Updated `<execution_directive>` to require concise tool-use intent text before tool calls and to allow mixed text + tool-call turns when supported by the provider.
  * - 2026-02-27: Run-scoped `load_skill` cache now stores only successful outcomes so declined/error/not-found paths remain retryable in the same run.
  * - 2026-02-27: Added run-scoped `load_skill` result caching keyed by latest user-turn marker so repeated same-skill calls are auto-suppressed across assistant/tool hops.
  * - 2026-02-27: Replaced `[load_skill:hitl]` console logs with structured category logger events (`load_skill.hitl`).
@@ -898,8 +899,9 @@ function buildSuccessResult(options: {
       ? '    2. Use the data in <active_resources> to complete the user\'s specific request.'
       : '    2. Use the skill instructions to complete the user\'s specific request.',
     '    3. If the workflow is multi-step, explicitly state your plan before executing.',
+    '    4. When using tools, first provide a brief intent statement (what you will do and why), then call the tool. If provider behavior allows mixed output, include the intent text and tool call in the same response turn.',
     ...(hasReferencedScripts
-      ? [`    4. Scripts referenced in <instructions> are located at skill root: ${escapeXmlText(skillRoot)}. When invoking them via shell commands, construct the absolute path (e.g., ${escapeXmlText(skillRoot)}/scripts/example.py) since they may not be accessible via relative paths from the project directory.`]
+      ? [`    5. Scripts referenced in <instructions> are located at skill root: ${escapeXmlText(skillRoot)}. When invoking them via shell commands, construct the absolute path (e.g., ${escapeXmlText(skillRoot)}/scripts/example.py) since they may not be accessible via relative paths from the project directory.`]
       : []),
     '  </execution_directive>',
   ];
