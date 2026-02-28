@@ -13,6 +13,7 @@
  * - Uses dependency injection for state setters and collaborators.
  *
  * Recent Changes:
+ * - 2026-02-27: Updated Enter-key stop/send gating to include status-registry `working` state so keyboard behavior matches stop-button visibility.
  * - 2026-02-28: Updated settings-header action to toggle the right panel closed when settings mode is already active.
  * - 2026-02-28: Added settings-open flow helper that refreshes skill registry when System Settings panel is opened.
  * - 2026-02-27: Updated `onOpenLogsPanel` to toggle the right panel when logs mode is already active.
@@ -29,7 +30,9 @@ import {
   DEFAULT_WORLD_CHAT_LLM_MODEL,
   DEFAULT_WORLD_CHAT_LLM_PROVIDER,
 } from '../constants/app-constants';
+import { computeCanStopCurrentSession } from '../domain/chat-stop-state';
 import { safeMessage } from '../domain/desktop-api';
+import { getChatStatus, getRegistry } from '../domain/status-registry';
 import { upsertEnvVariable } from '../utils/data-transform';
 import { getRefreshWarning } from '../utils/formatting';
 import { validateAgentForm } from '../utils/validation';
@@ -345,7 +348,18 @@ export function useAppActionHandlers({
       const isCurrentSessionSending = selectedSessionId && sendingSessionIds.has(selectedSessionId);
       const isCurrentSessionStopping = selectedSessionId && stoppingSessionIds.has(selectedSessionId);
       const isCurrentSessionPendingResponse = selectedSessionId && pendingResponseSessionIds.has(selectedSessionId);
-      const canStopCurrentSession = Boolean(selectedSessionId) && !isCurrentSessionSending && !isCurrentSessionStopping && Boolean(isCurrentSessionPendingResponse);
+      const isCurrentSessionWorking = Boolean(
+        loadedWorld?.id
+        && selectedSessionId
+        && getChatStatus(getRegistry(), loadedWorld.id, selectedSessionId) === 'working'
+      );
+      const canStopCurrentSession = computeCanStopCurrentSession({
+        selectedSessionId,
+        isCurrentSessionSending: Boolean(isCurrentSessionSending),
+        isCurrentSessionStopping: Boolean(isCurrentSessionStopping),
+        isCurrentSessionPendingResponse: Boolean(isCurrentSessionPendingResponse),
+        isCurrentSessionWorking,
+      });
 
       if (canStopCurrentSession) {
         return;
@@ -357,6 +371,7 @@ export function useAppActionHandlers({
   }, [
     composer,
     hasActiveHitlPrompt,
+    loadedWorld?.id,
     onSendMessage,
     pendingResponseSessionIds,
     selectedSessionId,

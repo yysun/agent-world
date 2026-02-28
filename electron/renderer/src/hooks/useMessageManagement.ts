@@ -13,6 +13,7 @@
  * - Keeps branch/session refresh semantics aligned with the existing desktop IPC flows.
  *
  * Recent Changes:
+ * - 2026-02-27: Updated submit stop-mode detection to also follow status-registry `working` state so stop remains available when pending markers are absent.
  * - 2026-02-26: Replaced edit-backup localStorage warning console traces with categorized renderer logger output controlled by env-derived log config.
  * - 2026-02-26: Set chat-scoped sending state during edit-save submission so the inline working indicator appears immediately (web parity) and clears in `finally`.
  * - 2026-02-26: Clear chat-scoped transient error/log artifacts when saving user edits so stale failure indicators do not persist into retried turns.
@@ -27,7 +28,8 @@
 
 import { useCallback, useState } from 'react';
 import { safeMessage } from '../domain/desktop-api';
-import { clearChatAgents, updateRegistry } from '../domain/status-registry';
+import { computeCanStopCurrentSession } from '../domain/chat-stop-state';
+import { clearChatAgents, getChatStatus, getRegistry, updateRegistry } from '../domain/status-registry';
 import { normalizeStringList, sortSessionsByNewest } from '../utils/data-transform';
 import { getRefreshWarning } from '../utils/formatting';
 import { getMessageIdentity, isTrueAgentResponseMessage } from '../utils/message-utils';
@@ -217,13 +219,21 @@ export function useMessageManagement({
 
   const onSubmitMessage = useCallback((event) => {
     event.preventDefault();
-    const isCurrentSessionSending = selectedSessionId && sendingSessionIds.has(selectedSessionId);
-    const isCurrentSessionStopping = selectedSessionId && stoppingSessionIds.has(selectedSessionId);
-    const isCurrentSessionPendingResponse = selectedSessionId && pendingResponseSessionIds.has(selectedSessionId);
-    const canStopCurrentSession = Boolean(selectedSessionId)
-      && !isCurrentSessionSending
-      && !isCurrentSessionStopping
-      && Boolean(isCurrentSessionPendingResponse);
+    const isCurrentSessionSending = Boolean(selectedSessionId && sendingSessionIds.has(selectedSessionId));
+    const isCurrentSessionStopping = Boolean(selectedSessionId && stoppingSessionIds.has(selectedSessionId));
+    const isCurrentSessionPendingResponse = Boolean(selectedSessionId && pendingResponseSessionIds.has(selectedSessionId));
+    const isCurrentSessionWorking = Boolean(
+      loadedWorldId
+      && selectedSessionId
+      && getChatStatus(getRegistry(), loadedWorldId, selectedSessionId) === 'working'
+    );
+    const canStopCurrentSession = computeCanStopCurrentSession({
+      selectedSessionId,
+      isCurrentSessionSending,
+      isCurrentSessionStopping,
+      isCurrentSessionPendingResponse,
+      isCurrentSessionWorking,
+    });
 
     if (canStopCurrentSession) {
       onStopMessage();
@@ -231,6 +241,7 @@ export function useMessageManagement({
     }
     onSendMessage();
   }, [
+    loadedWorldId,
     onSendMessage,
     onStopMessage,
     pendingResponseSessionIds,

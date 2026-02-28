@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-02-27: Restored stop-button visibility/behavior by deriving stop mode from both legacy pending markers and status-registry `working` state.
  * - 2026-02-28: Skill scope and per-skill settings toggles now autosave immediately when changed.
  * - 2026-02-28: Opening System Settings now triggers a skill-registry refresh to keep the settings skill list current.
  * - 2026-02-27: Added system setting support to show/hide tool-related transcript rows in the main message area.
@@ -87,6 +88,7 @@ import {
 } from './utils/app-helpers';
 import { useChatEventSubscriptions } from './hooks/useChatEventSubscriptions';
 import type { MainProcessLogEntry } from './domain/chat-event-handlers';
+import { computeCanStopCurrentSession } from './domain/chat-stop-state';
 import { clearChatAgents, finalizeReplayedChat, getChatStatus, syncWorldRoster, updateRegistry } from './domain/status-registry';
 import { applyEventToRegistry, parseStoredEventReplayArgs } from './domain/status-updater';
 import {
@@ -982,7 +984,14 @@ export default function App() {
   const isCurrentSessionSending = Boolean(selectedSessionId && sendingSessionIds.has(selectedSessionId));
   const isCurrentSessionStopping = Boolean(selectedSessionId && stoppingSessionIds.has(selectedSessionId));
   const isCurrentSessionPendingResponse = Boolean(selectedSessionId && pendingResponseSessionIds.has(selectedSessionId));
-  const canStopCurrentSession = Boolean(selectedSessionId) && !isCurrentSessionSending && !isCurrentSessionStopping && isCurrentSessionPendingResponse;
+  const isCurrentSessionWorking = chatStatus === 'working';
+  const canStopCurrentSession = computeCanStopCurrentSession({
+    selectedSessionId,
+    isCurrentSessionSending,
+    isCurrentSessionStopping,
+    isCurrentSessionPendingResponse,
+    isCurrentSessionWorking,
+  });
   const activeHitlPrompt = hitlPromptQueue.length > 0 ? hitlPromptQueue[0] : null;
   const showInlineWorkingIndicator = !activeHitlPrompt && (chatStatus === 'working' || isCurrentSessionSending);
   const workingAgentEntries = agentStatuses.filter((agent) => agent.status === 'working');
