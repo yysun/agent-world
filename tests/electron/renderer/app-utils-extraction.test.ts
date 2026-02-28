@@ -12,6 +12,7 @@
  * - No filesystem or network dependencies.
  *
  * Recent Changes:
+ * - 2026-02-28: Added regression ensuring assistant `Calling tool: human_intervention_request` placeholder rows are hidden from renderable transcript entries.
  * - 2026-02-27: Added normalization assertions for persisted `showToolMessages` desktop setting.
  * - 2026-02-27: Updated tool-classification expectations so assistant tool-call request messages remain assistant cards.
  * - 2026-02-27: Added regression coverage ensuring log-event rows are not treated as renderable chat messages.
@@ -184,6 +185,27 @@ describe('extracted message utils', () => {
     })).toBe(false);
     const className = getMessageCardClassName(message, new Map(), [message], 0);
     expect(className).toContain('rounded-lg');
+  });
+
+  it('hides assistant human-intervention tool-call placeholders from renderable rows', () => {
+    const hitlToolCallMessage = {
+      messageId: 'msg-hitl-1',
+      role: 'assistant',
+      sender: 'a1',
+      content: 'Calling tool: human_intervention_request',
+      tool_calls: [
+        {
+          id: 'call_123',
+          type: 'function',
+          function: {
+            name: 'human_intervention_request',
+            arguments: '{"question":"pick an option"}'
+          }
+        }
+      ]
+    };
+
+    expect(isRenderableMessageEntry(hitlToolCallMessage)).toBe(false);
   });
 
   it('builds sender label and avatar fallbacks', () => {

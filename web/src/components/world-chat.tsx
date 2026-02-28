@@ -12,6 +12,7 @@
  * - Message body rendering is delegated to domain helpers to keep this file focused on view composition.
  *
  * Summary of Recent Changes:
+ * - 2026-02-28: Switched chat-row suppression to shared domain visibility rules and hide assistant HITL tool-call placeholder rows.
  * - 2026-02-21: Wired `Project` button to web project-folder selection flow and dynamic folder tooltip text.
  * - 2026-02-21: Matched web composer toolbar structure to Electron (plus icon + project pill + round arrow action).
  * - 2026-02-21: Aligned web composer UI/behavior with Electron (textarea composer shell, icon action button, and Enter/Shift+Enter semantics).
@@ -22,6 +23,7 @@ import { app } from 'apprun';
 import type { WorldChatProps, Message } from '../types';
 import toKebabCase from '../utils/toKebabCase';
 import { SenderType, getSenderType } from '../utils/sender-type.js';
+import { shouldHideWorldChatMessage } from '../domain/message-visibility';
 import { isToolResultMessage, renderMessageContent } from '../domain/message-content';
 import { ActivityPulse, ElapsedTimeCounter } from './activity-indicators';
 import { AgentQueueDisplay } from './agent-queue-display';
@@ -231,31 +233,6 @@ export default function WorldChat(props: WorldChatProps) {
     })()
     : messages;  // No filters = use pre-deduplicated messages
 
-  // Helper function to check if message should be hidden from display.
-  // Internal tool result protocol messages are not shown in the chat UI.
-  // Phase 5: Tool messages are now visible with collapsible output.
-  const shouldHideMessage = (message: Message): boolean => {
-    if (message.isToolEvent && !message.isToolStreaming) {
-      return true;
-    }
-
-    try {
-      const text = message.text.trim();
-      const jsonText = text.startsWith('@') ? text.substring(text.indexOf(',') + 1).trim() : text;
-
-      if (jsonText.startsWith('{') && jsonText.endsWith('}')) {
-        const parsed = JSON.parse(jsonText);
-        if (parsed.__type === 'tool_result' && parsed.tool_call_id) {
-          return true;
-        }
-      }
-    } catch {
-      // Not valid JSON or doesn't match pattern - don't hide
-    }
-
-    return false;
-  };
-
   const getMessageRowAlignmentClass = (senderType: SenderType, isCrossAgentMessage: boolean): string => {
     if (senderType === SenderType.HUMAN || isCrossAgentMessage) {
       return 'message-row-left';
@@ -328,7 +305,7 @@ export default function WorldChat(props: WorldChatProps) {
           ) : (
             filteredMessages.map((message, index) => {
               // Skip messages that should be hidden (internal tool result messages)
-              if (shouldHideMessage(message)) {
+              if (shouldHideWorldChatMessage(message)) {
                 return null;
               }
 
