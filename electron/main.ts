@@ -19,6 +19,7 @@
  * - Defaults to SQLite storage and workspace path if env vars not set
  *
  * Recent Changes:
+ * - 2026-02-28: Added resilient realtime runtime module export resolution (named/default interop) to prevent startup failure from compiled export-shape drift.
  * - 2026-02-26: Added categorized Electron main loggers and renderer logging-config IPC bridge wiring for env-controlled main/renderer log behavior.
  * - 2026-02-26: Moved `.env` loading ahead of core module import so startup logger category levels honor `LOG_*` env values.
  * - 2026-02-21: Added single-instance guard with `app.requestSingleInstanceLock()` and second-instance focus/restore handling.
@@ -82,7 +83,8 @@ import { registerIpcRoutes } from './main-process/ipc-registration.js';
 import { createMainIpcHandlers } from './main-process/ipc-handlers.js';
 import { resolvePreloadPath, resolveRendererIndexPath } from './main-process/window-paths.js';
 import { setupMainLifecycle } from './main-process/lifecycle.js';
-import { createRealtimeEventsRuntime } from './main-process/realtime-events.js';
+import type { RealtimeEventsRuntime } from './main-process/realtime-events.js';
+import { resolveRealtimeEventsRuntimeFactory } from './main-process/module-interop.js';
 import { createWorkspaceRuntime } from './main-process/workspace-runtime.js';
 import {
   importCoreGitHubWorldImportModule,
@@ -151,6 +153,12 @@ const {
 } = await importCoreModule(__dirname);
 const { createStorage, createStorageFromEnv } = await importCoreStorageFactoryModule(__dirname);
 const { GitHubWorldImportError, stageGitHubWorldFromShorthand } = await importCoreGitHubWorldImportModule(__dirname);
+const realtimeEventsRuntimeModule = await import('./main-process/realtime-events.js');
+const createRealtimeEventsRuntime = resolveRealtimeEventsRuntimeFactory(realtimeEventsRuntimeModule) as
+  ((dependencies: unknown) => RealtimeEventsRuntime) | null;
+if (!createRealtimeEventsRuntime) {
+  throw new Error('Failed to load realtime events runtime factory from ./main-process/realtime-events.js');
+}
 
 const CHAT_EVENT_CHANNEL = 'chat:event';
 const mainLifecycleLogger = createCategoryLogger('electron.main.lifecycle');

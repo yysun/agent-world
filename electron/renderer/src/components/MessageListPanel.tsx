@@ -13,6 +13,7 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-28: Switched tool-name resolution to shared message-utils helper so assistant tool-request rows prefer their own `tool_calls` metadata.
  * - 2026-02-28: Backfilled tool-result rows with matching assistant tool-request metadata so combined tool cards can show request args with results.
  * - 2026-02-28: Added tool-name backfill for persisted tool-result rows (via linked assistant `tool_calls`) so status labels render `tool - <name> - <status>`.
  * - 2026-02-27: Added `showToolMessages` prop-driven filtering so tool-related rows can be hidden from the main transcript.
@@ -54,6 +55,7 @@ import {
   isHumanMessage,
   isToolRelatedMessage,
   isTrueAgentResponseMessage,
+  resolveToolNameForMessage,
   resolveMessageAvatar,
 } from '../utils/message-utils';
 
@@ -71,56 +73,6 @@ function isToolRequestMessage(message) {
     return true;
   }
   return /calling tool\s*:/i.test(String(message?.content || ''));
-}
-
-function extractToolNameFromToolCalls(message, preferredToolCallId = '') {
-  const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
-  if (toolCalls.length === 0) {
-    return '';
-  }
-
-  const normalizedPreferredToolCallId = String(preferredToolCallId || '').trim();
-  if (normalizedPreferredToolCallId) {
-    const exactMatch = toolCalls.find((toolCall) => String(toolCall?.id || '').trim() === normalizedPreferredToolCallId);
-    const exactToolName = String(exactMatch?.function?.name || exactMatch?.name || '').trim();
-    if (exactToolName) {
-      return exactToolName;
-    }
-  }
-
-  const firstToolName = String(toolCalls[0]?.function?.name || toolCalls[0]?.name || '').trim();
-  return firstToolName;
-}
-
-function resolveToolNameForMessage(message, messagesById, messages, currentIndex) {
-  const directToolName = String(message?.toolName || message?.tool_name || message?.toolExecution?.toolName || '').trim();
-  if (directToolName && directToolName.toLowerCase() !== 'unknown') {
-    return directToolName;
-  }
-
-  const toolCallId = String(message?.tool_call_id || message?.toolCallId || '').trim();
-  const replyToMessageId = String(message?.replyToMessageId || '').trim();
-  if (replyToMessageId) {
-    const parent = messagesById.get(replyToMessageId);
-    const parentToolName = extractToolNameFromToolCalls(parent, toolCallId);
-    if (parentToolName) {
-      return parentToolName;
-    }
-  }
-
-  for (let index = currentIndex - 1; index >= 0; index -= 1) {
-    const candidate = messages[index];
-    const role = String(candidate?.role || '').trim().toLowerCase();
-    if (role !== 'assistant') {
-      continue;
-    }
-    const candidateToolName = extractToolNameFromToolCalls(candidate, toolCallId);
-    if (candidateToolName) {
-      return candidateToolName;
-    }
-  }
-
-  return directToolName;
 }
 
 function hasPendingToolCalls(message, messages, currentIndex) {

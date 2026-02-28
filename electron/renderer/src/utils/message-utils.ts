@@ -13,6 +13,7 @@
  * - Helper functions are intentionally colocated to preserve behavior parity.
  *
  * Recent Changes:
+ * - 2026-02-28: Added `resolveToolNameForMessage` helper and fixed assistant tool-request name resolution to prefer current message `tool_calls` before history fallback.
  * - 2026-02-28: Added tool-request lookup helper to map tool-result rows back to matching assistant `tool_calls` by `tool_call_id`.
  * - 2026-02-28: Hidden assistant `Calling tool: human_intervention_request` placeholder rows from transcript rendering so only HITL prompt cards remain visible.
  * - 2026-02-27: Stopped classifying assistant tool-call request messages as tool cards so assistant bubbles stay visible during tool phases.
@@ -152,6 +153,84 @@ function messageIncludesToolCallId(message, toolCallId) {
   }
   const toolCallIds = collectToolCallIds(message);
   return toolCallIds.includes(toolCallId);
+}
+
+function extractToolNameFromToolCalls(message, preferredToolCallId = '') {
+  const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+  if (toolCalls.length === 0) {
+    return '';
+  }
+
+  const normalizedPreferredToolCallId = String(preferredToolCallId || '').trim();
+  if (normalizedPreferredToolCallId) {
+    const exactMatch = toolCalls.find((toolCall) => String(toolCall?.id || '').trim() === normalizedPreferredToolCallId);
+    const exactToolName = String(exactMatch?.function?.name || exactMatch?.name || '').trim();
+    if (exactToolName) {
+      return exactToolName;
+    }
+  }
+
+  return String(toolCalls[0]?.function?.name || toolCalls[0]?.name || '').trim();
+}
+
+/**
+ * Resolve display tool name for tool-related rows.
+ * Priority:
+ * 1) Direct tool metadata on the row.
+ * 2) Current message tool_calls (critical for assistant tool-request rows).
+ * 3) Linked parent assistant by reply/thread metadata.
+ * 4) Prior assistant rows, only when a concrete toolCallId exists.
+ * 5) "Calling tool: <name>" text fallback.
+ */
+export function resolveToolNameForMessage(message, messagesById, messages, currentIndex) {
+  const directToolName = String(message?.toolName || message?.tool_name || message?.toolExecution?.toolName || '').trim();
+  if (directToolName && directToolName.toLowerCase() !== 'unknown') {
+    return directToolName;
+  }
+
+  const toolCallId = String(message?.tool_call_id || message?.toolCallId || '').trim();
+
+  const ownToolName = extractToolNameFromToolCalls(message, toolCallId);
+  if (ownToolName) {
+    return ownToolName;
+  }
+
+  const replyToMessageId = String(message?.replyToMessageId || '').trim();
+  if (replyToMessageId) {
+    const parent = messagesById?.get?.(replyToMessageId);
+    const parentToolName = extractToolNameFromToolCalls(parent, toolCallId);
+    if (parentToolName) {
+      return parentToolName;
+    }
+  }
+
+  if (toolCallId) {
+    const directByToolCallId = messagesById?.get?.(toolCallId);
+    const directMappedToolName = extractToolNameFromToolCalls(directByToolCallId, toolCallId);
+    if (directMappedToolName) {
+      return directMappedToolName;
+    }
+
+    for (let index = currentIndex - 1; index >= 0; index -= 1) {
+      const candidate = messages[index];
+      const role = String(candidate?.role || '').trim().toLowerCase();
+      if (role !== 'assistant') {
+        continue;
+      }
+      const candidateToolName = extractToolNameFromToolCalls(candidate, toolCallId);
+      if (candidateToolName) {
+        return candidateToolName;
+      }
+    }
+  }
+
+  const content = String(message?.content || '');
+  const callingToolMatch = content.match(/calling tool\s*:\s*([a-z0-9_.:-]+)/i);
+  if (callingToolMatch?.[1]) {
+    return callingToolMatch[1];
+  }
+
+  return directToolName;
 }
 
 /**
