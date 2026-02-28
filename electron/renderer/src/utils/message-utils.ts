@@ -13,6 +13,7 @@
  * - Helper functions are intentionally colocated to preserve behavior parity.
  *
  * Recent Changes:
+ * - 2026-02-28: Added tool-message status border helper so completed tool cards use green/red left borders while pending states keep amber.
  * - 2026-02-28: Added `resolveToolNameForMessage` helper and fixed assistant tool-request name resolution to prefer current message `tool_calls` before history fallback.
  * - 2026-02-28: Added tool-request lookup helper to map tool-result rows back to matching assistant `tool_calls` by `tool_call_id`.
  * - 2026-02-28: Hidden assistant `Calling tool: human_intervention_request` placeholder rows from transcript rendering so only HITL prompt cards remain visible.
@@ -301,17 +302,178 @@ function isCrossAgentAssistantMessage(message, messagesById, messages, currentIn
   return false;
 }
 
-export function getMessageCardClassName(message, messagesById, messages, currentIndex) {
+function parseToolResultRecord(content) {
+  const text = String(content || '').trim();
+  if (!text) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function hasNonZeroExitCode(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value !== 0;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) && parsed !== 0;
+  }
+  return false;
+}
+
+function parseBoolean(value) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+  }
+  return null;
+}
+
+function isToolMessageFailure(message) {
+  const streamType = String(message?.streamType || '').trim().toLowerCase();
+  if (streamType === 'stderr') {
+    return true;
+  }
+
+  const status = String(message?.status || '').trim().toLowerCase();
+  if (status === 'failed' || status === 'error') {
+    return true;
+  }
+
+  const combinedToolResults = Array.isArray(message?.combinedToolResults) ? message.combinedToolResults : [];
+  if (combinedToolResults.some((result) => isToolMessageFailure(result))) {
+    return true;
+  }
+
+  const content = String(message?.content || '').trim();
+  if (!content) {
+    return false;
+  }
+
+  const record = parseToolResultRecord(content);
+  if (record) {
+    const recordStatus = String(record.status || '').trim().toLowerCase();
+    const reason = String(record.reason || '').trim().toLowerCase();
+    if (recordStatus === 'failed' || recordStatus === 'error') {
+      return true;
+    }
+    if (reason === 'non_zero_exit' || reason === 'execution_error' || reason === 'timeout' || reason === 'timed_out' || reason === 'canceled' || reason === 'cancelled') {
+      return true;
+    }
+    if (parseBoolean(record.timed_out ?? record.timedOut) === true || parseBoolean(record.canceled ?? record.cancelled) === true) {
+      return true;
+    }
+    if (hasNonZeroExitCode(record.exit_code ?? record.exitCode)) {
+      return true;
+    }
+  }
+
+  if (/status\s*[:=]\s*failed/i.test(content)) return true;
+  if (/timed[_\s-]?out\s*[:=]\s*true/i.test(content)) return true;
+  if (/cancel(?:ed|led)\s*[:=]\s*true/i.test(content)) return true;
+  if (/reason\s*[:=]\s*(non_zero_exit|execution_error|timeout|timed_out|canceled|cancelled)/i.test(content)) return true;
+
+  const exitCodeMatch = content.match(/exit[_\s-]?code\s*[:=]\s*(-?\d+)/i);
+  if (exitCodeMatch?.[1]) {
+    const exitCode = Number(exitCodeMatch[1]);
+    if (Number.isFinite(exitCode) && exitCode !== 0) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isToolMessageSuccess(message) {
+  const status = String(message?.status || '').trim().toLowerCase();
+  if (status === 'success' || status === 'succeeded' || status === 'done' || status === 'completed' || status === 'ok') {
+    return true;
+  }
+
+  const combinedToolResults = Array.isArray(message?.combinedToolResults) ? message.combinedToolResults : [];
+  if (combinedToolResults.length > 0 && !combinedToolResults.some((result) => isToolMessageFailure(result))) {
+    return true;
+  }
+
+  const content = String(message?.content || '').trim();
+  if (!content) {
+    return false;
+  }
+
+  const record = parseToolResultRecord(content);
+  if (record) {
+    const recordStatus = String(record.status || '').trim().toLowerCase();
+    if (recordStatus === 'success' || recordStatus === 'succeeded' || recordStatus === 'done' || recordStatus === 'completed' || recordStatus === 'ok') {
+      return true;
+    }
+    if (hasNonZeroExitCode(record.exit_code ?? record.exitCode)) {
+      return false;
+    }
+  }
+
+  return /status\s*[:=]\s*(success|succeeded|done|completed|ok)/i.test(content);
+}
+
+function getToolMessageBorderClassName(message, isToolCallPending) {
+  const role = String(message?.role || '').trim().toLowerCase();
+  const hasToolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
+  const hasExplicitPendingFlag = typeof isToolCallPending === 'boolean';
+  const inferredPendingFromToolCalls = role === 'assistant' && hasToolCalls;
+  const isPendingOrRunning = Boolean(message?.isToolStreaming)
+    || (hasExplicitPendingFlag ? isToolCallPending : inferredPendingFromToolCalls);
+
+  if (isPendingOrRunning) {
+    return 'border-l-amber-500/50';
+  }
+
+  if (isToolMessageFailure(message)) {
+    return 'border-l-red-500/60';
+  }
+
+  if (isToolMessageSuccess(message)) {
+    return 'border-l-green-500/60';
+  }
+
+  // Tool result rows default to "done" in the header when no failure is detected.
+  // Keep border color consistent with that completed state.
+  if (role === 'tool' && !isPendingOrRunning && !isToolMessageFailure(message)) {
+    return 'border-l-green-500/60';
+  }
+
+  if (role === 'assistant' && hasToolCalls && hasExplicitPendingFlag && isToolCallPending === false) {
+    return 'border-l-green-500/60';
+  }
+
+  return 'border-l-amber-500/50';
+}
+
+export function getMessageCardClassName(message, messagesById, messages, currentIndex, options = {}) {
   const role = String(message?.role || '').toLowerCase();
   const isUser = isHumanMessage(message);
   const isTool = isToolRelatedMessage(message);
   const isSystem = role === 'system' || message?.type === 'log' || Boolean(message?.logEvent);
   const isCrossAgent = isCrossAgentAssistantMessage(message, messagesById, messages, currentIndex);
+  const isToolCallPending = typeof options?.isToolCallPending === 'boolean'
+    ? options.isToolCallPending
+    : undefined;
 
   const roleClassName = isUser
     ? 'ml-auto w-[80%] border-l-sidebar-border bg-sidebar-accent'
     : isTool
-      ? 'ml-auto w-[92%] border-l-amber-500/50'
+      ? `ml-auto w-[92%] ${getToolMessageBorderClassName(message, isToolCallPending)}`
       : isCrossAgent
         ? 'ml-auto w-[92%] border-l-violet-500/50'
         : isSystem

@@ -437,7 +437,7 @@ export default function MessageListPanel({
                   </div>
                 ) : null}
 
-                <article className={`min-w-0 ${getMessageCardClassName(message, messagesById, renderableMessages, messageIndex)} ${isStreamingAssistantMessage ? 'agent-streaming-card' : ''} ${isActiveToolMessage ? 'agent-tool-active-card' : ''}`}>
+                <article className={`min-w-0 ${getMessageCardClassName(message, messagesById, renderableMessages, messageIndex, { isToolCallPending: isPendingToolCallRequest })} ${isStreamingAssistantMessage ? 'agent-streaming-card' : ''} ${isActiveToolMessage ? 'agent-tool-active-card' : ''}`}>
                   <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
                     {isToolMessage ? (
                       <span className="flex items-center gap-2">
