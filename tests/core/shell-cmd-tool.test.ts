@@ -10,6 +10,7 @@
  * - Output accumulation
  * 
  * Changes:
+ * - 2026-02-28: Added deterministic risk-tier tests for `allow`, `hitl_required`, and `block` shell command classification outcomes.
  * - 2026-02-15: Added coverage for core execute-time cwd boundary enforcement via `trustedWorkingDirectory`.
  * - 2026-02-15: Added single-command contract tests and shell control-syntax blocking (`&&`, pipes, redirects, substitution, backgrounding).
  * - 2026-02-14: Added inline-script guard coverage (`sh -c`) and short-option path-prefix checks (`-I/path`).
@@ -22,7 +23,8 @@ import { describe, test, expect } from 'vitest';
 import {
   executeShellCommand,
   validateShellDirectoryRequest,
-  validateShellCommandScope
+  validateShellCommandScope,
+  classifyShellCommandRisk
 } from '../../core/shell-cmd-tool.js';
 
 describe('shell command execution', () => {
@@ -305,5 +307,28 @@ describe('shell command argument scope validation', () => {
     if (!result.valid) {
       expect(result.error).toContain('inline script execution');
     }
+  });
+});
+
+describe('shell command risk classification', () => {
+  test('should classify safe read commands as allow', () => {
+    const result = classifyShellCommandRisk('ls', ['-la', './src']);
+
+    expect(result.tier).toBe('allow');
+    expect(result.reason).toBe('low_risk_command');
+  });
+
+  test('should classify destructive in-scope delete commands as hitl_required', () => {
+    const result = classifyShellCommandRisk('rm', ['-rf', './build']);
+
+    expect(result.tier).toBe('hitl_required');
+    expect(result.reason).toContain('destructive_delete');
+  });
+
+  test('should classify catastrophic delete targets as block', () => {
+    const result = classifyShellCommandRisk('rm', ['-rf', '/']);
+
+    expect(result.tier).toBe('block');
+    expect(result.reason).toBe('catastrophic_delete_target');
   });
 });

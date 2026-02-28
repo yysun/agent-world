@@ -18,6 +18,7 @@
  * - Executes real local shell commands and validates formatted tool output.
  * 
  * Changes:
+ * - 2026-02-28: Added risk-gating integration coverage for blocked catastrophic operations and approval-required high-risk commands without HITL context.
  * - 2026-02-21: Added `list_files` bounding/filtering coverage (`maxEntries`, `includePattern`) to prevent oversized tool results from inflating continuation tokens.
  * - 2026-02-21: Added LLM minimal-result mode coverage for `shell_cmd` (status-only result contract).
  * - 2026-02-20: Added assertion that built-in `create_agent` is registered alongside other always-on tools.
@@ -697,6 +698,47 @@ describe('shell_cmd integration with worlds', () => {
         }
       )
     ).rejects.toThrow('inline script execution');
+  });
+
+  test('should block catastrophic destructive shell operations', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    await expect(
+      shellCmdTool.execute(
+        {
+          command: 'rm',
+          parameters: ['--no-preserve-root', '-rf', './build']
+        },
+        undefined,
+        undefined,
+        {
+          world: {
+            id: worldId(),
+            variables: 'working_directory=/tmp'
+          }
+        }
+      )
+    ).rejects.toThrow('Blocked dangerous operation');
+  });
+
+  test('should reject high-risk commands when HITL context is unavailable', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    await expect(
+      shellCmdTool.execute(
+        {
+          command: 'rm',
+          parameters: ['-rf', './build']
+        },
+        undefined,
+        undefined,
+        {
+          workingDirectory: '/tmp/project'
+        }
+      )
+    ).rejects.toThrow('Approval required');
   });
 
   test('should use core default working directory when directory is unresolved', async () => {

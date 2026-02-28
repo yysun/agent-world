@@ -27,6 +27,7 @@
  * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - 2026-02-28: Added deterministic shell risk tiering (`allow`/`hitl_required`/`block`) with per-call HITL approve/deny gating via shared `requestToolApproval` helper for high-risk in-scope commands.
  * - 2026-02-24: Required explicit chatId context for stdout/stderr streaming event emission to preserve chat isolation under strict frontend filtering.
  * - 2026-02-21: Streamed stderr via legacy `tool-stream` events while streaming stdout as assistant SSE; persisted only finalized stdout assistant message after execution completes.
  * - 2026-02-21: Added assistant-style SSE start/chunk/end streaming for shell runtime output so command chunks are delivered as assistant stream events instead of `tool-stream` messages.
@@ -74,6 +75,7 @@ import { homedir } from 'os';
 import { realpathSync, promises as fsPromises } from 'fs';
 import { createCategoryLogger } from './logger.js';
 import { validateToolParameters } from './tool-utils.js';
+import { requestToolApproval } from './tool-approval.js';
 import { publishMessageWithId, publishSSE } from './events/publishers.js';
 import { getDefaultWorkingDirectory, getEnvValueFromText } from './utils.js';
 import {
@@ -96,6 +98,8 @@ import {
 } from './shell-process-registry.js';
 
 const logger = createCategoryLogger('shell-cmd');
+const SHELL_RISK_APPROVE_OPTION = 'approve';
+const SHELL_RISK_DENY_OPTION = 'deny';
 
 /**
  * Resolve directory path, handling tilde expansion and relative paths
@@ -151,6 +155,14 @@ export interface MinimalShellLLMResult {
   timed_out: boolean;
   canceled: boolean;
   reason?: 'timeout' | 'canceled' | 'non_zero_exit' | 'execution_error';
+}
+
+export type ShellCommandRiskTier = 'allow' | 'hitl_required' | 'block';
+
+export interface ShellCommandRiskAssessment {
+  tier: ShellCommandRiskTier;
+  reason: string;
+  tags: string[];
 }
 
 interface OutputSnippet {
@@ -414,6 +426,212 @@ function tokenizeInlineCommandArgs(command: string): string[] {
 
 function tokenizeCommand(command: string): string[] {
   return command.match(/"([^"\\]|\\.)*"|'([^'\\]|\\.)*'|[^\s]+/g) ?? [];
+}
+
+function normalizeExecutable(command: string): string {
+  const executable = getExecutableName(command).toLowerCase();
+  return executable.endsWith('.exe') ? executable.slice(0, -4) : executable;
+}
+
+function normalizeParameterTokens(parameters: unknown): string[] {
+  if (!Array.isArray(parameters)) {
+    return [];
+  }
+  return parameters
+    .filter((parameter): parameter is string => typeof parameter === 'string')
+    .map((parameter) => stripWrappingQuotes(parameter).trim())
+    .filter(Boolean);
+}
+
+function hasFlag(parameters: string[], aliases: string[]): boolean {
+  const aliasSet = new Set(aliases.map((alias) => alias.toLowerCase()));
+  return parameters.some((parameter) => {
+    const lowered = parameter.toLowerCase();
+    if (aliasSet.has(lowered)) return true;
+    if (lowered.startsWith('--')) {
+      return false;
+    }
+    if (lowered.startsWith('-') && lowered.length > 2) {
+      const shortFlags = lowered.slice(1).split('');
+      for (const shortFlag of shortFlags) {
+        if (aliasSet.has(`-${shortFlag}`)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  });
+}
+
+function isSystemCriticalPath(token: string): boolean {
+  const normalized = token.trim().replace(/\\/g, '/').toLowerCase();
+  if (!normalized) return false;
+
+  if (normalized === '/' || normalized === '~' || normalized === '/root') {
+    return true;
+  }
+
+  if (/^[a-z]:\/$/.test(normalized)) {
+    return true;
+  }
+
+  const criticalPrefixes = [
+    '/etc',
+    '/usr',
+    '/bin',
+    '/sbin',
+    '/lib',
+    '/opt',
+    '/var',
+    '/system',
+    '/library',
+    '/private',
+    '/proc',
+    '/sys',
+    '/dev'
+  ];
+
+  return criticalPrefixes.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`));
+}
+
+function hasWildcardTarget(parameters: string[]): boolean {
+  return parameters.some((token) => token.includes('*') || token.includes('?'));
+}
+
+function assessRmRisk(parameters: string[]): ShellCommandRiskAssessment {
+  const hasRecursive = hasFlag(parameters, ['-r', '-R', '--recursive']);
+  const hasForce = hasFlag(parameters, ['-f', '--force']);
+  const hasNoPreserveRoot = hasFlag(parameters, ['--no-preserve-root']);
+  const pathTargets = parameters
+    .map((token) => extractPathToken(token) ?? token)
+    .map((token) => stripWrappingQuotes(token));
+  const hasCriticalTarget = pathTargets.some((token) => isSystemCriticalPath(token));
+
+  if (hasNoPreserveRoot || (hasRecursive && hasForce && hasCriticalTarget)) {
+    return {
+      tier: 'block',
+      reason: 'catastrophic_delete_target',
+      tags: ['risk:destructive', 'risk:delete', 'risk:critical-target']
+    };
+  }
+
+  return {
+    tier: 'hitl_required',
+    reason: hasWildcardTarget(parameters) ? 'destructive_delete_wildcard' : 'destructive_delete',
+    tags: ['risk:destructive', 'risk:delete']
+  };
+}
+
+export function classifyShellCommandRisk(
+  command: unknown,
+  parameters: unknown
+): ShellCommandRiskAssessment {
+  if (typeof command !== 'string' || !command.trim()) {
+    return {
+      tier: 'allow',
+      reason: 'invalid_or_empty_command',
+      tags: ['risk:none']
+    };
+  }
+
+  const executable = normalizeExecutable(command);
+  const parameterTokens = normalizeParameterTokens(parameters);
+  const hasUrl = parameterTokens.some((token) => /^https?:\/\//i.test(token));
+
+  if (['rm', 'rmdir', 'unlink', 'del', 'erase'].includes(executable)) {
+    return assessRmRisk(parameterTokens);
+  }
+
+  if (['mkfs', 'mkfs.ext4', 'mkfs.xfs', 'mkfs.btrfs', 'fdisk', 'sfdisk', 'parted'].includes(executable)) {
+    return {
+      tier: 'block',
+      reason: 'catastrophic_disk_operation',
+      tags: ['risk:destructive', 'risk:disk']
+    };
+  }
+
+  if (executable === 'dd' && parameterTokens.some((token) => token.toLowerCase().startsWith('of=/dev/'))) {
+    return {
+      tier: 'block',
+      reason: 'catastrophic_disk_write',
+      tags: ['risk:destructive', 'risk:disk']
+    };
+  }
+
+  if (['chmod', 'chown', 'chgrp'].includes(executable) && hasFlag(parameterTokens, ['-r', '-R', '--recursive'])) {
+    return {
+      tier: 'hitl_required',
+      reason: 'recursive_permission_change',
+      tags: ['risk:permissions', 'risk:recursive']
+    };
+  }
+
+  if (executable === 'git' && parameterTokens[0]?.toLowerCase() === 'clean' && hasFlag(parameterTokens, ['-f', '-d', '-x'])) {
+    return {
+      tier: 'hitl_required',
+      reason: 'destructive_git_clean',
+      tags: ['risk:destructive', 'risk:git']
+    };
+  }
+
+  if (['curl', 'wget'].includes(executable) && hasUrl && hasFlag(parameterTokens, ['-o', '-O', '--output-document'])) {
+    return {
+      tier: 'hitl_required',
+      reason: 'remote_download',
+      tags: ['risk:network', 'risk:download']
+    };
+  }
+
+  return {
+    tier: 'allow',
+    reason: 'low_risk_command',
+    tags: ['risk:none']
+  };
+}
+
+async function requestShellCommandRiskApproval(options: {
+  world: any;
+  chatId: string | null;
+  command: string;
+  parameters: string[];
+  resolvedDirectory: string;
+  risk: ShellCommandRiskAssessment;
+  toolCallId?: string;
+  agentName?: string | null;
+}): Promise<{ approved: boolean; reason: 'approved' | 'user_denied' | 'timeout' }> {
+  const approval = await requestToolApproval({
+    world: options.world,
+    chatId: options.chatId,
+    title: 'Approve risky shell command?',
+    message: [
+      `Command: ${options.command} ${options.parameters.join(' ')}`.trim(),
+      `Risk: ${options.risk.reason}`,
+      `Trusted directory: ${options.resolvedDirectory}`,
+      'Proceed with this command?',
+    ].join('\n'),
+    defaultOptionId: SHELL_RISK_DENY_OPTION,
+    options: [
+      { id: SHELL_RISK_APPROVE_OPTION, label: 'Approve', description: 'Run this command once.' },
+      { id: SHELL_RISK_DENY_OPTION, label: 'Deny', description: 'Do not run this command.' },
+    ],
+    approvedOptionIds: [SHELL_RISK_APPROVE_OPTION],
+    metadata: {
+      tool: 'shell_cmd',
+      riskTier: options.risk.tier,
+      riskReason: options.risk.reason,
+      riskTags: options.risk.tags,
+      command: options.command,
+      parameters: options.parameters,
+      cwd: options.resolvedDirectory,
+      ...(options.toolCallId ? { toolCallId: options.toolCallId } : {}),
+    },
+    agentName: options.agentName || null,
+  });
+
+  return {
+    approved: approval.approved,
+    reason: approval.reason,
+  };
 }
 
 function hasDisallowedShellSyntax(value: string): boolean {
@@ -1440,6 +1658,38 @@ export function createShellCmdToolDefinition() {
       );
       if (!scopeValidation.valid) {
         throw new Error(scopeValidation.error);
+      }
+
+      const riskAssessment = classifyShellCommandRisk(command, validParameters);
+      if (riskAssessment.tier === 'block') {
+        throw new Error(
+          `Blocked dangerous operation: ${riskAssessment.reason}. This shell command cannot be executed.`
+        );
+      }
+
+      if (riskAssessment.tier === 'hitl_required') {
+        if (!world) {
+          throw new Error(
+            `Approval required: command classified as ${riskAssessment.reason}. HITL approval context is unavailable.`
+          );
+        }
+
+        const approval = await requestShellCommandRiskApproval({
+          world,
+          chatId: chatId ?? null,
+          command,
+          parameters: validParameters,
+          resolvedDirectory,
+          risk: riskAssessment,
+          toolCallId: typeof currentMessageId === 'string' ? currentMessageId : undefined,
+          agentName: streamAgentName,
+        });
+
+        if (!approval.approved) {
+          throw new Error(
+            `Command not executed: approval required for ${riskAssessment.reason} and request was not approved (${approval.reason}).`
+          );
+        }
       }
 
       let stdoutStartEmitted = false;
