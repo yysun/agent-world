@@ -170,7 +170,8 @@ describe('extracted message utils', () => {
     expect(isToolRelatedMessage({
       role: 'assistant',
       tool_calls: [{ type: 'function', function: { name: 'shell_cmd', arguments: '{}' } }]
-    })).toBe(false);
+    })).toBe(true);
+    expect(isToolRelatedMessage({ role: 'assistant', content: 'Hello world' })).toBe(false);
     expect(isTrueAgentResponseMessage({ role: 'assistant', sender: 'agent-a', content: 'hello' })).toBe(true);
     expect(isTrueAgentResponseMessage({ role: 'assistant', content: 'Calling tool: shell_cmd' })).toBe(false);
   });

@@ -55,11 +55,11 @@ export function isToolRelatedMessage(message) {
   if (role === 'tool' || Boolean(message?.isToolStreaming)) {
     return true;
   }
-  if (role === 'assistant') {
-    return false;
-  }
   if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
     return true;
+  }
+  if (role === 'assistant') {
+    return false;
   }
 
   const content = String(message?.content || '').trim();
