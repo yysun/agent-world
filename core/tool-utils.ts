@@ -140,6 +140,20 @@ function normalizeKnownParameterAliases(toolName: string, args: any): {
     delete normalizedArgs.confirmation_message;
   }
 
+  if (toolName === 'web_fetch') {
+    if (normalizedArgs.url === undefined && normalizedArgs.uri !== undefined) {
+      normalizedArgs.url = normalizedArgs.uri;
+      delete normalizedArgs.uri;
+      corrections.push("uri -> url");
+    }
+
+    if (normalizedArgs.url === undefined && normalizedArgs.href !== undefined) {
+      normalizedArgs.url = normalizedArgs.href;
+      delete normalizedArgs.href;
+      corrections.push("href -> url");
+    }
+  }
+
   return { normalizedArgs, corrections };
 }
 

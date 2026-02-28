@@ -121,6 +121,7 @@ import { createShellCmdToolDefinition } from './shell-cmd-tool.js';
 import { createLoadSkillToolDefinition } from './load-skill-tool.js';
 import { createCreateAgentToolDefinition } from './create-agent-tool.js';
 import { createHitlToolDefinition } from './hitl-tool.js';
+import { createWebFetchToolDefinition } from './web-fetch-tool.js';
 import {
   createReadFileToolDefinition,
   createListFilesToolDefinition,
@@ -1607,6 +1608,7 @@ export async function updateMCPServersForWorld(worldId: string, newMcpConfig: st
  * - load_skill: Load full SKILL.md instructions by registry skill_id
  * - create_agent: Create a new agent after explicit user approval
  * - human_intervention_request: Ask a human question with options (single-step selection)
+ * - web_fetch: Fetch URL content and convert to markdown
  * - read_file: Read file contents with pagination controls
  * - list_files: List directory entries
  * - grep: Recursive text search across files
@@ -1618,6 +1620,7 @@ function getBuiltInTools(): Record<string, any> {
   const loadSkillTool = createLoadSkillToolDefinition();
   const createAgentTool = createCreateAgentToolDefinition();
   const hitlTool = createHitlToolDefinition();
+  const webFetchTool = createWebFetchToolDefinition();
   const readFileTool = createReadFileToolDefinition();
   const listFilesTool = createListFilesToolDefinition();
   const grepTool = createGrepToolDefinition();
@@ -1627,6 +1630,7 @@ function getBuiltInTools(): Record<string, any> {
     'load_skill': wrapToolWithValidation(loadSkillTool, 'load_skill'),
     'create_agent': wrapToolWithValidation(createAgentTool, 'create_agent'),
     'human_intervention_request': wrapToolWithValidation(hitlTool, 'human_intervention_request'),
+    'web_fetch': wrapToolWithValidation(webFetchTool, 'web_fetch'),
     'read_file': wrapToolWithValidation(readFileTool, 'read_file'),
     'list_files': wrapToolWithValidation(listFilesTool, 'list_files'),
     'grep': wrapToolWithValidation(grepTool, 'grep'),

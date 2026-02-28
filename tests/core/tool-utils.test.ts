@@ -439,6 +439,28 @@ describe('Tool Utils - validateToolParameters', () => {
     });
   });
 
+  test('normalizes web_fetch aliases for url', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        url: { type: 'string' },
+      },
+      required: ['url'],
+      additionalProperties: false,
+    };
+
+    const validation = validateToolParameters(
+      { uri: 'https://example.com' },
+      schema,
+      'web_fetch',
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(validation.correctedArgs).toEqual({
+      url: 'https://example.com',
+    });
+  });
+
   test('rejects unknown parameters when schema disables additional properties', () => {
     const schema = {
       type: 'object',

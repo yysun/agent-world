@@ -50,6 +50,7 @@ import { createCategoryLogger } from './logger.js';
 import { parseSkillIdListFromEnv } from './skill-settings.js';
 import { requestWorldOption, type HitlOptionResolution } from './hitl.js';
 import { generateId } from './utils.js';
+import { requestToolApproval } from './tool-approval.js';
 
 const APPROVAL_OPTION_YES_ONCE = 'yes_once';
 const APPROVAL_OPTION_YES_IN_SESSION = 'yes_in_session';
@@ -683,7 +684,8 @@ async function requestSkillExecutionApproval(options: {
       scriptPaths: options.scriptPaths,
     });
 
-    const approval = await requestWorldOption(worldContext as any, {
+    const approvalResult = await requestToolApproval({
+      world: worldContext as any,
       requestId,
       title: `Run skill ${options.skillId}?`,
       message: [
@@ -702,6 +704,7 @@ async function requestSkillExecutionApproval(options: {
         },
         { id: APPROVAL_OPTION_NO, label: 'No', description: 'Do not apply this skill now.' },
       ],
+      approvedOptionIds: [APPROVAL_OPTION_YES_ONCE, APPROVAL_OPTION_YES_IN_SESSION],
       metadata: {
         tool: 'human_intervention_request',
         toolCallId: requestId,
@@ -712,6 +715,14 @@ async function requestSkillExecutionApproval(options: {
       agentName: options.context?.agentName ?? null,
     });
 
+    const approval: HitlOptionResolution = {
+      requestId,
+      worldId,
+      chatId,
+      optionId: approvalResult.optionId,
+      source: approvalResult.source,
+    };
+
     await persistLoadSkillApprovalResolutionMessage({
       context: options.context,
       requestId,
@@ -719,7 +730,7 @@ async function requestSkillExecutionApproval(options: {
       skillId: options.skillId,
     });
 
-    if (approval.optionId === APPROVAL_OPTION_NO) {
+    if (!approvalResult.approved) {
       return false;
     }
 

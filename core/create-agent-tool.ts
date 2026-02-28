@@ -24,6 +24,7 @@
  */
 
 import { requestWorldOption } from './hitl.js';
+import { requestToolApproval } from './tool-approval.js';
 import { createAgent, claimAgentCreationSlot } from './managers.js';
 import { LLMProvider, EventType, type CreateAgentParams, type World } from './types.js';
 import { publishEvent } from './events/publishers.js';
@@ -133,7 +134,8 @@ async function requestCreateAgentApproval(options: {
   approved: boolean;
   reason: 'approved' | 'user_denied' | 'timeout';
 }> {
-  const approval = await requestWorldOption(options.world, {
+  const approval = await requestToolApproval({
+    world: options.world,
     title: `Create agent ${options.name}?`,
     message: [
       `Create a new agent named "${options.name}"?`,
@@ -147,6 +149,7 @@ async function requestCreateAgentApproval(options: {
       { id: APPROVAL_OPTION_YES, label: 'Yes', description: 'Create the agent now.' },
       { id: APPROVAL_OPTION_NO, label: 'No', description: 'Do not create the agent.' },
     ],
+    approvedOptionIds: [APPROVAL_OPTION_YES],
     metadata: {
       tool: 'create_agent',
       name: options.name,
@@ -156,15 +159,10 @@ async function requestCreateAgentApproval(options: {
     },
   });
 
-  if (approval.optionId === APPROVAL_OPTION_YES) {
-    return { approved: true, reason: 'approved' };
-  }
-
-  if (approval.source === 'timeout') {
-    return { approved: false, reason: 'timeout' };
-  }
-
-  return { approved: false, reason: 'user_denied' };
+  return {
+    approved: approval.approved,
+    reason: approval.reason,
+  };
 }
 
 async function requestCreateAgentCreatedInfo(options: {
