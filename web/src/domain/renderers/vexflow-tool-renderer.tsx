@@ -144,15 +144,16 @@ function parseRenderSheetMusicText(text: string): SheetMusicData {
     return { notes: [] };
   }
 
-  const match = /render_sheet_music\s*\(\s*({[\s\S]*})\s*\)/i.exec(text);
+  const match = /render_sheet_music\s*\([\s\S]*?({[\s\S]*})[\s\S]*?\)/i.exec(text);
   if (!match?.[1]) {
     return { notes: [] };
   }
 
-  const objectLiteral = match[1];
+  const objectLiteral = match[1].replace(/```(?:json)?\n?/g, '').replace(/```/g, '');
   const normalizedJson = objectLiteral
     .replace(/\/\/.*$/gm, '')
     .replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3')
+    .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, '"$1"')
     .replace(/,\s*([}\]])/g, '$1')
     .trim();
 
