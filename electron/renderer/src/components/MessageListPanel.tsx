@@ -13,6 +13,7 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-28: Added tool-name backfill for persisted tool-result rows (via linked assistant `tool_calls`) so status labels render `tool - <name> - <status>`.
  * - 2026-02-27: Added `showToolMessages` prop-driven filtering so tool-related rows can be hidden from the main transcript.
  * - 2026-02-27: Added collapse/expand toggles for assistant message cards (tool-parity interaction).
  * - 2026-02-27: Reintroduced assistant-card user prompt preview above the `<model> ......` wait row for pre-chunk context.
@@ -68,6 +69,56 @@ function isToolRequestMessage(message) {
     return true;
   }
   return /calling tool\s*:/i.test(String(message?.content || ''));
+}
+
+function extractToolNameFromToolCalls(message, preferredToolCallId = '') {
+  const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+  if (toolCalls.length === 0) {
+    return '';
+  }
+
+  const normalizedPreferredToolCallId = String(preferredToolCallId || '').trim();
+  if (normalizedPreferredToolCallId) {
+    const exactMatch = toolCalls.find((toolCall) => String(toolCall?.id || '').trim() === normalizedPreferredToolCallId);
+    const exactToolName = String(exactMatch?.function?.name || exactMatch?.name || '').trim();
+    if (exactToolName) {
+      return exactToolName;
+    }
+  }
+
+  const firstToolName = String(toolCalls[0]?.function?.name || toolCalls[0]?.name || '').trim();
+  return firstToolName;
+}
+
+function resolveToolNameForMessage(message, messagesById, messages, currentIndex) {
+  const directToolName = String(message?.toolName || message?.tool_name || message?.toolExecution?.toolName || '').trim();
+  if (directToolName && directToolName.toLowerCase() !== 'unknown') {
+    return directToolName;
+  }
+
+  const toolCallId = String(message?.tool_call_id || message?.toolCallId || '').trim();
+  const replyToMessageId = String(message?.replyToMessageId || '').trim();
+  if (replyToMessageId) {
+    const parent = messagesById.get(replyToMessageId);
+    const parentToolName = extractToolNameFromToolCalls(parent, toolCallId);
+    if (parentToolName) {
+      return parentToolName;
+    }
+  }
+
+  for (let index = currentIndex - 1; index >= 0; index -= 1) {
+    const candidate = messages[index];
+    const role = String(candidate?.role || '').trim().toLowerCase();
+    if (role !== 'assistant') {
+      continue;
+    }
+    const candidateToolName = extractToolNameFromToolCalls(candidate, toolCallId);
+    if (candidateToolName) {
+      return candidateToolName;
+    }
+  }
+
+  return directToolName;
 }
 
 function hasPendingToolCalls(message, messages, currentIndex) {
@@ -391,13 +442,16 @@ export default function MessageListPanel({
             const isPendingOptimisticUserMessage = isHuman && message?.optimisticUserPending === true;
             const messageRole = String(message?.role || '').toLowerCase();
             const isToolMessage = isToolRelatedMessage(message);
+            const resolvedToolName = isToolMessage
+              ? resolveToolNameForMessage(message, messagesById, renderableMessages, messageIndex)
+              : '';
             const messageModelLabel = resolveMessageModelLabel(message, worldAgentsById, worldAgentsByName);
             const streamingInputPreview = extractStreamingInputPreview(message, messagesById, renderableMessages, messageIndex);
             const shouldRightAlignMessage = isHuman || isToolMessage || messageRole === 'assistant';
             const hasToolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
             const isToolCallRequestMessage = isToolRequestMessage(message);
             const isPendingToolCallRequest = isToolCallRequestMessage && hasPendingToolCalls(message, renderableMessages, messageIndex);
-            const toolStatusLabel = isToolMessage ? getToolStatusLabel(message, isPendingToolCallRequest) : '';
+            const toolStatusLabel = isToolMessage ? getToolStatusLabel(message, isPendingToolCallRequest, resolvedToolName) : '';
             const isStreamingAssistantMessage = Boolean(message?.isStreaming) && messageRole === 'assistant' && !isToolMessage;
             const isFinalizedAssistantMessage = message?.isStreaming !== true && message?.isToolStreaming !== true;
             const isActiveToolMessage = isToolMessage && (Boolean(message?.isToolStreaming) || isPendingToolCallRequest);
@@ -495,7 +549,9 @@ export default function MessageListPanel({
                     </div>
                   ) : (
                     <MessageContent
-                      message={message}
+                      message={resolvedToolName && !String(message?.toolName || '').trim()
+                        ? { ...message, toolName: resolvedToolName }
+                        : message}
                       collapsed={isCollapsed}
                       isToolCallPending={isPendingToolCallRequest}
                       showToolHeader={!isToolMessage}

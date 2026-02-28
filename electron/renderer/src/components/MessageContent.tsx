@@ -13,6 +13,7 @@
  * - Helper functions are scoped to this module because only this component uses them.
  *
  * Recent Changes:
+ * - 2026-02-28: Updated tool status label format to `tool - <name> - <status>` and added optional resolved-name override for history rows missing direct tool metadata.
  * - 2026-02-27: Restored bold user prompt preview above the `<model> ......` pre-chunk wait row on assistant cards.
  * - 2026-02-27: Removed embedded user-preview box rendering so user context remains in the original user message card.
  * - 2026-02-27: Tool cards no longer render embedded HUMAN preview sections.
@@ -20,7 +21,7 @@
  * - 2026-02-27: Added animated accumulating `...` placeholder for streaming assistant messages before first response chunk arrives.
  * - 2026-02-27: Removed assistant-card `a1 is working` inline indicator text during streaming; activity remains visible through card/tool animations and status rows.
  * - 2026-02-27: Removed request-phase `Calling <tool>...` indicator block while pending; waiting state is represented only by top-row status (`running`).
- * - 2026-02-27: Exposed tool status label helper (`tool - status`) and added optional tool-header suppression for list-level sender+status rendering.
+ * - 2026-02-27: Exposed tool status label helper and added optional tool-header suppression for list-level sender+status rendering.
  * - 2026-02-27: Header status now detects failed tool outcomes from result payload content (e.g. `status: failed`, `exit_code: 1`, timeout/canceled/non_zero_exit) to avoid false `done`.
  * - 2026-02-27: Tool header format simplified to `⚙️ <tool> - <status>` and combined tool body now shows `Args` + `Result` in the collapsible section.
  * - 2026-02-27: Tool headers now show `toolName (args) + status` with compact request arguments and runtime state (`running|done|error`).
@@ -53,6 +54,10 @@ function extractToolNameFromMessage(message) {
   const explicitToolName = String(message?.toolName || message?.tool_name || '').trim();
   if (explicitToolName) {
     return explicitToolName;
+  }
+  const toolExecutionName = String(message?.toolExecution?.toolName || '').trim();
+  if (toolExecutionName) {
+    return toolExecutionName;
   }
 
   if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
@@ -156,12 +161,12 @@ function isFailedToolResultContent(content) {
   return false;
 }
 
-export function getToolStatusLabel(message, isToolCallPending = false) {
+export function getToolStatusLabel(message, isToolCallPending = false, resolvedToolName = '') {
   const content = String(message?.content || '');
   const hasToolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
   const isToolCallRequest = hasToolCalls || /calling tool\s*:/i.test(content);
   const hasCombinedResult = Array.isArray(message?.combinedToolResults) && message.combinedToolResults.length > 0;
-  const toolName = extractToolNameFromMessage(message);
+  const toolName = String(resolvedToolName || extractToolNameFromMessage(message)).trim();
   const streamType = String(message?.streamType || '').toLowerCase();
   const combinedResults = Array.isArray(message?.combinedToolResults) ? message.combinedToolResults : [];
   const hasCombinedError = combinedResults.some((result) => {
@@ -173,11 +178,12 @@ export function getToolStatusLabel(message, isToolCallPending = false) {
     ? 'running'
     : (hasCombinedError || hasMessageFailure ? 'failed' : 'done');
 
+  const normalizedToolName = toolName || 'unknown';
   if (hasCombinedResult || isToolCallRequest) {
-    return `${toolName || 'tool'} - ${statusLabel}`;
+    return `tool: ${normalizedToolName} - ${statusLabel}`;
   }
 
-  return `${toolName || 'tool'} - ${statusLabel}`;
+  return `tool: ${normalizedToolName} - ${statusLabel}`;
 }
 
 function isToolCallRequestMessage(message) {
