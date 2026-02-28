@@ -15,6 +15,7 @@
  * - Tool execution requires world context; no external side effects beyond HITL events.
  *
  * Recent Changes:
+ * - 2026-02-28: Added shorthand default-option resolution so values like "No" can map to a single matching option label.
  * - 2026-02-27: Removed built-in post-selection confirmation stage and removed deprecated confirmation parameters from the tool contract.
  * - 2026-02-20: Removed free-text mode from `human_intervention_request`; tool now enforces options-only interactions.
  * - 2026-02-20: Added initial built-in `human_intervention_request` tool implementation.
@@ -95,6 +96,43 @@ function normalizeTimeoutMs(value: unknown): number | null {
   return Math.floor(parsed);
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function resolveDefaultOptionLabel(options: string[], defaultOption: string): {
+  matchedOption: string | null;
+  error: string | null;
+} {
+  const normalizedDefaultOption = defaultOption.trim().toLowerCase();
+  if (!normalizedDefaultOption) {
+    return { matchedOption: null, error: null };
+  }
+
+  const explicitMatch = options.find((option) => option.toLowerCase() === normalizedDefaultOption);
+  if (explicitMatch) {
+    return { matchedOption: explicitMatch, error: null };
+  }
+
+  const shorthandPattern = new RegExp(`^${escapeRegExp(normalizedDefaultOption)}(?:\\b|[\\s,;:()\\-])`, 'i');
+  const shorthandMatches = options.filter((option) => shorthandPattern.test(option));
+  if (shorthandMatches.length === 1) {
+    return { matchedOption: shorthandMatches[0]!, error: null };
+  }
+
+  if (shorthandMatches.length > 1) {
+    return {
+      matchedOption: null,
+      error: `defaultOption '${defaultOption}' is ambiguous across provided options.`,
+    };
+  }
+
+  return {
+    matchedOption: null,
+    error: `defaultOption '${defaultOption}' does not match any provided option.`,
+  };
+}
+
 function validateAndNormalizeArgs(args: HitlRequestToolArgs): {
   valid: true;
   args: NormalizedHitlRequestArgs;
@@ -109,7 +147,7 @@ function validateAndNormalizeArgs(args: HitlRequestToolArgs): {
 
   const options = normalizeOptionList(args.options);
   const timeoutMs = normalizeTimeoutMs(args.timeoutMs);
-  const defaultOption = typeof args.defaultOption === 'string' && args.defaultOption.trim()
+  const rawDefaultOption = typeof args.defaultOption === 'string' && args.defaultOption.trim()
     ? args.defaultOption.trim()
     : null;
   const metadata = args.metadata && typeof args.metadata === 'object'
@@ -123,14 +161,14 @@ function validateAndNormalizeArgs(args: HitlRequestToolArgs): {
     };
   }
 
-  if (defaultOption && options.length > 0) {
-    const hasDefaultOption = options.some((option) => option.toLowerCase() === defaultOption.toLowerCase());
-    if (!hasDefaultOption) {
-      return {
-        valid: false,
-        error: `defaultOption '${defaultOption}' does not match any provided option.`,
-      };
-    }
+  const resolvedDefaultOption = rawDefaultOption
+    ? resolveDefaultOptionLabel(options, rawDefaultOption)
+    : { matchedOption: null, error: null };
+  if (resolvedDefaultOption.error) {
+    return {
+      valid: false,
+      error: resolvedDefaultOption.error,
+    };
   }
 
   return {
@@ -139,7 +177,7 @@ function validateAndNormalizeArgs(args: HitlRequestToolArgs): {
       question,
       options,
       timeoutMs,
-      defaultOption,
+      defaultOption: resolvedDefaultOption.matchedOption,
       metadata,
     },
   };

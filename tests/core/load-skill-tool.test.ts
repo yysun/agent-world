@@ -27,7 +27,11 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fsModule from 'fs';
-import { createLoadSkillToolDefinition } from '../../core/load-skill-tool.js';
+import {
+  clearChatSkillApprovals,
+  createLoadSkillToolDefinition,
+  reconstructSkillApprovalsFromMessages,
+} from '../../core/load-skill-tool.js';
 import { requestWorldOption } from '../../core/hitl.js';
 import {
   executeShellCommand,
@@ -714,6 +718,63 @@ describe('core/load-skill-tool', () => {
     expect(secondResult).toContain('<skill_context id="skill-installer">');
     expect(secondResult).toContain('<instructions>');
     expect(mockedRequestWorldOption).toHaveBeenCalledTimes(2);
+  });
+
+  it('reuses reconstructed yes_in_session approval after cache reset (restart simulation)', async () => {
+    mockedGetSkill.mockReturnValue({
+      skill_id: 'skill-installer',
+      description: 'Install skills',
+      hash: 'abc123',
+      lastUpdated: '2026-02-28T12:00:00.000Z',
+    });
+    mockedGetSkillSourcePath.mockReturnValue('/skills/skill-installer/SKILL.md');
+    vi.mocked(fs.readFile).mockResolvedValue('# Skill Installer\nUse installer flow.' as any);
+    mockedRequestWorldOption.mockResolvedValue({
+      worldId: 'world-1',
+      requestId: 'load_skill_approval::req-session-approve',
+      chatId: 'chat-1',
+      optionId: 'yes_in_session',
+      source: 'user',
+    });
+
+    const messages: Array<Record<string, unknown>> = [{
+      role: 'user',
+      content: 'install it',
+      chatId: 'chat-1',
+      messageId: 'user-turn-session-1',
+      createdAt: new Date('2026-02-28T12:00:00.000Z'),
+    }];
+
+    const context = {
+      world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+      chatId: 'chat-1',
+      messages,
+      agentName: 'a1',
+      toolCallId: 'load-skill-call-session',
+    };
+
+    const tool = createLoadSkillToolDefinition();
+    const firstResult = await tool.execute({ skill_id: 'skill-installer' }, undefined, undefined, context);
+    expect(firstResult).toContain('<skill_context id="skill-installer">');
+    expect(mockedRequestWorldOption).toHaveBeenCalledTimes(1);
+
+    // Simulate app restart by clearing process-local caches, then rebuilding from persisted messages.
+    clearChatSkillApprovals('world-1', 'chat-1');
+    const restored = reconstructSkillApprovalsFromMessages('world-1', 'chat-1', messages as Array<Record<string, any>>);
+    expect(restored).toBeGreaterThan(0);
+
+    // Move to a new user turn so run-scoped result caching cannot suppress the second request.
+    messages.push({
+      role: 'user',
+      content: 'run it again in this chat',
+      chatId: 'chat-1',
+      messageId: 'user-turn-session-2',
+      createdAt: new Date('2026-02-28T12:01:00.000Z'),
+    });
+
+    const secondResult = await tool.execute({ skill_id: 'skill-installer' }, undefined, undefined, context);
+    expect(secondResult).toContain('<skill_context id="skill-installer">');
+    expect(mockedRequestWorldOption).toHaveBeenCalledTimes(1);
   });
 
 });

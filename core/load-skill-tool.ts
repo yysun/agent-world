@@ -339,6 +339,137 @@ function createRunResultKey(worldId: string, chatId: string | null, skillId: str
   return `${worldId}::${chatId ?? 'global'}::${skillId}::run::${turnMarker}`;
 }
 
+/**
+ * Reconstruct skill approval caches from persisted message history.
+ * Called during chat restore so that `yes_in_session` and `yes_once` grants
+ * survive app restarts without re-prompting the user.
+ *
+ * Scans `role: 'tool'` messages whose JSON content contains `skillId` and
+ * `optionId` fields (written by `persistLoadSkillApprovalResolutionMessage`).
+ *
+ * - `yes_in_session` grants are restored unconditionally (session-scoped).
+ * - `yes_once` grants are restored only when they belong to the current turn
+ *   (i.e. appear after the last `role: 'user'` message in the history).
+ */
+export function reconstructSkillApprovalsFromMessages(
+  worldId: string,
+  chatId: string | null,
+  messages: Array<Record<string, any>>,
+): number {
+  if (!worldId || !Array.isArray(messages) || messages.length === 0) {
+    return 0;
+  }
+
+  // Find the index of the last user message for this chat (turn boundary).
+  let lastUserMessageIndex = -1;
+  let turnMarker: string | null = null;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg?.role !== 'user') continue;
+    const msgChatId = msg?.chatId ? String(msg.chatId).trim() : null;
+    if (msgChatId && msgChatId !== (chatId ?? 'global')) continue;
+    lastUserMessageIndex = i;
+
+    // Derive turn marker using same precedence as getCurrentTurnMarker.
+    const messageId = String(msg?.messageId || '').trim();
+    if (messageId) {
+      turnMarker = `msg:${messageId}`;
+    } else {
+      const createdAt = msg?.createdAt ? new Date(msg.createdAt) : null;
+      if (createdAt && Number.isFinite(createdAt.valueOf())) {
+        turnMarker = `ts:${createdAt.toISOString()}`;
+      } else {
+        const content = String(msg?.content || '').trim();
+        if (content) {
+          turnMarker = `content:${content.slice(0, 80)}`;
+        } else {
+          turnMarker = `idx:${i}`;
+        }
+      }
+    }
+    break;
+  }
+
+  let restored = 0;
+  for (let i = 0; i < messages.length; i += 1) {
+    const msg = messages[i];
+    if (msg?.role !== 'tool') continue;
+
+    let payload: { requestId?: string; skillId?: string; optionId?: string } | null = null;
+    try {
+      const content = typeof msg.content === 'string' ? msg.content : null;
+      if (content) payload = JSON.parse(content);
+    } catch {
+      continue;
+    }
+    if (
+      !payload
+      || typeof payload.requestId !== 'string'
+      || !payload.requestId.includes('load_skill_approval')
+      || typeof payload.skillId !== 'string'
+      || typeof payload.optionId !== 'string'
+    ) {
+      continue;
+    }
+
+    const { skillId, optionId } = payload;
+
+    if (optionId === APPROVAL_OPTION_YES_IN_SESSION) {
+      skillSessionApprovals.add(createSessionApprovalKey(worldId, chatId, skillId));
+      restored += 1;
+    } else if (optionId === APPROVAL_OPTION_YES_ONCE && turnMarker && i > lastUserMessageIndex) {
+      skillTurnApprovals.add(createTurnApprovalKey(worldId, chatId, skillId, turnMarker));
+      restored += 1;
+    }
+  }
+
+  if (restored > 0) {
+    loggerLoadSkillHitl.debug('Reconstructed skill approvals from message history', {
+      worldId,
+      chatId: chatId || null,
+      restored,
+    });
+  }
+
+  return restored;
+}
+
+/**
+ * Clear cached skill approvals and run results scoped to a specific chat.
+ * Must be called when messages are removed (e.g. edit+resubmit) so that
+ * HITL approval prompts fire again for the reprocessed message.
+ */
+export function clearChatSkillApprovals(worldId: string, chatId: string | null): void {
+  const chatToken = chatId ?? 'global';
+  const prefix = `${worldId}::${chatToken}::`;
+
+  for (const key of skillSessionApprovals) {
+    if (key.startsWith(prefix)) {
+      skillSessionApprovals.delete(key);
+    }
+  }
+  for (const key of skillTurnApprovals) {
+    if (key.startsWith(prefix)) {
+      skillTurnApprovals.delete(key);
+    }
+  }
+  for (const key of inFlightSkillApprovals.keys()) {
+    if (key.includes(prefix)) {
+      inFlightSkillApprovals.delete(key);
+    }
+  }
+  for (const key of loadSkillRunResultCache.keys()) {
+    if (key.startsWith(prefix)) {
+      loadSkillRunResultCache.delete(key);
+    }
+  }
+  for (const key of inFlightLoadSkillRunResults.keys()) {
+    if (key.startsWith(prefix)) {
+      inFlightLoadSkillRunResults.delete(key);
+    }
+  }
+}
+
 function getRunScopedLoadSkillResultKey(skillId: string, context: LoadSkillToolContext | undefined): string | null {
   const worldId = String(context?.world?.id || '').trim();
   if (!worldId) {

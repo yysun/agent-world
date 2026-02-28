@@ -88,7 +88,8 @@ import { getWorldDir } from './storage/world-storage.js';
 import { getDefaultRootPath } from './storage/storage-factory.js';
 import { NEW_CHAT_TITLE, isDefaultChatTitle } from './chat-constants.js';
 import { hasActiveChatMessageProcessing, stopMessageProcessing } from './message-processing-control.js';
-import { replayPendingHitlRequests, listPendingHitlPromptEvents, listPendingHitlPromptEventsFromMessages } from './hitl.js';
+import { replayPendingHitlRequests, listPendingHitlPromptEvents, listPendingHitlPromptEventsFromMessages, clearPendingHitlRequestsForChat } from './hitl.js';
+import { clearChatSkillApprovals, reconstructSkillApprovalsFromMessages } from './load-skill-tool.js';
 import { resumePendingToolCallsForChat } from './events/memory-manager.js';
 
 // Type imports
@@ -1382,6 +1383,9 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
       worldId: world.id,
       chatId,
     });
+    const memoryForApprovals = await storageWrappers!.getMemory(resolvedWorldId, chatId);
+    clearChatSkillApprovals(resolvedWorldId, chatId);
+    reconstructSkillApprovalsFromMessages(resolvedWorldId, chatId, Array.isArray(memoryForApprovals) ? memoryForApprovals : []);
     replayPendingHitlRequests(world, chatId);
     loggerRestore.debug('Restore chat pending HITL replay triggered', {
       worldId: world.id,
@@ -1424,6 +1428,9 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
       worldId: world.id,
       chatId,
     });
+    const memoryForApprovals = await storageWrappers!.getMemory(resolvedWorldId, chatId);
+    clearChatSkillApprovals(resolvedWorldId, chatId);
+    reconstructSkillApprovalsFromMessages(resolvedWorldId, chatId, Array.isArray(memoryForApprovals) ? memoryForApprovals : []);
     replayPendingHitlRequests(world, chatId);
     loggerRestore.debug('Restore chat pending HITL replay triggered', {
       worldId: world.id,
@@ -1773,6 +1780,12 @@ export async function editUserMessage(
   if (hasActiveChatMessageProcessing(resolvedWorldId, chatId)) {
     stopMessageProcessing(resolvedWorldId, chatId);
   }
+
+  // Clear cached skill approvals and orphaned HITL requests so the
+  // resubmitted message triggers fresh HITL prompts instead of silently
+  // reusing stale session-level approvals from the previous processing run.
+  clearChatSkillApprovals(resolvedWorldId, chatId);
+  clearPendingHitlRequestsForChat(resolvedWorldId, chatId);
 
   // Step 1: Remove the message and all subsequent messages
   const removalResult = await removeMessagesFrom(resolvedWorldId, messageId, chatId);

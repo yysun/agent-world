@@ -14,6 +14,7 @@
  * - Executes tool through definition `execute()` to verify returned JSON contract.
  *
  * Recent Changes:
+ * - 2026-02-28: Added regression coverage for shorthand `defaultOption` matching and ambiguous shorthand rejection.
  * - 2026-02-27: Added schema contract coverage to ensure removed confirmation parameters stay removed.
  * - 2026-02-27: Removed deprecated confirmation field coverage and added default-option forwarding coverage.
  * - 2026-02-20: Updated coverage for strict options-only HITL policy.
@@ -154,5 +155,51 @@ describe('core/hitl-tool', () => {
     expect(mockedRequestWorldOption).toHaveBeenCalledTimes(1);
     const firstCallArgs = mockedRequestWorldOption.mock.calls[0]?.[1] as any;
     expect(firstCallArgs.defaultOptionId).toBe('opt_2');
+  });
+
+  it('maps shorthand defaultOption to a single matching option label', async () => {
+    mockedRequestWorldOption.mockResolvedValueOnce({
+      requestId: 'req-option-4',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      optionId: 'opt_2',
+      source: 'user',
+    } as any);
+
+    const tool = createHitlToolDefinition();
+    const result = await tool.execute(
+      {
+        question: 'Proceed?',
+        options: ['Yes, create and run the script', 'No, do not run it'],
+        defaultOption: 'No',
+      },
+      undefined,
+      undefined,
+      { world: { id: 'world-1', currentChatId: 'chat-1' } as any, chatId: 'chat-1' },
+    );
+    const parsed = JSON.parse(result);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.status).toBe('confirmed');
+    const firstCallArgs = mockedRequestWorldOption.mock.calls[0]?.[1] as any;
+    expect(firstCallArgs.defaultOptionId).toBe('opt_2');
+  });
+
+  it('rejects ambiguous shorthand defaultOption labels', async () => {
+    const tool = createHitlToolDefinition();
+    const result = await tool.execute(
+      {
+        question: 'Approve?',
+        options: ['Yes once', 'Yes in this session', 'No'],
+        defaultOption: 'Yes',
+      },
+      undefined,
+      undefined,
+      { world: { id: 'world-1', currentChatId: 'chat-1' } as any, chatId: 'chat-1' },
+    );
+    const parsed = JSON.parse(result);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.status).toBe('error');
+    expect(String(parsed.message || '')).toContain('ambiguous');
+    expect(mockedRequestWorldOption).not.toHaveBeenCalled();
   });
 });
