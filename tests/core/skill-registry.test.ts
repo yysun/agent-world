@@ -12,6 +12,7 @@
  * - Exercises syncSkills through exported singleton helpers
  *
  * Recent Changes:
+ * - 2026-02-27: Added regression coverage ensuring project-scope collisions override global scope even when file content hashes are identical.
  * - 2026-02-16: Added coverage ensuring default project-skill roots follow `AGENT_WORLD_PROJECT_PATH` when set.
  * - 2026-02-16: Added coverage for `getSkillsForSystemPrompt` source-scope filtering (global vs project).
  * - 2026-02-14: Added source-path lookup coverage for `load_skill` runtime resolution.
@@ -26,6 +27,7 @@ import * as fsModule from 'fs';
 import {
   clearSkillsForTests,
   getSkill,
+  getSkillSourceScope,
   getSkillsForSystemPrompt,
   getSkillSourcePath,
   getSkills,
@@ -297,6 +299,58 @@ describe('core/skill-registry', () => {
       total: 1,
     });
     expect(getSkill('shared-skill')?.description).toBe('From project root');
+    expect(getSkillSourcePath('shared-skill')).toContain('project-root/shared/SKILL.md');
+  });
+
+  it('keeps project scope as winner when same skill_id has identical content hash across global and project', async () => {
+    const sharedContent = [
+      '---',
+      'name: shared-skill',
+      'description: Shared instructions',
+      '---',
+      '',
+      'same body',
+    ].join('\n');
+
+    setupFsScenario(
+      {
+        'user-root': [{ name: 'shared', type: 'directory' }],
+        'user-root/shared': [{ name: 'SKILL.md', type: 'file' }],
+        'project-root': [{ name: 'shared', type: 'directory' }],
+        'project-root/shared': [{ name: 'SKILL.md', type: 'file' }],
+      },
+      {
+        'user-root/shared/SKILL.md': {
+          content: sharedContent,
+          mtime: new Date('2026-02-14T08:10:00.000Z'),
+        },
+        'project-root/shared/SKILL.md': {
+          content: sharedContent,
+          mtime: new Date('2026-02-14T08:00:00.000Z'),
+        },
+      },
+    );
+
+    await syncSkills({
+      userSkillRoots: ['user-root'],
+      projectSkillRoots: [],
+    });
+    expect(getSkillSourceScope('shared-skill')).toBe('global');
+    expect(getSkillSourcePath('shared-skill')).toContain('user-root/shared/SKILL.md');
+
+    const mergedResult = await syncSkills({
+      userSkillRoots: ['user-root'],
+      projectSkillRoots: ['project-root'],
+    });
+
+    expect(mergedResult).toEqual({
+      added: 0,
+      updated: 0,
+      removed: 0,
+      unchanged: 1,
+      total: 1,
+    });
+    expect(getSkillSourceScope('shared-skill')).toBe('project');
     expect(getSkillSourcePath('shared-skill')).toContain('project-root/shared/SKILL.md');
   });
 

@@ -3,6 +3,7 @@
  * Tests the storage backend functionality for mcpConfig
  */
 
+import { beforeEach, describe, expect, test } from 'vitest';
 import { MemoryStorage } from '../../core/storage/memory-storage.js';
 
 describe('Memory Storage MCP Config Tests', () => {

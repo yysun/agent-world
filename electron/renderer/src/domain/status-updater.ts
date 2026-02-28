@@ -5,34 +5,77 @@
  *
  * Key Exports:
  * - `applyEventToRegistry(registry, worldId, chatId, agentId, eventType, subtype)` — pure reducer.
+ * - `parseStoredEventReplayArgs(storedEvent)` — extracts replay args from a raw DB event; returns
+ *   null for events that should be skipped (human/user messages, unknown types, missing fields).
  *
  * Event → Transition Table:
- * | eventType | subtype           | Effect on agent                          |
- * |-----------|-------------------|------------------------------------------|
- * | sse       | start             | inFlightSse++, status → working          |
- * | sse       | end               | inFlightSse--, counters=0 → complete     |
- * | sse       | error             | inFlightSse--, counters=0 → complete     |
- * | tool      | start             | inFlightTools++, status → working        |
- * | tool      | result            | inFlightTools--, counters=0 → complete   |
- * | tool      | error             | inFlightTools--, counters=0 → complete   |
- * | system    | hitl-option-req.  | status → complete (reset counters)       |
- * | reset     | *                 | status → idle (reset counters)           |
+ * | eventType | subtype           | Effect on agent              |
+ * |-----------|-------------------|------------------------------|
+ * | sse       | start             | status → working             |
+ * | sse       | end / error       | status → complete            |
+ * | tool      | tool-start        | status → working             |
+ * | tool      | tool-result/error | status → complete            |
+ * | message   | (any)             | status → complete            |
  *
  * Implementation Notes:
- * - Counters never go below 0 (guarded with Math.max(0, counter - 1)).
+ * - No counters: direct state transitions. The activity event handler
+ *   (response-end/idle) calls clearChatAgents which is the authoritative
+ *   reset to idle. The complete state is an intermediate signal ("just
+ *   finished") visible between stream end and the activity event arrival.
+ * - Correct for DB replay (getChatEvents on chat entry): replayed events
+ *   end in `complete`, not stuck at `working`.
  * - Ensures registry world/chat/agent entries exist before mutation.
  *
  * Recent Changes:
+ * - 2026-02-26: Removed legacy system HITL transition path after HITL migrated to tool-progress prompt transport.
+ * - 2026-02-24: Removed inFlightSse/inFlightTools counter arithmetic; status is
+ *   now set directly on start events and cleared by activity events via
+ *   clearChatAgents (matches web app's pendingOperations-driven approach).
  * - 2026-02-22: Created as part of status-registry migration (Phase 3).
  */
 
 import type { AgentStatusEntry, ChatStatusEntry, StatusRegistry, WorldStatusEntry } from './status-types';
 
-export type RegistryEventType = 'sse' | 'tool' | 'system' | 'reset';
+export type RegistryEventType = 'sse' | 'tool' | 'message';
+
+export type ReplayEventArgs = {
+  agentName: string;
+  eventType: RegistryEventType;
+  subtype: string;
+};
+
+/**
+ * Parse a raw stored DB event into the arguments needed for applyEventToRegistry.
+ * Returns null for events that should be skipped during replay:
+ * - message events from human/user senders
+ * - events with missing agentName or subtype
+ * - unknown event categories (world, system, etc.)
+ */
+export function parseStoredEventReplayArgs(storedEvent: unknown): ReplayEventArgs | null {
+  const event = storedEvent as Record<string, unknown> | null;
+  if (!event) return null;
+
+  const eventCategory = String(event?.type || '').trim();
+  const payload = (event?.payload || {}) as Record<string, unknown>;
+
+  if (eventCategory === 'message') {
+    const sender = String(payload?.sender || '').trim();
+    if (!sender || sender === 'human' || sender === 'user') return null;
+    return { agentName: sender, eventType: 'message', subtype: 'received' };
+  }
+
+  if (eventCategory !== 'sse' && eventCategory !== 'tool') return null;
+
+  const agentName = String(payload?.agentName || '').trim();
+  if (!agentName) return null;
+  const subtype = String(payload?.type || '').trim();
+  if (!subtype) return null;
+
+  return { agentName, eventType: eventCategory as RegistryEventType, subtype };
+}
 export type RegistryEventSubtype =
   | 'start' | 'end' | 'error'
   | 'tool-start' | 'tool-result' | 'tool-error'
-  | 'hitl-option-request'
   | string;
 
 function ensureAgent(registry: StatusRegistry, worldId: string, chatId: string, agentId: string): {
@@ -48,7 +91,7 @@ function ensureAgent(registry: StatusRegistry, worldId: string, chatId: string, 
   const existingEntry = agents.get(agentId);
   const entry: AgentStatusEntry = existingEntry
     ? { ...existingEntry }
-    : { agentId, status: 'idle', inFlightSse: 0, inFlightTools: 0 };
+    : { agentId, status: 'idle' };
 
   agents.set(agentId, entry);
   chats.set(chatId, { chatId, agents });
@@ -67,35 +110,18 @@ export function applyEventToRegistry(
   const { entry, registry: r } = ensureAgent(registry, worldId, chatId, agentId);
   const agent = entry;
 
-  if (eventType === 'sse') {
-    if (subtype === 'start') {
-      agent.inFlightSse++;
-      agent.status = 'working';
-    } else if (subtype === 'end' || subtype === 'error') {
-      agent.inFlightSse = Math.max(0, agent.inFlightSse - 1);
-      if (agent.inFlightSse <= 0 && agent.inFlightTools <= 0) {
-        agent.status = 'complete';
-      }
-    }
-  } else if (eventType === 'tool') {
-    if (subtype === 'tool-start') {
-      agent.inFlightTools++;
-      agent.status = 'working';
-    } else if (subtype === 'tool-result' || subtype === 'tool-error') {
-      agent.inFlightTools = Math.max(0, agent.inFlightTools - 1);
-      if (agent.inFlightSse <= 0 && agent.inFlightTools <= 0) {
-        agent.status = 'complete';
-      }
-    }
-  } else if (eventType === 'system' && subtype === 'hitl-option-request') {
-    agent.inFlightSse = 0;
-    agent.inFlightTools = 0;
+  if (eventType === 'sse' && subtype === 'start') {
+    agent.status = 'working';
+  } else if (eventType === 'sse' && (subtype === 'end' || subtype === 'error')) {
     agent.status = 'complete';
-  } else if (eventType === 'reset') {
-    agent.inFlightSse = 0;
-    agent.inFlightTools = 0;
-    agent.status = 'idle';
+  } else if (eventType === 'tool' && subtype === 'tool-start') {
+    agent.status = 'working';
+  } else if (eventType === 'tool' && (subtype === 'tool-result' || subtype === 'tool-error')) {
+    agent.status = 'complete';
+  } else if (eventType === 'message') {
+    agent.status = 'complete';
   }
+  // clearChatAgents via the activity event handler is the authoritative reset to idle.
 
   return r;
 }

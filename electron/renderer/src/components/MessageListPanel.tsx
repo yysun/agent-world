@@ -13,6 +13,22 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-28: Added tool-name backfill for persisted tool-result rows (via linked assistant `tool_calls`) so status labels render `tool - <name> - <status>`.
+ * - 2026-02-27: Added `showToolMessages` prop-driven filtering so tool-related rows can be hidden from the main transcript.
+ * - 2026-02-27: Added collapse/expand toggles for assistant message cards (tool-parity interaction).
+ * - 2026-02-27: Reintroduced assistant-card user prompt preview above the `<model> ......` wait row for pre-chunk context.
+ * - 2026-02-27: Limited tool request/result merge to tool-styled rows only so assistant cards and tool cards can both remain visible.
+ * - 2026-02-27: Restored user message header label as `You` in blue user cards.
+ * - 2026-02-27: Removed embedded input-preview handoff so user context stays in the original blue user message card.
+ * - 2026-02-27: Hidden `HUMAN` title text in user message headers while preserving timestamp/actions.
+ * - 2026-02-27: Streaming placeholder now passes model label to message content so pre-chunk wait text renders as `<model> ......`.
+ * - 2026-02-27: Hidden branch/copy actions for non-finalized assistant messages (`isStreaming`/`isToolStreaming`) to avoid controls on in-progress cards.
+ * - 2026-02-27: Tool cards now show `sender + tool-status` in the top metadata row and suppress duplicate in-body tool header text.
+ * - 2026-02-27: Combined tool-request and matching tool-result rows into a single rendered card by merging matched tool outputs into the request card.
+ * - 2026-02-27: Tool-request card animation now auto-stops once matching tool_call_id results are observed.
+ * - 2026-02-27: Added active tool-call card animation for `calling tool` and live tool-stream rows.
+ * - 2026-02-27: Added animated streaming-message card class hook so active assistant bubbles show a clear in-place working effect.
+ * - 2026-02-24: Tool-related cards now default to collapsed with explicit per-message collapse overrides so users can reliably expand/re-collapse items.
  * - 2026-02-21: Added assistant-message action button to copy raw markdown beside branch action.
  * - 2026-02-20: Added inline message-flow HITL prompt card rendering for option prompts, replacing overlay-only HITL UX.
  * - 2026-02-20: Added message-loading guard so session switches render loading state instead of welcome-card flicker.
@@ -25,7 +41,7 @@
  */
 
 import { useState } from 'react';
-import MessageContent from './MessageContent';
+import MessageContent, { getToolStatusLabel } from './MessageContent';
 import ElapsedTimeCounter from './ElapsedTimeCounter';
 import { compactSkillDescription, formatTime } from '../utils/formatting';
 import {
@@ -39,6 +55,236 @@ import {
   resolveMessageAvatar,
 } from '../utils/message-utils';
 
+function collectToolCallIds(message) {
+  if (!Array.isArray(message?.tool_calls)) {
+    return [];
+  }
+  return message.tool_calls
+    .map((toolCall) => String(toolCall?.id || '').trim())
+    .filter(Boolean);
+}
+
+function isToolRequestMessage(message) {
+  if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
+    return true;
+  }
+  return /calling tool\s*:/i.test(String(message?.content || ''));
+}
+
+function extractToolNameFromToolCalls(message, preferredToolCallId = '') {
+  const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+  if (toolCalls.length === 0) {
+    return '';
+  }
+
+  const normalizedPreferredToolCallId = String(preferredToolCallId || '').trim();
+  if (normalizedPreferredToolCallId) {
+    const exactMatch = toolCalls.find((toolCall) => String(toolCall?.id || '').trim() === normalizedPreferredToolCallId);
+    const exactToolName = String(exactMatch?.function?.name || exactMatch?.name || '').trim();
+    if (exactToolName) {
+      return exactToolName;
+    }
+  }
+
+  const firstToolName = String(toolCalls[0]?.function?.name || toolCalls[0]?.name || '').trim();
+  return firstToolName;
+}
+
+function resolveToolNameForMessage(message, messagesById, messages, currentIndex) {
+  const directToolName = String(message?.toolName || message?.tool_name || message?.toolExecution?.toolName || '').trim();
+  if (directToolName && directToolName.toLowerCase() !== 'unknown') {
+    return directToolName;
+  }
+
+  const toolCallId = String(message?.tool_call_id || message?.toolCallId || '').trim();
+  const replyToMessageId = String(message?.replyToMessageId || '').trim();
+  if (replyToMessageId) {
+    const parent = messagesById.get(replyToMessageId);
+    const parentToolName = extractToolNameFromToolCalls(parent, toolCallId);
+    if (parentToolName) {
+      return parentToolName;
+    }
+  }
+
+  for (let index = currentIndex - 1; index >= 0; index -= 1) {
+    const candidate = messages[index];
+    const role = String(candidate?.role || '').trim().toLowerCase();
+    if (role !== 'assistant') {
+      continue;
+    }
+    const candidateToolName = extractToolNameFromToolCalls(candidate, toolCallId);
+    if (candidateToolName) {
+      return candidateToolName;
+    }
+  }
+
+  return directToolName;
+}
+
+function hasPendingToolCalls(message, messages, currentIndex) {
+  const requestedCallIds = collectToolCallIds(message);
+  if (requestedCallIds.length === 0) {
+    return false;
+  }
+
+  const pendingCallIds = new Set(requestedCallIds);
+  const toolCallStatus = message?.toolCallStatus && typeof message.toolCallStatus === 'object'
+    ? message.toolCallStatus
+    : null;
+
+  if (toolCallStatus) {
+    for (const callId of requestedCallIds) {
+      const statusEntry = toolCallStatus[callId];
+      if (statusEntry?.complete === true) {
+        pendingCallIds.delete(callId);
+      }
+    }
+  }
+
+  if (pendingCallIds.size === 0) {
+    return false;
+  }
+
+  const combinedToolResults = Array.isArray(message?.combinedToolResults) ? message.combinedToolResults : [];
+  for (const result of combinedToolResults) {
+    const completionKey = String(result?.tool_call_id || result?.messageId || '').trim();
+    if (!completionKey) {
+      continue;
+    }
+    pendingCallIds.delete(completionKey);
+  }
+
+  if (pendingCallIds.size === 0) {
+    return false;
+  }
+
+  for (let index = currentIndex + 1; index < messages.length; index += 1) {
+    const candidate = messages[index];
+    const candidateRole = String(candidate?.role || '').trim().toLowerCase();
+    if (candidateRole !== 'tool') {
+      continue;
+    }
+    const completionKey = String(candidate?.tool_call_id || candidate?.messageId || '').trim();
+    if (!completionKey) {
+      continue;
+    }
+    pendingCallIds.delete(completionKey);
+    if (pendingCallIds.size === 0) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function buildCombinedRenderableMessages(messages) {
+  const toolResultsByKey = new Map<string, Array<any>>();
+
+  for (const message of messages) {
+    const role = String(message?.role || '').trim().toLowerCase();
+    if (role !== 'tool') {
+      continue;
+    }
+    const completionKey = String(message?.tool_call_id || message?.messageId || '').trim();
+    if (!completionKey) {
+      continue;
+    }
+    const existing = toolResultsByKey.get(completionKey) || [];
+    existing.push(message);
+    toolResultsByKey.set(completionKey, existing);
+  }
+
+  const consumedToolResultIds = new Set<string>();
+
+  return messages
+    .map((message) => {
+      if (!isToolRelatedMessage(message) || !isToolRequestMessage(message)) {
+        return message;
+      }
+
+      const requestedCallIds = collectToolCallIds(message);
+      if (requestedCallIds.length === 0) {
+        return message;
+      }
+
+      const combinedToolResults: Array<any> = [];
+      for (const callId of requestedCallIds) {
+        const matches = toolResultsByKey.get(callId) || [];
+        for (const match of matches) {
+          const matchMessageId = String(match?.messageId || '').trim();
+          if (matchMessageId) {
+            consumedToolResultIds.add(matchMessageId);
+          }
+          combinedToolResults.push(match);
+        }
+      }
+
+      if (combinedToolResults.length === 0) {
+        return message;
+      }
+
+      return {
+        ...message,
+        combinedToolResults,
+      };
+    })
+    .filter((message) => {
+      const role = String(message?.role || '').trim().toLowerCase();
+      if (role !== 'tool') {
+        return true;
+      }
+      const messageId = String(message?.messageId || '').trim();
+      if (!messageId) {
+        return true;
+      }
+      return !consumedToolResultIds.has(messageId);
+    });
+}
+
+function resolveMessageModelLabel(message, worldAgentsById, worldAgentsByName) {
+  const fromAgentId = String(message?.fromAgentId || '').trim();
+  if (fromAgentId && worldAgentsById?.has(fromAgentId)) {
+    const fromAgent = worldAgentsById.get(fromAgentId);
+    const modelById = String(fromAgent?.model || '').trim();
+    if (modelById) return modelById;
+  }
+
+  const sender = String(message?.sender || '').trim().toLowerCase();
+  if (sender && worldAgentsByName?.has(sender)) {
+    const fromName = worldAgentsByName.get(sender);
+    const modelByName = String(fromName?.model || '').trim();
+    if (modelByName) return modelByName;
+  }
+
+  return 'model';
+}
+
+function extractStreamingInputPreview(message, messagesById, messages, messageIndex) {
+  const replyToMessageId = String(message?.replyToMessageId || '').trim();
+  if (replyToMessageId) {
+    const parent = messagesById.get(replyToMessageId);
+    if (isHumanMessage(parent)) {
+      const text = String(parent?.content || '').trim();
+      if (text) {
+        return text;
+      }
+    }
+  }
+
+  for (let index = messageIndex - 1; index >= 0; index -= 1) {
+    const candidate = messages[index];
+    if (!isHumanMessage(candidate)) {
+      continue;
+    }
+    const text = String(candidate?.content || '').trim();
+    if (text) {
+      return text;
+    }
+  }
+
+  return '';
+}
+
 export default function MessageListPanel({
   messagesContainerRef,
   messagesLoading,
@@ -48,6 +294,7 @@ export default function MessageListPanel({
   loadingSkillRegistry,
   visibleSkillRegistryEntries,
   skillRegistryError,
+  showToolMessages = true,
   messages,
   messagesById,
   worldAgentsById,
@@ -76,16 +323,26 @@ export default function MessageListPanel({
   ).trim();
   const inlineDetailText = String(inlineWorkingIndicatorState?.detailText || '').trim();
   const inlineElapsedMs = Number(inlineWorkingIndicatorState?.elapsedMs || 0);
-  const renderableMessages = messages.filter(isRenderableMessageEntry);
+  const renderableMessages = buildCombinedRenderableMessages(
+    messages
+      .filter(isRenderableMessageEntry)
+      .filter((message) => showToolMessages || !isToolRelatedMessage(message))
+  );
   const shouldShowLoading = messagesLoading && renderableMessages.length === 0;
-  const [collapsedMessageIds, setCollapsedMessageIds] = useState<Set<string>>(new Set());
-  const toggleMessageCollapsed = (messageId: string) => {
-    setCollapsedMessageIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(messageId)) next.delete(messageId);
-      else next.add(messageId);
-      return next;
-    });
+  const [messageCollapseOverrides, setMessageCollapseOverrides] = useState<Record<string, boolean>>({});
+  const toggleMessageCollapsed = (messageId: string, currentCollapsed: boolean) => {
+    setMessageCollapseOverrides((prev) => ({
+      ...prev,
+      [messageId]: !currentCollapsed,
+    }));
+  };
+
+  const isMessageCollapsed = (message, messageKey: string | null, isCollapsible: boolean) => {
+    if (!isCollapsible || !messageKey) return false;
+    if (Object.prototype.hasOwnProperty.call(messageCollapseOverrides, messageKey)) {
+      return Boolean(messageCollapseOverrides[messageKey]);
+    }
+    return isToolRelatedMessage(message);
   };
   const shouldShowWelcome = !messagesLoading && !hasConversationMessages;
 
@@ -184,8 +441,27 @@ export default function MessageListPanel({
             const isHuman = isHumanMessage(message);
             const isPendingOptimisticUserMessage = isHuman && message?.optimisticUserPending === true;
             const messageRole = String(message?.role || '').toLowerCase();
-            const shouldRightAlignMessage = isHuman || isToolRelatedMessage(message) || messageRole === 'assistant';
-            const isBranchableAgentMessage = !isHuman && isTrueAgentResponseMessage(message) && Boolean(message.messageId);
+            const isToolMessage = isToolRelatedMessage(message);
+            const resolvedToolName = isToolMessage
+              ? resolveToolNameForMessage(message, messagesById, renderableMessages, messageIndex)
+              : '';
+            const messageModelLabel = resolveMessageModelLabel(message, worldAgentsById, worldAgentsByName);
+            const streamingInputPreview = extractStreamingInputPreview(message, messagesById, renderableMessages, messageIndex);
+            const shouldRightAlignMessage = isHuman || isToolMessage || messageRole === 'assistant';
+            const hasToolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
+            const isToolCallRequestMessage = isToolRequestMessage(message);
+            const isPendingToolCallRequest = isToolCallRequestMessage && hasPendingToolCalls(message, renderableMessages, messageIndex);
+            const toolStatusLabel = isToolMessage ? getToolStatusLabel(message, isPendingToolCallRequest, resolvedToolName) : '';
+            const isStreamingAssistantMessage = Boolean(message?.isStreaming) && messageRole === 'assistant' && !isToolMessage;
+            const isFinalizedAssistantMessage = message?.isStreaming !== true && message?.isToolStreaming !== true;
+            const isActiveToolMessage = isToolMessage && (Boolean(message?.isToolStreaming) || isPendingToolCallRequest);
+            const isBranchableAgentMessage = !isHuman
+              && isFinalizedAssistantMessage
+              && isTrueAgentResponseMessage(message)
+              && Boolean(message.messageId);
+            const isAssistantMessage = messageRole === 'assistant' && !isToolMessage;
+            const isCollapsible = isToolMessage || (isAssistantMessage && Boolean(messageKey));
+            const isCollapsed = isMessageCollapsed(message, messageKey, isCollapsible);
             const normalizedEditedText = editingText.trim();
             const normalizedOriginalText = String(message?.content || '').trim();
             const isEditChanged = Boolean(normalizedEditedText) && normalizedEditedText !== normalizedOriginalText;
@@ -204,20 +480,27 @@ export default function MessageListPanel({
                   </div>
                 ) : null}
 
-                <article className={`min-w-0 ${getMessageCardClassName(message, messagesById, renderableMessages, messageIndex)}`}>
+                <article className={`min-w-0 ${getMessageCardClassName(message, messagesById, renderableMessages, messageIndex)} ${isStreamingAssistantMessage ? 'agent-streaming-card' : ''} ${isActiveToolMessage ? 'agent-tool-active-card' : ''}`}>
                   <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
-                    <span>{senderLabel}</span>
+                    {isToolMessage ? (
+                      <span className="flex items-center gap-2">
+                        <span>{senderLabel}</span>
+                        <span className="font-medium text-foreground/80">{toolStatusLabel}</span>
+                      </span>
+                    ) : (
+                      <span>{isHuman ? 'You' : senderLabel}</span>
+                    )}
                     <div className="flex items-center gap-1">
                       <span>{formatTime(message.createdAt)}</span>
-                      {(isBranchableAgentMessage || isToolRelatedMessage(message)) && messageKey ? (
+                      {isCollapsible && messageKey ? (
                         <button
                           type="button"
-                          onClick={() => toggleMessageCollapsed(messageKey)}
+                          onClick={() => toggleMessageCollapsed(messageKey, isCollapsed)}
                           className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
-                          title={collapsedMessageIds.has(messageKey) ? 'Expand' : 'Collapse'}
-                          aria-label={collapsedMessageIds.has(messageKey) ? 'Expand' : 'Collapse'}
+                          title={isCollapsed ? 'Expand' : 'Collapse'}
+                          aria-label={isCollapsed ? 'Expand' : 'Collapse'}
                         >
-                          {collapsedMessageIds.has(messageKey) ? (
+                          {isCollapsed ? (
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3" aria-hidden="true">
                               <path d="m6 9 6 6 6-6" />
                             </svg>
@@ -265,7 +548,16 @@ export default function MessageListPanel({
                       </div>
                     </div>
                   ) : (
-                    <MessageContent message={message} collapsed={(isBranchableAgentMessage || isToolRelatedMessage(message)) && Boolean(messageKey) && collapsedMessageIds.has(messageKey)} />
+                    <MessageContent
+                      message={resolvedToolName && !String(message?.toolName || '').trim()
+                        ? { ...message, toolName: resolvedToolName }
+                        : message}
+                      collapsed={isCollapsed}
+                      isToolCallPending={isPendingToolCallRequest}
+                      showToolHeader={!isToolMessage}
+                      streamingDotsLabel={messageModelLabel}
+                      streamingInputPreview={streamingInputPreview}
+                    />
                   )}
 
                   {isHumanMessage(message) && message.messageId && !isPendingOptimisticUserMessage && editingMessageId !== getMessageIdentity(message) ? (

@@ -5,14 +5,14 @@
  *
  * Key Features:
  * - Renders `MainHeaderBar` at the top of the workspace.
- * - Renders `MainContentArea` as the central layout body.
- * - Renders an optional status bar node at the bottom.
+ * - Renders `MainContentArea` as the central layout body with an optional status bar slot.
  *
  * Implementation Notes:
  * - Uses grouped prop objects to keep `App.jsx` orchestration compact.
  * - Preserves existing render order and styling classes.
  *
  * Recent Changes:
+ * - 2026-02-28: Routed status bar through `MainContentArea` to keep status alignment tied to composer column layout.
  * - 2026-02-22: Replaced StatusActivityBar slot with generic statusBar ReactNode for WorkingStatusBar.
  * - 2026-02-17: Added for Phase 5 final integration cleanup.
  */
@@ -33,8 +33,7 @@ export default function MainWorkspaceLayout({
   return (
     <main className="relative flex min-w-0 flex-1 flex-col bg-background">
       <MainHeaderBar {...mainHeaderProps} />
-      <MainContentArea {...mainContentAreaProps} />
-      {statusBar}
+      <MainContentArea {...mainContentAreaProps} statusBar={statusBar} />
     </main>
   );
 }

@@ -26,6 +26,12 @@ export interface IpcMainHandleLike {
 
 export function registerIpcRoutes(ipcMainLike: IpcMainHandleLike, routes: MainIpcRoute[]): void {
   for (const route of routes) {
-    ipcMainLike.handle(route.channel, route.handler);
+    ipcMainLike.handle(route.channel, async (event, payload) => {
+      try {
+        return await route.handler(event, payload);
+      } catch (err) {
+        return { __ipcError: err instanceof Error ? err.message : String(err) };
+      }
+    });
   }
 }

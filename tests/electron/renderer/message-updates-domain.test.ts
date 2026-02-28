@@ -11,18 +11,22 @@
  * - Avoids runtime dependencies beyond pure helper functions.
  *
  * Recent Changes:
+ * - 2026-02-26: Added coverage for redundant error-log suppression/removal and chat-scoped transient error clearing.
  * - 2026-02-20: Added optimistic user-message lifecycle coverage (create/reconcile/remove + identical-content reconciliation safety).
  * - 2026-02-12: Moved into layer-based tests/electron subfolder and updated module import paths.
  * - 2026-02-12: Added Phase 5 tests for extracted message update domain module.
- */
+*/
 
 import { describe, expect, it } from 'vitest';
 import {
+  clearChatTransientErrors,
   createOptimisticUserMessage,
   createLogMessage,
   getMessageTimestamp,
   reconcileOptimisticUserMessage,
+  removeRedundantErrorLogMessages,
   removeOptimisticUserMessage,
+  shouldSuppressLogForExistingStreamError,
   upsertMessageList
 } from '../../../electron/renderer/src/domain/message-updates';
 
@@ -93,6 +97,65 @@ describe('message-updates domain helpers', () => {
     expect(message.type).toBe('log');
     expect(message.createdAt).toBe(createdAt);
     expect(message.logEvent.category).toBe('runtime');
+  });
+
+  it('suppresses error logs when equivalent stream error already exists', () => {
+    const existing = [{
+      messageId: 'm-1',
+      hasError: true,
+      errorMessage: "model 'qwen2.5:14b' not found"
+    }];
+    const shouldSuppress = shouldSuppressLogForExistingStreamError(existing, {
+      message: 'LLM failure',
+      level: 'error',
+      data: {
+        error: "404 model 'qwen2.5:14b' not found"
+      }
+    });
+    expect(shouldSuppress).toBe(true);
+  });
+
+  it('removes redundant error log rows after stream error is marked inline', () => {
+    const existing = [{
+      messageId: 'log-1',
+      logEvent: {
+        level: 'error',
+        message: 'LLM failure',
+        data: { error: "404 model 'qwen2.5:14b' not found" }
+      }
+    }, {
+      messageId: 'm-1',
+      role: 'assistant',
+      hasError: true,
+      errorMessage: "model 'qwen2.5:14b' not found"
+    }];
+    const next = removeRedundantErrorLogMessages(existing, "model 'qwen2.5:14b' not found");
+    expect(next).toHaveLength(1);
+    expect(next[0].messageId).toBe('m-1');
+  });
+
+  it('clears chat-scoped transient error logs and inline error markers', () => {
+    const existing = [{
+      messageId: 'log-error',
+      chatId: 'chat-1',
+      type: 'log',
+      logEvent: { level: 'error', message: 'failure' }
+    }, {
+      messageId: 'assistant-error',
+      chatId: 'chat-1',
+      role: 'assistant',
+      hasError: true,
+      errorMessage: 'failure'
+    }, {
+      messageId: 'assistant-ok',
+      chatId: 'chat-1',
+      role: 'assistant',
+      content: 'ok'
+    }];
+
+    const next = clearChatTransientErrors(existing, 'chat-1');
+    expect(next).toHaveLength(1);
+    expect(next[0].messageId).toBe('assistant-ok');
   });
 
   it('creates optimistic user messages with pending metadata', () => {
@@ -198,4 +261,5 @@ describe('message-updates domain helpers', () => {
     expect(afterSecondEcho.map((item) => item.messageId)).toEqual(['server-user-1', 'server-user-2']);
     expect(afterSecondEcho.every((item) => item.optimisticUserPending !== true)).toBe(true);
   });
+
 });

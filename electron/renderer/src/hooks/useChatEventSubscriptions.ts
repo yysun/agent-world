@@ -13,6 +13,17 @@
  * - Accepts state setters/callbacks via dependency injection.
  *
  * Recent Changes:
+ * - 2026-02-27: Global log listener now routes events only to logs-panel ingestion; chat message list is no longer mutated for realtime log events.
+ * - 2026-02-27: Added app-level main log callback wiring so global log events can feed the logs panel independently of chat message rendering.
+ * - 2026-02-26: Replaced chat-subscription lifecycle console traces with categorized renderer logger output controlled by env-derived log config.
+ * - 2026-02-25: Added subscription lifecycle trace logs (subscribe/unsubscribe/HITL ingest) for resume timing diagnostics.
+ * - 2026-02-24: Fixed subscription cycling: changed loadedWorld dependency to loadedWorld?.id
+ *   so world metadata refreshes (HITL response, chat switch) no longer tear down and
+ *   recreate the subscription, losing realtime events and working indicator state.
+ * - 2026-02-24: Added exported HITL queue-ingestion helper for deterministic replay dedupe testing.
+ *   Deferred HITL enqueue uses batched flush to avoid dropping prompts on multi-replay.
+ * - 2026-02-24: Removed activityStateRef — activity-state.ts deleted as part of
+ *   working-status simplification.
  * - 2026-02-22: Removed onSessionResponseStateChange, setPendingResponseSessionIds,
  *   setSessionActivity, setStatusText, setActiveStreamCount as part of status-registry
  *   migration (Phase 1).
@@ -23,13 +34,15 @@
  * - 2026-02-17: Extracted from App.tsx during CC pass.
  */
 
-import { Dispatch, MutableRefObject, SetStateAction, useEffect } from 'react';
+import { Dispatch, MutableRefObject, SetStateAction, useEffect, useRef } from 'react';
 import {
   createChatSubscriptionEventHandler,
   createGlobalLogEventHandler,
+  type MainProcessLogEntry,
 } from '../domain/chat-event-handlers';
 import type { DesktopApi } from '../types/desktop-api';
 import type { MessageLike } from '../domain/message-updates';
+import { rendererLogger } from '../utils/logger';
 
 type HitlOption = {
   id: string;
@@ -65,15 +78,6 @@ type RealtimeState = {
   cleanup: () => void;
 };
 
-type ActivityState = {
-  setActiveStreamCount: (count: number) => void;
-  handleToolStart: (toolUseId: string, toolName: string, toolInput?: Record<string, unknown>) => void;
-  handleToolResult: (toolUseId: string, result: string) => void;
-  handleToolError: (toolUseId: string, error: string) => void;
-  handleToolProgress: (toolUseId: string, progress: string) => void;
-  cleanup: () => void;
-};
-
 type UseChatEventSubscriptionsArgs = {
   api: DesktopApi;
   loadedWorld: { id?: string } | null;
@@ -81,11 +85,80 @@ type UseChatEventSubscriptionsArgs = {
   setMessages: Dispatch<SetStateAction<MessageLike[]>>;
   chatSubscriptionCounter: MutableRefObject<number>;
   streamingStateRef: MutableRefObject<RealtimeState | null>;
-  activityStateRef: MutableRefObject<ActivityState | null>;
   refreshSessions: (worldId: string, preferredSessionId?: string | null) => Promise<void>;
   resetActivityRuntimeState: () => void;
   setHitlPromptQueue: Dispatch<SetStateAction<HitlPrompt[]>>;
+  onMainLogEvent?: (entry: MainProcessLogEntry) => void;
 };
+
+type SessionSystemEventPayload = {
+  eventType?: string | null;
+  chatId?: string | null;
+  content?: unknown;
+};
+
+export function enqueueHitlPromptFromToolEvent(
+  existing: HitlPrompt[],
+  payload: any,
+  fallbackChatId: string | null
+): HitlPrompt[] {
+  const toolPayload = payload?.tool && typeof payload.tool === 'object'
+    ? (payload.tool as Record<string, unknown>)
+    : null;
+  const eventType = String(toolPayload?.eventType || '').trim().toLowerCase();
+  if (eventType !== 'tool-progress') {
+    return existing;
+  }
+
+  const toolMetadata = toolPayload?.metadata && typeof toolPayload.metadata === 'object'
+    ? (toolPayload.metadata as Record<string, unknown>)
+    : null;
+  const content = toolMetadata?.hitlPrompt && typeof toolMetadata.hitlPrompt === 'object'
+    ? (toolMetadata.hitlPrompt as Record<string, unknown>)
+    : null;
+  const requestId = String(content?.requestId || '').trim();
+  if (!requestId) {
+    return existing;
+  }
+
+  if (existing.some((entry) => entry.requestId === requestId)) {
+    return existing;
+  }
+
+  const options = Array.isArray(content?.options)
+    ? content.options
+      .map((option) => ({
+        id: String(option?.id || '').trim(),
+        label: String(option?.label || '').trim(),
+        description: option?.description ? String(option.description) : ''
+      }))
+      .filter((option) => option.id && option.label)
+    : [];
+  if (options.length === 0) {
+    return existing;
+  }
+
+  const promptMetadata = content?.metadata && typeof content.metadata === 'object'
+    ? (content.metadata as Record<string, unknown>)
+    : null;
+
+  return [
+    ...existing,
+    {
+      requestId,
+      chatId: String(content?.chatId || payload?.chatId || fallbackChatId || '').trim() || null,
+      title: String(content?.title || 'Approval required').trim() || 'Approval required',
+      message: String(content?.message || '').trim(),
+      mode: 'option',
+      options,
+      ...(typeof content?.defaultOptionId === 'string' ? { defaultOptionId: String(content.defaultOptionId) } : {}),
+      metadata: {
+        refreshAfterDismiss: promptMetadata?.refreshAfterDismiss === true,
+        kind: typeof promptMetadata?.kind === 'string' ? promptMetadata.kind : undefined,
+      },
+    }
+  ];
+}
 
 export function useChatEventSubscriptions({
   api,
@@ -94,114 +167,116 @@ export function useChatEventSubscriptions({
   setMessages,
   chatSubscriptionCounter,
   streamingStateRef,
-  activityStateRef,
   refreshSessions,
   resetActivityRuntimeState,
   setHitlPromptQueue,
+  onMainLogEvent,
 }: UseChatEventSubscriptionsArgs) {
+  const pendingHitlEventsRef = useRef<Array<{ payload: any; fallbackChatId: string | null }>>([]);
+  const pendingHitlFlushTimerRef = useRef<number | null>(null);
+
   useEffect(() => {
     const removeListener = api.onChatEvent(createGlobalLogEventHandler({
-      loadedWorldId: loadedWorld?.id,
-      selectedSessionId,
-      setMessages
+      onMainLogEvent,
     }));
 
     return () => {
       removeListener();
     };
-  }, [api, loadedWorld?.id, selectedSessionId, setMessages]);
+  }, [api, onMainLogEvent]);
+
+  const loadedWorldId = loadedWorld?.id;
 
   useEffect(() => {
-    if (!loadedWorld?.id || !selectedSessionId) {
+    if (!loadedWorldId || !selectedSessionId) {
       return undefined;
     }
 
     const subscriptionId = `chat-${Date.now()}-${chatSubscriptionCounter.current++}`;
-    const removeListener = api.onChatEvent(createChatSubscriptionEventHandler({
+    rendererLogger.debug('electron.renderer.subscription', 'Chat subscription setup started', {
+      worldId: loadedWorldId,
+      chatId: selectedSessionId,
+      subscriptionId
+    });
+    const chatEventHandler = createChatSubscriptionEventHandler({
       subscriptionId,
-      loadedWorldId: loadedWorld.id,
+      loadedWorldId,
       selectedSessionId,
       streamingStateRef,
-      activityStateRef,
       setMessages,
       onSessionSystemEvent: (systemEvent) => {
-        if (!loadedWorld?.id) return;
+        if (!loadedWorldId) return;
         const eventType = String(systemEvent?.eventType || '').trim();
         if (eventType === 'chat-title-updated') {
           const targetChatId = String(systemEvent?.chatId || selectedSessionId || '').trim() || null;
-          refreshSessions(loadedWorld.id, targetChatId).catch(() => { });
+          refreshSessions(loadedWorldId, targetChatId).catch(() => { });
           return;
         }
-        if (eventType !== 'hitl-option-request') {
-          return;
-        }
-
-        const content = systemEvent?.content && typeof systemEvent.content === 'object'
-          ? (systemEvent.content as Record<string, unknown>)
-          : null;
-        const requestId = String(content?.requestId || '').trim();
-        if (!requestId) {
-          return;
-        }
-
-        const options = Array.isArray(content?.options)
-          ? content.options
-            .map((option) => ({
-              id: String(option?.id || '').trim(),
-              label: String(option?.label || '').trim(),
-              description: option?.description ? String(option.description) : ''
-            }))
-            .filter((option) => option.id && option.label)
-          : [];
-        if (options.length === 0) {
-          return;
-        }
-
-        setHitlPromptQueue((existing) => {
-          if (existing.some((entry) => entry.requestId === requestId)) {
-            return existing;
-          }
-          const metadata = content?.metadata && typeof content.metadata === 'object'
-            ? (content.metadata as Record<string, unknown>)
-            : null;
-          return [
-            ...existing,
-            {
-              requestId,
-              chatId: systemEvent?.chatId || selectedSessionId || null,
-              title: String(content?.title || 'Approval required').trim() || 'Approval required',
-              message: String(content?.message || '').trim(),
-              mode: 'option',
-              options,
-              ...(typeof content?.defaultOptionId === 'string' ? { defaultOptionId: String(content.defaultOptionId) } : {}),
-              metadata: {
-                refreshAfterDismiss: metadata?.refreshAfterDismiss === true,
-                kind: typeof metadata?.kind === 'string' ? metadata.kind : undefined,
-              },
-            }
-          ];
-        });
       }
-    }));
+    });
 
-    api.subscribeChatEvents(loadedWorld.id, selectedSessionId, subscriptionId).catch(() => { });
+    const removeListener = api.onChatEvent((payload: any) => {
+      chatEventHandler(payload);
+
+      if (payload?.subscriptionId && payload.subscriptionId !== subscriptionId) {
+        return;
+      }
+      if (payload?.worldId && payload.worldId !== loadedWorldId) {
+        return;
+      }
+
+      pendingHitlEventsRef.current.push({ payload, fallbackChatId: selectedSessionId });
+      if (pendingHitlFlushTimerRef.current === null) {
+        pendingHitlFlushTimerRef.current = window.setTimeout(() => {
+          const batch = pendingHitlEventsRef.current.splice(0);
+          pendingHitlFlushTimerRef.current = null;
+          if (batch.length === 0) return;
+          rendererLogger.debug('electron.renderer.subscription', 'Ingesting HITL prompt batch from realtime events', {
+            worldId: loadedWorldId,
+            chatId: selectedSessionId,
+            eventCount: batch.length,
+            subscriptionId
+          });
+          setHitlPromptQueue((existing) => {
+            let queue = existing;
+            for (const entry of batch) {
+              queue = enqueueHitlPromptFromToolEvent(queue, entry.payload, entry.fallbackChatId);
+            }
+            return queue;
+          });
+        }, 0);
+      }
+    });
+
+    api.subscribeChatEvents(loadedWorldId, selectedSessionId, subscriptionId).catch(() => { });
+    rendererLogger.debug('electron.renderer.subscription', 'Chat subscription request dispatched', {
+      worldId: loadedWorldId,
+      chatId: selectedSessionId,
+      subscriptionId
+    });
 
     return () => {
+      rendererLogger.debug('electron.renderer.subscription', 'Chat subscription teardown started', {
+        worldId: loadedWorldId,
+        chatId: selectedSessionId,
+        subscriptionId
+      });
       removeListener();
       api.unsubscribeChatEvents(subscriptionId).catch(() => { });
       if (streamingStateRef.current) {
         streamingStateRef.current.cleanup();
       }
-      if (activityStateRef.current) {
-        activityStateRef.current.cleanup();
+      if (pendingHitlFlushTimerRef.current !== null) {
+        clearTimeout(pendingHitlFlushTimerRef.current);
+        pendingHitlFlushTimerRef.current = null;
       }
+      pendingHitlEventsRef.current = [];
       resetActivityRuntimeState();
     };
   }, [
-    activityStateRef,
     api,
     chatSubscriptionCounter,
-    loadedWorld,
+    loadedWorldId,
     refreshSessions,
     resetActivityRuntimeState,
     selectedSessionId,

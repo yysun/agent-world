@@ -1,97 +1,199 @@
 /**
- * Tests for Case-Insensitive Agent Lookup in API Routes
- * 
- * This test ensures that agent names in API routes are properly normalized
- * using toKebabCase to handle case-insensitive lookups.
+ * API Agent Name Normalization Tests
+ *
+ * Purpose:
+ * - Validate that agent routes normalize world and agent route params before core lookups.
+ *
+ * Key features:
+ * - Exercises real route handlers from server/api.ts.
+ * - Asserts normalized IDs are passed to core manager functions.
+ *
+ * Notes:
+ * - Replaces legacy toKebabCase demonstration tests with production-path route coverage.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Mock storage-factory early to prevent SQLite initialization
-vi.mock('../../core/storage/storage-factory.js', () => ({
-  createStorageWithWrappers: vi.fn().mockResolvedValue({
-    saveWorld: vi.fn(),
-    loadWorld: vi.fn(),
-    worldExists: vi.fn().mockResolvedValue(false)
-  }),
-  getDefaultRootPath: vi.fn().mockReturnValue('/test/data')
+const getWorld = vi.fn();
+const getAgent = vi.fn();
+const updateAgent = vi.fn();
+
+vi.mock('../../core/index.js', () => {
+  const logger = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn()
+  };
+
+  return {
+    createWorld: vi.fn(),
+    listWorlds: vi.fn(async () => []),
+    createCategoryLogger: vi.fn(() => logger),
+    publishMessage: vi.fn(),
+    enableStreaming: vi.fn(),
+    disableStreaming: vi.fn(),
+    getWorld,
+    updateWorld: vi.fn(),
+    deleteWorld: vi.fn(),
+    createAgent: vi.fn(),
+    getAgent,
+    updateAgent,
+    deleteAgent: vi.fn(),
+    listChats: vi.fn(async () => []),
+    newChat: vi.fn(),
+    activateChatWithSnapshot: vi.fn(),
+    restoreChat: vi.fn(),
+    deleteChat: vi.fn(),
+    clearAgentMemory: vi.fn(),
+    listAgents: vi.fn(async () => []),
+    getMemory: vi.fn(),
+    exportWorldToMarkdown: vi.fn(),
+    removeMessagesFrom: vi.fn(),
+    editUserMessage: vi.fn(),
+    stopMessageProcessing: vi.fn(),
+    submitWorldHitlResponse: vi.fn(() => ({ accepted: true })),
+    subscribeWorld: vi.fn(),
+    ClientConnection: vi.fn(),
+    LLMProvider: { OPENAI: 'openai' },
+    EventType: {
+      WORLD: 'world',
+      MESSAGE: 'message',
+      SSE: 'sse'
+    }
+  };
+});
+
+vi.mock('../../core/mcp-server-registry.js', () => ({
+  listMCPServers: vi.fn(() => []),
+  restartMCPServer: vi.fn(async () => true),
+  getMCPSystemHealth: vi.fn(() => ({ status: 'healthy' })),
+  getMCPRegistryStats: vi.fn(() => ({ totalServers: 0 }))
 }));
 
-import { toKebabCase } from '../../core/utils.js';
+type MockResponse = {
+  statusCode: number;
+  body: any;
+  headersSent: boolean;
+  status: (code: number) => MockResponse;
+  json: (data: any) => MockResponse;
+  send: (data?: any) => MockResponse;
+};
 
-describe('Case-Insensitive Agent Lookup', () => {
-  describe('toKebabCase normalization', () => {
-    it('should normalize agent names consistently for simple case variations', () => {
-      // Test realistic case variations that users might type
-      expect(toKebabCase('Musician')).toBe('musician');
-      expect(toKebabCase('musician')).toBe('musician');
-      expect(toKebabCase('MUSICIAN')).toBe('musician');
+function createMockResponse(): MockResponse {
+  return {
+    statusCode: 200,
+    body: null,
+    headersSent: false,
+    status(code: number) {
+      this.statusCode = code;
+      return this;
+    },
+    json(data: any) {
+      this.body = data;
+      this.headersSent = true;
+      return this;
+    },
+    send(data?: any) {
+      this.body = data ?? null;
+      this.headersSent = true;
+      return this;
+    }
+  };
+}
+
+async function runMiddleware(middleware: any, req: any, res: any): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const next = (error?: unknown) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    };
+
+    try {
+      const maybePromise = middleware(req, res, next);
+      if (maybePromise && typeof maybePromise.then === 'function') {
+        maybePromise.then(() => resolve()).catch(reject);
+      }
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function getRouteHandlers(router: any, method: 'get' | 'patch', path: string): any[] {
+  const layer = router.stack.find(
+    (entry: any) => entry.route?.path === path && entry.route?.methods?.[method]
+  );
+  if (!layer) {
+    throw new Error(`Route not found: ${method.toUpperCase()} ${path}`);
+  }
+  return layer.route.stack.map((entry: any) => entry.handle);
+}
+
+describe('api agent route normalization', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getWorld.mockResolvedValue({
+      id: 'my-world',
+      name: 'My World',
+      agents: new Map([['my-agent', { id: 'my-agent', name: 'My Agent' }]]),
+      chats: new Map()
     });
-
-    it('should handle complex agent names', () => {
-      expect(toKebabCase('My Agent Name')).toBe('my-agent-name');
-      expect(toKebabCase('MY AGENT NAME')).toBe('my-agent-name');
-      expect(toKebabCase('my agent name')).toBe('my-agent-name');
-      expect(toKebabCase('My-Agent-Name')).toBe('my-agent-name');
+    getAgent.mockResolvedValue({
+      id: 'my-agent',
+      name: 'My Agent',
+      provider: 'openai',
+      model: 'gpt-4',
+      memory: [],
+      llmCallCount: 0
     });
-
-    it('should handle special characters', () => {
-      expect(toKebabCase('Agent@123')).toBe('agent-123');
-      expect(toKebabCase('Agent_Name')).toBe('agent-name');
-      expect(toKebabCase('Agent.Name')).toBe('agent-name');
-    });
-
-    it('should handle edge cases', () => {
-      expect(toKebabCase('')).toBe('');
-      expect(toKebabCase('A')).toBe('a');
-      expect(toKebabCase('a')).toBe('a');
-    });
-
-    it('should demonstrate camelCase handling behavior', () => {
-      // This shows the camelCase conversion behavior
-      expect(toKebabCase('MuSiCiAn')).toBe('mu-si-ci-an');
-      expect(toKebabCase('myAgent')).toBe('my-agent');
+    updateAgent.mockResolvedValue({
+      id: 'my-agent',
+      name: 'Renamed Agent',
+      provider: 'openai',
+      model: 'gpt-4',
+      memory: [],
+      llmCallCount: 0
     });
   });
 
-  describe('API route normalization scenarios', () => {
-    it('should demonstrate the fix for common case-sensitive SQLite lookups', () => {
-      // These are the realistic scenarios that were failing before the fix
-      const userInputs = ['Musician', 'MUSICIAN', 'musician'];
-      const expectedNormalizedId = 'musician';
+  it('normalizes world and agent params for GET /agents/:agentName', async () => {
+    const { default: router } = await import('../../server/api.js');
+    const [validateWorld, routeHandler] = getRouteHandlers(router, 'get', '/worlds/:worldName/agents/:agentName');
 
-      userInputs.forEach(input => {
-        const normalized = toKebabCase(input);
-        expect(normalized).toBe(expectedNormalizedId);
-      });
-    });
+    const req: any = {
+      params: { worldName: 'My World', agentName: 'MY_AGENT' },
+      body: {}
+    };
+    const res = createMockResponse();
 
-    it('should handle agent names from different case conventions', () => {
-      // camelCase
-      expect(toKebabCase('myAgent')).toBe('my-agent');
-      expect(toKebabCase('MyAgent')).toBe('my-agent');
+    await runMiddleware(validateWorld, req, res);
+    await routeHandler(req, res);
 
-      // PascalCase
-      expect(toKebabCase('MyAgentName')).toBe('my-agent-name');
+    expect(getWorld).toHaveBeenCalledWith('my-world');
+    expect(getAgent).toHaveBeenCalledWith('my-world', 'my-agent');
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ id: 'my-agent' });
+  });
 
-      // snake_case
-      expect(toKebabCase('my_agent_name')).toBe('my-agent-name');
+  it('normalizes agent param for PATCH /agents/:agentName updates', async () => {
+    const { default: router } = await import('../../server/api.js');
+    const [validateWorld, routeHandler] = getRouteHandlers(router, 'patch', '/worlds/:worldName/agents/:agentName');
 
-      // UPPER_SNAKE_CASE
-      expect(toKebabCase('MY_AGENT_NAME')).toBe('my-agent-name');
-    });
-  }); describe('SQLite case-sensitivity problem demonstration', () => {
-    it('should show why case normalization is needed', () => {
-      // Before the fix: These would be treated as different IDs in SQLite
-      const originalId = 'Musician';  // What user types in URL
-      const storedId = 'musician';    // What's actually stored (from toKebabCase during creation)
+    const req: any = {
+      params: { worldName: 'My World', agentName: 'MyAgent' },
+      body: { model: 'gpt-4.1' }
+    };
+    const res = createMockResponse();
 
-      // Without normalization: originalId !== storedId -> 404 Not Found
-      expect(originalId).not.toBe(storedId);
+    await runMiddleware(validateWorld, req, res);
+    await routeHandler(req, res);
 
-      // With normalization: both normalize to the same value
-      expect(toKebabCase(originalId)).toBe(toKebabCase(storedId));
-      expect(toKebabCase(originalId)).toBe(storedId);
-    });
+    expect(getAgent).toHaveBeenCalledWith('my-world', 'my-agent');
+    expect(updateAgent).toHaveBeenCalledWith('my-world', 'my-agent', { model: 'gpt-4.1' });
+    expect(res.statusCode).toBe(200);
   });
 });

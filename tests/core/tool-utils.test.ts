@@ -14,6 +14,7 @@
  * - Verifies tool_call_id handling with fallback
  *
  * Recent changes:
+ * - 2026-02-27: Added removed HITL confirmation-arg coverage to verify silent stripping for backward compatibility.
  * - 2026-02-20: Added alias normalization coverage for `create_agent` (`auto-reply` and `next agent` variants).
  */
 
@@ -464,5 +465,36 @@ describe('Tool Utils - validateToolParameters', () => {
 
     expect(validation.valid).toBe(false);
     expect(String(validation.error || '')).toContain("Unknown parameter 'answer' is not allowed");
+  });
+
+  test('strips removed HITL confirmation parameters for backward compatibility', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        question: { type: 'string' },
+        options: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+      },
+      required: ['question', 'options'],
+      additionalProperties: false,
+    };
+
+    const validation = validateToolParameters(
+      {
+        question: 'Pick one',
+        options: ['A', 'B'],
+        requireConfirmation: true,
+      },
+      schema,
+      'human_intervention_request',
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(validation.correctedArgs).toEqual({
+      question: 'Pick one',
+      options: ['A', 'B'],
+    });
   });
 });

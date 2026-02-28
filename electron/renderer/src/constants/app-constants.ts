@@ -12,6 +12,7 @@
  * - Prefer importing from this module over redefining constants in feature files.
  *
  * Recent Changes:
+ * - 2026-02-27: Added `showToolMessages` default system setting to control tool-row visibility in desktop main content.
  * - 2026-02-18: Made new-agent defaults align with world chat LLM defaults and set auto-reply default to false.
  * - 2026-02-18: Unified agent provider options with world provider option source.
  * - 2026-02-16: Extracted App.jsx constants into a reusable constants module.
@@ -59,6 +60,7 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   storageType: '',
   dataPath: '',
   sqliteDatabase: '',
+  showToolMessages: true,
   enableGlobalSkills: true,
   enableProjectSkills: true,
   disabledGlobalSkillIds: [],

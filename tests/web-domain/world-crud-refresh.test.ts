@@ -6,8 +6,12 @@
  *
  * Coverage:
  * - Ignores unrelated system events.
+ * - Ignores unscoped system events while a chat session is active.
  * - Refreshes world/currentChat on `agent-created` and `chat-title-updated` events.
  * - Surfaces refresh failures as UI errors.
+ *
+ * Recent Changes:
+ * - 2026-02-27: Added active-chat scope expectations for system events.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -34,11 +38,27 @@ describe('web world update system refresh', () => {
     vi.restoreAllMocks();
   });
 
-  it('ignores unrelated system events', async () => {
+  it('ignores unscoped system events when active chat is selected', async () => {
     const state = createBaseState();
     const getWorldSpy = vi.spyOn(api, 'getWorld');
 
     const nextState = await (worldUpdateHandlers['handleSystemEvent'] as any)(state, {
+      content: {
+        eventType: 'noop-event'
+      }
+    });
+
+    expect(nextState).toBe(state);
+    expect(nextState.messages).toHaveLength(0);
+    expect(getWorldSpy).not.toHaveBeenCalled();
+  });
+
+  it('records scoped unrelated system events without refresh', async () => {
+    const state = createBaseState();
+    const getWorldSpy = vi.spyOn(api, 'getWorld');
+
+    const nextState = await (worldUpdateHandlers['handleSystemEvent'] as any)(state, {
+      chatId: 'chat-1',
       content: {
         eventType: 'noop-event'
       }
@@ -61,6 +81,7 @@ describe('web world update system refresh', () => {
     } as any);
 
     const nextState = await (worldUpdateHandlers['handleSystemEvent'] as any)(state, {
+      chatId: 'chat-1',
       content: {
         eventType: 'agent-created'
       }
@@ -84,6 +105,7 @@ describe('web world update system refresh', () => {
     } as any);
 
     const nextState = await (worldUpdateHandlers['handleSystemEvent'] as any)(state, {
+      chatId: 'chat-1',
       content: {
         eventType: 'chat-title-updated'
       }
@@ -99,6 +121,7 @@ describe('web world update system refresh', () => {
     vi.spyOn(api, 'getWorld').mockRejectedValue(new Error('refresh failed'));
 
     const nextState = await (worldUpdateHandlers['handleSystemEvent'] as any)(state, {
+      chatId: 'chat-1',
       content: {
         eventType: 'agent-created'
       }

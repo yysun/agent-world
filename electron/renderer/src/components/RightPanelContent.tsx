@@ -13,9 +13,18 @@
  * - Receives all mutation handlers and state via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-28: Skill scope and per-skill switches now persist immediately (autosave) instead of waiting for footer Save.
+ * - 2026-02-27: Hid per-skill rows for global/project sections when their parent section toggle is off.
+ * - 2026-02-27: Added `Show tool messages` settings toggle above skill options to control tool-card visibility in the main transcript area.
+ * - 2026-02-27: Adjusted logs autoscroll to only stick when already near bottom so manual scrolling stays usable during live streaming.
+ * - 2026-02-27: Logs panel now streams in chronological order and auto-scrolls to latest entry while open.
+ * - 2026-02-27: Added `logs` panel mode UI with unified main/renderer runtime logs and clear-list control.
+ * - 2026-02-26: Simplified import-world actions by removing bottom footer buttons and adding inline source-specific import buttons.
+ * - 2026-02-26: Added `import-world` panel mode with a single import form supporting local-directory and GitHub shorthand sources.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component extraction.
  */
 
+import { useEffect, useRef, useState } from 'react';
 import AgentFormFields from './AgentFormFields';
 import SettingsSwitch from './SettingsSwitch';
 import SettingsSkillSwitch from './SettingsSkillSwitch';
@@ -24,6 +33,56 @@ import {
   MIN_TURN_LIMIT,
   WORLD_PROVIDER_OPTIONS,
 } from '../constants/app-constants';
+
+function formatLogTimestamp(value: unknown): string {
+  const rawValue = String(value || '').trim();
+  if (!rawValue) return '';
+  const parsed = new Date(rawValue);
+  if (Number.isNaN(parsed.getTime())) {
+    return rawValue;
+  }
+  return parsed.toLocaleTimeString();
+}
+
+function stringifyLogData(value: unknown): string {
+  if (value === undefined) return '';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function getProcessBadgeStyle(process: string) {
+  const accentColor = process === 'renderer'
+    ? 'var(--color-chart-2)'
+    : 'var(--color-chart-1)';
+
+  return {
+    color: 'var(--color-sidebar-foreground)',
+    backgroundColor: `color-mix(in oklab, ${accentColor} 16%, var(--color-sidebar-accent))`,
+    borderColor: `color-mix(in oklab, ${accentColor} 42%, var(--color-sidebar-border))`,
+  };
+}
+
+function getLevelBadgeStyle(level: string) {
+  let accentColor = 'var(--color-chart-2)';
+  if (level === 'error') accentColor = 'var(--color-destructive)';
+  if (level === 'warn') accentColor = 'var(--color-chart-3)';
+  if (level === 'debug' || level === 'trace') accentColor = 'var(--color-chart-5)';
+
+  return {
+    color: 'var(--color-sidebar-foreground)',
+    backgroundColor: `color-mix(in oklab, ${accentColor} 16%, var(--color-sidebar-accent))`,
+    borderColor: `color-mix(in oklab, ${accentColor} 42%, var(--color-sidebar-border))`,
+  };
+}
+
+function isNearBottom(container: HTMLDivElement, threshold = 24) {
+  const remaining = container.scrollHeight - container.scrollTop - container.clientHeight;
+  return remaining <= threshold;
+}
 
 export default function RightPanelContent({
   panelMode,
@@ -37,9 +96,11 @@ export default function RightPanelContent({
   api,
   globalSkillEntries,
   disabledGlobalSkillIdSet,
+  setGlobalSkillsEnabled,
   toggleSkillEnabled,
   projectSkillEntries,
   disabledProjectSkillIdSet,
+  setProjectSkillsEnabled,
   onCancelSettings,
   savingSystemSettings,
   onSaveSettings,
@@ -70,10 +131,143 @@ export default function RightPanelContent({
   onCreateWorld,
   creatingWorld,
   setCreatingWorld,
+  onImportWorld,
+  panelLogs,
+  onClearPanelLogs,
 }) {
+  const [importSourceType, setImportSourceType] = useState('local');
+  const [githubImportSource, setGithubImportSource] = useState('@awesome-agent-world/');
+  const [importingWorld, setImportingWorld] = useState(false);
+  const logsContainerRef = useRef<HTMLDivElement | null>(null);
+  const shouldStickLogsToBottomRef = useRef(true);
+
+  useEffect(() => {
+    if (panelMode !== 'import-world') return;
+    setImportSourceType('local');
+    setGithubImportSource('@awesome-agent-world/');
+    setImportingWorld(false);
+  }, [panelMode]);
+
+  useEffect(() => {
+    if (panelMode !== 'logs') return;
+    shouldStickLogsToBottomRef.current = true;
+  }, [panelMode]);
+
+  useEffect(() => {
+    if (panelMode !== 'logs') return;
+    const container = logsContainerRef.current;
+    if (!container) return;
+    if (!shouldStickLogsToBottomRef.current) return;
+    requestAnimationFrame(() => {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: 'auto',
+      });
+    });
+  }, [panelLogs, panelMode]);
+
+  const onLogsContainerScroll = () => {
+    const container = logsContainerRef.current;
+    if (!container) return;
+    shouldStickLogsToBottomRef.current = isNearBottom(container);
+  };
+
+  const onImportFromLocal = async () => {
+    if (importingWorld) return;
+
+    setImportingWorld(true);
+    try {
+      const success = await onImportWorld();
+      if (success) {
+        closePanel();
+      }
+    } finally {
+      setImportingWorld(false);
+    }
+  };
+
+  const onImportFromGithub = async () => {
+    if (importingWorld) return;
+    const source = String(githubImportSource || '').trim();
+    if (!source) return;
+
+    setImportingWorld(true);
+    try {
+      const success = await onImportWorld(source);
+      if (success) {
+        closePanel();
+      }
+    } finally {
+      setImportingWorld(false);
+    }
+  };
+
   return (
     <div className="min-h-0 flex flex-1 flex-col overflow-y-auto">
-      {panelMode === 'settings' ? (
+      {panelMode === 'logs' ? (
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
+          <div className="flex items-center justify-between rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2">
+            <div className="text-xs text-sidebar-foreground/80">
+              {Array.isArray(panelLogs) && panelLogs.length > 0 ? `${panelLogs.length} entries` : 'No log entries yet'}
+            </div>
+            <button
+              type="button"
+              onClick={onClearPanelLogs}
+              disabled={!Array.isArray(panelLogs) || panelLogs.length === 0}
+              className="rounded border border-sidebar-border px-2 py-0.5 text-[11px] text-sidebar-foreground/80 transition-colors hover:bg-sidebar-foreground/10 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Clear
+            </button>
+          </div>
+          <div
+            ref={logsContainerRef}
+            onScroll={onLogsContainerScroll}
+            className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1"
+          >
+            {Array.isArray(panelLogs) && panelLogs.length > 0 ? (
+              panelLogs.map((entry) => {
+                const process = String(entry?.process || '').trim().toLowerCase() === 'renderer' ? 'renderer' : 'main';
+                const level = String(entry?.level || 'info').trim().toLowerCase() || 'info';
+                const category = String(entry?.category || 'runtime').trim() || 'runtime';
+                const message = String(entry?.message || '').trim() || '(empty log message)';
+                const timestamp = formatLogTimestamp(entry?.timestamp);
+                const dataText = stringifyLogData(entry?.data);
+
+                return (
+                  <article key={String(entry?.id || `${timestamp}-${category}-${message}`)} className="space-y-2 rounded-md border border-sidebar-border bg-sidebar-accent/80 p-3">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span
+                        className="rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                        style={getProcessBadgeStyle(process)}
+                      >
+                        {process}
+                      </span>
+                      <span
+                        className="rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                        style={getLevelBadgeStyle(level)}
+                      >
+                        {level}
+                      </span>
+                      <span className="text-[10px] text-sidebar-foreground/60">{timestamp}</span>
+                    </div>
+                    <div className="text-[11px] font-semibold text-sidebar-foreground/70">{category}</div>
+                    <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-sidebar-foreground">{message}</pre>
+                    {dataText ? (
+                      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded border border-sidebar-border/70 bg-sidebar px-2 py-1 font-mono text-[10px] text-sidebar-foreground/80">
+                        {dataText}
+                      </pre>
+                    ) : null}
+                  </article>
+                );
+              })
+            ) : (
+              <div className="rounded-md border border-dashed border-sidebar-border bg-sidebar-accent/30 px-3 py-4 text-xs text-sidebar-foreground/60">
+                Logs from both Electron processes will appear here.
+              </div>
+            )}
+          </div>
+        </div>
+      ) : panelMode === 'settings' ? (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex-1 space-y-4 overflow-y-auto">
             <div className="flex items-center justify-between">
@@ -203,46 +397,57 @@ export default function RightPanelContent({
 
                 <div className="mt-2 border-t border-sidebar-border pt-2">
                   <SettingsSwitch
+                    label="Show tool messages"
+                    checked={systemSettings.showToolMessages !== false}
+                    onClick={() => setSystemSettings((settings) => ({ ...settings, showToolMessages: settings.showToolMessages === false }))}
+                  />
+                  <SettingsSwitch
                     label="Enable Global Skills"
                     checked={systemSettings.enableGlobalSkills !== false}
-                    onClick={() => setSystemSettings((settings) => ({ ...settings, enableGlobalSkills: settings.enableGlobalSkills === false }))}
+                    onClick={() => setGlobalSkillsEnabled(systemSettings.enableGlobalSkills === false)}
+                    disabled={savingSystemSettings}
                   />
-                  <div className="ml-1 space-y-0.5">
-                    {globalSkillEntries.length > 0 ? (
-                      globalSkillEntries.map((entry) => (
-                        <SettingsSkillSwitch
-                          key={`global-${entry.skillId}`}
-                          label={entry.skillId}
-                          checked={!disabledGlobalSkillIdSet.has(entry.skillId)}
-                          onClick={() => toggleSkillEnabled('global', entry.skillId)}
-                          disabled={systemSettings.enableGlobalSkills === false}
-                        />
-                      ))
-                    ) : (
-                      <p className="px-1 py-1 text-[11px] text-sidebar-foreground/50">No global skills discovered.</p>
-                    )}
-                  </div>
+                  {systemSettings.enableGlobalSkills !== false ? (
+                    <div className="ml-1 space-y-0.5">
+                      {globalSkillEntries.length > 0 ? (
+                        globalSkillEntries.map((entry) => (
+                          <SettingsSkillSwitch
+                            key={`global-${entry.skillId}`}
+                            label={entry.skillId}
+                            checked={!disabledGlobalSkillIdSet.has(entry.skillId)}
+                            onClick={() => toggleSkillEnabled('global', entry.skillId)}
+                            disabled={savingSystemSettings}
+                          />
+                        ))
+                      ) : (
+                        <p className="px-1 py-1 text-[11px] text-sidebar-foreground/50">No global skills discovered.</p>
+                      )}
+                    </div>
+                  ) : null}
 
                   <SettingsSwitch
                     label="Enable Project Skills"
                     checked={systemSettings.enableProjectSkills !== false}
-                    onClick={() => setSystemSettings((settings) => ({ ...settings, enableProjectSkills: settings.enableProjectSkills === false }))}
+                    onClick={() => setProjectSkillsEnabled(systemSettings.enableProjectSkills === false)}
+                    disabled={savingSystemSettings}
                   />
-                  <div className="ml-1 space-y-0.5">
-                    {projectSkillEntries.length > 0 ? (
-                      projectSkillEntries.map((entry) => (
-                        <SettingsSkillSwitch
-                          key={`project-${entry.skillId}`}
-                          label={entry.skillId}
-                          checked={!disabledProjectSkillIdSet.has(entry.skillId)}
-                          onClick={() => toggleSkillEnabled('project', entry.skillId)}
-                          disabled={systemSettings.enableProjectSkills === false}
-                        />
-                      ))
-                    ) : (
-                      <p className="px-1 py-1 text-[11px] text-sidebar-foreground/50">No project skills discovered.</p>
-                    )}
-                  </div>
+                  {systemSettings.enableProjectSkills !== false ? (
+                    <div className="ml-1 space-y-0.5">
+                      {projectSkillEntries.length > 0 ? (
+                        projectSkillEntries.map((entry) => (
+                          <SettingsSkillSwitch
+                            key={`project-${entry.skillId}`}
+                            label={entry.skillId}
+                            checked={!disabledProjectSkillIdSet.has(entry.skillId)}
+                            onClick={() => toggleSkillEnabled('project', entry.skillId)}
+                            disabled={savingSystemSettings}
+                          />
+                        ))
+                      ) : (
+                        <p className="px-1 py-1 text-[11px] text-sidebar-foreground/50">No project skills discovered.</p>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -265,6 +470,74 @@ export default function RightPanelContent({
             >
               {savingSystemSettings ? 'Saving...' : (settingsNeedRestart ? 'Save & Restart' : 'Save')}
             </button>
+          </div>
+        </div>
+      ) : panelMode === 'import-world' ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+            <p className="text-xs text-sidebar-foreground/70">
+              Choose import source type, then import into the current workspace.
+            </p>
+
+            <div className="space-y-2 rounded-md border border-sidebar-border bg-sidebar-accent p-3">
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-sidebar-foreground">
+                <input
+                  type="radio"
+                  name="import-source-type"
+                  value="local"
+                  checked={importSourceType === 'local'}
+                  onChange={() => setImportSourceType('local')}
+                  disabled={importingWorld}
+                  className="accent-primary"
+                />
+                <span>From local directory</span>
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-sidebar-foreground">
+                <input
+                  type="radio"
+                  name="import-source-type"
+                  value="github"
+                  checked={importSourceType === 'github'}
+                  onChange={() => setImportSourceType('github')}
+                  disabled={importingWorld}
+                  className="accent-primary"
+                />
+                <span>From GitHub shorthand</span>
+              </label>
+            </div>
+
+            {importSourceType === 'github' ? (
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-bold text-sidebar-foreground/90">GitHub Source</label>
+                <input
+                  value={githubImportSource}
+                  onChange={(event) => setGithubImportSource(event.target.value)}
+                  placeholder="@awesome-agent-world/infinite-etude"
+                  className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                  disabled={importingWorld}
+                />
+                <span className="text-[10px] text-sidebar-foreground/60">
+                  Example: @awesome-agent-world/infinite-etude
+                </span>
+                <button
+                  type="button"
+                  onClick={onImportFromGithub}
+                  disabled={importingWorld || !String(githubImportSource || '').trim()}
+                  className="mt-2 w-fit rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {importingWorld ? 'Importing...' : 'Import from GitHub'}
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={onImportFromLocal}
+                disabled={importingWorld}
+                className="w-fit rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {importingWorld ? 'Importing...' : 'Open local world folder'}
+              </button>
+            )}
           </div>
         </div>
       ) : panelMode === 'edit-world' && loadedWorld ? (

@@ -13,6 +13,10 @@
  * - Keeps branch/session refresh semantics aligned with the existing desktop IPC flows.
  *
  * Recent Changes:
+ * - 2026-02-27: Updated submit stop-mode detection to also follow status-registry `working` state so stop remains available when pending markers are absent.
+ * - 2026-02-26: Replaced edit-backup localStorage warning console traces with categorized renderer logger output controlled by env-derived log config.
+ * - 2026-02-26: Set chat-scoped sending state during edit-save submission so the inline working indicator appears immediately (web parity) and clears in `finally`.
+ * - 2026-02-26: Clear chat-scoped transient error/log artifacts when saving user edits so stale failure indicators do not persist into retried turns.
  * - 2026-02-22: Removed renderer-side no-agent inference on send; status now follows core-emitted activity events only.
  * - 2026-02-22: Enforced strict pending semantics: `pendingResponseSessionIds` is now populated only from realtime agent-start signals, never on send.
  * - 2026-02-21: Added assistant-message raw-markdown copy action with clipboard API + legacy fallback.
@@ -24,15 +28,19 @@
 
 import { useCallback, useState } from 'react';
 import { safeMessage } from '../domain/desktop-api';
+import { computeCanStopCurrentSession } from '../domain/chat-stop-state';
+import { clearChatAgents, getChatStatus, getRegistry, updateRegistry } from '../domain/status-registry';
 import { normalizeStringList, sortSessionsByNewest } from '../utils/data-transform';
 import { getRefreshWarning } from '../utils/formatting';
 import { getMessageIdentity, isTrueAgentResponseMessage } from '../utils/message-utils';
 import {
+  clearChatTransientErrors,
   createOptimisticUserMessage,
   reconcileOptimisticUserMessage,
   removeOptimisticUserMessage,
   upsertMessageList,
 } from '../domain/message-updates';
+import { rendererLogger } from '../utils/logger';
 
 export function useMessageManagement({
   api,
@@ -47,7 +55,6 @@ export function useMessageManagement({
   setSelectedSessionId,
   setStatusText,
   streamingStateRef,
-  activityStateRef,
   hasActiveHitlPrompt = false,
   setHitlPromptQueue,
   setSubmittingHitlRequestId,
@@ -182,9 +189,7 @@ export function useMessageManagement({
         if (streamingStateRef.current) {
           streamingStateRef.current.cleanup();
         }
-        if (activityStateRef.current) {
-          activityStateRef.current.cleanup();
-        }
+        updateRegistry(r => clearChatAgents(r, loadedWorldId, selectedSessionId));
       }
 
       if (stopped) {
@@ -204,7 +209,6 @@ export function useMessageManagement({
       });
     }
   }, [
-    activityStateRef,
     api,
     loadedWorldId,
     selectedSessionId,
@@ -215,13 +219,21 @@ export function useMessageManagement({
 
   const onSubmitMessage = useCallback((event) => {
     event.preventDefault();
-    const isCurrentSessionSending = selectedSessionId && sendingSessionIds.has(selectedSessionId);
-    const isCurrentSessionStopping = selectedSessionId && stoppingSessionIds.has(selectedSessionId);
-    const isCurrentSessionPendingResponse = selectedSessionId && pendingResponseSessionIds.has(selectedSessionId);
-    const canStopCurrentSession = Boolean(selectedSessionId)
-      && !isCurrentSessionSending
-      && !isCurrentSessionStopping
-      && Boolean(isCurrentSessionPendingResponse);
+    const isCurrentSessionSending = Boolean(selectedSessionId && sendingSessionIds.has(selectedSessionId));
+    const isCurrentSessionStopping = Boolean(selectedSessionId && stoppingSessionIds.has(selectedSessionId));
+    const isCurrentSessionPendingResponse = Boolean(selectedSessionId && pendingResponseSessionIds.has(selectedSessionId));
+    const isCurrentSessionWorking = Boolean(
+      loadedWorldId
+      && selectedSessionId
+      && getChatStatus(getRegistry(), loadedWorldId, selectedSessionId) === 'working'
+    );
+    const canStopCurrentSession = computeCanStopCurrentSession({
+      selectedSessionId,
+      isCurrentSessionSending,
+      isCurrentSessionStopping,
+      isCurrentSessionPendingResponse,
+      isCurrentSessionWorking,
+    });
 
     if (canStopCurrentSession) {
       onStopMessage();
@@ -229,6 +241,7 @@ export function useMessageManagement({
     }
     onSendMessage();
   }, [
+    loadedWorldId,
     onSendMessage,
     onStopMessage,
     pendingResponseSessionIds,
@@ -287,17 +300,45 @@ export function useMessageManagement({
     try {
       localStorage.setItem('agent-world-desktop-edit-backup', JSON.stringify(backup));
     } catch (error) {
-      console.warn('Failed to save edit backup:', error);
+      rendererLogger.warn('electron.renderer.message-edit', 'Failed to save edit backup', {
+        error: safeMessage(error, 'unknown')
+      });
     }
 
+    // Stop any active streaming before trimming so stale SSE chunk/update callbacks
+    // cannot re-insert the messages we are about to remove from the list.
+    if (streamingStateRef.current) {
+      streamingStateRef.current.cleanup();
+    }
+    // Reset registry so the working indicator clears before the new SSE flow begins.
+    updateRegistry(r => clearChatAgents(r, loadedWorldId, targetChatId));
+
     const targetIdentity = getMessageIdentity(message);
-    const editedIndex = messages.findIndex((entry) => getMessageIdentity(entry) === targetIdentity);
-    const optimisticMessages = editedIndex >= 0 ? messages.slice(0, editedIndex) : messages;
-    setMessages(optimisticMessages);
+    const optimisticEditedMessage = createOptimisticUserMessage({
+      chatId: targetChatId,
+      content: editedText,
+      sender: 'human',
+    });
+    const optimisticEditedMessageId = String(optimisticEditedMessage.messageId || '').trim();
+
+    // Trim to before the edited message and insert the optimistic replacement in a
+    // single functional update so the UI never shows a gap where no user message exists.
+    setMessages((existing) => {
+      const editedIndex = existing.findIndex((entry) => getMessageIdentity(entry) === targetIdentity);
+      const trimmed = editedIndex >= 0 ? existing.slice(0, editedIndex) : existing;
+      const clearedTransientErrors = clearChatTransientErrors(trimmed, targetChatId);
+      return upsertMessageList(clearedTransientErrors, optimisticEditedMessage);
+    });
     setEditingMessageId(null);
     setEditingText('');
     setHitlPromptQueue?.([]);
     setSubmittingHitlRequestId?.(null);
+    setPendingResponseSessionIds((prev) => {
+      const next = new Set(prev);
+      next.delete(targetChatId);
+      return next;
+    });
+    setSendingSessionIds((prev) => new Set([...prev, targetChatId]));
 
     try {
       const editResult = await api.editMessage(loadedWorldId, message.messageId, editedText, targetChatId);
@@ -317,6 +358,7 @@ export function useMessageManagement({
           `Messages removed but resubmission failed: ${details}. Please try editing again.`,
           'error'
         );
+        setMessages((existing) => removeOptimisticUserMessage(existing, optimisticEditedMessageId));
         await refreshMessages(loadedWorldId, targetChatId);
         return;
       }
@@ -324,7 +366,9 @@ export function useMessageManagement({
       try {
         localStorage.removeItem('agent-world-desktop-edit-backup');
       } catch (error) {
-        console.warn('Failed to clear edit backup:', error);
+        rendererLogger.warn('electron.renderer.message-edit', 'Failed to clear edit backup', {
+          error: safeMessage(error, 'unknown')
+        });
       }
 
       setStatusText('Message edited successfully', 'success');
@@ -340,13 +384,19 @@ export function useMessageManagement({
       }
 
       setStatusText(errorMessage, 'error');
+      setMessages((existing) => removeOptimisticUserMessage(existing, optimisticEditedMessageId));
       await refreshMessages(loadedWorldId, targetChatId);
+    } finally {
+      setSendingSessionIds((prev) => {
+        const next = new Set(prev);
+        next.delete(targetChatId);
+        return next;
+      });
     }
   }, [
     api,
     editingText,
     loadedWorldId,
-    messages,
     refreshMessages,
     resolveMessageTargetChatId,
     setMessages,

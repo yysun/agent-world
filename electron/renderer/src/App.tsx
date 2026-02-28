@@ -13,6 +13,14 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-02-27: Restored stop-button visibility/behavior by deriving stop mode from both legacy pending markers and status-registry `working` state.
+ * - 2026-02-28: Skill scope and per-skill settings toggles now autosave immediately when changed.
+ * - 2026-02-28: Opening System Settings now triggers a skill-registry refresh to keep the settings skill list current.
+ * - 2026-02-27: Added system setting support to show/hide tool-related transcript rows in the main message area.
+ * - 2026-02-27: Replaced header refresh with a logs action and added a unified right-panel logs stream (main + renderer) with bounded in-memory buffering.
+ * - 2026-02-27: Passed UI-selected project folder into world-management create flow so new worlds can inherit `working_directory`; load/switch continue to mirror world `cwd`.
+ * - 2026-02-26: Added renderer categorized logger initialization via preload logging config and replaced message activation console tracing with env-controlled logger output.
+ * - 2026-02-26: Inline working indicator now shows model-aware text (`Contacting <model>...` during handshake and `<agent> (<model>) working...` when active) using real agent model metadata.
  * - 2026-02-22: Status bar completion is now driven by core activity events plus a send-finish no-activity fallback for zero-agent runs.
  * - 2026-02-22: Removed frontend @mention validation/inference from status and pending decisions; renderer now follows core event signals only.
  * - 2026-02-22: Restored immediate working-indicator visibility during send handshake by including per-session sending state in composer activity detection.
@@ -68,6 +76,7 @@ import {
 import {
   isHumanMessage,
   isRenderableMessageEntry,
+  isToolRelatedMessage,
 } from './utils/message-utils';
 import {
   getAgentDisplayName,
@@ -78,8 +87,10 @@ import {
   parseOptionalInteger,
 } from './utils/app-helpers';
 import { useChatEventSubscriptions } from './hooks/useChatEventSubscriptions';
-import { clearChatAgents, syncWorldRoster, updateRegistry } from './domain/status-registry';
-import { applyEventToRegistry } from './domain/status-updater';
+import type { MainProcessLogEntry } from './domain/chat-event-handlers';
+import { computeCanStopCurrentSession } from './domain/chat-stop-state';
+import { clearChatAgents, finalizeReplayedChat, getChatStatus, syncWorldRoster, updateRegistry } from './domain/status-registry';
+import { applyEventToRegistry, parseStoredEventReplayArgs } from './domain/status-updater';
 import {
   createLeftSidebarProps,
   createMainContentComposerProps,
@@ -88,6 +99,7 @@ import {
   createMainContentRightPanelShellProps,
   createMainHeaderProps,
 } from './utils/app-layout-props';
+import { initializeRendererLogger, rendererLogger, type RendererLogEntry } from './utils/logger';
 
 type WorkspaceState = {
   workspacePath: string | null;
@@ -117,6 +129,51 @@ type HitlPrompt = {
     kind?: string;
   };
 };
+
+type UnifiedLogProcess = 'main' | 'renderer';
+
+type UnifiedLogEntry = {
+  id: string;
+  process: UnifiedLogProcess;
+  level: string;
+  category: string;
+  message: string;
+  timestamp: string;
+  data?: unknown;
+};
+
+const MAX_LOG_PANEL_ENTRIES = 600;
+
+function normalizeAgentKey(value: unknown): string {
+  return String(value || '').trim().toLowerCase();
+}
+
+function createLogEntryId() {
+  return `panel-log-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function normalizeLogProcess(value: unknown): UnifiedLogProcess {
+  return String(value || '').trim().toLowerCase() === 'renderer' ? 'renderer' : 'main';
+}
+
+function normalizeUnifiedLogEntry(entry: {
+  process?: unknown;
+  level?: unknown;
+  category?: unknown;
+  message?: unknown;
+  timestamp?: unknown;
+  data?: unknown;
+}): UnifiedLogEntry {
+  return {
+    id: createLogEntryId(),
+    process: normalizeLogProcess(entry?.process),
+    level: String(entry?.level || '').trim().toLowerCase() || 'info',
+    category: String(entry?.category || '').trim() || 'runtime',
+    message: String(entry?.message || '').trim() || '(empty log message)',
+    timestamp: String(entry?.timestamp || '').trim() || new Date().toISOString(),
+    ...(entry?.data !== undefined ? { data: entry.data } : {}),
+  };
+}
 
 export default function App() {
   const api = useMemo(() => getDesktopApi(), []);
@@ -160,11 +217,70 @@ export default function App() {
   // HITL option prompt queue (generic world option requests)
   const [hitlPromptQueue, setHitlPromptQueue] = useState<HitlPrompt[]>([]);
   const [submittingHitlRequestId, setSubmittingHitlRequestId] = useState<string | null>(null);
+  const [panelLogs, setPanelLogs] = useState<UnifiedLogEntry[]>([]);
   const hasActiveHitlPrompt = hitlPromptQueue.length > 0;
 
-  const setStatusText = useCallback((_text: string, _kind: string = 'info') => {
-    // Status notifications to be wired in Phase 7
+  const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [notification, setNotification] = useState<{ text: string; kind: 'error' | 'success' | 'info' } | null>(null);
+
+  useEffect(() => {
+    void initializeRendererLogger(api);
+  }, [api]);
+
+  useEffect(() => {
+    return () => {
+      if (notificationTimerRef.current !== null) {
+        clearTimeout(notificationTimerRef.current);
+      }
+    };
   }, []);
+
+  const setStatusText = useCallback((text: string, kind: string = 'info') => {
+    const safeKind = (kind === 'error' || kind === 'success') ? kind : 'info';
+    setNotification({ text, kind: safeKind });
+    if (notificationTimerRef.current !== null) {
+      clearTimeout(notificationTimerRef.current);
+    }
+    notificationTimerRef.current = setTimeout(() => {
+      setNotification(null);
+      notificationTimerRef.current = null;
+    }, 5000);
+  }, []);
+
+  const appendUnifiedLogEntry = useCallback((incoming: {
+    process?: unknown;
+    level?: unknown;
+    category?: unknown;
+    message?: unknown;
+    timestamp?: unknown;
+    data?: unknown;
+  }) => {
+    const nextEntry = normalizeUnifiedLogEntry(incoming);
+    setPanelLogs((existing) => {
+      const next = [...existing, nextEntry];
+      if (next.length <= MAX_LOG_PANEL_ENTRIES) {
+        return next;
+      }
+      return next.slice(next.length - MAX_LOG_PANEL_ENTRIES);
+    });
+  }, []);
+
+  const onMainProcessLogEvent = useCallback((entry: MainProcessLogEntry) => {
+    appendUnifiedLogEntry(entry);
+  }, [appendUnifiedLogEntry]);
+
+  const onClearPanelLogs = useCallback(() => {
+    setPanelLogs([]);
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = rendererLogger.subscribe((entry: RendererLogEntry) => {
+      appendUnifiedLogEntry(entry);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [appendUnifiedLogEntry]);
 
   const {
     loadedWorld,
@@ -201,6 +317,7 @@ export default function App() {
     setPanelMode,
     getDefaultWorldForm,
     getWorldFormFromWorld,
+    selectedProjectPath,
   });
 
   const {
@@ -230,7 +347,6 @@ export default function App() {
 
   const {
     streamingStateRef,
-    activityStateRef,
     resetActivityRuntimeState,
   } = useStreamingActivity({ setMessages });
 
@@ -256,7 +372,28 @@ export default function App() {
 
     setSubmittingHitlRequestId(requestId);
     try {
-      await api.respondHitlOption(worldId, requestId, normalizedOptionId, prompt.chatId || null);
+      const normalizeHitlResponse = (value: unknown): { accepted: boolean; reason: string } => {
+        const payload = (value && typeof value === 'object') ? (value as Record<string, unknown>) : null;
+        return {
+          accepted: payload?.accepted === true,
+          reason: String(payload?.reason || '').trim(),
+        };
+      };
+
+      const responseChatId = prompt.chatId || selectedSessionId || null;
+      const response = normalizeHitlResponse(
+        await api.respondHitlOption(worldId, requestId, normalizedOptionId, responseChatId)
+      );
+
+      if (!response.accepted) {
+        if (response.reason.includes('No pending HITL request found')) {
+          setHitlPromptQueue((existing: HitlPrompt[]) => existing.filter((entry) => entry.requestId !== requestId));
+          setStatusText('HITL request was already resolved.', 'info');
+          return;
+        }
+        throw new Error(response.reason || 'HITL response was not accepted.');
+      }
+
       setHitlPromptQueue((existing: HitlPrompt[]) => existing.filter((entry) => entry.requestId !== requestId));
 
       if (prompt?.metadata?.refreshAfterDismiss) {
@@ -425,6 +562,12 @@ export default function App() {
 
     setLoading((value: { sessions: boolean; messages: boolean }) => ({ ...value, messages: true }));
     try {
+      const activation = await api.selectSession(worldId, sessionId);
+      rendererLogger.debug('electron.renderer.messages', 'Session activation resolved while refreshing messages', {
+        worldId,
+        requestedChatId: sessionId,
+        resolvedChatId: String((activation as any)?.chatId || '').trim() || null
+      });
       const nextMessages = (await api.getMessages(worldId, sessionId)) as any[];
       if (refreshId !== messageRefreshCounter.current) return;
       setMessages(nextMessages);
@@ -462,6 +605,8 @@ export default function App() {
     visibleSkillRegistryEntries,
     globalSkillEntries,
     projectSkillEntries,
+    setGlobalSkillsEnabled,
+    setProjectSkillsEnabled,
     toggleSkillEnabled,
     loadSystemSettings,
     resetSystemSettings,
@@ -507,7 +652,6 @@ export default function App() {
     setSelectedSessionId,
     setStatusText,
     streamingStateRef,
-    activityStateRef,
     hasActiveHitlPrompt,
     setHitlPromptQueue,
     setSubmittingHitlRequestId,
@@ -563,30 +707,47 @@ export default function App() {
     refreshMessages(loadedWorld?.id, selectedSessionId);
   }, [loadedWorld?.id, selectedSessionId, refreshMessages]);
 
-  // Phase 6.2b: Clear registry for the new chat and replay stored events to reconstruct status
+  // Phase 6.2b: Replay stored events to reconstruct status on chat switch.
+  // Clear and replay happen atomically after the fetch so the previous status
+  // remains visible while events are loading (no brief flash to idle).
   useEffect(() => {
     const worldId = loadedWorld?.id;
     const chatId = selectedSessionId;
     if (!worldId || !chatId) return;
 
-    updateRegistry(r => clearChatAgents(r, worldId, chatId));
-
     let cancelled = false;
     (async () => {
       try {
         const events = (await api.getChatEvents(worldId, chatId)) as any[];
-        if (cancelled || !Array.isArray(events)) return;
-        for (const storedEvent of events) {
-          const eventCategory = String(storedEvent?.type || '').trim();
-          const payload = storedEvent?.payload || {};
-          const subtype = String(payload?.type || '').trim();
-          const agentName = String(payload?.agentName || '').trim();
-          if (!agentName || !subtype) continue;
-          if (eventCategory !== 'sse' && eventCategory !== 'tool') continue;
-          updateRegistry(r => applyEventToRegistry(r, worldId, chatId, agentName, eventCategory as any, subtype as any));
-        }
+        if (cancelled) return;
+        // Atomic clear + replay: apply all events in one registry update.
+        // Downgrade guard: if the live registry already has 'complete' for this
+        // chat but the DB-replayed events only reach 'working' (async persistence
+        // lag — 'sse end' not yet saved), keep the live complete status so we
+        // don't regress the indicator back to "working".
+        updateRegistry(r => {
+          const liveStatus = getChatStatus(r, worldId, chatId);
+          let reg = clearChatAgents(r, worldId, chatId);
+          if (!Array.isArray(events)) return reg;
+          for (const storedEvent of events) {
+            const args = parseStoredEventReplayArgs(storedEvent);
+            if (!args) continue;
+            reg = applyEventToRegistry(reg, worldId, chatId, args.agentName, args.eventType, args.subtype);
+          }
+          // Normalize: force any remaining 'working' to 'complete'.
+          // Handles incomplete sequences (e.g. sse/end missing from interrupted sessions).
+          reg = finalizeReplayedChat(reg, worldId, chatId);
+          // Don't downgrade complete → working (DB persistence lag)
+          if (liveStatus === 'complete' && getChatStatus(reg, worldId, chatId) === 'working') {
+            return r;
+          }
+          return reg;
+        });
       } catch {
-        // event replay failure is non-critical
+        // Clear stale data on fetch failure
+        if (!cancelled) {
+          updateRegistry(r => clearChatAgents(r, worldId, chatId));
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -656,10 +817,10 @@ export default function App() {
     setMessages,
     chatSubscriptionCounter,
     streamingStateRef,
-    activityStateRef,
     refreshSessions,
     resetActivityRuntimeState,
     setHitlPromptQueue,
+    onMainLogEvent: onMainProcessLogEvent,
   });
 
   const hasUnsavedWorldChanges = useCallback(() => {
@@ -716,6 +877,8 @@ export default function App() {
     onCancelSettings,
     onSaveSettings,
     onOpenCreateWorldPanel,
+    onOpenImportWorldPanel,
+    onOpenLogsPanel,
     onOpenWorldEditPanel,
     onOpenCreateAgentPanel,
     onOpenEditAgentPanel,
@@ -736,6 +899,8 @@ export default function App() {
       hasUnsavedAgentChanges,
       hasUnsavedSystemSettingsChanges,
     },
+    panelMode,
+    panelOpen,
     setPanelOpen,
     setPanelMode,
     setSelectedAgentId,
@@ -758,6 +923,7 @@ export default function App() {
     loadSystemSettings,
     resetSystemSettings,
     saveSystemSettings,
+    refreshSkillRegistry,
   });
 
   const agentStatusInput = useMemo(
@@ -765,6 +931,23 @@ export default function App() {
     [worldAgents]
   );
   const { chatStatus, agentStatuses } = useWorkingStatus(loadedWorld?.id, selectedSessionId, agentStatusInput);
+
+  const workingStartTimeRef = useRef<number | null>(null);
+  const [inlineElapsedMs, setInlineElapsedMs] = useState(0);
+  useEffect(() => {
+    if (chatStatus === 'working') {
+      if (workingStartTimeRef.current === null) {
+        workingStartTimeRef.current = Date.now();
+      }
+      const id = setInterval(() => {
+        setInlineElapsedMs(Date.now() - (workingStartTimeRef.current ?? Date.now()));
+      }, 250);
+      return () => clearInterval(id);
+    }
+    workingStartTimeRef.current = null;
+    setInlineElapsedMs(0);
+    return undefined;
+  }, [chatStatus]);
 
   useEffect(() => {
     const textarea = composerTextareaRef.current;
@@ -801,11 +984,80 @@ export default function App() {
   const isCurrentSessionSending = Boolean(selectedSessionId && sendingSessionIds.has(selectedSessionId));
   const isCurrentSessionStopping = Boolean(selectedSessionId && stoppingSessionIds.has(selectedSessionId));
   const isCurrentSessionPendingResponse = Boolean(selectedSessionId && pendingResponseSessionIds.has(selectedSessionId));
-  const canStopCurrentSession = Boolean(selectedSessionId) && !isCurrentSessionSending && !isCurrentSessionStopping && isCurrentSessionPendingResponse;
+  const isCurrentSessionWorking = chatStatus === 'working';
+  const canStopCurrentSession = computeCanStopCurrentSession({
+    selectedSessionId,
+    isCurrentSessionSending,
+    isCurrentSessionStopping,
+    isCurrentSessionPendingResponse,
+    isCurrentSessionWorking,
+  });
   const activeHitlPrompt = hitlPromptQueue.length > 0 ? hitlPromptQueue[0] : null;
+  const showInlineWorkingIndicator = !activeHitlPrompt && (chatStatus === 'working' || isCurrentSessionSending);
+  const workingAgentEntries = agentStatuses.filter((agent) => agent.status === 'working');
+  const workingAgentNames = workingAgentEntries.map((agent) => agent.name);
+  const workingAgentModels = workingAgentEntries
+    .map((agent) => String(worldAgentsById.get(agent.id)?.model || '').trim())
+    .filter(Boolean);
+  const uniqueWorkingAgentModels = [...new Set(workingAgentModels)];
+  const mainAgentModel = useMemo(() => {
+    const normalizedMainAgent = normalizeAgentKey(loadedWorld?.mainAgent);
+    if (!normalizedMainAgent) return '';
+
+    const byId = worldAgents.find(
+      (agent: any) => normalizeAgentKey(agent.id) === normalizedMainAgent
+    );
+    if (byId?.model) {
+      return String(byId.model).trim();
+    }
+
+    const byName = worldAgents.find(
+      (agent: any) => normalizeAgentKey(agent.name) === normalizedMainAgent
+    );
+    return String(byName?.model || '').trim();
+  }, [loadedWorld?.mainAgent, worldAgents]);
+  const fallbackContactModel = String(
+    uniqueWorkingAgentModels[0]
+    || mainAgentModel
+    || worldAgents[0]?.model
+    || loadedWorld?.chatLLMModel
+    || ''
+  ).trim();
+  const inlineStatusText = (() => {
+    if (workingAgentEntries.length === 1) {
+      const singleAgent = workingAgentEntries[0];
+      const singleModel = String(worldAgentsById.get(singleAgent.id)?.model || '').trim();
+      return singleModel
+        ? `${singleAgent.name} (${singleModel}) working...`
+        : `${singleAgent.name} working...`;
+    }
+    if (workingAgentEntries.length > 1) {
+      return `${workingAgentNames.join(', ')} working...`;
+    }
+    if (fallbackContactModel) {
+      return `Contacting ${fallbackContactModel}...`;
+    }
+    return 'Contacting model...';
+  })();
+  const inlineDetailText = workingAgentEntries.length > 1 && uniqueWorkingAgentModels.length > 0
+    ? `models: ${uniqueWorkingAgentModels.join(', ')}`
+    : '';
+  const inlineWorkingIndicatorState = showInlineWorkingIndicator
+    ? {
+      primaryText: workingAgentNames.length > 0 ? workingAgentNames.join(', ') : 'Agent',
+      inlineStatusText,
+      detailText: inlineDetailText,
+      elapsedMs: inlineElapsedMs
+    }
+    : null;
   const hasConversationMessages = useMemo(() => {
-    return messages.some(isRenderableMessageEntry);
-  }, [messages]);
+    const shouldShowToolMessages = systemSettings.showToolMessages !== false;
+    return messages.some((message) => {
+      if (!isRenderableMessageEntry(message)) return false;
+      if (shouldShowToolMessages) return true;
+      return !isToolRelatedMessage(message);
+    });
+  }, [messages, systemSettings.showToolMessages]);
 
   const mainContentMessageListProps = createMainContentMessageListProps({
     messagesContainerRef,
@@ -816,6 +1068,7 @@ export default function App() {
     loadingSkillRegistry,
     visibleSkillRegistryEntries,
     skillRegistryError,
+    showToolMessages: systemSettings.showToolMessages !== false,
     messages,
     messagesById,
     worldAgentsById,
@@ -830,8 +1083,8 @@ export default function App() {
     onDeleteMessage,
     onBranchFromMessage,
     onCopyRawMarkdownFromMessage,
-    showInlineWorkingIndicator: false,
-    inlineWorkingIndicatorState: null,
+    showInlineWorkingIndicator,
+    inlineWorkingIndicatorState,
     activeHitlPrompt,
     submittingHitlRequestId,
     onRespondHitlOption: (prompt: HitlPrompt, optionId: string) => respondToHitlPrompt(prompt, optionId),
@@ -869,9 +1122,11 @@ export default function App() {
     api,
     globalSkillEntries,
     disabledGlobalSkillIdSet,
+    setGlobalSkillsEnabled,
     toggleSkillEnabled,
     projectSkillEntries,
     disabledProjectSkillIdSet,
+    setProjectSkillsEnabled,
     onCancelSettings,
     savingSystemSettings,
     onSaveSettings,
@@ -902,6 +1157,9 @@ export default function App() {
     onCreateWorld,
     creatingWorld,
     setCreatingWorld,
+    onImportWorld,
+    panelLogs,
+    onClearPanelLogs,
   });
 
   const leftSidebarProps = createLeftSidebarProps({
@@ -912,7 +1170,7 @@ export default function App() {
     availableWorlds,
     loadedWorld,
     onOpenCreateWorldPanel,
-    onImportWorld,
+    onImportWorld: onOpenImportWorldPanel,
     onExportWorld,
     onSelectWorld,
     loadingWorld,
@@ -945,8 +1203,8 @@ export default function App() {
     activeHeaderAgentIds: [],
     onOpenEditAgentPanel,
     onOpenCreateAgentPanel,
+    onOpenLogsPanel,
     onOpenSettingsPanel,
-    onRefreshWorldInfo,
     panelMode,
     panelOpen,
     DRAG_REGION_STYLE,
@@ -965,7 +1223,7 @@ export default function App() {
             rightPanelShellProps: mainContentRightPanelShellProps,
             rightPanelContentProps: mainContentRightPanelContentProps,
           }}
-          statusBar={<WorkingStatusBar chatStatus={chatStatus} agentStatuses={agentStatuses} />}
+          statusBar={<WorkingStatusBar chatStatus={chatStatus} agentStatuses={agentStatuses} notification={notification} />}
         />
       )}
       overlays={(

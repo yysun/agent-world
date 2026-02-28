@@ -19,6 +19,7 @@
  * - Project roots are scanned after user roots, so later collisions always override earlier ones
  *
  * Recent Changes:
+ * - 2026-02-27: Made collision precedence explicit in candidate resolution so project-scope definitions always win over global-scope definitions even if discovery order changes.
  * - 2026-02-16: Default project-skill roots now resolve from active workspace env (`AGENT_WORLD_PROJECT_PATH`/`AGENT_WORLD_WORKSPACE_PATH`) before falling back to process cwd.
  * - 2026-02-16: Added source-scope filtering helper so callers can include/exclude global or project skills when building system prompts.
  * - 2026-02-14: Added `getSkillSourcePath` API and source-path tracking map for on-demand `SKILL.md` loading.
@@ -77,6 +78,14 @@ interface SkillFrontMatter {
   description?: string;
 }
 
+interface ResolvedDiscoveredSkill {
+  description: string;
+  hash: string;
+  lastUpdated: string;
+  skillFilePath: string;
+  sourceScope: SkillSourceScope;
+}
+
 function buildDefaultUserSkillRoots(): string[] {
   return [
     path.join(homedir(), '.agents', 'skills'),
@@ -111,6 +120,28 @@ function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
 
 function createContentHash(content: string): string {
   return createHash('md5').update(content).digest('hex').slice(0, 8);
+}
+
+function getScopePriority(scope: SkillSourceScope): number {
+  return scope === 'project' ? 1 : 0;
+}
+
+function shouldReplaceResolvedSkill(
+  existingSkill: ResolvedDiscoveredSkill | undefined,
+  nextSkill: ResolvedDiscoveredSkill,
+): boolean {
+  if (!existingSkill) {
+    return true;
+  }
+
+  const existingScopePriority = getScopePriority(existingSkill.sourceScope);
+  const nextScopePriority = getScopePriority(nextSkill.sourceScope);
+  if (nextScopePriority !== existingScopePriority) {
+    return nextScopePriority > existingScopePriority;
+  }
+
+  // Keep deterministic "last discovered wins" behavior within the same source scope.
+  return true;
 }
 
 function normalizeFrontMatterValue(value: string): string {
@@ -301,16 +332,7 @@ function createSkillRegistrySingleton() {
     let updated = 0;
     let unchanged = 0;
 
-    const resolvedDiscovered = new Map<
-      string,
-      {
-        description: string;
-        hash: string;
-        lastUpdated: string;
-        skillFilePath: string;
-        sourceScope: SkillSourceScope;
-      }
-    >();
+    const resolvedDiscovered = new Map<string, ResolvedDiscoveredSkill>();
     for (const discoveredSkill of discovered.values()) {
       let content: string;
       try {
@@ -326,13 +348,19 @@ function createSkillRegistrySingleton() {
       }
 
       const description = (metadata.description ?? '').trim();
-      resolvedDiscovered.set(skillId, {
+      const nextResolvedSkill: ResolvedDiscoveredSkill = {
         description,
         hash: createContentHash(content),
         lastUpdated: discoveredSkill.lastUpdated,
         skillFilePath: discoveredSkill.skillFilePath,
         sourceScope: discoveredSkill.sourceScope,
-      });
+      };
+      const existingResolvedSkill = resolvedDiscovered.get(skillId);
+      if (!shouldReplaceResolvedSkill(existingResolvedSkill, nextResolvedSkill)) {
+        continue;
+      }
+
+      resolvedDiscovered.set(skillId, nextResolvedSkill);
     }
 
     for (const [skillId, discoveredSkill] of [...resolvedDiscovered.entries()].sort(([leftId], [rightId]) =>

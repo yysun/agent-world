@@ -1,0 +1,204 @@
+/**
+ * HITL Queue Ingestion Tests for Chat Event Subscriptions
+ *
+ * Purpose:
+ * - Validate replay-safe HITL prompt queue ingestion behavior in renderer subscriptions.
+ *
+ * Coverage:
+ * - Enqueues valid HITL option prompts from tool-progress payloads.
+ * - Deduplicates prompts by requestId.
+ * - Ignores malformed or non-HITL tool payloads.
+ * - Preserves metadata used by refresh-after-dismiss behavior.
+ */
+
+import { describe, expect, it } from 'vitest';
+import { enqueueHitlPromptFromToolEvent } from '../../../electron/renderer/src/hooks/useChatEventSubscriptions';
+
+describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
+  it('enqueues a valid HITL prompt from tool-progress payload', () => {
+    const queue = enqueueHitlPromptFromToolEvent(
+      [],
+      {
+        chatId: 'chat-1',
+        tool: {
+          eventType: 'tool-progress',
+          metadata: {
+            hitlPrompt: {
+              requestId: 'req-1',
+              title: 'Approval required',
+              message: 'Choose one',
+              defaultOptionId: 'no',
+              options: [
+                { id: 'yes', label: 'Yes' },
+                { id: 'no', label: 'No' },
+              ],
+              metadata: {
+                kind: 'create_agent_created',
+                refreshAfterDismiss: true,
+              },
+            },
+          },
+        },
+      },
+      'chat-fallback'
+    );
+
+    expect(queue).toHaveLength(1);
+    expect(queue[0]).toMatchObject({
+      requestId: 'req-1',
+      chatId: 'chat-1',
+      title: 'Approval required',
+      message: 'Choose one',
+      defaultOptionId: 'no',
+      metadata: {
+        kind: 'create_agent_created',
+        refreshAfterDismiss: true,
+      },
+    });
+  });
+
+  it('deduplicates replayed prompts by requestId', () => {
+    const existing = enqueueHitlPromptFromToolEvent(
+      [],
+      {
+        chatId: 'chat-1',
+        tool: {
+          eventType: 'tool-progress',
+          metadata: {
+            hitlPrompt: {
+              requestId: 'req-replay',
+              title: 'Approval required',
+              message: 'First payload',
+              options: [
+                { id: 'yes', label: 'Yes' },
+                { id: 'no', label: 'No' },
+              ],
+            },
+          },
+        },
+      },
+      'chat-fallback'
+    );
+
+    const replayed = enqueueHitlPromptFromToolEvent(
+      existing,
+      {
+        chatId: 'chat-1',
+        tool: {
+          eventType: 'tool-progress',
+          metadata: {
+            hitlPrompt: {
+              requestId: 'req-replay',
+              title: 'Approval required (replay)',
+              message: 'Replayed payload',
+              options: [
+                { id: 'yes', label: 'Yes' },
+                { id: 'no', label: 'No' },
+              ],
+            },
+          },
+        },
+      },
+      'chat-fallback'
+    );
+
+    expect(replayed).toHaveLength(1);
+    expect(replayed[0]?.message).toBe('First payload');
+  });
+
+  it('uses fallback chat id when tool payload is unscoped', () => {
+    const queue = enqueueHitlPromptFromToolEvent(
+      [],
+      {
+        tool: {
+          eventType: 'tool-progress',
+          metadata: {
+            hitlPrompt: {
+              requestId: 'req-fallback',
+              options: [
+                { id: 'yes', label: 'Yes' },
+                { id: 'no', label: 'No' },
+              ],
+            },
+          },
+        },
+      },
+      'chat-fallback'
+    );
+
+    expect(queue[0]?.chatId).toBe('chat-fallback');
+  });
+
+  it('ignores non-hitl and malformed tool events', () => {
+    const baseQueue = [
+      {
+        requestId: 'req-1',
+        chatId: 'chat-1',
+        title: 'A',
+        message: 'B',
+        mode: 'option' as const,
+        options: [{ id: 'no', label: 'No' }],
+      },
+    ];
+
+    const nonHitl = enqueueHitlPromptFromToolEvent(baseQueue, {
+      tool: { eventType: 'tool-result' }
+    }, 'chat-1');
+    const malformed = enqueueHitlPromptFromToolEvent(baseQueue, {
+      tool: {
+        eventType: 'tool-progress',
+        metadata: { hitlPrompt: { requestId: '', options: [] } },
+      }
+    }, 'chat-1');
+
+    expect(nonHitl).toEqual(baseQueue);
+    expect(malformed).toEqual(baseQueue);
+  });
+
+  it('enqueues all prompts when multiple tool events are batched sequentially', () => {
+    const events = [
+      {
+        payload: {
+          chatId: 'chat-1',
+          tool: {
+            eventType: 'tool-progress',
+            metadata: {
+              hitlPrompt: {
+                requestId: 'req-batch-a',
+                title: 'First',
+                message: 'First?',
+                options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }],
+              },
+            },
+          },
+        },
+        fallbackChatId: 'chat-1' as string | null,
+      },
+      {
+        payload: {
+          chatId: 'chat-1',
+          tool: {
+            eventType: 'tool-progress',
+            metadata: {
+              hitlPrompt: {
+                requestId: 'req-batch-b',
+                title: 'Second',
+                message: 'Second?',
+                options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }],
+              },
+            },
+          },
+        },
+        fallbackChatId: 'chat-1' as string | null,
+      },
+    ];
+
+    let queue: any[] = [];
+    for (const entry of events) {
+      queue = enqueueHitlPromptFromToolEvent(queue, entry.payload, entry.fallbackChatId);
+    }
+
+    expect(queue).toHaveLength(2);
+    expect(queue.map((p: any) => p.requestId)).toEqual(['req-batch-a', 'req-batch-b']);
+  });
+});

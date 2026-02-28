@@ -14,6 +14,7 @@
  * - Preserves existing drag/no-drag region behavior for Electron title area.
  *
  * Recent Changes:
+ * - 2026-02-27: Replaced the header refresh action with a logs action that opens the right panel in logs mode.
  * - 2026-02-20: Added active-streaming avatar animation state for header agent badges.
  * - 2026-02-20: Highlighted the world main agent in the top header avatar strip.
  * - 2026-02-20: Added refresh button next to the settings gear to reload world agents.
@@ -44,7 +45,7 @@ export default function MainHeaderBar({
   onOpenEditAgentPanel,
   onOpenCreateAgentPanel,
   onOpenSettingsPanel,
-  onRefreshWorld,
+  onOpenLogsPanel,
   panelMode,
   panelOpen,
   dragRegionStyle,
@@ -159,30 +160,34 @@ export default function MainHeaderBar({
         ) : null}
       </div>
       <div className="flex items-center justify-end gap-2" style={noDragRegionStyle}>
-        {selectedWorld ? (
-          <button
-            type="button"
-            onClick={onRefreshWorld}
-            className="flex h-7 w-7 items-center justify-center rounded transition-colors text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            title="Refresh world"
-            aria-label="Refresh world"
+        <button
+          type="button"
+          onClick={onOpenLogsPanel}
+          className={`flex h-7 w-7 items-center justify-center rounded transition-colors ${panelMode === 'logs' && panelOpen
+            ? 'bg-primary text-primary-foreground'
+            : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+            }`}
+          title="Logs"
+          aria-label="Logs"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-4 w-4"
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-4 w-4"
-            >
-              <polyline points="23 4 23 10 17 10" />
-              <polyline points="1 20 1 14 7 14" />
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-            </svg>
-          </button>
-        ) : null}
+            <path d="M9 6h11" />
+            <path d="M9 12h11" />
+            <path d="M9 18h11" />
+            <path d="M3 6h.01" />
+            <path d="M3 12h.01" />
+            <path d="M3 18h.01" />
+          </svg>
+        </button>
         <button
           type="button"
           onClick={onOpenSettingsPanel}

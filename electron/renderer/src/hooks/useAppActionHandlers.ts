@@ -13,6 +13,12 @@
  * - Uses dependency injection for state setters and collaborators.
  *
  * Recent Changes:
+ * - 2026-02-27: Updated Enter-key stop/send gating to include status-registry `working` state so keyboard behavior matches stop-button visibility.
+ * - 2026-02-28: Updated settings-header action to toggle the right panel closed when settings mode is already active.
+ * - 2026-02-28: Added settings-open flow helper that refreshes skill registry when System Settings panel is opened.
+ * - 2026-02-27: Updated `onOpenLogsPanel` to toggle the right panel when logs mode is already active.
+ * - 2026-02-27: Added `onOpenLogsPanel` action to open the right panel in unified logs mode from the header.
+ * - 2026-02-26: Added `onOpenImportWorldPanel` to route world-import action into right-panel import form mode.
  * - 2026-02-20: Blocked Enter-to-send while HITL prompt queue is non-empty.
  * - 2026-02-18: Updated create-agent panel defaults to inherit world chat LLM provider/model and default auto-reply to false.
  * - 2026-02-17: Extracted from App.tsx during CC pass.
@@ -24,10 +30,49 @@ import {
   DEFAULT_WORLD_CHAT_LLM_MODEL,
   DEFAULT_WORLD_CHAT_LLM_PROVIDER,
 } from '../constants/app-constants';
+import { computeCanStopCurrentSession } from '../domain/chat-stop-state';
 import { safeMessage } from '../domain/desktop-api';
+import { getChatStatus, getRegistry } from '../domain/status-registry';
 import { upsertEnvVariable } from '../utils/data-transform';
 import { getRefreshWarning } from '../utils/formatting';
 import { validateAgentForm } from '../utils/validation';
+
+type OpenSettingsPanelArgs = {
+  setPanelMode: (mode: string) => void;
+  setPanelOpen: (open: boolean) => void;
+  loadSystemSettings: () => Promise<void>;
+  refreshSkillRegistry?: () => Promise<void>;
+  panelMode?: string;
+  panelOpen?: boolean;
+};
+
+async function runBestEffortAsync(task: (() => Promise<void>) | undefined): Promise<void> {
+  if (!task) return;
+  try {
+    await task();
+  } catch { }
+}
+
+export async function openSettingsPanel({
+  setPanelMode,
+  setPanelOpen,
+  loadSystemSettings,
+  refreshSkillRegistry,
+  panelMode,
+  panelOpen,
+}: OpenSettingsPanelArgs): Promise<void> {
+  if (panelOpen && panelMode === 'settings') {
+    setPanelOpen(false);
+    return;
+  }
+
+  setPanelMode('settings');
+  setPanelOpen(true);
+  await Promise.all([
+    runBestEffortAsync(loadSystemSettings),
+    runBestEffortAsync(refreshSkillRegistry),
+  ]);
+}
 
 export function useAppActionHandlers({
   api,
@@ -37,6 +82,8 @@ export function useAppActionHandlers({
   creatingAgent,
   setStatusText,
   closePanelNeeds,
+  panelMode,
+  panelOpen,
   setPanelOpen,
   setPanelMode,
   setSelectedAgentId,
@@ -59,6 +106,7 @@ export function useAppActionHandlers({
   loadSystemSettings,
   resetSystemSettings,
   saveSystemSettings,
+  refreshSkillRegistry,
 }) {
   const closePanel = useCallback(() => {
     const {
@@ -82,12 +130,15 @@ export function useAppActionHandlers({
   }, [closePanelNeeds, setPanelMode, setPanelOpen, setSelectedAgentId]);
 
   const onOpenSettingsPanel = useCallback(async () => {
-    setPanelMode('settings');
-    setPanelOpen(true);
-    try {
-      await loadSystemSettings();
-    } catch { }
-  }, [loadSystemSettings, setPanelMode, setPanelOpen]);
+    await openSettingsPanel({
+      setPanelMode,
+      setPanelOpen,
+      loadSystemSettings,
+      refreshSkillRegistry,
+      panelMode,
+      panelOpen,
+    });
+  }, [loadSystemSettings, panelMode, panelOpen, refreshSkillRegistry, setPanelMode, setPanelOpen]);
 
   const onCancelSettings = useCallback(() => {
     resetSystemSettings();
@@ -106,6 +157,20 @@ export function useAppActionHandlers({
     setPanelMode('create-world');
     setPanelOpen(true);
   }, [setPanelMode, setPanelOpen]);
+
+  const onOpenImportWorldPanel = useCallback(() => {
+    setPanelMode('import-world');
+    setPanelOpen(true);
+  }, [setPanelMode, setPanelOpen]);
+
+  const onOpenLogsPanel = useCallback(() => {
+    if (panelOpen && panelMode === 'logs') {
+      setPanelOpen(false);
+      return;
+    }
+    setPanelMode('logs');
+    setPanelOpen(true);
+  }, [panelMode, panelOpen, setPanelMode, setPanelOpen]);
 
   const onOpenWorldEditPanel = useCallback(() => {
     if (!loadedWorld) return;
@@ -283,7 +348,18 @@ export function useAppActionHandlers({
       const isCurrentSessionSending = selectedSessionId && sendingSessionIds.has(selectedSessionId);
       const isCurrentSessionStopping = selectedSessionId && stoppingSessionIds.has(selectedSessionId);
       const isCurrentSessionPendingResponse = selectedSessionId && pendingResponseSessionIds.has(selectedSessionId);
-      const canStopCurrentSession = Boolean(selectedSessionId) && !isCurrentSessionSending && !isCurrentSessionStopping && Boolean(isCurrentSessionPendingResponse);
+      const isCurrentSessionWorking = Boolean(
+        loadedWorld?.id
+        && selectedSessionId
+        && getChatStatus(getRegistry(), loadedWorld.id, selectedSessionId) === 'working'
+      );
+      const canStopCurrentSession = computeCanStopCurrentSession({
+        selectedSessionId,
+        isCurrentSessionSending: Boolean(isCurrentSessionSending),
+        isCurrentSessionStopping: Boolean(isCurrentSessionStopping),
+        isCurrentSessionPendingResponse: Boolean(isCurrentSessionPendingResponse),
+        isCurrentSessionWorking,
+      });
 
       if (canStopCurrentSession) {
         return;
@@ -295,6 +371,7 @@ export function useAppActionHandlers({
   }, [
     composer,
     hasActiveHitlPrompt,
+    loadedWorld?.id,
     onSendMessage,
     pendingResponseSessionIds,
     selectedSessionId,
@@ -308,6 +385,8 @@ export function useAppActionHandlers({
     onCancelSettings,
     onSaveSettings,
     onOpenCreateWorldPanel,
+    onOpenImportWorldPanel,
+    onOpenLogsPanel,
     onOpenWorldEditPanel,
     onOpenCreateAgentPanel,
     onOpenEditAgentPanel,

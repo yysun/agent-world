@@ -97,6 +97,9 @@ export {
 
 export {
   requestWorldOption,
+  replayPendingHitlRequests,
+  listPendingHitlPromptEvents,
+  listPendingHitlPromptEventsFromMessages,
   submitWorldHitlResponse,
   submitWorldOptionResponse,
   clearHitlStateForTests,
@@ -126,6 +129,14 @@ export {
   type StopMessageProcessingResult
 } from './message-processing-control.js';
 
+export {
+  GitHubWorldImportError,
+  stageGitHubWorldFromShorthand,
+  type GitHubWorldImportErrorCode,
+  type ResolvedGitHubWorldSource,
+  type StagedGitHubWorldResult,
+} from './storage/github-world-import.js';
+
 // === CHAT MANAGEMENT ===
 export {
   newChat,
@@ -133,7 +144,8 @@ export {
   listChats,
   updateChat,
   deleteChat,
-  restoreChat
+  restoreChat,
+  activateChatWithSnapshot
 } from './managers.js';
 
 // === EVENT SYSTEM ===

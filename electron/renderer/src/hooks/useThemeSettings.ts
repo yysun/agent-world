@@ -13,6 +13,8 @@
  * - Preserves existing App.jsx behavior by returning state + action helpers.
  *
  * Recent Changes:
+ * - 2026-02-28: Added immediate autosave handlers for skill scope/row toggles with serialized persistence and registry refresh.
+ * - 2026-02-27: Added unsaved-change tracking support for `showToolMessages` desktop setting.
  * - 2026-02-17: Extracted theme/settings logic from `App.jsx` for Phase 3.
  */
 
@@ -34,6 +36,56 @@ function getStoredThemePreference() {
   return 'system';
 }
 
+type SkillSettingsSnapshot = {
+  enableGlobalSkills: boolean;
+  enableProjectSkills: boolean;
+  disabledGlobalSkillIds: string[];
+  disabledProjectSkillIds: string[];
+};
+
+function extractSkillSettingsSnapshot(settings: any): SkillSettingsSnapshot {
+  const normalized = normalizeSystemSettings(settings);
+  return {
+    enableGlobalSkills: normalized.enableGlobalSkills !== false,
+    enableProjectSkills: normalized.enableProjectSkills !== false,
+    disabledGlobalSkillIds: normalizeStringList(normalized.disabledGlobalSkillIds),
+    disabledProjectSkillIds: normalizeStringList(normalized.disabledProjectSkillIds),
+  };
+}
+
+export async function persistSkillSettingsAutosave({
+  api,
+  refreshSkillRegistry,
+  setStatusText,
+  savedSystemSettings,
+  nextSkillSettings,
+}: {
+  api: { saveSettings?: ((settings: any) => Promise<unknown>) | undefined };
+  refreshSkillRegistry: () => Promise<unknown>;
+  setStatusText: (text: string, kind?: string) => void;
+  savedSystemSettings: any;
+  nextSkillSettings: SkillSettingsSnapshot;
+}): Promise<{ saved: boolean; nextSavedSystemSettings: any }> {
+  const savedBaseline = normalizeSystemSettings(savedSystemSettings);
+  if (typeof api?.saveSettings !== 'function') {
+    return { saved: false, nextSavedSystemSettings: savedBaseline };
+  }
+
+  const payload = normalizeSystemSettings({
+    ...savedBaseline,
+    ...nextSkillSettings,
+  });
+
+  try {
+    await api.saveSettings({ ...payload, restart: false });
+    await refreshSkillRegistry();
+    return { saved: true, nextSavedSystemSettings: payload };
+  } catch (error) {
+    setStatusText(safeMessage(error, 'Failed to save settings.'), 'error');
+    return { saved: false, nextSavedSystemSettings: savedBaseline };
+  }
+}
+
 export function useThemeSettings({
   api,
   panelMode,
@@ -44,7 +96,14 @@ export function useThemeSettings({
   const [themePreference, setThemePreference] = useState(getStoredThemePreference);
   const [systemSettings, setSystemSettings] = useState(DEFAULT_SYSTEM_SETTINGS);
   const savedSystemSettingsRef = useRef(DEFAULT_SYSTEM_SETTINGS);
+  const systemSettingsRef = useRef(DEFAULT_SYSTEM_SETTINGS);
+  const skillAutosaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingSkillAutosaveCountRef = useRef(0);
   const [savingSystemSettings, setSavingSystemSettings] = useState(false);
+
+  useEffect(() => {
+    systemSettingsRef.current = systemSettings;
+  }, [systemSettings]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -64,6 +123,7 @@ export function useThemeSettings({
   const loadSystemSettings = useCallback(async () => {
     if (!api.getSettings) return;
     const loaded = normalizeSystemSettings(await api.getSettings());
+    systemSettingsRef.current = loaded;
     setSystemSettings(loaded);
     savedSystemSettingsRef.current = loaded;
   }, [api]);
@@ -93,6 +153,7 @@ export function useThemeSettings({
       current.storageType !== saved.storageType ||
       current.dataPath !== saved.dataPath ||
       current.sqliteDatabase !== saved.sqliteDatabase ||
+      current.showToolMessages !== saved.showToolMessages ||
       current.enableGlobalSkills !== saved.enableGlobalSkills ||
       current.enableProjectSkills !== saved.enableProjectSkills ||
       normalizeStringList(current.disabledGlobalSkillIds).join('|') !== normalizeStringList(saved.disabledGlobalSkillIds).join('|') ||
@@ -133,28 +194,85 @@ export function useThemeSettings({
     [skillRegistryEntries],
   );
 
+  const enqueueSkillSettingsAutosave = useCallback((nextSkillSettings: SkillSettingsSnapshot) => {
+    pendingSkillAutosaveCountRef.current += 1;
+    setSavingSystemSettings(true);
+
+    skillAutosaveQueueRef.current = skillAutosaveQueueRef.current
+      .then(async () => {
+        const result = await persistSkillSettingsAutosave({
+          api,
+          refreshSkillRegistry,
+          setStatusText,
+          savedSystemSettings: savedSystemSettingsRef.current,
+          nextSkillSettings,
+        });
+
+        if (result.saved) {
+          savedSystemSettingsRef.current = result.nextSavedSystemSettings;
+          return;
+        }
+
+        systemSettingsRef.current = result.nextSavedSystemSettings;
+        setSystemSettings(result.nextSavedSystemSettings);
+      })
+      .finally(() => {
+        pendingSkillAutosaveCountRef.current = Math.max(0, pendingSkillAutosaveCountRef.current - 1);
+        if (pendingSkillAutosaveCountRef.current === 0) {
+          setSavingSystemSettings(false);
+        }
+      });
+  }, [api, refreshSkillRegistry, setStatusText]);
+
+  const setGlobalSkillsEnabled = useCallback((enabled: boolean) => {
+    const currentSettings = normalizeSystemSettings(systemSettingsRef.current);
+    const nextSettings = normalizeSystemSettings({
+      ...currentSettings,
+      enableGlobalSkills: enabled,
+    });
+    systemSettingsRef.current = nextSettings;
+    setSystemSettings(nextSettings);
+    enqueueSkillSettingsAutosave(extractSkillSettingsSnapshot(nextSettings));
+  }, [enqueueSkillSettingsAutosave]);
+
+  const setProjectSkillsEnabled = useCallback((enabled: boolean) => {
+    const currentSettings = normalizeSystemSettings(systemSettingsRef.current);
+    const nextSettings = normalizeSystemSettings({
+      ...currentSettings,
+      enableProjectSkills: enabled,
+    });
+    systemSettingsRef.current = nextSettings;
+    setSystemSettings(nextSettings);
+    enqueueSkillSettingsAutosave(extractSkillSettingsSnapshot(nextSettings));
+  }, [enqueueSkillSettingsAutosave]);
+
   const toggleSkillEnabled = useCallback((sourceScope, skillId) => {
     const normalizedSkillId = String(skillId || '').trim();
     if (!normalizedSkillId) return;
 
-    setSystemSettings((settings) => {
-      const key = sourceScope === 'project' ? 'disabledProjectSkillIds' : 'disabledGlobalSkillIds';
-      const existing = new Set(normalizeStringList(settings[key]));
-      if (existing.has(normalizedSkillId)) {
-        existing.delete(normalizedSkillId);
-      } else {
-        existing.add(normalizedSkillId);
-      }
+    const currentSettings = normalizeSystemSettings(systemSettingsRef.current);
+    const key = sourceScope === 'project' ? 'disabledProjectSkillIds' : 'disabledGlobalSkillIds';
+    const existing = new Set(normalizeStringList(currentSettings[key]));
+    if (existing.has(normalizedSkillId)) {
+      existing.delete(normalizedSkillId);
+    } else {
+      existing.add(normalizedSkillId);
+    }
 
-      return {
-        ...settings,
-        [key]: [...existing].sort((left, right) => left.localeCompare(right)),
-      };
+    const nextSettings = normalizeSystemSettings({
+      ...currentSettings,
+      [key]: [...existing].sort((left, right) => left.localeCompare(right)),
     });
-  }, []);
+
+    systemSettingsRef.current = nextSettings;
+    setSystemSettings(nextSettings);
+    enqueueSkillSettingsAutosave(extractSkillSettingsSnapshot(nextSettings));
+  }, [enqueueSkillSettingsAutosave]);
 
   const resetSystemSettings = useCallback(() => {
-    setSystemSettings(normalizeSystemSettings(savedSystemSettingsRef.current));
+    const reset = normalizeSystemSettings(savedSystemSettingsRef.current);
+    systemSettingsRef.current = reset;
+    setSystemSettings(reset);
   }, []);
 
   const saveSystemSettings = useCallback(async () => {
@@ -200,6 +318,8 @@ export function useThemeSettings({
     visibleSkillRegistryEntries,
     globalSkillEntries,
     projectSkillEntries,
+    setGlobalSkillsEnabled,
+    setProjectSkillsEnabled,
     toggleSkillEnabled,
     loadSystemSettings,
     resetSystemSettings,

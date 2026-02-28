@@ -13,11 +13,15 @@
  * - Renders children only when panel is open, preserving existing mount behavior.
  *
  * Recent Changes:
+ * - 2026-02-27: Added `Logs` title support for the new `logs` panel mode.
+ * - 2026-02-26: Added `Import World` title for new `import-world` panel mode.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component decomposition.
  */
 
 function getPanelTitle(panelMode) {
+  if (panelMode === 'logs') return 'Logs';
   if (panelMode === 'settings') return 'System Settings';
+  if (panelMode === 'import-world') return 'Import World';
   if (panelMode === 'edit-world') return 'Edit World';
   if (panelMode === 'create-agent') return 'Create Agent';
   if (panelMode === 'edit-agent') return 'Edit Agent';

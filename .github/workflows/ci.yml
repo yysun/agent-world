@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test-and-quality-gates:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run coverage + core threshold gate + integration
+        run: npm run ci:test
+
+      - name: Publish coverage scorecard summary
+        if: always()
+        run: |
+          if [ -f coverage/scorecard.md ]; then
+            {
+              echo "## Coverage Scorecard"
+              echo
+              cat coverage/scorecard.md
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "coverage/scorecard.md not found" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-artifacts
+          path: |
+            coverage/
+            coverage-integration/
+          if-no-files-found: warn

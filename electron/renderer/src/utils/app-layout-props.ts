@@ -12,6 +12,10 @@
  * - Data-only transformations from provided inputs.
  *
  * Recent Changes:
+ * - 2026-02-28: Added right-panel settings autosave handlers wiring for skill scope toggles.
+ * - 2026-02-27: Added `showToolMessages` wiring to message-list props for transcript-level tool-row visibility control.
+ * - 2026-02-27: Added right-panel logs props wiring (`panelLogs`, `onClearPanelLogs`) and replaced header refresh wiring with `onOpenLogsPanel`.
+ * - 2026-02-26: Added right-panel import props wiring (`onImportWorld`) to support import form mode.
  * - 2026-02-21: Added message-list prop wiring for assistant raw-markdown copy action.
  * - 2026-02-20: Added inline HITL message-card props to main message-list wiring (replacing overlay HITL modal usage).
  * - 2026-02-20: Added `activeHeaderAgentIds` wiring so header avatars can reflect active streaming agents.
@@ -33,6 +37,7 @@ export function createMainContentMessageListProps<T extends PropBag>(input: T) {
     loadingSkillRegistry: input.loadingSkillRegistry,
     visibleSkillRegistryEntries: input.visibleSkillRegistryEntries,
     skillRegistryError: input.skillRegistryError,
+    showToolMessages: input.showToolMessages,
     messages: input.messages,
     messagesById: input.messagesById,
     worldAgentsById: input.worldAgentsById,
@@ -92,9 +97,11 @@ export function createMainContentRightPanelContentProps<T extends PropBag>(input
     api: input.api,
     globalSkillEntries: input.globalSkillEntries,
     disabledGlobalSkillIdSet: input.disabledGlobalSkillIdSet,
+    setGlobalSkillsEnabled: input.setGlobalSkillsEnabled,
     toggleSkillEnabled: input.toggleSkillEnabled,
     projectSkillEntries: input.projectSkillEntries,
     disabledProjectSkillIdSet: input.disabledProjectSkillIdSet,
+    setProjectSkillsEnabled: input.setProjectSkillsEnabled,
     onCancelSettings: input.onCancelSettings,
     savingSystemSettings: input.savingSystemSettings,
     onSaveSettings: input.onSaveSettings,
@@ -125,6 +132,9 @@ export function createMainContentRightPanelContentProps<T extends PropBag>(input
     onCreateWorld: input.onCreateWorld,
     creatingWorld: input.creatingWorld,
     setCreatingWorld: input.setCreatingWorld,
+    onImportWorld: input.onImportWorld,
+    panelLogs: input.panelLogs,
+    onClearPanelLogs: input.onClearPanelLogs,
   };
 }
 
@@ -172,8 +182,8 @@ export function createMainHeaderProps<T extends PropBag>(input: T) {
     activeHeaderAgentIds: input.activeHeaderAgentIds,
     onOpenEditAgentPanel: input.onOpenEditAgentPanel,
     onOpenCreateAgentPanel: input.onOpenCreateAgentPanel,
+    onOpenLogsPanel: input.onOpenLogsPanel,
     onOpenSettingsPanel: input.onOpenSettingsPanel,
-    onRefreshWorld: input.onRefreshWorldInfo,
     panelMode: input.panelMode,
     panelOpen: input.panelOpen,
     dragRegionStyle: input.DRAG_REGION_STYLE,

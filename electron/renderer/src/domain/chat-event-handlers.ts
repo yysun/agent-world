@@ -4,19 +4,25 @@
  * - Encapsulate chat/log realtime event routing logic used by App effects.
  *
  * Features:
- * - Global log event handler for status or message timeline updates
+ * - Global log event handler for right-panel diagnostics stream updates
  * - Session-scoped realtime handler for message/sse/tool events
- * - Stream/activity synchronization helpers
+ * - Stream synchronization helpers
  *
  * Implementation Notes:
  * - Handlers are generated from dependency injection for testability.
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
+ * - 2026-02-27: Stopped injecting realtime `type='log'` events into chat message timelines; logs are routed to the dedicated logs panel stream only.
+ * - 2026-02-27: Added unified main-process log callback support so logs are available in the right-panel diagnostics view even when no chat is selected.
+ * - 2026-02-26: Suppressed redundant error-level log rows when equivalent stream errors are already shown inline on message cards.
+ * - 2026-02-24: Removed ActivityRefs/activityStateRef and syncActiveStreamCount —
+ *   activity-state.ts deleted as part of working-status simplification.
+ * - 2026-02-22: Added activity event handler (response-end/idle) as authoritative
+ *   "all done" signal to clear stale streaming state and reset working indicator.
  * - 2026-02-21: Backfilled tool-stream row metadata on late `tool-start` events so shell cards still resolve command/tool labels even when stream chunks arrive first.
  * - 2026-02-21: Derived shell command labels for tool-stream rows from `tool-start` input (`toolUseId -> command`) and forwarded command metadata into streaming state.
  * - 2026-02-21: Forwarded SSE `toolName` into tool-stream state so tool streaming cards can render tool-specific running labels.
- * - 2026-02-20: Allow `hitl-option-request` system events to bypass strict chatId session filtering so approval prompts remain visible when event scope is stale/unscoped.
  * - 2026-02-19: Reset elapsed activity timer on idle→active session-activity transition so new agent work starts from 0s.
  * - 2026-02-16: Added defensive SSE end/error handling when `messageId` is missing by clearing response state and ending lingering streams.
  * - 2026-02-16: Added selected-session fallback for unscoped SSE/tool completion events so waiting indicators clear when `chatId` is omitted.
@@ -30,8 +36,8 @@
  * - 2026-02-17: Migrated module from JS to TS with typed payload and dependency interfaces.
  */
 
-import { createLogMessage, upsertMessageList, type MessageLike } from './message-updates';
-import { updateRegistry } from './status-registry';
+import { upsertMessageList, type MessageLike } from './message-updates';
+import { clearChatAgents, updateRegistry } from './status-registry';
 import { applyEventToRegistry } from './status-updater';
 
 interface BasePayload {
@@ -54,17 +60,7 @@ interface RealtimeRefs {
     handleToolStreamChunk: (messageId: string, content: string, streamType: 'stdout' | 'stderr', toolName?: string, command?: string) => void;
     handleToolStreamEnd: (messageId: string) => void;
     isActive: (messageId: string) => boolean;
-  } | null;
-}
-
-interface ActivityRefs {
-  current: {
-    setActiveStreamCount: (count: number) => void;
-    handleToolStart: (toolUseId: string, toolName: string, toolInput?: Record<string, unknown>) => void;
-    handleToolResult: (toolUseId: string, result: string) => void;
-    handleToolError: (toolUseId: string, error: string) => void;
-    handleToolProgress: (toolUseId: string, progress: string) => void;
-    resetElapsed?: () => void;
+    cleanup: () => void;
   } | null;
 }
 
@@ -73,7 +69,6 @@ interface ChatHandlerOptions {
   loadedWorldId: string | null | undefined;
   selectedSessionId: string | null | undefined;
   streamingStateRef: RealtimeRefs;
-  activityStateRef: ActivityRefs;
   setMessages: (updater: (existing: MessageLike[]) => MessageLike[]) => void;
   onSessionSystemEvent?: (event: {
     eventType: string;
@@ -82,6 +77,29 @@ interface ChatHandlerOptions {
     createdAt: string | null;
     content: unknown;
   }) => void;
+}
+
+export interface MainProcessLogEntry {
+  process: 'main';
+  level: string;
+  category: string;
+  message: string;
+  timestamp: string;
+  data?: unknown;
+}
+
+function toToolContent(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (value == null) {
+    return '';
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 function isAssistantLikeMessage(message: Record<string, unknown> | null | undefined) {
@@ -100,40 +118,26 @@ function isAssistantLikeMessage(message: Record<string, unknown> | null | undefi
 }
 
 
-function isHitlRequestPayload(systemPayload: Record<string, unknown>): boolean {
-  const topLevelType = String(systemPayload.eventType || '').trim();
-  if (topLevelType === 'hitl-option-request') {
-    return true;
-  }
-  const nestedContent = systemPayload.content;
-  if (nestedContent && typeof nestedContent === 'object') {
-    const eventType = String((nestedContent as Record<string, unknown>).eventType || '').trim();
-    return eventType === 'hitl-option-request';
-  }
-  return false;
-}
-
 export function createGlobalLogEventHandler({
-  loadedWorldId,
-  selectedSessionId,
-  setMessages,
+  onMainLogEvent,
 }: {
-  loadedWorldId: string | null | undefined;
-  selectedSessionId: string | null | undefined;
-  setMessages: (updater: (existing: MessageLike[]) => MessageLike[]) => void;
+  onMainLogEvent?: (entry: MainProcessLogEntry) => void;
 }) {
   return (payload: BasePayload & { logEvent?: Record<string, unknown> }) => {
     if (!payload || payload.type !== 'log') return;
 
     const logEvent = payload.logEvent;
     if (!logEvent) return;
-
-    const hasActiveSession = Boolean(loadedWorldId && selectedSessionId);
-    if (!hasActiveSession) return;
-
-    const logChatId = String(payload.chatId || logEvent?.chatId || '').trim();
-    if (logChatId && logChatId !== selectedSessionId) return;
-    setMessages((existing) => [...existing, createLogMessage(logEvent, logChatId || (selectedSessionId ?? undefined))]);
+    if (typeof onMainLogEvent === 'function') {
+      onMainLogEvent({
+        process: 'main',
+        level: String(logEvent.level || '').trim().toLowerCase() || 'info',
+        category: String(logEvent.category || '').trim() || 'main',
+        message: String(logEvent.message || '').trim() || '(empty log message)',
+        timestamp: String(logEvent.timestamp || '').trim() || new Date().toISOString(),
+        ...(logEvent.data !== undefined ? { data: logEvent.data } : {}),
+      });
+    }
   };
 }
 
@@ -142,30 +146,38 @@ export function createChatSubscriptionEventHandler({
   loadedWorldId,
   selectedSessionId,
   streamingStateRef,
-  activityStateRef,
   setMessages,
   onSessionSystemEvent,
 }: ChatHandlerOptions) {
   const toolCommandByUseId = new Map<string, string>();
 
-  const syncActiveStreamCount = () => {
-    const streaming = streamingStateRef.current;
-    if (!streaming) return;
+  const ensureToolStreamMessageChatId = (messageId: string, chatId: string | null) => {
+    const normalizedMessageId = String(messageId || '').trim();
+    const normalizedChatId = String(chatId || '').trim();
+    if (!normalizedMessageId || !normalizedChatId) return;
 
-    const count = streaming.getActiveCount();
-    if (activityStateRef.current) {
-      activityStateRef.current.setActiveStreamCount(count);
-    }
+    setMessages((existing) => {
+      const index = existing.findIndex(
+        (message) => String(message?.messageId || '').trim() === normalizedMessageId
+      );
+      if (index < 0) return existing;
+
+      const currentChatId = String(existing[index]?.chatId || '').trim();
+      if (currentChatId === normalizedChatId) return existing;
+
+      const next = [...existing];
+      next[index] = {
+        ...next[index],
+        chatId: normalizedChatId,
+      };
+      return next;
+    });
   };
 
   const endAllToolStreams = () => {
     const streaming = streamingStateRef.current;
     if (!streaming) return;
-
-    const endedIds = streaming.endAllToolStreams();
-    if (endedIds.length > 0) {
-      syncActiveStreamCount();
-    }
+    streaming.endAllToolStreams();
   };
 
   const endResponseStreamByMessage = (incomingMessage: Record<string, unknown>) => {
@@ -178,16 +190,10 @@ export function createChatSubscriptionEventHandler({
       String(incomingMessage.id || '').trim(),
     ].filter(Boolean);
 
-    let ended = false;
     for (const candidateId of candidateIds) {
       if (!streaming.isActive(candidateId)) continue;
       streaming.handleEnd(candidateId);
-      ended = true;
       break;
-    }
-
-    if (ended) {
-      syncActiveStreamCount();
     }
   };
 
@@ -209,6 +215,14 @@ export function createChatSubscriptionEventHandler({
         return;
       }
 
+      // End streaming state BEFORE upserting the final message so that
+      // onStreamUpdate (re-sets isStreaming:true) + onStreamEnd (removes isStreaming:true
+      // entries) fire first, then the upsert adds the message with isStreaming:false.
+      if (isAssistantLikeMessage(incomingMessage)) {
+        endResponseStreamByMessage(incomingMessage);
+        endAllToolStreams();
+      }
+
       setMessages((existing) => upsertMessageList(existing, {
         ...incomingMessage,
         isStreaming: false,
@@ -216,10 +230,6 @@ export function createChatSubscriptionEventHandler({
         streamType: undefined,
       }));
 
-      if (isAssistantLikeMessage(incomingMessage)) {
-        endResponseStreamByMessage(incomingMessage);
-        endAllToolStreams();
-      }
       return;
     }
 
@@ -234,6 +244,16 @@ export function createChatSubscriptionEventHandler({
       const messageId = streamPayload.messageId ? String(streamPayload.messageId) : '';
       const streaming = streamingStateRef.current;
       if (!streaming) return;
+      const toolName = String(streamPayload.toolName || '').trim() || 'shell_cmd';
+      const isShellStdoutSSE = (
+        toolName === 'shell_cmd'
+        && messageId.endsWith('-stdout')
+        && (eventType === 'start' || eventType === 'chunk' || eventType === 'end')
+      );
+      const shellStdoutToolUseId = isShellStdoutSSE
+        ? messageId.slice(0, -'-stdout'.length)
+        : '';
+      const shellCommand = toolCommandByUseId.get(shellStdoutToolUseId || messageId);
 
       const sseAgentName = String(streamPayload.agentName || '').trim() || null;
       const sseChatId = streamChatId || selectedSessionId || null;
@@ -241,7 +261,6 @@ export function createChatSubscriptionEventHandler({
       if (!messageId) {
         if (eventType === 'end' || eventType === 'error') {
           endAllToolStreams();
-          syncActiveStreamCount();
           if (sseAgentName && loadedWorldId && sseChatId) {
             updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', eventType));
           }
@@ -250,23 +269,51 @@ export function createChatSubscriptionEventHandler({
       }
 
       if (eventType === 'start') {
-        endAllToolStreams();
-        streaming.handleStart(messageId, String(streamPayload.agentName || 'assistant'));
-        syncActiveStreamCount();
+        if (isShellStdoutSSE) {
+          streaming.handleToolStreamStart(
+            messageId,
+            String(streamPayload.agentName || 'shell_cmd'),
+            'stdout',
+            'shell_cmd',
+            shellCommand,
+          );
+          ensureToolStreamMessageChatId(messageId, sseChatId);
+        } else {
+          endAllToolStreams();
+          streaming.handleStart(messageId, String(streamPayload.agentName || 'assistant'));
+        }
         if (sseAgentName && loadedWorldId && sseChatId) {
           updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', 'start'));
         }
       } else if (eventType === 'chunk') {
-        streaming.handleChunk(messageId, String(streamPayload.content || ''));
+        if (isShellStdoutSSE) {
+          const content = String(streamPayload.content || '');
+          if (!streaming.isActive(messageId)) {
+            streaming.handleToolStreamStart(
+              messageId,
+              String(streamPayload.agentName || 'shell_cmd'),
+              'stdout',
+              'shell_cmd',
+              shellCommand,
+            );
+            ensureToolStreamMessageChatId(messageId, sseChatId);
+          }
+          streaming.handleToolStreamChunk(messageId, content, 'stdout', 'shell_cmd', shellCommand);
+          ensureToolStreamMessageChatId(messageId, sseChatId);
+        } else {
+          streaming.handleChunk(messageId, String(streamPayload.content || ''));
+        }
       } else if (eventType === 'end') {
-        streaming.handleEnd(messageId);
-        syncActiveStreamCount();
+        if (isShellStdoutSSE) {
+          streaming.handleToolStreamEnd(messageId);
+        } else {
+          streaming.handleEnd(messageId);
+        }
         if (sseAgentName && loadedWorldId && sseChatId) {
           updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', 'end'));
         }
       } else if (eventType === 'error') {
         streaming.handleError(messageId, String(streamPayload.error || 'Stream error'));
-        syncActiveStreamCount();
         if (sseAgentName && loadedWorldId && sseChatId) {
           updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', 'error'));
         }
@@ -283,9 +330,10 @@ export function createChatSubscriptionEventHandler({
             toolName,
             command,
           );
-          syncActiveStreamCount();
+          ensureToolStreamMessageChatId(messageId, sseChatId);
         }
         streaming.handleToolStreamChunk(messageId, content, stream, toolName, command);
+        ensureToolStreamMessageChatId(messageId, sseChatId);
       }
       return;
     }
@@ -295,9 +343,6 @@ export function createChatSubscriptionEventHandler({
       if (!toolPayload) return;
       const toolChatId = String(payload.chatId || toolPayload.chatId || '').trim() || null;
       if (selectedSessionId && toolChatId && toolChatId !== selectedSessionId) return;
-
-      const activity = activityStateRef.current;
-      if (!activity) return;
 
       const toolEventType = String(toolPayload.eventType || '').toLowerCase();
       const toolUseId = String(toolPayload.toolUseId || '').trim();
@@ -329,40 +374,57 @@ export function createChatSubscriptionEventHandler({
             return next;
           });
         }
-        activity.handleToolStart(
-          toolUseId,
-          toolName,
-          toolInput,
-        );
         if (toolAgentName && loadedWorldId && toolChatIdResolved) {
           updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, toolChatIdResolved, toolAgentName, 'tool', 'tool-start'));
         }
       } else if (toolEventType === 'tool-result') {
+        const toolName = String(toolPayload.toolName || 'unknown').trim() || 'unknown';
+        const content = toToolContent(toolPayload.result);
+        setMessages((existing) => upsertMessageList(existing, {
+          id: toolUseId,
+          messageId: toolUseId,
+          role: 'tool',
+          sender: String(toolPayload.agentName || toolPayload.agentId || toolName || 'tool').trim() || 'tool',
+          toolName,
+          content,
+          chatId: toolChatIdResolved,
+          createdAt: String(toolPayload.createdAt || new Date().toISOString()),
+          isToolStreaming: false,
+          streamType: undefined,
+        }));
         toolCommandByUseId.delete(toolUseId);
-        activity.handleToolResult(toolUseId, String(toolPayload.result || ''));
         const streaming = streamingStateRef.current;
         if (streaming?.isActive(toolUseId)) {
           streaming.handleToolStreamEnd(toolUseId);
-          syncActiveStreamCount();
         }
         endAllToolStreams();
         if (toolAgentName && loadedWorldId && toolChatIdResolved) {
           updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, toolChatIdResolved, toolAgentName, 'tool', 'tool-result'));
         }
       } else if (toolEventType === 'tool-error') {
+        const toolName = String(toolPayload.toolName || 'unknown').trim() || 'unknown';
+        const content = toToolContent(toolPayload.error || 'Tool execution failed');
+        setMessages((existing) => upsertMessageList(existing, {
+          id: toolUseId,
+          messageId: toolUseId,
+          role: 'tool',
+          sender: String(toolPayload.agentName || toolPayload.agentId || toolName || 'tool').trim() || 'tool',
+          toolName,
+          content,
+          chatId: toolChatIdResolved,
+          createdAt: String(toolPayload.createdAt || new Date().toISOString()),
+          isToolStreaming: false,
+          streamType: 'stderr',
+        }));
         toolCommandByUseId.delete(toolUseId);
-        activity.handleToolError(toolUseId, String(toolPayload.error || 'Tool error'));
         const streaming = streamingStateRef.current;
         if (streaming?.isActive(toolUseId)) {
           streaming.handleToolStreamEnd(toolUseId);
-          syncActiveStreamCount();
         }
         endAllToolStreams();
         if (toolAgentName && loadedWorldId && toolChatIdResolved) {
           updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, toolChatIdResolved, toolAgentName, 'tool', 'tool-error'));
         }
-      } else if (toolEventType === 'tool-progress') {
-        activity.handleToolProgress(toolUseId, String(toolPayload.progress || ''));
       }
     }
 
@@ -371,8 +433,7 @@ export function createChatSubscriptionEventHandler({
       if (!systemPayload) return;
 
       const systemChatId = String(payload.chatId || systemPayload.chatId || '').trim() || null;
-      const isHitlRequest = isHitlRequestPayload(systemPayload);
-      if (!isHitlRequest && selectedSessionId && systemChatId !== selectedSessionId) return;
+      if (selectedSessionId && systemChatId !== selectedSessionId) return;
 
       if (typeof onSessionSystemEvent === 'function') {
         onSessionSystemEvent({
@@ -384,11 +445,72 @@ export function createChatSubscriptionEventHandler({
         });
       }
 
-      if (isHitlRequest) {
-        const hitlAgentName = String(systemPayload.agentName || '').trim() || null;
-        const hitlChatId = systemChatId || selectedSessionId || null;
-        if (hitlAgentName && loadedWorldId && hitlChatId) {
-          updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, hitlChatId, hitlAgentName, 'system', 'hitl-option-request'));
+    }
+
+    // Activity events drive the working indicator, mirroring the web app's
+    // pendingOperations-based approach:
+    // - response-start with pending > 0 → set agents to working
+    // - response-end with pending === 0 / idle → clear agents (all done)
+    if (payload.type === 'activity') {
+      const activityPayload = payload.activity as Record<string, unknown> | undefined;
+      if (!activityPayload) return;
+
+      const activityChatId = String(payload.chatId || activityPayload.chatId || '').trim() || null;
+      // Allow unscoped (no chatId) activity events through; only filter explicit mismatches.
+      if (selectedSessionId && activityChatId && activityChatId !== selectedSessionId) return;
+
+      const activityEventType = String(activityPayload.eventType || '').toLowerCase();
+      const pendingOps = Number(activityPayload.pendingOperations ?? -1);
+      const isAllDone = (activityEventType === 'response-end' && pendingOps === 0)
+        || activityEventType === 'idle';
+      const isResponseStart = activityEventType === 'response-start' && pendingOps > 0;
+
+      if (isResponseStart) {
+        // Agent(s) started working — set registry to working so the indicator shows.
+        // Use activeSources (agent names) or fall back to source (single agent name).
+        if (!loadedWorldId) return;
+        const targetChatId = activityChatId || selectedSessionId || null;
+        if (!targetChatId) return;
+
+        const activeSources = Array.isArray(activityPayload.activeSources)
+          ? (activityPayload.activeSources as unknown[])
+            .map((s) => String(s || '').trim())
+            .filter(Boolean)
+          : [];
+        const source = String(activityPayload.source || '').trim();
+        const agentNames = activeSources.length > 0 ? activeSources : source ? [source] : [];
+
+        if (agentNames.length > 0) {
+          updateRegistry((r) => {
+            let reg = r;
+            for (const name of agentNames) {
+              reg = applyEventToRegistry(reg, loadedWorldId, targetChatId, name, 'sse', 'start');
+            }
+            return reg;
+          });
+        }
+        return;
+      }
+
+      if (!isAllDone) return;
+
+      // Flush and clear all active streams without firing per-stream callbacks that
+      // might re-tag a just-upserted final message as streaming.
+      const streaming = streamingStateRef.current;
+      if (streaming) {
+        streaming.cleanup();
+      }
+
+      // Remove any remaining streaming placeholders left by the cleanup above.
+      setMessages((existing) => existing.filter(
+        (msg) => msg.isStreaming !== true && msg.isToolStreaming !== true
+      ));
+
+      // Reset registry so the working indicator clears.
+      if (loadedWorldId) {
+        const targetChatId = activityChatId || selectedSessionId || null;
+        if (targetChatId) {
+          updateRegistry((r) => clearChatAgents(r, loadedWorldId, targetChatId));
         }
       }
     }

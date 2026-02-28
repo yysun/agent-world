@@ -15,6 +15,8 @@
  * - Runtime validation remains in main-process handlers for behavior parity.
  *
  * Recent Changes:
+ * - 2026-02-26: Added `logging:getConfig` invoke contract and typed renderer logging config payload for env-controlled categorized renderer logs.
+ * - 2026-02-25: Extended `world:import` contract with optional source payload for path/shorthand imports.
  * - 2026-02-19: Added `world:export` invoke contract for desktop world save/export flows aligned with CLI storage options.
  * - 2026-02-16: Added `session:branchFromMessage` invoke contract for creating a branched chat from an assistant message.
  * - 2026-02-14: Added `hitl:respond` invoke contract for resolving world HITL option prompts from renderer.
@@ -60,6 +62,7 @@ export const DESKTOP_INVOKE_CHANNELS = {
   MESSAGE_DELETE: 'message:delete',
   CHAT_SUBSCRIBE_EVENTS: 'chat:subscribeEvents',
   CHAT_UNSUBSCRIBE_EVENTS: 'chat:unsubscribeEvents',
+  LOGGING_GET_CONFIG: 'logging:getConfig',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SAVE: 'settings:save',
   DIALOG_PICK_FILE: 'dialog:pickFile',
@@ -75,6 +78,10 @@ export interface WorldIdPayload {
 
 export interface WorldExportPayload extends WorldIdPayload {
   targetPath?: string;
+}
+
+export interface WorldImportPayload {
+  source?: string;
 }
 
 export interface WorldChatPayload extends WorldIdPayload {
@@ -151,13 +158,21 @@ export interface SkillListFilterPayload {
   projectPath?: string;
 }
 
+export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
+
+export interface RendererLoggingConfig {
+  globalLevel: LogLevel;
+  categoryLevels: Record<string, LogLevel>;
+  nodeEnv: string;
+}
+
 export interface DesktopApi {
   getWorkspace: () => Promise<unknown>;
   openWorkspace: (directoryPath?: string) => Promise<unknown>;
   pickDirectory: () => Promise<unknown>;
   loadWorldFromFolder: () => Promise<unknown>;
   loadWorld: (worldId: string) => Promise<unknown>;
-  importWorld: () => Promise<unknown>;
+  importWorld: (payload?: WorldImportPayload) => Promise<unknown>;
   exportWorld: (worldId: string) => Promise<unknown>;
   listWorlds: () => Promise<unknown>;
   listSkills: (filters?: SkillListFilterPayload) => Promise<SkillRegistrySummary[]>;
@@ -184,6 +199,7 @@ export interface DesktopApi {
   subscribeChatEvents: (worldId: string, chatId: string, subscriptionId: string) => Promise<unknown>;
   unsubscribeChatEvents: (subscriptionId: string) => Promise<unknown>;
   onChatEvent: (callback: (payload: ChatEventPayload) => void) => () => void;
+  getLoggingConfig: () => Promise<RendererLoggingConfig>;
   getSettings: () => Promise<unknown>;
   saveSettings: (settings: Record<string, unknown>) => Promise<unknown>;
   pickFile: () => Promise<unknown>;

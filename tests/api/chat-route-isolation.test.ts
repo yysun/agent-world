@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getWorld = vi.fn();
 const restoreChat = vi.fn();
+const activateChatWithSnapshot = vi.fn();
 const editUserMessage = vi.fn();
 const listChatsMock = vi.fn();
 
@@ -43,6 +44,7 @@ vi.mock('../../core/index.js', () => {
     deleteAgent: vi.fn(),
     listChats: listChatsMock,
     newChat: vi.fn(),
+    activateChatWithSnapshot,
     restoreChat,
     deleteChat: vi.fn(),
     clearAgentMemory: vi.fn(),
@@ -153,6 +155,7 @@ describe('API chat route isolation', () => {
       chats: new Map([['chat-1', { id: 'chat-1', name: 'Chat 1', messageCount: 0 }]])
     });
     restoreChat.mockResolvedValue(null);
+    activateChatWithSnapshot.mockResolvedValue(null);
   });
 
   it('rejects message send when requested chatId does not exist', async () => {
@@ -218,11 +221,108 @@ describe('API chat route isolation', () => {
     await runMiddleware(validateWorld, req, res);
     await routeHandler(req, res);
 
-    expect(restoreChat).toHaveBeenCalledWith('world-1', 'chat-missing');
+    expect(activateChatWithSnapshot).toHaveBeenCalledWith('world-1', 'chat-missing');
     expect(res.statusCode).toBe(200);
     expect(res.body).toMatchObject({
       success: false,
-      chatId: 'chat-1'
+      chatId: 'chat-1',
+      hitlPrompts: []
+    });
+  });
+
+  it('returns success and switched chat when setChat target is valid', async () => {
+    const { default: router } = await import('../../server/api.js');
+    const [validateWorld, routeHandler] = getRouteHandlers(router, 'post', '/worlds/:worldName/setChat/:chatId');
+
+    activateChatWithSnapshot.mockResolvedValueOnce({
+      world: {
+        id: 'world-1',
+        name: 'World 1',
+        currentChatId: 'chat-2',
+        agents: new Map(),
+        chats: new Map([
+          ['chat-1', { id: 'chat-1', name: 'Chat 1', messageCount: 0 }],
+          ['chat-2', { id: 'chat-2', name: 'Chat 2', messageCount: 0 }],
+        ])
+      },
+      chatId: 'chat-2',
+      memory: [],
+      hitlPrompts: []
+    });
+
+    const req: any = {
+      params: { worldName: 'world-1', chatId: 'chat-2' },
+      body: {}
+    };
+    const res = createMockResponse();
+
+    await runMiddleware(validateWorld, req, res);
+    await routeHandler(req, res);
+
+    expect(activateChatWithSnapshot).toHaveBeenCalledWith('world-1', 'chat-2');
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      chatId: 'chat-2',
+    });
+  });
+
+  it('returns pending HITL prompts in setChat response payload', async () => {
+    const { default: router } = await import('../../server/api.js');
+    const [validateWorld, routeHandler] = getRouteHandlers(router, 'post', '/worlds/:worldName/setChat/:chatId');
+
+    const pendingPrompt = {
+      chatId: 'chat-2',
+      prompt: {
+        requestId: 'req-1',
+        title: 'Approval required',
+        options: [{ id: 'yes', label: 'Yes' }],
+        message: 'Approve?',
+        defaultOptionId: 'yes',
+        metadata: null,
+        agentName: null,
+        toolName: 'human_intervention_request',
+        toolCallId: 'req-1',
+      },
+    };
+
+    activateChatWithSnapshot.mockResolvedValueOnce({
+      world: {
+        id: 'world-1',
+        name: 'World 1',
+        currentChatId: 'chat-2',
+        agents: new Map(),
+        chats: new Map([
+          ['chat-1', { id: 'chat-1', name: 'Chat 1', messageCount: 0 }],
+          ['chat-2', { id: 'chat-2', name: 'Chat 2', messageCount: 0 }],
+        ])
+      },
+      chatId: 'chat-2',
+      memory: [],
+      hitlPrompts: [pendingPrompt]
+    });
+
+    const req: any = {
+      params: { worldName: 'world-1', chatId: 'chat-2' },
+      body: {}
+    };
+    const res = createMockResponse();
+
+    await runMiddleware(validateWorld, req, res);
+    await routeHandler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      chatId: 'chat-2',
+      hitlPrompts: [
+        expect.objectContaining({
+          chatId: 'chat-2',
+          prompt: expect.objectContaining({
+            requestId: 'req-1',
+          }),
+        }),
+      ],
     });
   });
 });

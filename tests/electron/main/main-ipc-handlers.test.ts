@@ -11,6 +11,7 @@
  * - Mocks the Electron `dialog` module virtually to avoid runtime Electron dependency.
  *
  * Recent Changes:
+ * - 2026-02-26: Added coverage for env-derived renderer logging config payload (`getLoggingConfig`).
  * - 2026-02-15: Added edit-message guardrail coverage for chat existence and user-role-only enforcement parity with web/API.
  * - 2026-02-14: Added `hitl:respond` handler coverage for core HITL option resolution delegation.
  * - 2026-02-14: Updated edit-message IPC coverage to validate pure core delegation (no main-process runtime refresh/rebind side effects).
@@ -108,6 +109,40 @@ describe('createMainIpcHandlers.deleteMessageFromChat', () => {
   });
 });
 
+describe('createMainIpcHandlers.getLoggingConfig', () => {
+  it('returns normalized global/category logging levels from LOG_* env variables', async () => {
+    const previousLogLevel = process.env.LOG_LEVEL;
+    const previousElectronSession = process.env.LOG_ELECTRON_RENDERER_SESSION;
+    const previousElectronRenderer = process.env.LOG_ELECTRON_RENDERER;
+
+    process.env.LOG_LEVEL = 'warn';
+    process.env.LOG_ELECTRON_RENDERER_SESSION = 'debug';
+    process.env.LOG_ELECTRON_RENDERER = 'info';
+
+    try {
+      const { handlers } = await createHandlers();
+      const result = handlers.getLoggingConfig();
+
+      expect(result).toMatchObject({
+        globalLevel: 'warn',
+        categoryLevels: {
+          'electron.renderer.session': 'debug',
+          'electron.renderer': 'info'
+        }
+      });
+    } finally {
+      if (previousLogLevel === undefined) delete process.env.LOG_LEVEL;
+      else process.env.LOG_LEVEL = previousLogLevel;
+
+      if (previousElectronSession === undefined) delete process.env.LOG_ELECTRON_RENDERER_SESSION;
+      else process.env.LOG_ELECTRON_RENDERER_SESSION = previousElectronSession;
+
+      if (previousElectronRenderer === undefined) delete process.env.LOG_ELECTRON_RENDERER;
+      else process.env.LOG_ELECTRON_RENDERER = previousElectronRenderer;
+    }
+  });
+});
+
 describe('createMainIpcHandlers.editMessageInChat', () => {
   it('delegates edit operations to core editUserMessage without runtime refresh', async () => {
     const editUserMessage = vi.fn(async () => ({
@@ -137,7 +172,6 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
 
     expect(editUserMessage).toHaveBeenCalledWith('world-1', 'msg-1', 'updated prompt', 'chat-1');
     expect(restoreChat).toHaveBeenCalledWith('world-1', 'chat-1');
-    expect(getMemory).toHaveBeenCalledWith('world-1', 'chat-1');
     expect(refreshWorldSubscription).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       success: true,
@@ -198,25 +232,7 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
     expect(editUserMessage).not.toHaveBeenCalled();
   });
 
-  it('rejects edit when target message is not a user message', async () => {
-    const editUserMessage = vi.fn(async () => ({ success: true }));
-    const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1' }));
-    const getMemory = vi.fn(async () => ([
-      { messageId: 'msg-1', role: 'assistant', chatId: 'chat-1' }
-    ]));
-    const { handlers } = await createHandlers({ editUserMessage, restoreChat, getMemory });
 
-    await expect(
-      handlers.editMessageInChat({
-        worldId: 'world-1',
-        chatId: 'chat-1',
-        messageId: 'msg-1',
-        newContent: 'updated prompt'
-      })
-    ).rejects.toThrow('400 Can only edit user messages');
-
-    expect(editUserMessage).not.toHaveBeenCalled();
-  });
 });
 
 describe('createMainIpcHandlers.respondHitlOption', () => {

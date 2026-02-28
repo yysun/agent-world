@@ -19,6 +19,8 @@
  * - Defaults to SQLite storage and workspace path if env vars not set
  *
  * Recent Changes:
+ * - 2026-02-26: Added categorized Electron main loggers and renderer logging-config IPC bridge wiring for env-controlled main/renderer log behavior.
+ * - 2026-02-26: Moved `.env` loading ahead of core module import so startup logger category levels honor `LOG_*` env values.
  * - 2026-02-21: Added single-instance guard with `app.requestSingleInstanceLock()` and second-instance focus/restore handling.
  * - 2026-02-19: Added `world:export` IPC wiring and storage-factory dependency injection for CLI-parity desktop world import/export flows.
  * - 2026-02-16: Wired `session:branchFromMessage` IPC to core `branchChatFromMessage` for branch-chat creation from assistant messages.
@@ -82,7 +84,11 @@ import { resolvePreloadPath, resolveRendererIndexPath } from './main-process/win
 import { setupMainLifecycle } from './main-process/lifecycle.js';
 import { createRealtimeEventsRuntime } from './main-process/realtime-events.js';
 import { createWorkspaceRuntime } from './main-process/workspace-runtime.js';
-import { importCoreModule, importCoreStorageFactoryModule } from './main-process/core-module-loader.js';
+import {
+  importCoreGitHubWorldImportModule,
+  importCoreModule,
+  importCoreStorageFactoryModule
+} from './main-process/core-module-loader.js';
 import {
   applySystemSettings,
   configureProvidersFromEnv,
@@ -102,6 +108,15 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
+
+// Load env before importing core so logger/category levels honor LOG_* from .env.
+loadEnvironmentVariables(__dirname);
+applySystemSettings(readSystemSettings(app));
+
 const {
   createAgent,
   createWorld,
@@ -118,8 +133,11 @@ const {
   newChat,
   branchChatFromMessage,
   publishMessage,
+  listPendingHitlPromptEvents,
+  listPendingHitlPromptEventsFromMessages,
   submitWorldHitlResponse,
   stopMessageProcessing,
+  activateChatWithSnapshot,
   restoreChat,
   syncSkills,
   editUserMessage,
@@ -128,21 +146,21 @@ const {
   removeMessagesFrom,
   LLMProvider,
   configureLLMProvider,
-  addLogStreamCallback
+  addLogStreamCallback,
+  createCategoryLogger
 } = await importCoreModule(__dirname);
 const { createStorage, createStorageFromEnv } = await importCoreStorageFactoryModule(__dirname);
+const { GitHubWorldImportError, stageGitHubWorldFromShorthand } = await importCoreGitHubWorldImportModule(__dirname);
 
 const CHAT_EVENT_CHANNEL = 'chat:event';
+const mainLifecycleLogger = createCategoryLogger('electron.main.lifecycle');
+const mainIpcLogger = createCategoryLogger('electron.main.ipc');
+const mainIpcSessionLogger = createCategoryLogger('electron.main.ipc.session');
+const mainIpcMessagesLogger = createCategoryLogger('electron.main.ipc.messages');
+const mainRealtimeLogger = createCategoryLogger('electron.main.realtime');
+const mainWorkspaceLogger = createCategoryLogger('electron.main.workspace');
 
 let mainWindow: BrowserWindow | null = null;
-
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
-if (!hasSingleInstanceLock) {
-  app.quit();
-}
-
-loadEnvironmentVariables(__dirname);
-applySystemSettings(readSystemSettings(app));
 
 let ensureCoreReady: () => Promise<void> = async () => {
   throw new Error('Workspace runtime not initialized');
@@ -153,7 +171,11 @@ const realtimeEventsRuntime = createRealtimeEventsRuntime({
   chatEventChannel: CHAT_EVENT_CHANNEL,
   addLogStreamCallback,
   subscribeWorld,
-  ensureCoreReady: () => ensureCoreReady()
+  ensureCoreReady: () => ensureCoreReady(),
+  getMemory,
+  listPendingHitlPromptEvents,
+  listPendingHitlPromptEventsFromMessages,
+  loggerRealtime: mainRealtimeLogger,
 });
 
 const workspaceRuntime = createWorkspaceRuntime({
@@ -163,7 +185,8 @@ const workspaceRuntime = createWorkspaceRuntime({
   readWorkspacePreference: () => readWorkspacePreference(app),
   writeWorkspacePreference: (workspacePath) => writeWorkspacePreference(app, workspacePath),
   getDefaultWorkspacePath: () => path.join(os.homedir(), 'agent-world'),
-  resetRuntimeSubscriptions: () => realtimeEventsRuntime.resetRuntimeSubscriptions()
+  resetRuntimeSubscriptions: () => realtimeEventsRuntime.resetRuntimeSubscriptions(),
+  loggerWorkspace: mainWorkspaceLogger
 });
 
 ensureCoreReady = workspaceRuntime.ensureCoreReady;
@@ -209,12 +232,18 @@ const ipcHandlers = createMainIpcHandlers({
   publishMessage,
   submitWorldHitlResponse,
   stopMessageProcessing,
+  activateChatWithSnapshot,
   restoreChat,
   updateWorld,
   editUserMessage,
   removeMessagesFrom,
   createStorage,
-  createStorageFromEnv
+  createStorageFromEnv,
+  GitHubWorldImportError,
+  stageGitHubWorldFromShorthand,
+  loggerIpc: mainIpcLogger,
+  loggerIpcSession: mainIpcSessionLogger,
+  loggerIpcMessages: mainIpcMessagesLogger
 });
 
 function registerIpcHandlers() {
@@ -253,6 +282,7 @@ function registerIpcHandlers() {
     deleteMessageFromChat: ipcHandlers.deleteMessageFromChat,
     subscribeChatEvents,
     unsubscribeChatEvents,
+    getLoggingConfig: ipcHandlers.getLoggingConfig,
     getSystemSettings: () => readSystemSettings(app),
     saveSystemSettings: (payload) => {
       const p = (payload ?? {}) as Record<string, unknown>;
@@ -305,7 +335,9 @@ function createMainWindow() {
   });
 
   loadRenderer(mainWindow).catch((error) => {
-    console.error('Failed to load renderer:', error);
+    mainLifecycleLogger.error('Failed to load renderer window', {
+      error: error instanceof Error ? error.message : String(error)
+    });
   });
 }
 
@@ -357,6 +389,8 @@ async function bootstrap() {
 }
 
 bootstrap().catch((error) => {
-  console.error('Failed to bootstrap Electron app:', error);
+  mainLifecycleLogger.error('Failed to bootstrap Electron app', {
+    error: error instanceof Error ? error.message : String(error)
+  });
   app.exit(1);
 });

@@ -18,9 +18,13 @@
  * - Keeps payload format deterministic for stable downstream parsing
  *
  * Recent Changes:
- * - 2026-02-16: Treat non-zero exit status from instruction-referenced skill scripts as execution errors so UI receives tool-error feedback.
- * - 2026-02-15: Reject `load_skill` script execution when a referenced script resolves outside the active execution working directory.
- * - 2026-02-15: Execute skill scripts in the project working directory (from context) instead of the skill root.
+ * - 2026-02-27: Run-scoped `load_skill` cache now stores only successful outcomes so declined/error/not-found paths remain retryable in the same run.
+ * - 2026-02-27: Added run-scoped `load_skill` result caching keyed by latest user-turn marker so repeated same-skill calls are auto-suppressed across assistant/tool hops.
+ * - 2026-02-27: Replaced `[load_skill:hitl]` console logs with structured category logger events (`load_skill.hitl`).
+ * - 2026-02-27: Added same-turn `yes_once` approval reuse + in-flight approval dedupe so repeated/concurrent `load_skill` calls for the same skill do not spam duplicate HITL prompts.
+ * - 2026-02-25: Added persisted synthetic HITL tool-call/response messages for `load_skill` approval so frontends can reconstruct prompts from memory without relying on transient event timing.
+ * - 2026-02-24: Surface non-zero script exits as informational output instead of blocking errors (scripts may be CLI tools requiring args).
+ * - 2026-02-24: Execute skill scripts with cwd set to the skill root directory, not the project working directory.
  * - 2026-02-14: Strip SKILL.md YAML front matter from injected `<instructions>` content.
  * - 2026-02-14: Omit `<active_resources>` from `load_skill` payloads when no instruction-referenced scripts are present.
  * - 2026-02-14: Added skill-level HITL gating so `load_skill` requires approval even when no script references are present.
@@ -35,25 +39,42 @@ import {
   getSkillSourceScope,
   waitForInitialSkillSync,
 } from './skill-registry.js';
+import { createStorageWithWrappers } from './storage/storage-factory.js';
 import {
   executeShellCommand,
   formatResultForLLM,
   validateShellCommandScope,
 } from './shell-cmd-tool.js';
+import { createCategoryLogger } from './logger.js';
 import { parseSkillIdListFromEnv } from './skill-settings.js';
-import { requestWorldOption } from './hitl.js';
+import { requestWorldOption, type HitlOptionResolution } from './hitl.js';
+import { generateId } from './utils.js';
 
 const APPROVAL_OPTION_YES_ONCE = 'yes_once';
 const APPROVAL_OPTION_YES_IN_SESSION = 'yes_in_session';
 const APPROVAL_OPTION_NO = 'no';
 const SCRIPT_TIMEOUT_MS = 120_000;
+const LOAD_SKILL_RUN_RESULT_CACHE_LIMIT = 256;
 const skillSessionApprovals = new Set<string>();
+const skillTurnApprovals = new Set<string>();
+const inFlightSkillApprovals = new Map<string, Promise<boolean>>();
+const loadSkillRunResultCache = new Map<string, string>();
+const inFlightLoadSkillRunResults = new Map<string, Promise<string>>();
+const loggerLoadSkillHitl = createCategoryLogger('load_skill.hitl');
 
 type LoadSkillToolContext = {
   world?: { id?: string; currentChatId?: string | null; eventEmitter?: unknown };
   chatId?: string | null;
   abortSignal?: AbortSignal;
   workingDirectory?: string;
+  messages?: Array<Record<string, any>>;
+  toolCallId?: string;
+  agentName?: string;
+};
+
+type LoadSkillExecutionOutcome = {
+  result: string;
+  cacheableForRun: boolean;
 };
 
 class SkillScriptExecutionError extends Error {
@@ -272,56 +293,325 @@ function createSessionApprovalKey(worldId: string, chatId: string | null, skillI
   return `${worldId}::${chatId ?? 'global'}::${skillId}`;
 }
 
+function getCurrentTurnMarker(context: LoadSkillToolContext | undefined): string | null {
+  const chatId = context?.chatId ?? context?.world?.currentChatId ?? null;
+  const messages = Array.isArray(context?.messages) ? context!.messages : [];
+  if (!chatId || messages.length === 0) {
+    return null;
+  }
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== 'user') {
+      continue;
+    }
+    const messageChatId = message?.chatId ? String(message.chatId).trim() : null;
+    if (messageChatId && messageChatId !== chatId) {
+      continue;
+    }
+
+    const messageId = String(message?.messageId || '').trim();
+    if (messageId) {
+      return `msg:${messageId}`;
+    }
+
+    const createdAt = message?.createdAt ? new Date(message.createdAt) : null;
+    if (createdAt && Number.isFinite(createdAt.valueOf())) {
+      return `ts:${createdAt.toISOString()}`;
+    }
+
+    const content = String(message?.content || '').trim();
+    if (content) {
+      return `content:${content.slice(0, 80)}`;
+    }
+
+    return `idx:${index}`;
+  }
+
+  return null;
+}
+
+function createTurnApprovalKey(worldId: string, chatId: string | null, skillId: string, turnMarker: string): string {
+  return `${worldId}::${chatId ?? 'global'}::${skillId}::turn::${turnMarker}`;
+}
+
+function createRunResultKey(worldId: string, chatId: string | null, skillId: string, turnMarker: string): string {
+  return `${worldId}::${chatId ?? 'global'}::${skillId}::run::${turnMarker}`;
+}
+
+function getRunScopedLoadSkillResultKey(skillId: string, context: LoadSkillToolContext | undefined): string | null {
+  const worldId = String(context?.world?.id || '').trim();
+  if (!worldId) {
+    return null;
+  }
+  const turnMarker = getCurrentTurnMarker(context);
+  if (!turnMarker) {
+    return null;
+  }
+  const chatId = context?.chatId ?? context?.world?.currentChatId ?? null;
+  return createRunResultKey(worldId, chatId, skillId, turnMarker);
+}
+
+function rememberRunScopedLoadSkillResult(cacheKey: string, result: string): void {
+  if (loadSkillRunResultCache.has(cacheKey)) {
+    loadSkillRunResultCache.delete(cacheKey);
+  }
+  loadSkillRunResultCache.set(cacheKey, result);
+  while (loadSkillRunResultCache.size > LOAD_SKILL_RUN_RESULT_CACHE_LIMIT) {
+    const oldestKey = loadSkillRunResultCache.keys().next().value;
+    if (!oldestKey) {
+      break;
+    }
+    loadSkillRunResultCache.delete(oldestKey);
+  }
+}
+
+function getLoadSkillApprovalRequestId(context: LoadSkillToolContext | undefined, skillId: string): string {
+  const parentToolCallId = String(context?.toolCallId || '').trim();
+  if (parentToolCallId) {
+    return `${parentToolCallId}::load_skill_approval`;
+  }
+  const normalizedSkillId = String(skillId || '').trim() || 'skill';
+  return `load_skill_approval::${normalizedSkillId}::${generateId()}`;
+}
+
+async function persistAgentMemoryIfAvailable(context: LoadSkillToolContext | undefined): Promise<void> {
+  const worldId = String(context?.world?.id || '').trim();
+  const agentName = String(context?.agentName || '').trim();
+  const messages = Array.isArray(context?.messages) ? context!.messages : null;
+  const world = context?.world as any;
+
+  if (!worldId || !agentName || !messages || !world?.agents || typeof world.agents.get !== 'function') {
+    return;
+  }
+
+  const agent = world.agents.get(agentName);
+  if (!agent) {
+    return;
+  }
+
+  const storage = await createStorageWithWrappers();
+  await storage.saveAgent(worldId, agent);
+}
+
+async function persistLoadSkillApprovalPromptMessage(options: {
+  context?: LoadSkillToolContext;
+  requestId: string;
+  skillId: string;
+  scriptPaths: string[];
+}): Promise<void> {
+  const messages = Array.isArray(options.context?.messages) ? options.context!.messages : null;
+  if (!messages) {
+    return;
+  }
+
+  const existing = messages.some((message) =>
+    message?.role === 'assistant'
+    && Array.isArray(message?.tool_calls)
+    && message.tool_calls.some((toolCall: any) => String(toolCall?.id || '').trim() === options.requestId)
+  );
+  if (existing) {
+    return;
+  }
+
+  const question = `Skill "${options.skillId}" requested execution.${options.scriptPaths.length > 0 ? ` Referenced scripts:\n${options.scriptPaths.map((scriptPath) => `- ${scriptPath}`).join('\n')}` : ''}\n\nApprove applying this skill now?`;
+  const toolArguments = {
+    question,
+    options: ['Yes once', 'Yes in this session', 'No'],
+    defaultOption: 'No',
+    metadata: {
+      tool: 'human_intervention_request',
+      toolCallId: options.requestId,
+      source: 'load_skill',
+      skillId: options.skillId,
+      scriptPaths: options.scriptPaths,
+    },
+  };
+
+  const chatId = options.context?.chatId ?? options.context?.world?.currentChatId ?? null;
+  const agentName = String(options.context?.agentName || '').trim() || 'assistant';
+  messages.push({
+    role: 'assistant',
+    content: `Calling tool: human_intervention_request (skill_id: "${options.skillId}")`,
+    tool_calls: [{
+      id: options.requestId,
+      type: 'function',
+      function: {
+        name: 'human_intervention_request',
+        arguments: JSON.stringify(toolArguments),
+      },
+    }],
+    sender: agentName,
+    createdAt: new Date(),
+    chatId,
+    messageId: generateId(),
+    replyToMessageId: options.context?.toolCallId,
+    agentId: agentName,
+  });
+
+  await persistAgentMemoryIfAvailable(options.context);
+  loggerLoadSkillHitl.debug('Persisted load_skill approval tool-call message', {
+    chatId: chatId || null,
+    agentName,
+    requestId: options.requestId,
+    skillId: options.skillId,
+  });
+}
+
+async function persistLoadSkillApprovalResolutionMessage(options: {
+  context?: LoadSkillToolContext;
+  requestId: string;
+  resolution: HitlOptionResolution;
+  skillId: string;
+}): Promise<void> {
+  const messages = Array.isArray(options.context?.messages) ? options.context!.messages : null;
+  if (!messages) {
+    return;
+  }
+
+  const existing = messages.some((message) =>
+    message?.role === 'tool'
+    && String(message?.tool_call_id || '').trim() === options.requestId
+  );
+  if (existing) {
+    return;
+  }
+
+  const chatId = options.context?.chatId ?? options.context?.world?.currentChatId ?? null;
+  const agentName = String(options.context?.agentName || '').trim() || 'assistant';
+  const payload = {
+    requestId: options.resolution.requestId,
+    optionId: options.resolution.optionId,
+    source: options.resolution.source,
+    skillId: options.skillId,
+  };
+
+  messages.push({
+    role: 'tool',
+    content: JSON.stringify(payload),
+    tool_call_id: options.requestId,
+    sender: agentName,
+    createdAt: new Date(),
+    chatId,
+    messageId: generateId(),
+    agentId: agentName,
+  });
+
+  await persistAgentMemoryIfAvailable(options.context);
+  loggerLoadSkillHitl.debug('Persisted load_skill approval tool-result message', {
+    chatId: chatId || null,
+    agentName,
+    requestId: options.requestId,
+    optionId: options.resolution.optionId,
+  });
+}
+
 async function requestSkillExecutionApproval(options: {
   skillId: string;
   scriptPaths: string[];
   context?: LoadSkillToolContext;
 }): Promise<boolean> {
-  const worldId = String(options.context?.world?.id || '').trim();
-  const chatId = options.context?.chatId ?? options.context?.world?.currentChatId ?? null;
-  if (!worldId || !options.context?.world) {
+  const worldContext = options.context?.world;
+  const worldId = String(worldContext?.id || '').trim();
+  const chatId = options.context?.chatId ?? worldContext?.currentChatId ?? null;
+  const requestId = getLoadSkillApprovalRequestId(options.context, options.skillId);
+  if (!worldId || !worldContext) {
     return true;
   }
 
   const sessionApprovalKey = createSessionApprovalKey(worldId, chatId, options.skillId);
+  const turnMarker = getCurrentTurnMarker(options.context);
+  const turnApprovalKey = turnMarker
+    ? createTurnApprovalKey(worldId, chatId, options.skillId, turnMarker)
+    : null;
   if (skillSessionApprovals.has(sessionApprovalKey)) {
     return true;
   }
+  if (turnApprovalKey && skillTurnApprovals.has(turnApprovalKey)) {
+    return true;
+  }
 
-  const scriptSummary = options.scriptPaths.length > 0
-    ? `The skill references local scripts:\n${options.scriptPaths.map((scriptPath) => `- ${scriptPath}`).join('\n')}`
-    : 'No instruction-referenced local scripts were detected for this skill.';
+  const inFlightApprovalKey = turnApprovalKey
+    ? `turn::${turnApprovalKey}`
+    : `session::${sessionApprovalKey}`;
+  const existingInFlightApproval = inFlightSkillApprovals.get(inFlightApprovalKey);
+  if (existingInFlightApproval) {
+    return await existingInFlightApproval;
+  }
 
-  const approval = await requestWorldOption(options.context.world as any, {
-    title: `Run skill ${options.skillId}?`,
-    message: [
-      `Skill "${options.skillId}" requested execution.`,
-      scriptSummary,
-      'Approve applying this skill now?',
-    ].join('\n\n'),
-    chatId,
-    defaultOptionId: APPROVAL_OPTION_NO,
-    options: [
-      { id: APPROVAL_OPTION_YES_ONCE, label: 'Yes once', description: 'Allow this skill for this call only.' },
-      {
-        id: APPROVAL_OPTION_YES_IN_SESSION,
-        label: 'Yes in this session',
-        description: 'Allow this skill for the current chat session.',
+  const approvalPromise = (async (): Promise<boolean> => {
+    const scriptSummary = options.scriptPaths.length > 0
+      ? `The skill references local scripts:\n${options.scriptPaths.map((scriptPath) => `- ${scriptPath}`).join('\n')}`
+      : 'No instruction-referenced local scripts were detected for this skill.';
+
+    await persistLoadSkillApprovalPromptMessage({
+      context: options.context,
+      requestId,
+      skillId: options.skillId,
+      scriptPaths: options.scriptPaths,
+    });
+
+    const approval = await requestWorldOption(worldContext as any, {
+      requestId,
+      title: `Run skill ${options.skillId}?`,
+      message: [
+        `Skill "${options.skillId}" requested execution.`,
+        scriptSummary,
+        'Approve applying this skill now?',
+      ].join('\n\n'),
+      chatId,
+      defaultOptionId: APPROVAL_OPTION_NO,
+      options: [
+        { id: APPROVAL_OPTION_YES_ONCE, label: 'Yes once', description: 'Allow this skill for this call only.' },
+        {
+          id: APPROVAL_OPTION_YES_IN_SESSION,
+          label: 'Yes in this session',
+          description: 'Allow this skill for the current chat session.',
+        },
+        { id: APPROVAL_OPTION_NO, label: 'No', description: 'Do not apply this skill now.' },
+      ],
+      metadata: {
+        tool: 'human_intervention_request',
+        toolCallId: requestId,
+        source: 'load_skill',
+        skillId: options.skillId,
+        scriptPaths: options.scriptPaths,
       },
-      { id: APPROVAL_OPTION_NO, label: 'No', description: 'Do not apply this skill now.' },
-    ],
-    metadata: { skillId: options.skillId, scriptPaths: options.scriptPaths },
-  });
+      agentName: options.context?.agentName ?? null,
+    });
 
-  if (approval.optionId === APPROVAL_OPTION_NO) {
-    return false;
+    await persistLoadSkillApprovalResolutionMessage({
+      context: options.context,
+      requestId,
+      resolution: approval,
+      skillId: options.skillId,
+    });
+
+    if (approval.optionId === APPROVAL_OPTION_NO) {
+      return false;
+    }
+
+    if (approval.optionId === APPROVAL_OPTION_YES_IN_SESSION) {
+      skillSessionApprovals.add(sessionApprovalKey);
+      if (turnApprovalKey) {
+        skillTurnApprovals.add(turnApprovalKey);
+      }
+    } else if (approval.optionId === APPROVAL_OPTION_YES_ONCE && turnApprovalKey) {
+      skillTurnApprovals.add(turnApprovalKey);
+    }
+
+    return true;
+  })();
+
+  inFlightSkillApprovals.set(inFlightApprovalKey, approvalPromise);
+  try {
+    return await approvalPromise;
+  } finally {
+    const currentInFlightApproval = inFlightSkillApprovals.get(inFlightApprovalKey);
+    if (currentInFlightApproval === approvalPromise) {
+      inFlightSkillApprovals.delete(inFlightApprovalKey);
+    }
   }
-
-  if (approval.optionId === APPROVAL_OPTION_YES_IN_SESSION) {
-    skillSessionApprovals.add(sessionApprovalKey);
-  }
-
-  return true;
 }
 
 async function executeSkillScripts(options: {
@@ -397,14 +687,6 @@ async function executeSkillScripts(options: {
     }
 
     const absoluteCommandSpec = resolveScriptCommand(normalizedAbsoluteScriptPath);
-    if (!isPathWithinRoot(executionDirectory, normalizedAbsoluteScriptPath)) {
-      scriptOutputs.push({
-        source: relativeScriptPath,
-        output: `Script path rejected: "${relativeScriptPath}" resolves outside execution working directory "${executionDirectory}".`,
-      });
-      continue;
-    }
-
     const executionResult = await executeShellCommand(
       absoluteCommandSpec.command,
       absoluteCommandSpec.parameters,
@@ -421,10 +703,17 @@ async function executeSkillScripts(options: {
     if (executionResult.exitCode !== 0 || executionResult.error) {
       const exitCode = executionResult.exitCode === null ? 'unknown' : String(executionResult.exitCode);
       const stderr = executionResult.stderr.trim();
-      const stderrSuffix = stderr ? ` stderr: ${stderr}` : '';
-      throw new SkillScriptExecutionError(
-        `Skill script "${relativeScriptPath}" failed with exit code ${exitCode}.${stderrSuffix}`,
-      );
+      const stdoutPreview = executionResult.stdout.trim();
+      const detail = [
+        `exit code ${exitCode}`,
+        stderr ? `stderr: ${stderr}` : '',
+        stdoutPreview ? `stdout: ${stdoutPreview}` : '',
+      ].filter(Boolean).join(' | ');
+      scriptOutputs.push({
+        source: relativeScriptPath,
+        output: `Script exited with ${detail}`,
+      });
+      continue;
     }
 
     scriptOutputs.push({
@@ -439,11 +728,13 @@ async function executeSkillScripts(options: {
 function buildSuccessResult(options: {
   skillId: string;
   skillName: string;
+  skillRoot: string;
   markdown: string;
   scriptOutputs: Array<{ source: string; output: string }>;
   referenceFiles: string[];
+  scriptPaths: string[];
 }): string {
-  const { skillId, skillName, markdown, scriptOutputs, referenceFiles } = options;
+  const { skillId, skillName, skillRoot, markdown, scriptOutputs, referenceFiles, scriptPaths } = options;
   const escapedSkillId = escapeXmlText(skillId);
   const escapedSkillName = escapeXmlText(skillName);
   const hasActiveResources = scriptOutputs.length > 0;
@@ -467,6 +758,7 @@ function buildSuccessResult(options: {
     ]
     : [];
 
+  const hasReferencedScripts = scriptPaths.length > 0;
   const executionDirective = [
     '  <execution_directive>',
     `    You are now operating under the specialized ${escapedSkillName} protocol.`,
@@ -475,6 +767,9 @@ function buildSuccessResult(options: {
       ? '    2. Use the data in <active_resources> to complete the user\'s specific request.'
       : '    2. Use the skill instructions to complete the user\'s specific request.',
     '    3. If the workflow is multi-step, explicitly state your plan before executing.',
+    ...(hasReferencedScripts
+      ? [`    4. Scripts referenced in <instructions> are located at skill root: ${escapeXmlText(skillRoot)}. When invoking them via shell commands, construct the absolute path (e.g., ${escapeXmlText(skillRoot)}/scripts/example.py) since they may not be accessible via relative paths from the project directory.`]
+      : []),
     '  </execution_directive>',
   ];
 
@@ -513,48 +808,104 @@ export function createLoadSkillToolDefinition() {
         return buildReadErrorResult('', 'Missing required parameter: skill_id');
       }
 
-      const entry = getSkill(requestedSkillId);
-      const sourcePath = getSkillSourcePath(requestedSkillId);
-      if (!entry || !sourcePath) {
-        return buildNotFoundResult(requestedSkillId);
+      const runScopedResultKey = getRunScopedLoadSkillResultKey(requestedSkillId, context);
+      if (runScopedResultKey) {
+        const cachedResult = loadSkillRunResultCache.get(runScopedResultKey);
+        if (cachedResult !== undefined) {
+          loggerLoadSkillHitl.debug('Returning cached run-scoped load_skill result', {
+            skillId: requestedSkillId,
+            runScopedResultKey,
+          });
+          return cachedResult;
+        }
+        const inFlightResult = inFlightLoadSkillRunResults.get(runScopedResultKey);
+        if (inFlightResult) {
+          return await inFlightResult;
+        }
       }
 
-      if (!isSkillEnabledBySettings(requestedSkillId)) {
-        return buildDisabledBySettingsResult(requestedSkillId);
+      const computeResult = async (): Promise<LoadSkillExecutionOutcome> => {
+        const entry = getSkill(requestedSkillId);
+        const sourcePath = getSkillSourcePath(requestedSkillId);
+        if (!entry || !sourcePath) {
+          return {
+            result: buildNotFoundResult(requestedSkillId),
+            cacheableForRun: false,
+          };
+        }
+
+        if (!isSkillEnabledBySettings(requestedSkillId)) {
+          return {
+            result: buildDisabledBySettingsResult(requestedSkillId),
+            cacheableForRun: false,
+          };
+        }
+
+        try {
+          const markdown = await fs.readFile(sourcePath, 'utf8');
+          const instructionsMarkdown = stripYamlFrontMatter(markdown);
+          const skillRoot = path.dirname(sourcePath);
+          const scriptPaths = extractReferencedScriptPaths(instructionsMarkdown);
+          const isApproved = await requestSkillExecutionApproval({
+            skillId: requestedSkillId,
+            scriptPaths,
+            context,
+          });
+          if (!isApproved) {
+            return {
+              result: buildDeclinedResult(requestedSkillId),
+              cacheableForRun: false,
+            };
+          }
+          const scriptOutputs = await executeSkillScripts({
+            scriptPaths,
+            skillRoot,
+            context,
+          });
+          const referenceFiles = await collectReferenceFiles(skillRoot, instructionsMarkdown);
+          return {
+            result: buildSuccessResult({
+              skillId: requestedSkillId,
+              skillName: entry.skill_id,
+              skillRoot,
+              markdown: instructionsMarkdown,
+              scriptOutputs,
+              referenceFiles,
+              scriptPaths,
+            }),
+            cacheableForRun: true,
+          };
+        } catch (error) {
+          if (error instanceof SkillScriptExecutionError) {
+            throw error;
+          }
+          const message = error instanceof Error ? error.message : String(error);
+          return {
+            result: buildReadErrorResult(requestedSkillId, message),
+            cacheableForRun: false,
+          };
+        }
+      };
+
+      if (!runScopedResultKey) {
+        const outcome = await computeResult();
+        return outcome.result;
       }
 
+      const runScopedPromise = computeResult().then((outcome) => {
+        if (outcome.cacheableForRun) {
+          rememberRunScopedLoadSkillResult(runScopedResultKey, outcome.result);
+        }
+        return outcome.result;
+      });
+      inFlightLoadSkillRunResults.set(runScopedResultKey, runScopedPromise);
       try {
-        const markdown = await fs.readFile(sourcePath, 'utf8');
-        const instructionsMarkdown = stripYamlFrontMatter(markdown);
-        const skillRoot = path.dirname(sourcePath);
-        const scriptPaths = extractReferencedScriptPaths(instructionsMarkdown);
-        const isApproved = await requestSkillExecutionApproval({
-          skillId: requestedSkillId,
-          scriptPaths,
-          context,
-        });
-        if (!isApproved) {
-          return buildDeclinedResult(requestedSkillId);
+        return await runScopedPromise;
+      } finally {
+        const inFlightResult = inFlightLoadSkillRunResults.get(runScopedResultKey);
+        if (inFlightResult === runScopedPromise) {
+          inFlightLoadSkillRunResults.delete(runScopedResultKey);
         }
-        const scriptOutputs = await executeSkillScripts({
-          scriptPaths,
-          skillRoot,
-          context,
-        });
-        const referenceFiles = await collectReferenceFiles(skillRoot, instructionsMarkdown);
-        return buildSuccessResult({
-          skillId: requestedSkillId,
-          skillName: entry.skill_id,
-          markdown: instructionsMarkdown,
-          scriptOutputs,
-          referenceFiles,
-        });
-      } catch (error) {
-        if (error instanceof SkillScriptExecutionError) {
-          throw error;
-        }
-        const message = error instanceof Error ? error.message : String(error);
-        return buildReadErrorResult(requestedSkillId, message);
       }
     },
   };

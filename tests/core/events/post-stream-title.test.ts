@@ -15,6 +15,7 @@
  * - Exercises subscriber behavior through emitted `world` events.
  *
  * Recent Changes:
+ * - 2026-02-27: Added idle-activity chatId routing coverage so title generation ignores `world.currentChatId` drift.
  * - 2026-02-19: Asserted chat-title CRUD payload shape.
  * - 2026-02-13: Asserted structured `chat-title-updated` system payload shape.
  * - 2026-02-13: Added repeated-idle dedupe and no-activity human-message title-generation coverage.
@@ -123,7 +124,8 @@ describe('World activity-based title update', () => {
       timestamp: new Date().toISOString(),
       activeSources: [],
       queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
-      messageId: 'test-msg-id'
+      messageId: 'test-msg-id',
+      chatId: 'chat-1'
     });
 
     // Allow microtask to run and wait for async title generation
@@ -145,7 +147,8 @@ describe('World activity-based title update', () => {
       timestamp: new Date().toISOString(),
       activeSources: [],
       queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
-      messageId: 'test-msg-id'
+      messageId: 'test-msg-id',
+      chatId: 'chat-1'
     });
 
     await new Promise(r => setTimeout(r, 10));
@@ -171,6 +174,29 @@ describe('World activity-based title update', () => {
     expect(world.chats.get('chat-1')!.name).toBe('New Chat');
   });
 
+  test('uses idle event chatId instead of world.currentChatId', async () => {
+    world.chats.set('chat-2', { id: 'chat-2', name: 'New Chat' } as any);
+    mocks.chatNameById.set('chat-2', 'New Chat');
+    world.currentChatId = 'chat-2';
+
+    world.eventEmitter.emit('world', {
+      type: 'idle',
+      pendingOperations: 0,
+      activityId: 1,
+      timestamp: new Date().toISOString(),
+      activeSources: [],
+      queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
+      messageId: 'test-msg-id',
+      chatId: 'chat-1'
+    });
+
+    await new Promise(r => setTimeout(r, 15));
+
+    expect(world.chats.get('chat-1')!.name).toBe('Generated Chat Title');
+    expect(world.chats.get('chat-2')!.name).toBe('New Chat');
+    expect(mocks.updateChatNameIfCurrent).toHaveBeenCalledWith('world-1', 'chat-1', 'New Chat', 'Generated Chat Title');
+  });
+
   test('keeps title update scoped to captured chat when currentChatId changes mid-generation', async () => {
     world.chats.set('chat-2', { id: 'chat-2', name: 'New Chat' } as any);
     mocks.chatNameById.set('chat-2', 'New Chat');
@@ -192,7 +218,8 @@ describe('World activity-based title update', () => {
       timestamp: new Date().toISOString(),
       activeSources: [],
       queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
-      messageId: 'test-msg-id'
+      messageId: 'test-msg-id',
+      chatId: 'chat-1'
     });
 
     world.currentChatId = 'chat-2';
@@ -223,7 +250,8 @@ describe('World activity-based title update', () => {
       timestamp: new Date().toISOString(),
       activeSources: [],
       queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
-      messageId: 'test-msg-id'
+      messageId: 'test-msg-id',
+      chatId: 'chat-1'
     });
 
     world.chats.get('chat-1')!.name = 'Manual Name';
@@ -258,7 +286,8 @@ describe('World activity-based title update', () => {
       timestamp: new Date().toISOString(),
       activeSources: [],
       queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
-      messageId: 'test-msg-id'
+      messageId: 'test-msg-id',
+      chatId: 'chat-1'
     });
 
     await new Promise(r => setTimeout(r, 10));
@@ -288,7 +317,8 @@ describe('World activity-based title update', () => {
       timestamp: new Date().toISOString(),
       activeSources: [],
       queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
-      messageId: 'test-msg-id'
+      messageId: 'test-msg-id',
+      chatId: 'chat-1'
     });
 
     await new Promise(r => setTimeout(r, 15));
@@ -308,7 +338,8 @@ describe('World activity-based title update', () => {
       timestamp: new Date().toISOString(),
       activeSources: [],
       queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
-      messageId: 'test-msg-id'
+      messageId: 'test-msg-id',
+      chatId: 'chat-1'
     });
 
     await new Promise(r => setTimeout(r, 15));
@@ -330,7 +361,8 @@ describe('World activity-based title update', () => {
       timestamp: new Date().toISOString(),
       activeSources: [],
       queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
-      messageId: 'test-msg-id'
+      messageId: 'test-msg-id',
+      chatId: 'chat-1'
     };
 
     world.eventEmitter.emit('world', idleEvent);

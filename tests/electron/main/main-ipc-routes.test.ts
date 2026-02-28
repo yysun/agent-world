@@ -11,6 +11,8 @@
  * - Tests route build + registration helpers together.
  *
  * Recent Changes:
+ * - 2026-02-26: Added channel/order/payload assertions for `logging:getConfig` route wiring.
+ * - 2026-02-26: Added payload assertion for `world:import` route wiring with optional `source` input.
  * - 2026-02-19: Added channel/order/payload assertions for `world:export` route wiring.
  * - 2026-02-16: Added channel/order/payload assertions for `session:branchFromMessage` route wiring.
  * - 2026-02-14: Added channel/order/payload assertions for `hitl:respond` route wiring.
@@ -58,6 +60,7 @@ function createHandlerMocks() {
     deleteMessageFromChat: vi.fn(async () => ({ deleted: true })),
     subscribeChatEvents: vi.fn(async () => ({ subscribed: true })),
     unsubscribeChatEvents: vi.fn(async () => ({ unsubscribed: true })),
+    getLoggingConfig: vi.fn(async () => ({ globalLevel: 'error', categoryLevels: {}, nodeEnv: 'test' })),
     getSystemSettings: vi.fn(async () => ({})),
     saveSystemSettings: vi.fn(async () => true),
     openFileDialog: vi.fn(async () => ({ canceled: true, filePath: null }))
@@ -102,6 +105,7 @@ describe('buildMainIpcRoutes', () => {
       'message:delete',
       'chat:subscribeEvents',
       'chat:unsubscribeEvents',
+      'logging:getConfig',
       'settings:get',
       'settings:save',
       'dialog:pickFile'
@@ -115,6 +119,7 @@ describe('buildMainIpcRoutes', () => {
     await routes.find((route) => route.channel === 'world:saveLastSelected')?.handler({}, 'world-99');
     await routes.find((route) => route.channel === 'workspace:open')?.handler({}, { directoryPath: '/tmp/workspace' });
     await routes.find((route) => route.channel === 'dialog:pickDirectory')?.handler({});
+    await routes.find((route) => route.channel === 'world:import')?.handler({}, { source: '@awesome-agent-world/infinite-etude' });
     await routes.find((route) => route.channel === 'world:export')?.handler({}, { worldId: 'w-9' });
     await routes.find((route) => route.channel === 'skill:list')?.handler({});
     await routes.find((route) => route.channel === 'session:list')?.handler({}, { worldId: 'w-1' });
@@ -123,6 +128,7 @@ describe('buildMainIpcRoutes', () => {
     await routes.find((route) => route.channel === 'message:edit')?.handler({}, { worldId: 'w-1', chatId: 'c-1', messageId: 'm-1', newContent: 'updated' });
     await routes.find((route) => route.channel === 'hitl:respond')?.handler({}, { worldId: 'w-1', requestId: 'req-1', optionId: 'yes_once' });
     await routes.find((route) => route.channel === 'chat:stopMessage')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
+    await routes.find((route) => route.channel === 'logging:getConfig')?.handler({});
     await routes.find((route) => route.channel === 'settings:get')?.handler({});
     await routes.find((route) => route.channel === 'settings:save')?.handler({}, { storageType: 'sqlite' });
     await routes.find((route) => route.channel === 'dialog:pickFile')?.handler({});
@@ -130,6 +136,7 @@ describe('buildMainIpcRoutes', () => {
     expect(handlers.writeWorldPreference).toHaveBeenCalledWith('world-99');
     expect(handlers.openWorkspaceDialog).toHaveBeenCalledWith({ directoryPath: '/tmp/workspace' });
     expect(handlers.pickDirectoryDialog).toHaveBeenCalledTimes(1);
+    expect(handlers.importWorld).toHaveBeenCalledWith({ source: '@awesome-agent-world/infinite-etude' });
     expect(handlers.exportWorld).toHaveBeenCalledWith({ worldId: 'w-9' });
     expect(handlers.listSkillRegistry).toHaveBeenCalledTimes(1);
     expect(handlers.listWorldSessions).toHaveBeenCalledWith('w-1');
@@ -138,6 +145,7 @@ describe('buildMainIpcRoutes', () => {
     expect(handlers.editMessageInChat).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1', messageId: 'm-1', newContent: 'updated' });
     expect(handlers.respondHitlOption).toHaveBeenCalledWith({ worldId: 'w-1', requestId: 'req-1', optionId: 'yes_once' });
     expect(handlers.stopChatMessage).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1' });
+    expect(handlers.getLoggingConfig).toHaveBeenCalledTimes(1);
     expect(handlers.getSystemSettings).toHaveBeenCalledTimes(1);
     expect(handlers.saveSystemSettings).toHaveBeenCalledWith({ storageType: 'sqlite' });
     expect(handlers.openFileDialog).toHaveBeenCalledTimes(1);

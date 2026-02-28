@@ -22,6 +22,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-26: Removed legacy replay-only HITL system-event filter after migration to tool-progress HITL transport.
  * - 2025-11-09: Fixed event persistence - use world.eventStorage directly instead of creating separate instance
  * - 2025-01-09: Extracted from events.ts for modular architecture
  */

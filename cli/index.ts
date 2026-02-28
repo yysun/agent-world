@@ -14,6 +14,9 @@
  * - Work with loaded world without importing (uses external storage path)
  * 
  * Changes:
+ * - 2026-02-27: Added active-chat event scoping in CLI listeners to prevent cross-chat message/system/SSE/tool leakage.
+ * - 2026-02-25: Added fallback shorthand attempt `@awesome-agent-world/<input>` when a provided local path does not exist.
+ * - 2026-02-25: Added GitHub shorthand world source import support (`@awesome-agent-world/<world-name>`) with safe remote staging and automatic import mode.
  * - 2026-02-20: Enforced options-only HITL handling in interactive and pipeline modes.
  * - 2026-02-14: Added interactive + pipeline HITL option response handling for generic approval requests.
  * - 2026-02-11: Fixed tool-stream timeout: extendTimeout() resets idle timeout on streaming data
@@ -83,8 +86,11 @@ import { program } from 'commander';
 import readline from 'readline';
 import {
   listWorlds,
+  deleteWorld,
   subscribeWorld,
   submitWorldHitlResponse,
+  GitHubWorldImportError,
+  stageGitHubWorldFromShorthand,
   ClientConnection,
   createCategoryLogger,
   LLMProvider,
@@ -113,7 +119,8 @@ import {
   log as statusLog,
 } from './display.js';
 import {
-  parseHitlPromptRequest,
+  markHitlRequestHandled,
+  parseHitlPromptFromToolEvent,
   resolveHitlOptionSelectionInput,
   type HitlOptionRequestPayload,
 } from './hitl.js';
@@ -542,75 +549,50 @@ function attachCLIListeners(
 ): Map<string, (...args: any[]) => void> {
   const listeners = new Map<string, (...args: any[]) => void>();
   let hitlPromptChain: Promise<void> = Promise.resolve();
+  const handledHitlRequestIds = new Set<string>();
+  const getActiveChatId = (): string | null => {
+    const value = String(world.currentChatId || '').trim();
+    return value || null;
+  };
+  const isChatEventInScope = (
+    eventChatId: unknown,
+    includeUnscopedWhenScoped: boolean = false
+  ): boolean => {
+    const activeChatId = getActiveChatId();
+    if (!activeChatId) {
+      return true;
+    }
+    if (eventChatId === undefined || eventChatId === null) {
+      return includeUnscopedWhenScoped;
+    }
+    const normalizedEventChatId = String(eventChatId).trim();
+    if (!normalizedEventChatId) {
+      return includeUnscopedWhenScoped;
+    }
+    return normalizedEventChatId === activeChatId;
+  };
+  const shouldHandleWorldEvent = (eventData: WorldActivityEventPayload): boolean => {
+    const eventType = String((eventData as any)?.type || '').trim().toLowerCase();
+    if (eventType === 'response-start' || eventType === 'response-end' || eventType === 'idle' || eventType === 'info') {
+      return isChatEventInScope((eventData as any)?.chatId, true);
+    }
+    if (eventType.startsWith('tool-')) {
+      return isChatEventInScope((eventData as any)?.chatId, false);
+    }
+    return isChatEventInScope((eventData as any)?.chatId, true);
+  };
 
   // World activity events
   const worldListener = (eventData: WorldActivityEventPayload) => {
-    activityMonitor.handle(eventData);
-    // Only render activity progress in interactive mode
-    if (streaming && globalState && rl && statusLine) {
-      handleWorldEvent(EventType.WORLD, eventData, streaming, globalState, activityMonitor, statusLine, rl)
-        .catch(err => console.error('Error handling world event:', err));
+    if (!shouldHandleWorldEvent(eventData)) {
+      return;
     }
-    // Pipeline mode: silently track events for completion detection
-  };
-  world.eventEmitter.on(EventType.WORLD, worldListener);
-  listeners.set(EventType.WORLD, worldListener);
 
-  // Message events
-  const messageListener = (eventData: MessageEventPayload) => {
-    if (eventData.content &&
-      typeof eventData.content === 'string' &&
-      eventData.content.includes('Success message sent')) return;
-
-    if (streaming && globalState && rl && statusLine) {
-      handleWorldEvent(EventType.MESSAGE, eventData, streaming, globalState, activityMonitor, statusLine, rl)
-        .catch(err => console.error('Error handling message event:', err));
-    } else {
-      // Pipeline mode: simple console output
-      if (eventData.sender === 'system') {
-        console.log(`${boldRed('● system:')} ${eventData.content}`);
-      }
-      if (eventData.content) {
-        console.log(`${boldGreen('● ' + (eventData.sender || 'agent') + ':')} ${eventData.content}`);
-      }
-    }
-  };
-  world.eventEmitter.on(EventType.MESSAGE, messageListener);
-  listeners.set(EventType.MESSAGE, messageListener);
-
-  // SSE events (interactive mode only - pipeline mode uses non-streaming LLM calls)
-  if (streaming && globalState && rl && statusLine) {
-    const sseListener = (eventData: any) => {
-      // Extend timeout when long-running shell stream activity arrives.
-      const isLegacyToolStream = eventData.type === 'tool-stream';
-      const isShellAssistantStream = eventData.toolName === 'shell_cmd' &&
-        (eventData.type === 'start' || eventData.type === 'chunk' || eventData.type === 'end');
-      if (isLegacyToolStream || isShellAssistantStream) {
-        activityMonitor.extendTimeout();
-      }
-      handleWorldEvent(EventType.SSE, eventData, streaming, globalState, activityMonitor, statusLine, rl)
-        .catch(err => console.error('Error handling SSE event:', err));
-    };
-    world.eventEmitter.on(EventType.SSE, sseListener);
-    listeners.set(EventType.SSE, sseListener);
-  } else {
-    // Pipeline mode: listen for shell stream events to extend timeout on long-running commands.
-    const sseTimeoutListener = (eventData: any) => {
-      const isLegacyToolStream = eventData.type === 'tool-stream';
-      const isShellAssistantStream = eventData.toolName === 'shell_cmd' &&
-        (eventData.type === 'start' || eventData.type === 'chunk' || eventData.type === 'end');
-      if (isLegacyToolStream || isShellAssistantStream) {
-        activityMonitor.extendTimeout();
-      }
-    };
-    world.eventEmitter.on(EventType.SSE, sseTimeoutListener);
-    listeners.set(EventType.SSE, sseTimeoutListener);
-  }
-
-  // System events
-  const systemListener = (eventData: SystemEventPayload) => {
-    const hitlRequest = parseHitlPromptRequest(eventData);
+    const hitlRequest = parseHitlPromptFromToolEvent(eventData);
     if (hitlRequest) {
+      if (!markHitlRequestHandled(handledHitlRequestIds, hitlRequest.requestId)) {
+        return;
+      }
       hitlPromptChain = hitlPromptChain
         .then(async () => {
           if (streaming && globalState && rl && statusLine) {
@@ -637,7 +619,6 @@ function attachCLIListeners(
             }
           }
 
-          // Pipeline/non-interactive mode: auto-respond with default option to avoid blocking.
           const result = submitWorldHitlResponse({
             worldId: world.id,
             requestId: hitlRequest.requestId,
@@ -656,6 +637,82 @@ function attachCLIListeners(
       return;
     }
 
+    activityMonitor.handle(eventData);
+    // Only render activity progress in interactive mode
+    if (streaming && globalState && rl && statusLine) {
+      handleWorldEvent(EventType.WORLD, eventData, streaming, globalState, activityMonitor, statusLine, rl)
+        .catch(err => console.error('Error handling world event:', err));
+    }
+    // Pipeline mode: silently track events for completion detection
+  };
+  world.eventEmitter.on(EventType.WORLD, worldListener);
+  listeners.set(EventType.WORLD, worldListener);
+
+  // Message events
+  const messageListener = (eventData: MessageEventPayload) => {
+    if (!isChatEventInScope((eventData as any)?.chatId, false)) {
+      return;
+    }
+    if (eventData.content &&
+      typeof eventData.content === 'string' &&
+      eventData.content.includes('Success message sent')) return;
+
+    if (streaming && globalState && rl && statusLine) {
+      handleWorldEvent(EventType.MESSAGE, eventData, streaming, globalState, activityMonitor, statusLine, rl)
+        .catch(err => console.error('Error handling message event:', err));
+    } else {
+      // Pipeline mode: simple console output
+      if (eventData.sender === 'system') {
+        console.log(`${boldRed('● system:')} ${eventData.content}`);
+      }
+      if (eventData.content) {
+        console.log(`${boldGreen('● ' + (eventData.sender || 'agent') + ':')} ${eventData.content}`);
+      }
+    }
+  };
+  world.eventEmitter.on(EventType.MESSAGE, messageListener);
+  listeners.set(EventType.MESSAGE, messageListener);
+
+  // SSE events (interactive mode only - pipeline mode uses non-streaming LLM calls)
+  if (streaming && globalState && rl && statusLine) {
+    const sseListener = (eventData: any) => {
+      if (!isChatEventInScope(eventData?.chatId, false)) {
+        return;
+      }
+      // Extend timeout when long-running shell stream activity arrives.
+      const isLegacyToolStream = eventData.type === 'tool-stream';
+      const isShellAssistantStream = eventData.toolName === 'shell_cmd' &&
+        (eventData.type === 'start' || eventData.type === 'chunk' || eventData.type === 'end');
+      if (isLegacyToolStream || isShellAssistantStream) {
+        activityMonitor.extendTimeout();
+      }
+      handleWorldEvent(EventType.SSE, eventData, streaming, globalState, activityMonitor, statusLine, rl)
+        .catch(err => console.error('Error handling SSE event:', err));
+    };
+    world.eventEmitter.on(EventType.SSE, sseListener);
+    listeners.set(EventType.SSE, sseListener);
+  } else {
+    // Pipeline mode: listen for shell stream events to extend timeout on long-running commands.
+    const sseTimeoutListener = (eventData: any) => {
+      if (!isChatEventInScope(eventData?.chatId, false)) {
+        return;
+      }
+      const isLegacyToolStream = eventData.type === 'tool-stream';
+      const isShellAssistantStream = eventData.toolName === 'shell_cmd' &&
+        (eventData.type === 'start' || eventData.type === 'chunk' || eventData.type === 'end');
+      if (isLegacyToolStream || isShellAssistantStream) {
+        activityMonitor.extendTimeout();
+      }
+    };
+    world.eventEmitter.on(EventType.SSE, sseTimeoutListener);
+    listeners.set(EventType.SSE, sseTimeoutListener);
+  }
+
+  // System events
+  const systemListener = (eventData: SystemEventPayload) => {
+    if (!isChatEventInScope((eventData as any)?.chatId, false)) {
+      return;
+    }
     if (eventData.content &&
       typeof eventData.content === 'string' &&
       eventData.content.includes('Success message sent')) return;
@@ -1099,10 +1156,14 @@ async function selectWorld(rootPath: string, rl: readline.Interface): Promise<{ 
 // Load world from external file folder
 async function loadWorldFromFile(currentRootPath: string, rl: readline.Interface): Promise<{ worldName: string; externalPath?: string } | null> {
   const fs = await import('fs');
+  void currentRootPath;
+  let stagedGitHubWorld: Awaited<ReturnType<typeof stageGitHubWorldFromShorthand>> | null = null;
+  let resolvedSourcePath = '';
+  let importIsRequired = false;
 
   // Get world folder path
-  const folderPath = await new Promise<string | null>((resolve) => {
-    rl.question(`\n${boldMagenta('Enter path to world folder:')} `, (answer) => {
+  const sourceInput = await new Promise<string | null>((resolve) => {
+    rl.question(`\n${boldMagenta('Enter path to world folder (or @awesome-agent-world/<world-name>):')} `, (answer) => {
       const trimmed = answer.trim();
       if (trimmed === '') {
         resolve(null);
@@ -1112,32 +1173,60 @@ async function loadWorldFromFile(currentRootPath: string, rl: readline.Interface
     });
   });
 
-  if (!folderPath) {
+  if (!sourceInput) {
     console.log(boldRed('Load cancelled.'));
     return null;
   }
 
-  // Validate folder exists
-  if (!fs.existsSync(folderPath)) {
-    console.log(boldRed(`Folder does not exist: ${folderPath}`));
-    return null;
-  }
-
   try {
+    if (sourceInput.startsWith('@')) {
+      stagedGitHubWorld = await stageGitHubWorldFromShorthand(sourceInput);
+      resolvedSourcePath = stagedGitHubWorld.stagingRootPath;
+      importIsRequired = true;
+      console.log(green(`Fetched world source from GitHub: ${sourceInput}`));
+      if (stagedGitHubWorld.source.commitSha) {
+        console.log(`  ${yellow('Source commit:')} ${stagedGitHubWorld.source.commitSha}`);
+      }
+    } else {
+      resolvedSourcePath = sourceInput;
+      if (!fs.existsSync(resolvedSourcePath)) {
+        const fallbackShorthand = `@awesome-agent-world/${sourceInput}`;
+        try {
+          stagedGitHubWorld = await stageGitHubWorldFromShorthand(fallbackShorthand);
+          resolvedSourcePath = stagedGitHubWorld.stagingRootPath;
+          importIsRequired = true;
+          console.log(yellow(`Folder does not exist locally: ${sourceInput}`));
+          console.log(green(`Trying GitHub shorthand: ${fallbackShorthand}`));
+          if (stagedGitHubWorld.source.commitSha) {
+            console.log(`  ${yellow('Source commit:')} ${stagedGitHubWorld.source.commitSha}`);
+          }
+        } catch (fallbackError) {
+          if (!(fallbackError instanceof GitHubWorldImportError)) {
+            throw fallbackError;
+          }
+        }
+      }
+    }
+
+    if (!fs.existsSync(resolvedSourcePath)) {
+      console.log(boldRed(`Folder does not exist: ${resolvedSourcePath}`));
+      return null;
+    }
+
     // Import necessary functions
     const { createStorage } = await import('../core/storage/storage-factory.js');
-    const { checkTargetExists, deleteExistingData } = await import('./commands.js');
+    const { createStorageFromEnv } = await import('../core/storage/storage-factory.js');
 
     // Create storage instance for source folder
     const sourceStorage = await createStorage({
       type: 'file' as const,
-      rootPath: folderPath
+      rootPath: resolvedSourcePath
     });
 
     // List worlds in the source folder
     const worldsInFolder = await sourceStorage.listWorlds();
     if (worldsInFolder.length === 0) {
-      console.log(boldRed(`No worlds found in: ${folderPath}`));
+      console.log(boldRed(`No worlds found in: ${resolvedSourcePath}`));
       return null;
     }
 
@@ -1195,23 +1284,28 @@ async function loadWorldFromFile(currentRootPath: string, rl: readline.Interface
     console.log(`  ${yellow('Chats:')} ${chats.length}`);
 
     // Ask if user wants to import
-    const shouldImport = await new Promise<boolean>((resolve) => {
-      rl.question(`\n${boldMagenta('Import this world to current storage?')} ${boldMagenta('(yes/no):')} `, (answer) => {
-        const trimmed = answer.trim().toLowerCase();
-        resolve(trimmed === 'yes' || trimmed === 'y');
+    const shouldImport = importIsRequired
+      ? true
+      : await new Promise<boolean>((resolve) => {
+        rl.question(`\n${boldMagenta('Import this world to current storage?')} ${boldMagenta('(yes/no):')} `, (answer) => {
+          const trimmed = answer.trim().toLowerCase();
+          resolve(trimmed === 'yes' || trimmed === 'y');
+        });
       });
-    });
 
     if (!shouldImport) {
       console.log(yellow('World loaded from external storage (not imported).'));
       // Return world name with external path to use that storage
-      return { worldName: worldData.name, externalPath: folderPath };
+      return { worldName: worldData.id, externalPath: resolvedSourcePath };
     }
 
-    // Check if world already exists in current storage
-    const checkResult = await checkTargetExists(currentRootPath, 'file', worldData.id);
+    // Check if world already exists in active runtime storage
+    const existingWorlds = await listWorlds();
+    const idConflict = existingWorlds.find((world) => String(world?.id || '') === String(worldData?.id || ''));
+    const nameConflict = existingWorlds.find((world) => String(world?.name || '').trim().toLowerCase() === String(worldData?.name || '').trim().toLowerCase());
+    const existingWorld = idConflict || nameConflict;
 
-    if (checkResult.exists) {
+    if (existingWorld) {
       // Confirm overwrite
       const shouldOverwrite = await new Promise<boolean>((resolve) => {
         rl.question(`\n${boldYellow(`World '${worldData.name}' already exists. Overwrite?`)} ${boldMagenta('(yes/no):')} `, (answer) => {
@@ -1223,19 +1317,20 @@ async function loadWorldFromFile(currentRootPath: string, rl: readline.Interface
       if (!shouldOverwrite) {
         console.log(yellow('Import cancelled. Loading from external storage instead.'));
         // Return world name with external path to use that storage
-        return { worldName: worldData.name, externalPath: folderPath };
+        return { worldName: worldData.id, externalPath: resolvedSourcePath };
       }
 
       // Delete existing world
-      await deleteExistingData(currentRootPath, 'file', worldData.id);
-      console.log(green(`Deleted existing world '${worldData.name}'`));
+      const deleted = await deleteWorld(String(existingWorld.id));
+      if (!deleted) {
+        console.log(boldRed(`Failed to delete existing world '${existingWorld.id}' before import.`));
+        return null;
+      }
+      console.log(green(`Deleted existing world '${existingWorld.name || existingWorld.id}'`));
     }
 
-    // Create storage instance for target
-    const targetStorage = await createStorage({
-      type: 'file' as const,
-      rootPath: currentRootPath
-    });
+    // Create storage instance for active runtime target
+    const targetStorage = await createStorageFromEnv();
 
     // Save world
     await targetStorage.saveWorld(worldData);
@@ -1282,11 +1377,27 @@ async function loadWorldFromFile(currentRootPath: string, rl: readline.Interface
     console.log(`  ${yellow('Chats:')} ${chats.length}`);
     console.log(`  ${yellow('Events:')} ${eventCount}`);
 
-    return { worldName: worldData.name };
+    return { worldName: worldData.id };
 
   } catch (error) {
+    if (error instanceof GitHubWorldImportError) {
+      console.log(boldRed(`Error loading world: ${error.message}`));
+      const details = error.details || {};
+      const owner = String(details.owner || '');
+      const repo = String(details.repo || '');
+      const branch = String(details.branch || '');
+      const worldPath = String(details.worldPath || '');
+      if (owner && repo && branch && worldPath) {
+        console.log(`  ${yellow('Resolved source:')} ${owner}/${repo}@${branch}:${worldPath}`);
+      }
+      return null;
+    }
     console.log(boldRed(`Error loading world: ${error instanceof Error ? error.message : String(error)}`));
     return null;
+  } finally {
+    if (stagedGitHubWorld) {
+      await stagedGitHubWorld.cleanup();
+    }
   }
 }
 

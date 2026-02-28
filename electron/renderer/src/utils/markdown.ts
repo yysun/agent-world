@@ -18,12 +18,14 @@
  * - Handles browser/window environment checks
  * 
  * Recent Changes:
+ * - 2026-02-26: Replaced markdown-render fallback error console logging with categorized renderer logger output.
  * - 2026-02-10: Converted to TypeScript with proper type definitions
  * - 2026-02-10: Initial implementation for Electron app markdown rendering
  */
 
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { rendererLogger } from './logger';
 
 // Configure marked for GitHub Flavored Markdown
 marked.setOptions({
@@ -82,7 +84,9 @@ export function renderMarkdown(markdownText: string | null | undefined): string 
 
     return sanitizedHtml;
   } catch (error) {
-    console.error('Error rendering markdown:', error);
+    rendererLogger.error('electron.renderer.markdown', 'Error rendering markdown', {
+      error: error instanceof Error ? error.message : String(error)
+    });
     // Return escaped plain text as fallback
     return markdownText
       .replace(/&/g, '&amp;')

@@ -23,7 +23,10 @@
  * - Extracts error details from log data for better error visibility in UI
  * 
  * Created: 2025-10-25 - Initial SSE client implementation
+ * Updated: 2026-02-27 - Enforced strict active-chat filtering for realtime log events (drop unscoped and mismatched logs when a chat is selected).
  * Updated: 2026-02-20 - Removed stale CRUD SSE routing branch to align with runtime event channels.
+ * Updated: 2026-02-26 - Normalized object-shaped error details in log rendering to avoid "[object Object]" output.
+ * Updated: 2026-02-26 - Suppressed redundant error-level log messages when equivalent stream error indicators are present.
  * Updated: 2026-02-11 - Enhanced error log display to include error details from log data
  * Updated: 2026-02-11 - Preserve tool_calls in handleStreamChunk for complete display
  * Updated: 2026-02-08 - Removed legacy manual tool-intervention request and tool-result submission helpers
@@ -173,6 +176,120 @@ const handleSSEData = (data: SSEData): void => {
       publishEvent('handleWorldActivity', data.data ?? data.payload ?? data);
       break;
   }
+};
+
+const normalizeLogEventPayload = (eventData: any) => {
+  if (!eventData || typeof eventData !== 'object') {
+    return null;
+  }
+
+  const source = eventData.logEvent && typeof eventData.logEvent === 'object'
+    ? eventData.logEvent
+    : eventData;
+
+  const hasLogShape =
+    typeof source.level === 'string' ||
+    typeof source.category === 'string' ||
+    typeof source.message === 'string';
+
+  if (!hasLogShape) {
+    return null;
+  }
+
+  return {
+    level: source.level || 'info',
+    category: source.category || 'unknown',
+    message: source.message || '',
+    timestamp: source.timestamp || new Date().toISOString(),
+    data: source.data ?? null,
+    messageId: source.messageId || eventData.messageId || `log-${Date.now()}`
+  };
+};
+
+const normalizeErrorText = (value: unknown): string => {
+  return String(value || '').trim().toLowerCase();
+};
+
+const formatErrorDetail = (value: unknown): string | null => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  if (value instanceof Error) {
+    const message = String(value.message || '').trim();
+    return message.length > 0 ? message : value.name || 'Error';
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    if (typeof record.message === 'string' && record.message.trim()) {
+      return record.message.trim();
+    }
+    if (typeof record.error === 'string' && record.error.trim()) {
+      return record.error.trim();
+    }
+    try {
+      return JSON.stringify(record);
+    } catch {
+      return String(record);
+    }
+  }
+  return String(value);
+};
+
+const extractErrorDetailFromLogEvent = (logEvent: any): string | null => {
+  if (!logEvent || typeof logEvent !== 'object') {
+    return null;
+  }
+  const data = logEvent.data && typeof logEvent.data === 'object' ? logEvent.data : null;
+  if (!data) {
+    return null;
+  }
+  const firstArg = Array.isArray(data.args) ? data.args[0] : null;
+  const candidate =
+    data.error ||
+    data.errorMessage ||
+    (typeof data.message === 'string' && data.message !== logEvent.message ? data.message : null) ||
+    firstArg?.error ||
+    firstArg?.errorMessage ||
+    firstArg?.message ||
+    null;
+  return formatErrorDetail(candidate);
+};
+
+const shouldSuppressLogForExistingStreamError = (state: SSEComponentState, logEvent: any): boolean => {
+  if (normalizeErrorText(logEvent?.level) !== 'error') {
+    return false;
+  }
+
+  const logDetail = normalizeErrorText(extractErrorDetailFromLogEvent(logEvent) || logEvent?.message);
+  if (!logDetail) {
+    return false;
+  }
+
+  return (state.messages || []).some((message: any) => {
+    if (!message?.hasError) {
+      return false;
+    }
+    const streamError = normalizeErrorText(message.errorMessage || message.text);
+    if (!streamError) {
+      return false;
+    }
+    return logDetail.includes(streamError) || streamError.includes(logDetail);
+  });
+};
+
+const shouldRemoveRedundantErrorLogMessage = (message: any, streamErrorText: string): boolean => {
+  if (!message?.logEvent || normalizeErrorText(message.logEvent.level) !== 'error') {
+    return false;
+  }
+  const logDetail = normalizeErrorText(extractErrorDetailFromLogEvent(message.logEvent) || message.logEvent?.message);
+  if (!logDetail || !streamErrorText) {
+    return false;
+  }
+  return logDetail.includes(streamErrorText) || streamErrorText.includes(logDetail);
 };
 
 /**
@@ -357,10 +474,14 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
     // Memory-only messages are handled internally without frontend notification
 
     case 'log':
-      // Handle log events from the server - ensure they're always processed
+      const normalizedLogEvent = normalizeLogEventPayload(eventData);
+      if (!normalizedLogEvent) {
+        return;
+      }
       publishEvent('handleLogEvent', {
-        messageId: eventData.messageId,
-        logEvent: eventData.logEvent,
+        messageId: normalizedLogEvent.messageId,
+        chatId: eventData.chatId ?? (normalizedLogEvent as any).chatId ?? null,
+        logEvent: normalizedLogEvent,
         worldName: eventData.worldName || streamingState.currentWorldName
       });
       break;
@@ -684,9 +805,14 @@ export const handleStreamError = <T extends SSEComponentState>(state: T, data: S
     } as any
   ];
 
+  const normalizedStreamError = normalizeErrorText(error);
+  const filteredMessages = normalizedStreamError
+    ? nextMessages.filter((message) => !shouldRemoveRedundantErrorLogMessage(message, normalizedStreamError))
+    : nextMessages;
+
   return {
     ...state,
-    messages: nextMessages,
+    messages: filteredMessages,
     activeStreamMessageId: undefined,
     isWaiting: false
   };
@@ -694,8 +820,18 @@ export const handleStreamError = <T extends SSEComponentState>(state: T, data: S
 
 // Handle log events from server
 export const handleLogEvent = <T extends SSEComponentState>(state: T, data: any): T => {
-  const { logEvent } = data;
+  const logEvent = data?.logEvent ?? normalizeLogEventPayload(data);
   if (!logEvent) return state;
+  if (shouldSuppressLogForExistingStreamError(state, logEvent)) {
+    return state;
+  }
+
+  const stateAny = state as any;
+  const activeChatId = stateAny.currentChat?.id || stateAny.world?.currentChatId || null;
+  const incomingChatId = data?.chatId ?? null;
+  if (activeChatId && (!incomingChatId || incomingChatId !== activeChatId)) {
+    return state;
+  }
 
   // Console.log all log messages from server for debugging
   console.log(`[${logEvent.level.toUpperCase()}] ${logEvent.category}: ${logEvent.message}`, {
@@ -711,8 +847,7 @@ export const handleLogEvent = <T extends SSEComponentState>(state: T, data: any)
   // For error-level logs, include error details from logEvent.data if available
   let displayText = logEvent.message;
   if (logEvent.level === 'error' && logEvent.data) {
-    // Extract error message from data (could be in data.error, data.message, etc.)
-    const errorDetail = logEvent.data.error || logEvent.data.message || logEvent.data.errorMessage;
+    const errorDetail = extractErrorDetailFromLogEvent(logEvent);
     if (errorDetail) {
       displayText = `${logEvent.message}: ${errorDetail}`;
     }

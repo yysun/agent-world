@@ -11,7 +11,8 @@
  * - Avoids Electron runtime and filesystem dependencies.
  *
  * Recent Changes:
- * - 2026-02-20: Added coverage that `hitl-option-request` system events bypass chatId filtering for chat-scoped subscriptions.
+ * - 2026-02-24: Reinstated strict chat-scope filtering coverage for unscoped SSE/tool events after source-side chatId streaming guarantees.
+ * - 2026-02-20: Added coverage for chat-scoped HITL prompt delivery during chat subscription lifecycle transitions.
  * - 2026-02-16: Added coverage for world-level activity events forwarded to chat-scoped subscriptions.
  * - 2026-02-13: Updated system-event forwarding coverage to structured payload content.
  * - 2026-02-13: Added system-event forwarding coverage for chat title update notifications.
@@ -498,7 +499,7 @@ describe('createRealtimeEventsRuntime', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('forwards hitl-option-request system events even when scoped to a different chat', async () => {
+  it('does not forward system events scoped to a different chat', async () => {
     const send = vi.fn();
     const worldSubscription = createWorldSubscription();
 
@@ -522,7 +523,7 @@ describe('createRealtimeEventsRuntime', () => {
     worldSubscription.world.eventEmitter.emit('system', {
       chatId: 'chat-2',
       content: {
-        eventType: 'hitl-option-request',
+        eventType: 'chat-title-updated',
         requestId: 'req-1',
         title: 'Approval required',
         options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }]
@@ -531,15 +532,158 @@ describe('createRealtimeEventsRuntime', () => {
       timestamp: new Date('2026-02-20T00:00:00.000Z')
     });
 
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('does not forward unscoped system events to chat-scoped subscriptions', async () => {
+    const send = vi.fn();
+    const worldSubscription = createWorldSubscription();
+
+    const runtime = createRealtimeEventsRuntime({
+      getMainWindow: () => ({
+        isDestroyed: () => false,
+        webContents: { send }
+      }),
+      chatEventChannel: 'chat:event',
+      addLogStreamCallback: () => () => { },
+      subscribeWorld: async () => worldSubscription,
+      ensureCoreReady: async () => { }
+    });
+
+    await runtime.subscribeChatEvents({
+      subscriptionId: 'sub-hitl-unscoped',
+      worldId: 'world-1',
+      chatId: 'chat-1'
+    });
+
+    worldSubscription.world.eventEmitter.emit('system', {
+      content: {
+        eventType: 'chat-title-updated',
+        requestId: 'req-1',
+        title: 'Approval required',
+        options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }]
+      },
+      messageId: 'sys-hitl-unscoped',
+      timestamp: new Date('2026-02-20T00:00:00.000Z')
+    });
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('dispatches pending HITL prompts from persisted messages as tool-progress events after chat subscription is attached', async () => {
+    const send = vi.fn();
+    const worldSubscription = createWorldSubscription();
+    const getMemory = vi.fn(async () => ([
+      { role: 'assistant', tool_calls: [{ id: 'req-replay-1', function: { name: 'human_intervention_request', arguments: '{"question":"Approve?","options":["Yes"]}' } }] }
+    ]));
+    const listPendingHitlPromptEventsFromMessages = vi.fn(() => ([
+      {
+        chatId: 'chat-1',
+        prompt: {
+          requestId: 'req-replay-1',
+          title: 'Approval required',
+          message: 'Approve?',
+          options: [{ id: 'yes', label: 'Yes' }],
+          defaultOptionId: 'yes',
+          metadata: null,
+          agentName: null,
+          toolName: 'human_intervention_request',
+          toolCallId: 'req-replay-1',
+        }
+      }
+    ]));
+
+    const runtime = createRealtimeEventsRuntime({
+      getMainWindow: () => ({
+        isDestroyed: () => false,
+        webContents: { send }
+      }),
+      chatEventChannel: 'chat:event',
+      addLogStreamCallback: () => () => { },
+      subscribeWorld: async () => worldSubscription,
+      ensureCoreReady: async () => { },
+      getMemory,
+      listPendingHitlPromptEventsFromMessages,
+    });
+
+    await runtime.subscribeChatEvents({
+      subscriptionId: 'sub-replay',
+      worldId: 'world-1',
+      chatId: 'chat-1'
+    });
+
+    expect(getMemory).toHaveBeenCalledWith('world-1', 'chat-1');
+    expect(listPendingHitlPromptEventsFromMessages).toHaveBeenCalledWith(expect.any(Array), 'chat-1');
     expect(send).toHaveBeenCalledWith(
       'chat:event',
       expect.objectContaining({
-        type: 'system',
-        subscriptionId: 'sub-hitl',
+        type: 'tool',
+        subscriptionId: 'sub-replay',
         worldId: 'world-1',
-        chatId: 'chat-2',
-        system: expect.objectContaining({
-          eventType: 'hitl-option-request'
+        chatId: 'chat-1',
+        tool: expect.objectContaining({
+          eventType: 'tool-progress'
+        })
+      })
+    );
+  });
+
+  it('replays runtime pending HITL prompts on subscribe even without persisted-message reconstruction', async () => {
+    const send = vi.fn();
+    const worldSubscription = createWorldSubscription();
+    const listPendingHitlPromptEvents = vi.fn(() => ([
+      {
+        chatId: 'chat-1',
+        prompt: {
+          requestId: 'req-runtime-1',
+          title: 'Approval required',
+          message: 'Run this skill?',
+          options: [{ id: 'yes_once', label: 'Yes once' }, { id: 'no', label: 'No' }],
+          defaultOptionId: 'no',
+          metadata: { skillId: 'skill-creator' },
+          agentName: 'qwen',
+          toolName: 'load_skill',
+          toolCallId: 'call_runtime_1',
+        }
+      }
+    ]));
+
+    const runtime = createRealtimeEventsRuntime({
+      getMainWindow: () => ({
+        isDestroyed: () => false,
+        webContents: { send }
+      }),
+      chatEventChannel: 'chat:event',
+      addLogStreamCallback: () => () => { },
+      subscribeWorld: async () => worldSubscription,
+      ensureCoreReady: async () => { },
+      listPendingHitlPromptEvents,
+    });
+
+    await runtime.subscribeChatEvents({
+      subscriptionId: 'sub-runtime-replay',
+      worldId: 'world-1',
+      chatId: 'chat-1'
+    });
+
+    expect(listPendingHitlPromptEvents).toHaveBeenCalledWith(worldSubscription.world, 'chat-1');
+    expect(send).toHaveBeenCalledWith(
+      'chat:event',
+      expect.objectContaining({
+        type: 'tool',
+        subscriptionId: 'sub-runtime-replay',
+        worldId: 'world-1',
+        chatId: 'chat-1',
+        tool: expect.objectContaining({
+          eventType: 'tool-progress',
+          toolUseId: 'call_runtime_1',
+          toolName: 'load_skill',
+          metadata: expect.objectContaining({
+            hitlPrompt: expect.objectContaining({
+              requestId: 'req-runtime-1',
+              toolCallId: 'call_runtime_1',
+            })
+          })
         })
       })
     );

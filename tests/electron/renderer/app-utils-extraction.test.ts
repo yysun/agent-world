@@ -12,6 +12,10 @@
  * - No filesystem or network dependencies.
  *
  * Recent Changes:
+ * - 2026-02-28: Added regression ensuring assistant `Calling tool: human_intervention_request` placeholder rows are hidden from renderable transcript entries.
+ * - 2026-02-27: Added normalization assertions for persisted `showToolMessages` desktop setting.
+ * - 2026-02-27: Updated tool-classification expectations so assistant tool-call request messages remain assistant cards.
+ * - 2026-02-27: Added regression coverage ensuring log-event rows are not treated as renderable chat messages.
  * - 2026-02-22: Added regression for pending-only inline status to avoid fallback agent names on invalid mention flows.
  * - 2026-02-22: Added coverage for end-of-run processed-agent status summary text helper.
  * - 2026-02-22: Added regression coverage to prevent fallback agent attribution when no concrete agent activity state exists.
@@ -63,9 +67,15 @@ describe('extracted data-transform utils', () => {
     });
 
     expect(result.storageType).toBe('sqlite');
+    expect(result.showToolMessages).toBe(true);
     expect(result.enableGlobalSkills).toBe(false);
     expect(result.enableProjectSkills).toBe(true);
     expect(result.disabledGlobalSkillIds).toEqual(['a', 'z']);
+  });
+
+  it('normalizes showToolMessages when explicitly disabled', () => {
+    const result = normalizeSystemSettings({ showToolMessages: false });
+    expect(result.showToolMessages).toBe(false);
   });
 
   it('sorts sessions by newest timestamp', () => {
@@ -158,7 +168,7 @@ describe('extracted message utils', () => {
     expect(isToolRelatedMessage({
       role: 'assistant',
       tool_calls: [{ type: 'function', function: { name: 'shell_cmd', arguments: '{}' } }]
-    })).toBe(true);
+    })).toBe(false);
     expect(isTrueAgentResponseMessage({ role: 'assistant', sender: 'agent-a', content: 'hello' })).toBe(true);
     expect(isTrueAgentResponseMessage({ role: 'assistant', content: 'Calling tool: shell_cmd' })).toBe(false);
   });
@@ -168,8 +178,34 @@ describe('extracted message utils', () => {
     expect(getMessageIdentity(message)).toBe('msg-1');
     expect(isRenderableMessageEntry(message)).toBe(true);
     expect(isRenderableMessageEntry({ role: 'assistant' })).toBe(false);
+    expect(isRenderableMessageEntry({
+      messageId: 'log-row-1',
+      type: 'log',
+      logEvent: { level: 'info', category: 'main', message: 'bridge event' }
+    })).toBe(false);
     const className = getMessageCardClassName(message, new Map(), [message], 0);
     expect(className).toContain('rounded-lg');
+  });
+
+  it('hides assistant human-intervention tool-call placeholders from renderable rows', () => {
+    const hitlToolCallMessage = {
+      messageId: 'msg-hitl-1',
+      role: 'assistant',
+      sender: 'a1',
+      content: 'Calling tool: human_intervention_request',
+      tool_calls: [
+        {
+          id: 'call_123',
+          type: 'function',
+          function: {
+            name: 'human_intervention_request',
+            arguments: '{"question":"pick an option"}'
+          }
+        }
+      ]
+    };
+
+    expect(isRenderableMessageEntry(hitlToolCallMessage)).toBe(false);
   });
 
   it('builds sender label and avatar fallbacks', () => {

@@ -22,6 +22,11 @@
  * - Message deletion uses DELETE /worlds/:worldName/messages/:messageId endpoint
  *
  * Changes:
+ * - 2026-02-26: Normalize world `mainAgent` values (trim, remove leading `@`, kebab-case) before PATCH to ensure reliable persistence/routing.
+ * - 2026-02-26: Fixed agent edit payload bloat by sending only patchable agent fields to `PATCH /worlds/:worldName/agents/:agentName`.
+ * - 2026-02-26: Fixed world edit payload bloat by sending only world patchable fields to `PATCH /worlds/:worldName` (avoids oversized request failures on large worlds).
+ * - 2026-02-26: Improved API error parsing to preserve backend `code` on thrown errors for richer UI messaging.
+ * - 2026-02-24: Extended `setChat()` response type with `hitlPrompts` replay payload for chat-switch HITL restoration.
  * - 2026-02-21: Removed server-side project-folder picker call; web now uses browser File API flow.
  * - 2026-02-20: Enforced options-only HITL response API (`respondHitlOption`).
  * - 2026-02-14: Added respondHitlOption() API call for generic HITL option approvals.
@@ -35,12 +40,36 @@ import type {
   ApiRequestOptions,
   Chat
 } from './types';
+import toKebabCase from './utils/toKebabCase';
 
 interface ErrorResponse {
   error: string;
   code?: string;
   details?: any[];
 }
+
+type WorldPatchPayload = {
+  name?: string;
+  description?: string;
+  turnLimit?: number;
+  mainAgent?: string | null;
+  chatLLMProvider?: string | null;
+  chatLLMModel?: string | null;
+  mcpConfig?: string | null;
+  variables?: string;
+};
+
+type AgentPatchPayload = {
+  name?: string;
+  autoReply?: boolean;
+  status?: 'active' | 'inactive' | 'error';
+  provider?: string;
+  model?: string;
+  systemPrompt?: string;
+  temperature?: number;
+  maxTokens?: number;
+  clearMemory?: boolean;
+};
 
 // Base API URL - can be configured
 const API_BASE_URL = '/api';
@@ -63,6 +92,7 @@ export async function apiRequest(endpoint: string, options: ApiRequestOptions = 
     if (!response.ok) {
       let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
       let errorDetails = null;
+      let errorCode: string | undefined;
 
       // Try to parse structured error response
       try {
@@ -70,6 +100,7 @@ export async function apiRequest(endpoint: string, options: ApiRequestOptions = 
         if (errorData.error) {
           errorMessage = errorData.error;
           if (errorData.code) {
+            errorCode = errorData.code;
             errorMessage += ` (${errorData.code})`;
           }
           // Pass through detailed validation errors
@@ -82,6 +113,9 @@ export async function apiRequest(endpoint: string, options: ApiRequestOptions = 
       }
 
       const error = new Error(errorMessage) as any;
+      if (errorCode) {
+        error.code = errorCode;
+      }
       if (errorDetails) {
         error.details = errorDetails;
       }
@@ -154,12 +188,52 @@ async function updateWorld(worldName: string, updateData: Partial<World>): Promi
     throw new Error('World name and update data are required');
   }
 
+  const worldPatchPayload = buildWorldPatchPayload(updateData);
+
   const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}`, {
     method: 'PATCH',
-    body: JSON.stringify(updateData),
+    body: JSON.stringify(worldPatchPayload),
   });
 
   return response.json();
+}
+
+export function buildWorldPatchPayload(updateData: Partial<World>): WorldPatchPayload {
+  const payload: WorldPatchPayload = {};
+
+  if (updateData.name !== undefined) payload.name = updateData.name;
+  if (updateData.description !== undefined) payload.description = updateData.description;
+  if (updateData.turnLimit !== undefined) payload.turnLimit = updateData.turnLimit;
+  if (updateData.variables !== undefined) payload.variables = updateData.variables;
+
+  if (updateData.mainAgent !== undefined) {
+    if (typeof updateData.mainAgent === 'string') {
+      const normalizedMainAgent = toKebabCase(updateData.mainAgent.replace(/^@+/, '').trim());
+      payload.mainAgent = normalizedMainAgent === '' ? null : normalizedMainAgent;
+    } else {
+      payload.mainAgent = updateData.mainAgent;
+    }
+  }
+
+  if (updateData.chatLLMProvider !== undefined) {
+    payload.chatLLMProvider = updateData.chatLLMProvider === ''
+      ? null
+      : updateData.chatLLMProvider;
+  }
+
+  if (updateData.chatLLMModel !== undefined) {
+    payload.chatLLMModel = updateData.chatLLMModel === ''
+      ? null
+      : updateData.chatLLMModel;
+  }
+
+  if (updateData.mcpConfig !== undefined) {
+    payload.mcpConfig = updateData.mcpConfig === ''
+      ? null
+      : updateData.mcpConfig;
+  }
+
+  return payload;
 }
 
 /**
@@ -199,12 +273,39 @@ async function updateAgent(worldName: string, agentName: string, updateData: Par
     throw new Error('World name, agent name, and update data are required');
   }
 
+  const agentPatchPayload = buildAgentPatchPayload(updateData as Partial<Agent> & { clearMemory?: boolean; status?: 'active' | 'inactive' | 'error' });
+
   const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/agents/${encodeURIComponent(agentName)}`, {
     method: 'PATCH',
-    body: JSON.stringify(updateData),
+    body: JSON.stringify(agentPatchPayload),
   });
 
   return response.json();
+}
+
+export function buildAgentPatchPayload(
+  updateData: Partial<Agent> & { clearMemory?: boolean; status?: 'active' | 'inactive' | 'error' }
+): AgentPatchPayload {
+  const payload: AgentPatchPayload = {};
+
+  if (updateData.name !== undefined) payload.name = updateData.name;
+  if (updateData.autoReply !== undefined) payload.autoReply = updateData.autoReply;
+  if (updateData.status !== undefined) payload.status = updateData.status;
+
+  if (updateData.provider !== undefined && updateData.provider !== '') {
+    payload.provider = updateData.provider;
+  }
+
+  if (updateData.model !== undefined && updateData.model !== '') {
+    payload.model = updateData.model;
+  }
+
+  if (updateData.systemPrompt !== undefined) payload.systemPrompt = updateData.systemPrompt;
+  if (updateData.temperature !== undefined) payload.temperature = updateData.temperature;
+  if (updateData.maxTokens !== undefined) payload.maxTokens = updateData.maxTokens;
+  if (updateData.clearMemory !== undefined) payload.clearMemory = updateData.clearMemory;
+
+  return payload;
 }
 
 /**
@@ -285,6 +386,7 @@ async function getWorldMarkdown(worldName: string): Promise<string> {
 export async function setChat(worldName: string, chatId: string): Promise<{
   world: any;
   chatId: string;
+  hitlPrompts?: Array<{ chatId: string | null; prompt: Record<string, unknown> }>;
   success: boolean;
 }> {
   const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/setChat/${encodeURIComponent(chatId)}`, {

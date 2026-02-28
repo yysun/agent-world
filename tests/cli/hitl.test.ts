@@ -5,23 +5,24 @@
  * - Validate CLI HITL parsing and option-input resolution helpers.
  *
  * Coverage:
- * - Parsing valid/invalid `hitl-option-request` payloads.
+ * - Parsing valid/invalid pending-prompt and tool-event payloads.
  * - Mapping user input to option IDs by number and id.
  * - Fallback/invalid input behavior.
  */
 
 import { describe, expect, it } from 'vitest';
 import {
+  markHitlRequestHandled,
+  parseHitlPromptFromToolEvent,
   parseHitlOptionRequest,
   resolveHitlOptionSelectionInput,
 } from '../../cli/hitl.js';
 
 describe('cli/hitl', () => {
-  it('parses a valid hitl-option-request payload', () => {
+  it('parses a valid pending HITL prompt payload', () => {
     const parsed = parseHitlOptionRequest({
       chatId: 'chat-1',
-      content: {
-        eventType: 'hitl-option-request',
+      prompt: {
         requestId: 'req-1',
         title: 'Run scripts?',
         message: 'Please confirm.',
@@ -49,8 +50,33 @@ describe('cli/hitl', () => {
     });
   });
 
+  it('parses a valid HITL prompt from tool-progress metadata', () => {
+    const parsed = parseHitlPromptFromToolEvent({
+      chatId: 'chat-2',
+      toolExecution: {
+        metadata: {
+          hitlPrompt: {
+            requestId: 'req-tool-1',
+            title: 'Approval required',
+            message: 'Approve?',
+            defaultOptionId: 'yes',
+            options: [
+              { id: 'yes', label: 'Yes' },
+              { id: 'no', label: 'No' },
+            ],
+          }
+        }
+      }
+    });
+
+    expect(parsed?.requestId).toBe('req-tool-1');
+    expect(parsed?.chatId).toBe('chat-2');
+    expect(parsed?.defaultOptionId).toBe('yes');
+  });
+
   it('returns null for non-hitl payloads', () => {
-    expect(parseHitlOptionRequest({ content: { eventType: 'chat-title-updated' } })).toBeNull();
+    expect(parseHitlOptionRequest({ prompt: { title: 'missing request id' } })).toBeNull();
+    expect(parseHitlPromptFromToolEvent({ toolExecution: { metadata: {} } })).toBeNull();
   });
 
   it('resolves option by numeric selection', () => {
@@ -85,5 +111,21 @@ describe('cli/hitl', () => {
     ];
     expect(resolveHitlOptionSelectionInput(options, '', 'no')).toBe('no');
     expect(resolveHitlOptionSelectionInput(options, '999', 'no')).toBeNull();
+  });
+
+  it('marks replayed request IDs as duplicates after first handling', () => {
+    const handled = new Set<string>();
+
+    expect(markHitlRequestHandled(handled, 'req-1')).toBe(true);
+    expect(markHitlRequestHandled(handled, 'req-1')).toBe(false);
+    expect(markHitlRequestHandled(handled, '  req-1  ')).toBe(false);
+    expect(markHitlRequestHandled(handled, 'req-2')).toBe(true);
+  });
+
+  it('rejects empty request IDs in duplicate handler helper', () => {
+    const handled = new Set<string>();
+    expect(markHitlRequestHandled(handled, '')).toBe(false);
+    expect(markHitlRequestHandled(handled, '   ')).toBe(false);
+    expect(handled.size).toBe(0);
   });
 });

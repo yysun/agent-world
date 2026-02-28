@@ -1606,7 +1606,7 @@ export async function updateMCPServersForWorld(worldId: string, newMcpConfig: st
  * - shell_cmd: Execute shell commands
  * - load_skill: Load full SKILL.md instructions by registry skill_id
  * - create_agent: Create a new agent after explicit user approval
- * - human_intervention_request: Ask a human question with options and optional confirmation
+ * - human_intervention_request: Ask a human question with options (single-step selection)
  * - read_file: Read file contents with pagination controls
  * - list_files: List directory entries
  * - grep: Recursive text search across files

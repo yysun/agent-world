@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest';
 import {
   clearChatAgents,
   createStatusRegistry,
+  finalizeReplayedChat,
   getAgentStatus,
   getChatStatus,
   getWorldStatus,
@@ -169,5 +170,66 @@ describe('syncWorldRoster', () => {
     let r = createStatusRegistry();
     r = syncWorldRoster(r, 'w1', ['c1'], ['a1']);
     expect(getWorldStatus(r, 'w1')).toBe('idle');
+  });
+});
+
+describe('finalizeReplayedChat', () => {
+  it('working agent → complete', () => {
+    let r = createStatusRegistry();
+    r = applyEventToRegistry(r, 'w1', 'c1', 'a1', 'sse', 'start');
+    r = finalizeReplayedChat(r, 'w1', 'c1');
+    expect(getAgentStatus(r, 'w1', 'c1', 'a1')).toBe('complete');
+  });
+
+  it('multiple working agents → all complete', () => {
+    let r = createStatusRegistry();
+    r = applyEventToRegistry(r, 'w1', 'c1', 'a1', 'sse', 'start');
+    r = applyEventToRegistry(r, 'w1', 'c1', 'a2', 'tool', 'tool-start');
+    r = finalizeReplayedChat(r, 'w1', 'c1');
+    expect(getAgentStatus(r, 'w1', 'c1', 'a1')).toBe('complete');
+    expect(getAgentStatus(r, 'w1', 'c1', 'a2')).toBe('complete');
+  });
+
+  it('already complete agent → unchanged', () => {
+    let r = createStatusRegistry();
+    r = applyEventToRegistry(r, 'w1', 'c1', 'a1', 'sse', 'start');
+    r = applyEventToRegistry(r, 'w1', 'c1', 'a1', 'sse', 'end');
+    const before = r;
+    r = finalizeReplayedChat(r, 'w1', 'c1');
+    expect(r).toBe(before); // same reference — no mutation
+    expect(getAgentStatus(r, 'w1', 'c1', 'a1')).toBe('complete');
+  });
+
+  it('idle agent → unchanged (not promoted to complete)', () => {
+    let r = createStatusRegistry();
+    r = syncWorldRoster(r, 'w1', ['c1'], ['a1']);
+    r = finalizeReplayedChat(r, 'w1', 'c1');
+    expect(getAgentStatus(r, 'w1', 'c1', 'a1')).toBe('idle');
+  });
+
+  it('mixed: working normalized, complete preserved, idle preserved', () => {
+    let r = createStatusRegistry();
+    r = applyEventToRegistry(r, 'w1', 'c1', 'a1', 'sse', 'start'); // working
+    r = applyEventToRegistry(r, 'w1', 'c1', 'a2', 'sse', 'start');
+    r = applyEventToRegistry(r, 'w1', 'c1', 'a2', 'sse', 'end');   // complete
+    r = syncWorldRoster(r, 'w1', ['c1'], ['a1', 'a2', 'a3']);       // a3 = idle
+    r = finalizeReplayedChat(r, 'w1', 'c1');
+    expect(getAgentStatus(r, 'w1', 'c1', 'a1')).toBe('complete');
+    expect(getAgentStatus(r, 'w1', 'c1', 'a2')).toBe('complete');
+    expect(getAgentStatus(r, 'w1', 'c1', 'a3')).toBe('idle');
+  });
+
+  it('does not affect sibling chats', () => {
+    let r = createStatusRegistry();
+    r = applyEventToRegistry(r, 'w1', 'c1', 'a1', 'sse', 'start');
+    r = applyEventToRegistry(r, 'w1', 'c2', 'a1', 'sse', 'start');
+    r = finalizeReplayedChat(r, 'w1', 'c1');
+    expect(getAgentStatus(r, 'w1', 'c1', 'a1')).toBe('complete');
+    expect(getAgentStatus(r, 'w1', 'c2', 'a1')).toBe('working');
+  });
+
+  it('is a no-op for unknown world/chat', () => {
+    const r = createStatusRegistry();
+    expect(finalizeReplayedChat(r, 'unknown', 'unknown')).toBe(r);
   });
 });

@@ -12,6 +12,7 @@
  * - Keeps active core workspace state stable while cleanup runs.
  *
  * Recent Changes:
+ * - 2026-02-26: Added optional categorized logger dependency and removed direct console error logging from core-runtime readiness queue handling.
  * - 2026-02-13: Made core readiness transition serialized/awaitable so workspace switches fully reset subscriptions before new runtime work continues.
  * - 2026-02-12: Replaced fire-and-forget reset state clobber with queued async cleanup to avoid workspace switch races.
  * - 2026-02-12: Extracted workspace/core runtime state management from `electron/main.ts`.
@@ -31,6 +32,9 @@ interface CreateWorkspaceRuntimeDependencies {
   writeWorkspacePreference: (workspacePath: string) => void;
   getDefaultWorkspacePath: () => string;
   resetRuntimeSubscriptions: () => Promise<void>;
+  loggerWorkspace?: {
+    error: (message: string, data?: unknown) => void;
+  };
 }
 
 export interface WorkspaceRuntime {
@@ -48,7 +52,8 @@ export function createWorkspaceRuntime(dependencies: CreateWorkspaceRuntimeDepen
     readWorkspacePreference,
     writeWorkspacePreference,
     getDefaultWorkspacePath,
-    resetRuntimeSubscriptions
+    resetRuntimeSubscriptions,
+    loggerWorkspace
   } = dependencies;
 
   let activeWorkspacePath: string | null = null;
@@ -88,7 +93,9 @@ export function createWorkspaceRuntime(dependencies: CreateWorkspaceRuntimeDepen
     });
 
     ensureQueue = run.catch((error) => {
-      console.error('Failed to ensure core runtime:', error);
+      loggerWorkspace?.error('Failed to ensure core runtime', {
+        error: error instanceof Error ? error.message : String(error)
+      });
     });
     return run;
   }

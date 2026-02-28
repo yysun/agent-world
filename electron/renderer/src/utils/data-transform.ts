@@ -14,6 +14,7 @@
  * - Returned objects/arrays are newly allocated to avoid mutation bugs.
  *
  * Recent Changes:
+ * - 2026-02-27: Normalized persisted `showToolMessages` setting with default `true` for desktop tool-row visibility control.
  * - 2026-02-16: Extracted from App.jsx into dedicated utility module.
  */
 
@@ -41,6 +42,7 @@ export function normalizeSystemSettings(settings) {
     storageType: String(settings.storageType || ''),
     dataPath: String(settings.dataPath || ''),
     sqliteDatabase: String(settings.sqliteDatabase || ''),
+    showToolMessages: settings.showToolMessages !== false,
     enableGlobalSkills: settings.enableGlobalSkills !== false,
     enableProjectSkills: settings.enableProjectSkills !== false,
     disabledGlobalSkillIds: normalizeStringList(settings.disabledGlobalSkillIds),

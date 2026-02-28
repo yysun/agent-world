@@ -1,26 +1,17 @@
-/**
- * SwipeCarousel – coverflow-style 3D fan carousel
+/*
+ * Purpose:
+ * - Render and control the Home-page world carousel with coverflow-style interactions.
  *
- * Visual design (matches reference image):
- *   - Center card: large portrait rectangle, faces flat toward viewer.
- *   - Side cards: rotateY fans them out left/right; they overlap the center
- *     card because each button (CARD_W wide) is wider than its track slot
- *     (CARD_SLOT wide). overflow:visible + zIndex keeps center on top.
- *   - Outer cards: rotated even more steeply, lower opacity.
+ * Key features:
+ * - 3D fan carousel layout with drag, arrows, dot navigation, and enter action.
+ * - Persists and restores the last selected world across Home page visits.
  *
- * 3D per-card formula (all continuous during drag):
- *   fractCenter  = currentIndex − dragOffset / CARD_SLOT
- *   signedDist   = i − fractCenter
- *   rotateY      = clamp(±MAX_ROT, −signedDist × ROT_PER_DIST)
- *   translateZ   = −|signedDist| × DEPTH_PX
- *   scale        = max(0.70, 1 − |d| × 0.14)
- *   opacity      = max(0.50, 1 − |d| × 0.26)
- *   zIndex       = 100 − round(|d| × 10)
+ * Notes on implementation:
+ * - Uses localStorage defensively (try/catch + browser checks) to avoid runtime issues.
+ * - Stores both world id and name for robust restore when IDs are absent.
  *
- * Drag-vs-tap:
- *   After any drag > 10 px a one-shot capture click listener is installed
- *   to swallow the post-pointerup click so the newly centred card is not
- *   accidentally entered.
+ * Summary of recent changes:
+ * - 2026-02-26: Added last-selected-world persistence/restore on Home page.
  */
 
 import { app, Component } from 'apprun';
@@ -33,6 +24,11 @@ interface SwipeCarouselState {
   isDragging: boolean;
   startX: number | null;
   startY: number | null;
+}
+
+interface PersistedWorldSelection {
+  id: string | null;
+  name: string | null;
 }
 
 // ── Layout constants ─────────────────────────────────────────────────────────
@@ -62,7 +58,103 @@ const rotateAt  = (sd: number) =>
 // Horizontal margin to centre CARD_W button inside CARD_SLOT slot
 const CARD_MARGIN = (CARD_SLOT - CARD_W) / 2;  // negative → button overflows slot
 
+const LAST_SELECTED_WORLD_STORAGE_KEY = 'agent-world-home-last-selected-world';
+
+function toNonEmptyString(value: unknown): string | null {
+  const text = String(value ?? '').trim();
+  return text.length > 0 ? text : null;
+}
+
+function readPersistedWorldSelection(): PersistedWorldSelection | null {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(LAST_SELECTED_WORLD_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as PersistedWorldSelection | string | null;
+    if (typeof parsed === 'string') {
+      return { id: null, name: toNonEmptyString(parsed) };
+    }
+
+    if (parsed && typeof parsed === 'object') {
+      return {
+        id: toNonEmptyString(parsed.id),
+        name: toNonEmptyString(parsed.name),
+      };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function persistWorldSelection(world: World | undefined): void {
+  if (!world || typeof window === 'undefined' || !window.localStorage) {
+    return;
+  }
+
+  const selection: PersistedWorldSelection = {
+    id: toNonEmptyString(world.id),
+    name: toNonEmptyString(world.name),
+  };
+
+  if (!selection.id && !selection.name) {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(LAST_SELECTED_WORLD_STORAGE_KEY, JSON.stringify(selection));
+  } catch {
+    // Ignore storage failures; carousel interaction should continue without persistence.
+  }
+}
+
+function resolveInitialWorldIndex(worlds: World[], persistedSelection: PersistedWorldSelection | null): number {
+  if (!worlds.length || !persistedSelection) {
+    return 0;
+  }
+
+  if (persistedSelection.id) {
+    const idMatchIndex = worlds.findIndex((world) => toNonEmptyString(world.id) === persistedSelection.id);
+    if (idMatchIndex >= 0) {
+      return idMatchIndex;
+    }
+  }
+
+  if (persistedSelection.name) {
+    const nameMatchIndex = worlds.findIndex((world) => toNonEmptyString(world.name) === persistedSelection.name);
+    if (nameMatchIndex >= 0) {
+      return nameMatchIndex;
+    }
+  }
+
+  return 0;
+}
+
+function updateSelectedIndex(state: SwipeCarouselState, nextIndex: number): SwipeCarouselState {
+  if (!state.worlds.length) {
+    return { ...state, currentIndex: 0, dragOffset: 0 };
+  }
+
+  const boundedIndex = Math.max(0, Math.min(state.worlds.length - 1, nextIndex));
+  persistWorldSelection(state.worlds[boundedIndex]);
+  return {
+    ...state,
+    currentIndex: boundedIndex,
+    dragOffset: 0,
+  };
+}
+
 export default class SwipeCarousel extends Component<SwipeCarouselState> {
+
+  is_global_event = () => true;
+  
   declare props: Readonly<{ worlds: World[] }>;
 
   state: SwipeCarouselState = {
@@ -74,10 +166,15 @@ export default class SwipeCarousel extends Component<SwipeCarouselState> {
     startY: null,
   };
 
-  mounted = (props: { worlds: World[] }): SwipeCarouselState => ({
-    ...this.state,
-    worlds: props.worlds ?? [],
-  });
+  mounted = (props: { worlds: World[] }): SwipeCarouselState => {
+    const worlds = props.worlds ?? [];
+    const initialIndex = resolveInitialWorldIndex(worlds, readPersistedWorldSelection());
+    return {
+      ...this.state,
+      worlds,
+      currentIndex: initialIndex,
+    };
+  };
 
   view = (state: SwipeCarouselState) => {
     const { worlds, currentIndex, dragOffset, isDragging } = state;
@@ -293,30 +390,35 @@ export default class SwipeCarousel extends Component<SwipeCarouselState> {
       let next = currentIndex;
       if (dragOffset < -SNAP_THRESHOLD && currentIndex < worlds.length - 1) next++;
       else if (dragOffset > SNAP_THRESHOLD && currentIndex > 0) next--;
-      return { ...state, currentIndex: next, dragOffset: 0, isDragging: false, startX: null, startY: null };
+      return {
+        ...updateSelectedIndex(state, next),
+        isDragging: false,
+        startX: null,
+        startY: null,
+      };
     },
 
     'sc-cancel': (state: SwipeCarouselState): SwipeCarouselState => ({
       ...state, dragOffset: 0, isDragging: false, startX: null, startY: null,
     }),
 
-    'sc-goto': (state: SwipeCarouselState, index: number): SwipeCarouselState => ({
-      ...state, currentIndex: index, dragOffset: 0,
-    }),
+    'sc-goto': (state: SwipeCarouselState, index: number): SwipeCarouselState =>
+      updateSelectedIndex(state, index),
 
-    'sc-prev': (state: SwipeCarouselState): SwipeCarouselState => ({
-      ...state,
-      currentIndex: state.currentIndex > 0 ? state.currentIndex - 1 : state.worlds.length - 1,
-      dragOffset: 0,
-    }),
+    'sc-prev': (state: SwipeCarouselState): SwipeCarouselState =>
+      updateSelectedIndex(
+        state,
+        state.currentIndex > 0 ? state.currentIndex - 1 : state.worlds.length - 1
+      ),
 
-    'sc-next': (state: SwipeCarouselState): SwipeCarouselState => ({
-      ...state,
-      currentIndex: state.currentIndex < state.worlds.length - 1 ? state.currentIndex + 1 : 0,
-      dragOffset: 0,
-    }),
+    'sc-next': (state: SwipeCarouselState): SwipeCarouselState =>
+      updateSelectedIndex(
+        state,
+        state.currentIndex < state.worlds.length - 1 ? state.currentIndex + 1 : 0
+      ),
 
     'sc-enter': (_state: SwipeCarouselState, world: World): void => {
+      persistWorldSelection(world);
       window.location.href = '/World/' + encodeURIComponent(world.id || world.name);
     },
   };

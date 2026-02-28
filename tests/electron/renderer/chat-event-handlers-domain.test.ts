@@ -4,16 +4,20 @@
  * Features:
  * - Verifies global log event routing behavior.
  * - Verifies subscription/world/chat filtering in session handlers.
- * - Verifies SSE/tool event delegation to streaming/activity state managers.
+ * - Verifies SSE/tool event delegation to streaming state managers.
  *
  * Implementation Notes:
  * - Uses dependency injection with in-memory refs/state setters.
  * - Focuses on orchestration behavior, not UI rendering.
  *
  * Recent Changes:
+ * - 2026-02-27: Updated global-log coverage to assert logs are routed only to panel callbacks (no chat-message insertion).
+ * - 2026-02-27: Added coverage for unified main-process log callback routing independent of active-session message-list updates.
+ * - 2026-02-26: Added coverage for redundant error-log suppression when an equivalent inline stream error is already present.
+ * - 2026-02-24: Removed activityStateRef from all tests (activity-state.ts deleted as part of working-status simplification).
  * - 2026-02-22: Removed activity event routing tests and response-state tracking tests as part of status-registry migration (Phase 1).
  * - 2026-02-20: Added optimistic user-message reconciliation coverage for message-event ordering and identical consecutive user sends.
- * - 2026-02-20: Added coverage that `hitl-option-request` system events bypass chatId filtering so approval prompts are not dropped.
+ * - 2026-02-20: Added coverage for chat-scoped HITL prompt delivery via tool-progress metadata.
  * - 2026-02-13: Updated system-event coverage to structured payload content (`eventType` + metadata object).
  * - 2026-02-13: Added coverage for session-scoped realtime system events (chat title update notifications).
  * - 2026-02-13: Added coverage for tool lifecycle response-state transitions and chat-id filtering.
@@ -35,8 +39,12 @@ type TestMessage = {
   chatId?: string;
   content?: string;
   type?: string;
+  hasError?: boolean;
+  errorMessage?: string;
   optimisticUserPending?: boolean;
   createdAt?: string;
+  isToolStreaming?: boolean;
+  streamType?: string;
 };
 
 function createMessageStateHarness(initial: TestMessage[] = []) {
@@ -63,53 +71,17 @@ function makeFullStreamingRef() {
       handleToolStreamChunk: vi.fn(),
       handleToolStreamEnd: vi.fn(),
       isActive: vi.fn(() => false),
-    }
-  };
-}
-
-function makeFullActivityRef() {
-  return {
-    current: {
-      setActiveStreamCount: vi.fn(),
-      handleToolStart: vi.fn(),
-      handleToolResult: vi.fn(),
-      handleToolError: vi.fn(),
-      handleToolProgress: vi.fn(),
+      cleanup: vi.fn(),
     }
   };
 }
 
 describe('createGlobalLogEventHandler', () => {
-  it('appends log messages when an active session is selected', () => {
-    const harness = createMessageStateHarness();
+  it('publishes main log callbacks for log events', () => {
+    const onMainLogEvent = vi.fn();
 
     const handler = createGlobalLogEventHandler({
-      loadedWorldId: 'world-1',
-      selectedSessionId: 'chat-1',
-      setMessages: harness.setMessages as Parameters<typeof createGlobalLogEventHandler>[0]['setMessages'],
-    });
-
-    handler({
-      type: 'log',
-      logEvent: {
-        message: 'Runtime warning',
-        level: 'warn',
-        category: 'runtime',
-        timestamp: '2026-02-12T12:00:00.000Z'
-      }
-    });
-
-    expect(harness.getMessages()).toHaveLength(1);
-    expect((harness.getMessages()[0] as Record<string, unknown>).type).toBe('log');
-  });
-
-  it('does not append log messages when no active session is selected', () => {
-    const harness = createMessageStateHarness();
-
-    const handler = createGlobalLogEventHandler({
-      loadedWorldId: null,
-      selectedSessionId: null,
-      setMessages: harness.setMessages as Parameters<typeof createGlobalLogEventHandler>[0]['setMessages'],
+      onMainLogEvent,
     });
 
     handler({
@@ -117,11 +89,51 @@ describe('createGlobalLogEventHandler', () => {
       logEvent: {
         message: 'Something happened',
         level: 'info',
-        category: 'system'
+        category: 'system',
+        timestamp: '2026-02-27T10:00:00.000Z'
       }
     });
 
-    expect(harness.getMessages()).toHaveLength(0);
+    expect(onMainLogEvent).toHaveBeenCalledTimes(1);
+    expect(onMainLogEvent).toHaveBeenCalledWith({
+      process: 'main',
+      level: 'info',
+      category: 'system',
+      message: 'Something happened',
+      timestamp: '2026-02-27T10:00:00.000Z',
+    });
+  });
+
+  it('normalizes missing log fields and ignores non-log payloads', () => {
+    const onMainLogEvent = vi.fn();
+    const handler = createGlobalLogEventHandler({
+      onMainLogEvent,
+    });
+
+    handler({
+      type: 'message',
+      message: {
+        messageId: 'm-1',
+      }
+    } as any);
+
+    handler({
+      type: 'log',
+      logEvent: {
+        message: '',
+        level: '',
+        category: '',
+      }
+    });
+
+    expect(onMainLogEvent).toHaveBeenCalledTimes(1);
+    expect(onMainLogEvent.mock.calls[0]?.[0]).toMatchObject({
+      process: 'main',
+      level: 'info',
+      category: 'main',
+      message: '(empty log message)',
+    });
+    expect(typeof onMainLogEvent.mock.calls[0]?.[0]?.timestamp).toBe('string');
   });
 });
 
@@ -140,16 +152,15 @@ describe('createChatSubscriptionEventHandler', () => {
         handleToolStreamChunk: vi.fn(),
         handleToolStreamEnd: vi.fn(),
         isActive: vi.fn(() => false),
+        cleanup: vi.fn(),
       }
     };
-    const activityStateRef = makeFullActivityRef();
 
     const handler = createChatSubscriptionEventHandler({
       subscriptionId: 'sub-1',
       loadedWorldId: 'world-1',
       selectedSessionId: 'chat-1',
       streamingStateRef,
-      activityStateRef,
       setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
     });
 
@@ -186,7 +197,6 @@ describe('createChatSubscriptionEventHandler', () => {
       loadedWorldId: 'world-1',
       selectedSessionId: 'chat-1',
       streamingStateRef: { current: null },
-      activityStateRef: { current: null },
       setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
     });
 
@@ -238,7 +248,7 @@ describe('createChatSubscriptionEventHandler', () => {
       loadedWorldId: 'world-1',
       selectedSessionId: 'chat-1',
       streamingStateRef: { current: null },
-      activityStateRef: { current: null },
+
       setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
     });
 
@@ -282,7 +292,7 @@ describe('createChatSubscriptionEventHandler', () => {
       loadedWorldId: 'world-1',
       selectedSessionId: 'chat-1',
       streamingStateRef: { current: null },
-      activityStateRef: { current: null },
+
       setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
     });
 
@@ -308,7 +318,7 @@ describe('createChatSubscriptionEventHandler', () => {
       loadedWorldId: 'world-1',
       selectedSessionId: 'chat-1',
       streamingStateRef: { current: null },
-      activityStateRef: { current: null },
+
       setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
     });
 
@@ -333,7 +343,7 @@ describe('createChatSubscriptionEventHandler', () => {
       loadedWorldId: 'world-1',
       selectedSessionId: 'chat-1',
       streamingStateRef: { current: null },
-      activityStateRef: { current: null },
+
       setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
     });
 
@@ -365,6 +375,7 @@ describe('createChatSubscriptionEventHandler', () => {
         handleToolStreamChunk: vi.fn(),
         handleToolStreamEnd: vi.fn(),
         isActive: vi.fn((messageId: string) => messageId === 'stream-1'),
+        cleanup: vi.fn(),
       }
     };
 
@@ -373,7 +384,7 @@ describe('createChatSubscriptionEventHandler', () => {
       loadedWorldId: 'world-1',
       selectedSessionId: 'chat-1',
       streamingStateRef,
-      activityStateRef: { current: null },
+
       setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
     });
 
@@ -394,18 +405,16 @@ describe('createChatSubscriptionEventHandler', () => {
     expect(harness.getMessages()).toHaveLength(1);
   });
 
-  it('delegates SSE and tool lifecycle events to state managers', () => {
+  it('delegates SSE start events to streaming state manager', () => {
     const harness = createMessageStateHarness();
     const streamingStateRef = makeFullStreamingRef();
     (streamingStateRef.current.getActiveCount as ReturnType<typeof vi.fn>).mockReturnValue(1);
-    const activityStateRef = makeFullActivityRef();
 
     const handler = createChatSubscriptionEventHandler({
       subscriptionId: 'sub-1',
       loadedWorldId: 'world-1',
       selectedSessionId: 'chat-1',
       streamingStateRef,
-      activityStateRef,
       setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
     });
 
@@ -427,11 +436,26 @@ describe('createChatSubscriptionEventHandler', () => {
       worldId: 'world-1',
       chatId: 'chat-1',
       tool: {
-        eventType: 'tool-start',
+        eventType: 'tool-result',
         toolUseId: 'tool-1',
-        toolName: 'read_file',
-        toolInput: { path: '/tmp' }
+        result: 'done'
       }
+    });
+
+    expect(streamingStateRef.current.handleStart).toHaveBeenCalledWith('m-1', 'assistant-1');
+    expect(streamingStateRef.current.endAllToolStreams).toHaveBeenCalled();
+  });
+
+  it('propagates tool-start command to subsequent tool-stream chunk', () => {
+    const harness = createMessageStateHarness();
+    const streamingStateRef = makeFullStreamingRef();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef,
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
     });
 
     handler({
@@ -440,15 +464,196 @@ describe('createChatSubscriptionEventHandler', () => {
       worldId: 'world-1',
       chatId: 'chat-1',
       tool: {
-        eventType: 'tool-result',
+        eventType: 'tool-start',
         toolUseId: 'tool-1',
-        result: 'done'
+        toolName: 'shell_cmd',
+        toolInput: { command: 'ls -la' }
       }
     });
 
-    expect(streamingStateRef.current.handleStart).toHaveBeenCalledWith('m-1', 'assistant-1');
-    expect(activityStateRef.current.handleToolStart).toHaveBeenCalledWith('tool-1', 'read_file', { path: '/tmp' });
-    expect(activityStateRef.current.handleToolResult).toHaveBeenCalledWith('tool-1', 'done');
+    handler({
+      type: 'sse',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      sse: {
+        eventType: 'tool-stream',
+        messageId: 'tool-1',
+        content: 'file.txt\n',
+        stream: 'stderr',
+        toolName: 'shell_cmd',
+        agentName: 'assistant-1',
+        chatId: 'chat-1'
+      }
+    });
+
+    expect(streamingStateRef.current.handleToolStreamStart).toHaveBeenCalledWith(
+      'tool-1', 'assistant-1', 'stderr', 'shell_cmd', 'ls -la'
+    );
+    expect(streamingStateRef.current.handleToolStreamChunk).toHaveBeenCalledWith(
+      'tool-1', 'file.txt\n', 'stderr', 'shell_cmd', 'ls -la'
+    );
+  });
+
+  it('normalizes shell stdout start/chunk/end SSE events to tool-stream handlers', () => {
+    const harness = createMessageStateHarness();
+    const streamingStateRef = makeFullStreamingRef();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef,
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
+    });
+
+    handler({
+      type: 'tool',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      tool: {
+        eventType: 'tool-start',
+        toolUseId: 'tool-1',
+        toolName: 'shell_cmd',
+        toolInput: { command: 'npm test' }
+      }
+    });
+
+    handler({
+      type: 'sse',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      sse: {
+        eventType: 'start',
+        messageId: 'tool-1-stdout',
+        toolName: 'shell_cmd',
+        agentName: 'assistant-1',
+        chatId: 'chat-1'
+      }
+    });
+
+    handler({
+      type: 'sse',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      sse: {
+        eventType: 'chunk',
+        messageId: 'tool-1-stdout',
+        toolName: 'shell_cmd',
+        content: 'ok\n',
+        agentName: 'assistant-1',
+        chatId: 'chat-1'
+      }
+    });
+
+    handler({
+      type: 'sse',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      sse: {
+        eventType: 'end',
+        messageId: 'tool-1-stdout',
+        toolName: 'shell_cmd',
+        agentName: 'assistant-1',
+        chatId: 'chat-1'
+      }
+    });
+
+    expect(streamingStateRef.current.handleStart).not.toHaveBeenCalledWith('tool-1-stdout', expect.any(String));
+    expect(streamingStateRef.current.handleChunk).not.toHaveBeenCalledWith('tool-1-stdout', expect.any(String));
+    expect(streamingStateRef.current.handleEnd).not.toHaveBeenCalledWith('tool-1-stdout');
+
+    expect(streamingStateRef.current.handleToolStreamStart).toHaveBeenCalledWith(
+      'tool-1-stdout',
+      'assistant-1',
+      'stdout',
+      'shell_cmd',
+      'npm test'
+    );
+    expect(streamingStateRef.current.handleToolStreamChunk).toHaveBeenCalledWith(
+      'tool-1-stdout',
+      'ok\n',
+      'stdout',
+      'shell_cmd',
+      'npm test'
+    );
+    expect(streamingStateRef.current.handleToolStreamEnd).toHaveBeenCalledWith('tool-1-stdout');
+  });
+
+  it('stamps tool-stream rows with selected chatId during live streaming', () => {
+    const harness = createMessageStateHarness([{
+      messageId: 'tool-1',
+      role: 'tool',
+      sender: 'shell_cmd',
+      content: '',
+      isToolStreaming: true,
+    }]);
+
+    const streamingStateRef = makeFullStreamingRef();
+    (streamingStateRef.current.isActive as ReturnType<typeof vi.fn>).mockReturnValue(true);
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef,
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
+    });
+
+    handler({
+      type: 'sse',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      sse: {
+        eventType: 'tool-stream',
+        messageId: 'tool-1',
+        content: 'ok\n',
+        stream: 'stderr',
+        toolName: 'shell_cmd',
+        agentName: 'assistant-1',
+        chatId: 'chat-1'
+      }
+    });
+
+    const msgs = harness.getMessages() as Record<string, unknown>[];
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].chatId).toBe('chat-1');
+  });
+
+  it('backfills tool-start command onto pre-existing tool-stream row', () => {
+    const harness = createMessageStateHarness([{
+      messageId: 'tool-1',
+      role: 'tool',
+      sender: 'shell_cmd',
+      content: 'partial output',
+      isToolStreaming: true
+    }]);
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
+    });
+
+    handler({
+      type: 'tool',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      tool: {
+        eventType: 'tool-start',
+        toolUseId: 'tool-1',
+        toolName: 'shell_cmd',
+        toolInput: { command: 'grep -r pattern' }
+      }
+    });
+
+    const msgs = harness.getMessages() as Record<string, unknown>[];
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].command).toBe('grep -r pattern');
+    expect(msgs[0].toolName).toBe('shell_cmd');
   });
 
   it('calls handleEnd for unscoped SSE end events', () => {
@@ -460,7 +665,7 @@ describe('createChatSubscriptionEventHandler', () => {
       loadedWorldId: 'world-1',
       selectedSessionId: 'chat-1',
       streamingStateRef,
-      activityStateRef: { current: null },
+
       setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
     });
 
@@ -481,14 +686,12 @@ describe('createChatSubscriptionEventHandler', () => {
     const harness = createMessageStateHarness();
     const streamingStateRef = makeFullStreamingRef();
     (streamingStateRef.current.endAllToolStreams as ReturnType<typeof vi.fn>).mockReturnValue(['tool-1']);
-    const activityStateRef = makeFullActivityRef();
 
     const handler = createChatSubscriptionEventHandler({
       subscriptionId: 'sub-1',
       loadedWorldId: 'world-1',
       selectedSessionId: 'chat-1',
       streamingStateRef,
-      activityStateRef,
       setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
     });
 
@@ -505,20 +708,20 @@ describe('createChatSubscriptionEventHandler', () => {
     expect(streamingStateRef.current.handleEnd).not.toHaveBeenCalled();
   });
 
-  it('routes unscoped tool-result events to activity state', () => {
+  it('processes unscoped tool-result events without error', () => {
     const harness = createMessageStateHarness();
-    const activityStateRef = makeFullActivityRef();
+    const streamingStateRef = makeFullStreamingRef();
 
     const handler = createChatSubscriptionEventHandler({
       subscriptionId: 'sub-1',
       loadedWorldId: 'world-1',
       selectedSessionId: 'chat-1',
-      streamingStateRef: { current: null },
-      activityStateRef,
+      streamingStateRef,
       setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
     });
 
-    handler({
+    // tool-result with no chatId scoping — should be processed without throwing
+    expect(() => handler({
       type: 'tool',
       subscriptionId: 'sub-1',
       worldId: 'world-1',
@@ -527,9 +730,83 @@ describe('createChatSubscriptionEventHandler', () => {
         toolUseId: 'tool-1',
         result: 'done'
       }
+    })).not.toThrow();
+
+    expect(streamingStateRef.current.endAllToolStreams).toHaveBeenCalled();
+  });
+
+  it('upserts a live tool message for tool-result events', () => {
+    const harness = createMessageStateHarness();
+    const streamingStateRef = makeFullStreamingRef();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef,
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
     });
 
-    expect(activityStateRef.current.handleToolResult).toHaveBeenCalledWith('tool-1', 'done');
+    handler({
+      type: 'tool',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      tool: {
+        eventType: 'tool-result',
+        toolUseId: 'tool-r1',
+        toolName: 'read_file',
+        agentName: 'assistant-1',
+        result: { ok: true },
+        createdAt: '2026-02-24T00:00:00.000Z'
+      }
+    });
+
+    const messages = harness.getMessages() as Record<string, unknown>[];
+    expect(messages).toHaveLength(1);
+    expect(messages[0].messageId).toBe('tool-r1');
+    expect(messages[0].role).toBe('tool');
+    expect(messages[0].toolName).toBe('read_file');
+    expect(String(messages[0].content || '')).toContain('"ok": true');
+    expect(messages[0].chatId).toBe('chat-1');
+    expect(messages[0].isToolStreaming).toBe(false);
+  });
+
+  it('upserts a live tool message for tool-error events', () => {
+    const harness = createMessageStateHarness();
+    const streamingStateRef = makeFullStreamingRef();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef,
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
+    });
+
+    handler({
+      type: 'tool',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      tool: {
+        eventType: 'tool-error',
+        toolUseId: 'tool-e1',
+        toolName: 'read_file',
+        agentName: 'assistant-1',
+        error: 'File not found',
+        createdAt: '2026-02-24T00:00:00.000Z'
+      }
+    });
+
+    const messages = harness.getMessages() as Record<string, unknown>[];
+    expect(messages).toHaveLength(1);
+    expect(messages[0].messageId).toBe('tool-e1');
+    expect(messages[0].role).toBe('tool');
+    expect(messages[0].toolName).toBe('read_file');
+    expect(messages[0].content).toBe('File not found');
+    expect(messages[0].chatId).toBe('chat-1');
+    expect(messages[0].streamType).toBe('stderr');
   });
 
   it('forwards system events to session system callback', () => {
@@ -541,7 +818,7 @@ describe('createChatSubscriptionEventHandler', () => {
       loadedWorldId: 'world-1',
       selectedSessionId: 'chat-1',
       streamingStateRef: { current: null },
-      activityStateRef: { current: null },
+
       setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
       onSessionSystemEvent
     });
@@ -585,7 +862,7 @@ describe('createChatSubscriptionEventHandler', () => {
       loadedWorldId: 'world-1',
       selectedSessionId: 'chat-1',
       streamingStateRef: { current: null },
-      activityStateRef: { current: null },
+
       setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
       onSessionSystemEvent
     });
@@ -612,7 +889,7 @@ describe('createChatSubscriptionEventHandler', () => {
       loadedWorldId: 'world-1',
       selectedSessionId: 'chat-1',
       streamingStateRef: { current: null },
-      activityStateRef: { current: null },
+
       setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
       onSessionSystemEvent
     });
@@ -630,7 +907,7 @@ describe('createChatSubscriptionEventHandler', () => {
     expect(onSessionSystemEvent).not.toHaveBeenCalled();
   });
 
-  it('forwards hitl-option-request system events even when chatId differs', () => {
+  it('ignores system events when chatId differs', () => {
     const harness = createMessageStateHarness();
     const onSessionSystemEvent = vi.fn();
 
@@ -639,7 +916,7 @@ describe('createChatSubscriptionEventHandler', () => {
       loadedWorldId: 'world-1',
       selectedSessionId: 'chat-1',
       streamingStateRef: { current: null },
-      activityStateRef: { current: null },
+
       setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
       onSessionSystemEvent
     });
@@ -650,21 +927,44 @@ describe('createChatSubscriptionEventHandler', () => {
       worldId: 'world-1',
       chatId: 'chat-2',
       system: {
-        eventType: 'hitl-option-request',
+        eventType: 'chat-title-updated',
         messageId: 'sys-hitl',
         content: {
-          eventType: 'hitl-option-request',
-          requestId: 'req-1',
-          title: 'Approval required',
-          options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }]
+          eventType: 'chat-title-updated',
         }
       }
     });
 
-    expect(onSessionSystemEvent).toHaveBeenCalledWith(expect.objectContaining({
-      eventType: 'hitl-option-request',
-      chatId: 'chat-2',
-      messageId: 'sys-hitl'
-    }));
+    expect(onSessionSystemEvent).not.toHaveBeenCalled();
+  });
+
+  it('ignores unscoped system events when a session is selected', () => {
+    const harness = createMessageStateHarness();
+    const onSessionSystemEvent = vi.fn();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
+      onSessionSystemEvent
+    });
+
+    handler({
+      type: 'system',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      system: {
+        eventType: 'chat-title-updated',
+        messageId: 'sys-hitl-unscoped',
+        content: {
+          eventType: 'chat-title-updated',
+        }
+      }
+    });
+
+    expect(onSessionSystemEvent).not.toHaveBeenCalled();
   });
 });

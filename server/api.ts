@@ -5,6 +5,8 @@
  * Supports world/agent/chat management with optimized serialization and error handling.
  *
  * Changes:
+ * - 2026-02-27: Hardened non-streaming `/messages` event collection with chat-scoped filtering to prevent cross-chat response contamination.
+ * - 2026-02-24: Added `hitlPrompts` payload to `POST /worlds/:worldName/setChat/:chatId` responses so web chat switches can render replayed pending HITL prompts.
  * - 2026-02-21: Removed temporary server-side folder-picker endpoint in favor of web File API based selection.
  * - 2026-02-20: Enforced options-only HITL response endpoint `POST /worlds/:worldName/hitl/respond` (`optionId` required).
  * - 2026-02-14: Added HITL option response endpoint `POST /worlds/:worldName/hitl/respond` for web/CLI approval submissions.
@@ -68,6 +70,7 @@ import {
   deleteAgent,
   listChats,
   newChat,
+  activateChatWithSnapshot,
   restoreChat,
   deleteChat as deleteChatCore,
   clearAgentMemory,
@@ -640,6 +643,20 @@ async function handleNonStreamingChat(
   disableStreaming();
   let subscription: any = null;
   let listeners: Map<string, (...args: any[]) => void> = new Map();
+  const normalizedChatId = typeof chatId === 'string' ? chatId.trim() : '';
+  const scopedChatId = normalizedChatId.length > 0 ? normalizedChatId : null;
+  const isChatEventInScope = (
+    eventChatId: unknown,
+    includeUnscopedWhenScoped: boolean = false
+  ): boolean => {
+    if (!scopedChatId) {
+      return true;
+    }
+    if (eventChatId === undefined || eventChatId === null) {
+      return includeUnscopedWhenScoped;
+    }
+    return String(eventChatId).trim() === scopedChatId;
+  };
 
   try {
     let responseContent = '';
@@ -685,6 +702,9 @@ async function handleNonStreamingChat(
 
         // Listen to world activity events to detect when all processing is complete
         const worldActivityListener = (eventData: WorldActivityEventPayload) => {
+          if (!isChatEventInScope((eventData as any)?.chatId, true)) {
+            return;
+          }
           if (eventData.type === 'response-start') {
             awaitingIdle = true;
             loggerChat.debug('Non-streaming: world processing started', {
@@ -703,6 +723,9 @@ async function handleNonStreamingChat(
 
         // Collect message events for response
         const messageListener = (eventData: any) => {
+          if (!isChatEventInScope(eventData?.chatId, false)) {
+            return;
+          }
           responseContent = JSON.stringify({ type: 'message', data: eventData });
         };
 
@@ -716,6 +739,9 @@ async function handleNonStreamingChat(
 
         // Listen to SSE events to extend timeout on shell stream activity.
         const sseListener = (eventData: any) => {
+          if (!isChatEventInScope(eventData?.chatId, false)) {
+            return;
+          }
           const isLegacyToolStream = eventData.type === 'tool-stream';
           const isShellAssistantStream = eventData.toolName === 'shell_cmd' &&
             (eventData.type === 'start' || eventData.type === 'chunk' || eventData.type === 'end');
@@ -1199,19 +1225,24 @@ router.post('/worlds/:worldName/setChat/:chatId', validateWorld, async (req: Req
       return;
     }
 
-    const updatedWorld = await worldCtx.setChat(chatId);
-    if (!updatedWorld) {
+    const activated = await activateChatWithSnapshot(worldCtx.id, chatId);
+    if (!activated) {
       res.json({
         world: serializeWorld(currentWorld),
         chatId: currentWorld.currentChatId,
+        hitlPrompts: [],
         success: false
       });
       return;
     }
 
+    const updatedWorld = activated.world;
+    const pendingHitlPrompts = activated.hitlPrompts;
+
     res.json({
       world: serializeWorld(updatedWorld),
-      chatId: updatedWorld.currentChatId,
+      chatId: activated.chatId,
+      hitlPrompts: pendingHitlPrompts,
       success: true
     });
   } catch (error) {

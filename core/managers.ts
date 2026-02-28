@@ -25,6 +25,12 @@
  * - Error log persistence with 100-entry retention policy
  *
  * Recent Changes:
+ * - 2026-02-26: Consolidated `restoreChat` and restore auto-resume tracing under categorized core loggers (`chat.restore`, `chat.restore.resume`) with structured metadata (removed direct `console.log` traces).
+ * - 2026-02-25: Added comprehensive restore/resume trace logging in `restoreChat` to verify chat-switch ordering, memory sync completion, and auto-resume trigger timing.
+ * - 2026-02-25: `restoreChat` now refreshes runtime agent memory from storage before auto-resume checks so loaded-chat pending tool calls can resume reliably.
+ * - 2026-02-25: Added last-message auto-resume during `restoreChat` so pending user-last messages are auto-submitted and pending assistant tool-call-last messages auto-resume tool execution.
+ * - 2026-02-25: Added non-blocking pending tool-call resume trigger during `restoreChat` so unresolved persisted tool calls continue after chat load/switch.
+ * - 2026-02-24: Replays unresolved HITL prompts during `restoreChat` so blocked requests become visible again on chat load.
  * - 2026-02-20: Added `claimAgentCreationSlot` to allow `create_agent` tool to hold the TOCTOU slot before showing approval dialog, preventing duplicate-approval race conditions.
  * - 2026-02-20: Added `createAgent` option `allowWhileWorldProcessing` so approval-gated in-flight tool calls can create agents without disabling default processing guards.
  * - 2026-02-16: Added `branchChatFromMessage` to create a new chat branched from an assistant message and copy source-chat history up to the target message.
@@ -68,7 +74,8 @@
  *   - logEditError/getEditErrors: Error persistence in edit-errors.json
  *
  * Note: Export functionality has been moved to core/export.ts
- */// Core module imports
+ */
+// Core module imports
 import { createCategoryLogger, initializeLogger } from './logger.js';
 import { EventEmitter } from 'events';
 import { type StorageAPI, createStorageWithWrappers } from './storage/storage-factory.js'
@@ -80,6 +87,8 @@ import { getWorldDir } from './storage/world-storage.js';
 import { getDefaultRootPath } from './storage/storage-factory.js';
 import { NEW_CHAT_TITLE, isDefaultChatTitle } from './chat-constants.js';
 import { hasActiveChatMessageProcessing, stopMessageProcessing } from './message-processing-control.js';
+import { replayPendingHitlRequests, listPendingHitlPromptEvents, listPendingHitlPromptEventsFromMessages } from './hitl.js';
+import { resumePendingToolCallsForChat } from './events/memory-manager.js';
 
 // Type imports
 import type {
@@ -89,6 +98,8 @@ import type {
 
 // Initialize logger and storage
 const logger = createCategoryLogger('core.managers');
+const loggerRestore = createCategoryLogger('chat.restore');
+const loggerRestoreResume = createCategoryLogger('chat.restore.resume');
 let storageWrappers: StorageAPI | null = null;
 let moduleInitialization: Promise<void> | null = null;
 
@@ -113,12 +124,196 @@ function ensureInitialization(): Promise<void> {
   return moduleInitialization;
 }
 const NEW_CHAT_CONFIG = { REUSABLE_CHAT_TITLE: NEW_CHAT_TITLE } as const;
+const inFlightToolResumeKeys = new Set<string>();
+const inFlightUserResumeKeys = new Set<string>();
 
 type CreateAgentOptions = {
   allowWhileWorldProcessing?: boolean;
   /** Set to true when the creation slot was already claimed via claimAgentCreationSlot(). */
   slotAlreadyClaimed?: boolean;
 };
+
+export type ChatActivationSnapshot = {
+  world: World;
+  chatId: string;
+  memory: AgentMessage[];
+  hitlPrompts: Array<{ chatId: string | null; prompt: Record<string, unknown> }>;
+};
+
+function triggerPendingToolCallResume(world: World, chatId: string, targetAssistantMessageId?: string): void {
+  if (!chatId) {
+    return;
+  }
+
+  if (hasActiveChatMessageProcessing(world.id, chatId)) {
+    return;
+  }
+
+  const resumeKey = `${world.id}:${chatId}`;
+  if (inFlightToolResumeKeys.has(resumeKey)) {
+    return;
+  }
+
+  inFlightToolResumeKeys.add(resumeKey);
+  void (async () => {
+    try {
+      const resumedCount = await resumePendingToolCallsForChat(world, chatId, targetAssistantMessageId);
+      loggerRestoreResume.debug('Attempted pending tool-call resume after chat restore', {
+        worldId: world.id,
+        chatId,
+        targetAssistantMessageId: targetAssistantMessageId || null,
+        resumedCount,
+      });
+      if (resumedCount > 0) {
+        loggerRestoreResume.debug('Resumed pending persisted tool calls after chat restore', {
+          worldId: world.id,
+          chatId,
+          targetAssistantMessageId,
+          resumedCount,
+        });
+      }
+    } catch (error) {
+      loggerRestoreResume.warn('Failed to resume pending persisted tool calls after chat restore', {
+        worldId: world.id,
+        chatId,
+        targetAssistantMessageId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      inFlightToolResumeKeys.delete(resumeKey);
+    }
+  })();
+}
+
+function hasPendingToolCallsOnLastAssistantMessage(lastMessage: AgentMessage, chatMemory: AgentMessage[]): boolean {
+  if (lastMessage.role !== 'assistant' || !Array.isArray(lastMessage.tool_calls) || lastMessage.tool_calls.length === 0) {
+    return false;
+  }
+
+  const completedToolCallIds = new Set<string>();
+  for (const message of chatMemory) {
+    if (message.role !== 'tool' || typeof message.tool_call_id !== 'string') {
+      continue;
+    }
+    const toolCallId = message.tool_call_id.trim();
+    if (toolCallId) {
+      completedToolCallIds.add(toolCallId);
+    }
+  }
+
+  for (const toolCall of lastMessage.tool_calls) {
+    const toolCallId = String((toolCall as any)?.id || '').trim();
+    if (!toolCallId) {
+      continue;
+    }
+    if (!completedToolCallIds.has(toolCallId)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function triggerPendingUserMessageResume(world: World, chatId: string, userMessage: AgentMessage): void {
+  if (!chatId || !userMessage.messageId) {
+    return;
+  }
+
+  if (hasActiveChatMessageProcessing(world.id, chatId)) {
+    return;
+  }
+
+  const content = typeof userMessage.content === 'string' ? userMessage.content.trim() : '';
+  if (!content) {
+    return;
+  }
+
+  const sender = typeof userMessage.sender === 'string' && userMessage.sender.trim()
+    ? userMessage.sender
+    : 'human';
+
+  const resumeKey = `${world.id}:${chatId}:${userMessage.messageId}`;
+  if (inFlightUserResumeKeys.has(resumeKey)) {
+    return;
+  }
+
+  inFlightUserResumeKeys.add(resumeKey);
+
+  void (async () => {
+    try {
+      const { publishMessageWithId } = await import('./events/index.js');
+      loggerRestoreResume.debug('Submitting pending user-last message after chat restore', {
+        worldId: world.id,
+        chatId,
+        messageId: userMessage.messageId,
+      });
+      publishMessageWithId(
+        world,
+        userMessage.content,
+        sender,
+        userMessage.messageId!,
+        chatId,
+        userMessage.replyToMessageId
+      );
+
+      loggerRestoreResume.debug('Auto-submitted pending user-last message after chat restore', {
+        worldId: world.id,
+        chatId,
+        messageId: userMessage.messageId,
+      });
+    } catch (error) {
+      loggerRestoreResume.warn('Failed to auto-submit pending user-last message after chat restore', {
+        worldId: world.id,
+        chatId,
+        messageId: userMessage.messageId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      inFlightUserResumeKeys.delete(resumeKey);
+    }
+  })();
+}
+
+function triggerPendingLastMessageResume(world: World, chatId: string): void {
+  if (!chatId) {
+    return;
+  }
+
+  void (async () => {
+    try {
+      const chatMemory = await storageWrappers!.getMemory(world.id, chatId);
+      if (!chatMemory || chatMemory.length === 0) {
+        return;
+      }
+
+      const lastMessage = chatMemory[chatMemory.length - 1];
+      if (lastMessage.role === 'user') {
+        loggerRestoreResume.debug('Detected pending user-last message during chat-restore inspection', {
+          worldId: world.id,
+          chatId,
+          messageId: lastMessage.messageId || null,
+        });
+        triggerPendingUserMessageResume(world, chatId, lastMessage);
+        return;
+      }
+
+      if (hasPendingToolCallsOnLastAssistantMessage(lastMessage, chatMemory)) {
+        loggerRestoreResume.debug('Detected pending tool-call-last message during chat-restore inspection', {
+          worldId: world.id,
+          chatId,
+          messageId: lastMessage.messageId || null,
+        });
+        triggerPendingToolCallResume(world, chatId, lastMessage.messageId);
+      }
+    } catch (error) {
+      loggerRestoreResume.warn('Failed to inspect last message for chat-restore auto-resume', {
+        worldId: world.id,
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  })();
+}
 
 // TOCTOU guard: prevents two concurrent createAgent calls from both passing the
 // `agentExists` check before either write lands. Maps worldId → Set<agentId>.
@@ -248,6 +443,7 @@ async function resetAutoGeneratedChatTitleForEditResubmission(
 
 async function syncRuntimeAgentMemoryFromStorage(world: World, worldId: string): Promise<void> {
   if (!world?.agents || world.agents.size === 0) return;
+  if (typeof (storageWrappers as any)?.loadAgent !== 'function') return;
 
   for (const runtimeAgent of world.agents.values()) {
     const persistedAgent = await storageWrappers!.loadAgent(worldId, runtimeAgent.id);
@@ -1116,13 +1312,44 @@ export async function deleteChat(worldId: string, chatId: string): Promise<boole
 export async function restoreChat(worldId: string, chatId: string): Promise<World | null> {
   await ensureInitialization();
   const resolvedWorldId = await getResolvedWorldId(worldId);
+  const restoreStartedAt = Date.now();
+
+  loggerRestore.debug('Restore chat started', {
+    worldId: resolvedWorldId,
+    requestedChatId: chatId,
+  });
 
   let world = await getWorld(resolvedWorldId);
   if (!world) {
+    loggerRestore.debug('Restore chat aborted: world missing', {
+      worldId: resolvedWorldId,
+      requestedChatId: chatId,
+    });
     return null;
   }
 
   if (world.currentChatId === chatId) {
+    loggerRestore.debug('Restore chat detected already-current chat', {
+      worldId: world.id,
+      chatId,
+      action: 'sync-memory+resume',
+    });
+    await syncRuntimeAgentMemoryFromStorage(world, resolvedWorldId);
+    loggerRestore.debug('Restore chat memory sync complete', {
+      worldId: world.id,
+      chatId,
+    });
+    replayPendingHitlRequests(world, chatId);
+    loggerRestore.debug('Restore chat pending HITL replay triggered', {
+      worldId: world.id,
+      chatId,
+    });
+    triggerPendingLastMessageResume(world, chatId);
+    loggerRestore.debug('Restore chat resume inspection triggered', {
+      worldId: world.id,
+      chatId,
+      elapsedMs: Date.now() - restoreStartedAt,
+    });
     return world;
   }
 
@@ -1132,13 +1359,88 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
     : !!(await storageWrappers!.loadChatData(resolvedWorldId, chatId));
 
   if (!persistedChatExists) {
+    loggerRestore.debug('Restore chat aborted: chat missing', {
+      worldId: resolvedWorldId,
+      requestedChatId: chatId,
+      runtimeChatExists,
+    });
     return null;
   }
 
+  loggerRestore.debug('Restore chat switching current chat', {
+    worldId: resolvedWorldId,
+    fromChatId: world.currentChatId || null,
+    toChatId: chatId,
+  });
   world = await updateWorld(resolvedWorldId, {
     currentChatId: chatId
   });
+  if (world) {
+    await syncRuntimeAgentMemoryFromStorage(world, resolvedWorldId);
+    loggerRestore.debug('Restore chat memory sync complete', {
+      worldId: world.id,
+      chatId,
+    });
+    replayPendingHitlRequests(world, chatId);
+    loggerRestore.debug('Restore chat pending HITL replay triggered', {
+      worldId: world.id,
+      chatId,
+    });
+    triggerPendingLastMessageResume(world, chatId);
+    loggerRestore.debug('Restore chat resume inspection triggered', {
+      worldId: world.id,
+      chatId,
+      elapsedMs: Date.now() - restoreStartedAt,
+    });
+  } else {
+    loggerRestore.warn('Restore chat update-world returned null', {
+      worldId: resolvedWorldId,
+      requestedChatId: chatId,
+      elapsedMs: Date.now() - restoreStartedAt,
+    });
+  }
+
+  loggerRestore.debug('Restore chat completed', {
+    worldId: resolvedWorldId,
+    requestedChatId: chatId,
+    restoredCurrentChatId: world?.currentChatId || null,
+    elapsedMs: Date.now() - restoreStartedAt,
+  });
   return world;
+}
+
+export async function activateChatWithSnapshot(worldId: string, chatId: string): Promise<ChatActivationSnapshot | null> {
+  const world = await restoreChat(worldId, chatId);
+  if (!world) {
+    return null;
+  }
+
+  const resolvedChatId = String(chatId || world.currentChatId || '').trim();
+  if (!resolvedChatId) {
+    return null;
+  }
+
+  const memory = await storageWrappers!.getMemory(world.id, resolvedChatId);
+  const safeMemory = Array.isArray(memory) ? memory : [];
+
+  const runtimePending = listPendingHitlPromptEvents(world, resolvedChatId);
+  const hitlPrompts = runtimePending.length > 0
+    ? runtimePending
+    : listPendingHitlPromptEventsFromMessages(safeMemory, resolvedChatId);
+
+  loggerRestore.debug('Activate chat snapshot assembled', {
+    worldId: world.id,
+    chatId: resolvedChatId,
+    memoryCount: safeMemory.length,
+    hitlPromptCount: hitlPrompts.length,
+  });
+
+  return {
+    world,
+    chatId: resolvedChatId,
+    memory: safeMemory,
+    hitlPrompts,
+  };
 }
 
 export async function getMemory(worldId: string, chatId?: string | null): Promise<AgentMessage[] | null> {

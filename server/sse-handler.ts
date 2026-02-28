@@ -29,8 +29,9 @@
  * ```
  *
  * Created: 2025-11-10 - Extracted from api.ts for reusability
+ * Updated: 2026-02-27 - Scoped realtime log forwarding by world/chat to prevent cross-chat log leakage in chat-scoped streams.
+ * Updated: 2026-02-26 - Added realtime log-stream forwarding (`type: 'log'`) to SSE clients to align web error visibility with Electron.
  * Updated: 2026-02-20 - Removed stale legacy event-channel SSE forwarding from this handler.
- * Updated: 2026-02-20 - Keep `hitl-option-request` system events bypassing strict chat scope filtering so HITL prompts are always delivered.
  * Updated: 2026-02-21 - Refresh fallback timeout on shell assistant-stream SSE activity (`start`/`chunk`/`end` + `toolName='shell_cmd'`) as well as legacy `tool-stream`.
  * Updated: 2026-02-11 - Extended fallback timeout on tool-stream events to prevent premature timeout
  * Updated: 2026-02-08 - Removed manual tool-intervention SSE commentary and kept generic tool_call forwarding
@@ -38,7 +39,14 @@
  */
 
 import { Request, Response } from 'express';
-import { createCategoryLogger, World, EventType } from '../core/index.js';
+import {
+  addLogStreamCallback,
+  createCategoryLogger,
+  World,
+  EventType,
+  getMemory,
+  listPendingHitlPromptEventsFromMessages
+} from '../core/index.js';
 
 const loggerStream = createCategoryLogger('api.stream');
 
@@ -80,6 +88,17 @@ interface WorldActivityPayload {
   timestamp?: string;
   source?: string;
   [key: string]: any;
+}
+
+interface LogStreamEventPayload {
+  level?: string;
+  category?: string;
+  message?: string;
+  timestamp?: string;
+  data?: any;
+  messageId?: string;
+  chatId?: string | null;
+  worldId?: string;
 }
 
 export interface SSEHandler {
@@ -200,21 +219,11 @@ export function createSSEHandler(
     return normalizedEventChatId === normalizedScopedChatId;
   };
 
-  const isHitlRequestEvent = (eventData: SystemEventPayload | undefined): boolean => {
-    if (!eventData) return false;
-    const content = eventData.content;
-    if (content && typeof content === 'object') {
-      const eventType = String((content as any).eventType || '').trim();
-      return eventType === 'hitl-option-request';
-    }
-    if (typeof content === 'string') {
-      const eventType = content.trim();
-      return eventType === 'hitl-option-request';
-    }
-    return false;
-  };
+  // Track already-sent ids to avoid double-emitting synthesized -> live events
+  const sentMessageIds = new Set<string>();
+  const sentToolCallIds = new Set<string>();
 
-  // Attach direct listeners to world.eventEmitter
+  // Attach direct listeners to world.eventEmitter (defined inside attach to allow synth-before-attach)
   const worldListener = (eventData: any) => {
     // Check if this is a tool event (tool-start, tool-result, tool-error, tool-progress)
     const isToolEvent = eventData?.type && ['tool-start', 'tool-result', 'tool-error', 'tool-progress'].includes(eventData.type);
@@ -273,8 +282,6 @@ export function createSSEHandler(
       sendSSE({ type: EventType.WORLD, data: eventData });
     }
   };
-  world.eventEmitter.on(EventType.WORLD, worldListener);
-  listeners.set(EventType.WORLD, worldListener);
 
   const messageListener = (eventData: MessageEventPayload) => {
     if (!isChatEventInScope(eventData?.chatId, false)) {
@@ -296,8 +303,6 @@ export function createSSEHandler(
     };
     sendSSE({ type: EventType.MESSAGE, data: messageData });
   };
-  world.eventEmitter.on(EventType.MESSAGE, messageListener);
-  listeners.set(EventType.MESSAGE, messageListener);
 
   const sseListener = (eventData: SSEEventPayload) => {
     if (!isChatEventInScope(eventData?.chatId, false)) {
@@ -312,18 +317,150 @@ export function createSSEHandler(
     }
     sendSSE({ type: EventType.SSE, data: eventData });
   };
-  world.eventEmitter.on(EventType.SSE, sseListener);
-  listeners.set(EventType.SSE, sseListener);
 
   const systemListener = (eventData: SystemEventPayload) => {
-    const isHitlRequest = isHitlRequestEvent(eventData);
-    if (!isHitlRequest && !isChatEventInScope(eventData?.chatId, true)) {
+    if (!isChatEventInScope(eventData?.chatId, true)) {
       return;
     }
     sendSSE({ type: EventType.SYSTEM, data: eventData });
   };
-  world.eventEmitter.on(EventType.SYSTEM, systemListener);
-  listeners.set(EventType.SYSTEM, systemListener);
+
+  // Mirror Electron's global log forwarding pattern:
+  // stream backend logger events as SSE `type: 'log'` payloads during the active request.
+  const logListener = (logEvent: LogStreamEventPayload) => {
+    const logData = logEvent?.data && typeof logEvent.data === 'object' ? logEvent.data : null;
+    const logWorldId =
+      (typeof logEvent?.worldId === 'string' && logEvent.worldId.trim()) ? logEvent.worldId.trim()
+        : (typeof (logData as any)?.worldId === 'string' && String((logData as any).worldId).trim())
+          ? String((logData as any).worldId).trim()
+          : undefined;
+    if (logWorldId && logWorldId !== world.id) {
+      return;
+    }
+
+    const logChatId =
+      (typeof logEvent?.chatId === 'string' && logEvent.chatId.trim()) ? logEvent.chatId.trim()
+        : (logEvent?.chatId === null ? null
+          : (typeof logData?.chatId === 'string' && logData.chatId.trim()) ? logData.chatId.trim()
+            : (logData?.chatId === null ? null : undefined));
+    if (!isChatEventInScope(logChatId, false)) {
+      return;
+    }
+
+    sendSSE({
+      type: EventType.SSE,
+      data: {
+        type: 'log',
+        chatId: logChatId,
+        messageId: logEvent?.messageId || `log-${Date.now()}`,
+        logEvent: {
+          level: logEvent?.level || 'info',
+          category: logEvent?.category || 'unknown',
+          message: logEvent?.message || '',
+          timestamp: logEvent?.timestamp || new Date().toISOString(),
+          data: logData ?? null,
+          messageId: logEvent?.messageId || `log-${Date.now()}`,
+          chatId: logChatId
+        }
+      }
+    });
+  };
+
+  let unsubscribeLogStream: (() => void) | null = null;
+
+  // NOTE: listeners are attached after an initial synthesis step below to avoid race
+  // where core resume emits events before the client has subscribed.
+  async function attachListeners() {
+    world.eventEmitter.on(EventType.WORLD, worldListener);
+    listeners.set(EventType.WORLD, worldListener);
+
+    world.eventEmitter.on(EventType.MESSAGE, messageListener);
+    listeners.set(EventType.MESSAGE, messageListener);
+
+    world.eventEmitter.on(EventType.SSE, sseListener);
+    listeners.set(EventType.SSE, sseListener);
+
+    world.eventEmitter.on(EventType.SYSTEM, systemListener);
+    listeners.set(EventType.SYSTEM, systemListener);
+
+    unsubscribeLogStream = addLogStreamCallback(logListener);
+  }
+
+  // Synthesis: use persisted memory as the source of truth to restore UI state
+  (async () => {
+    try {
+      // Try to read canonical chat memory using public core helper
+      const memory = await getMemory(world.id, normalizedScopedChatId as any || undefined);
+      if (Array.isArray(memory) && memory.length > 0) {
+        // Send the most recent user message if the last message is a user message
+        const lastMessage = memory[memory.length - 1];
+        if (lastMessage && lastMessage.messageId) {
+          // Mark as sent to avoid double-emitting when live listeners arrive
+          sentMessageIds.add(String(lastMessage.messageId));
+
+          if (lastMessage.role === 'user') {
+            const messageData = {
+              type: 'message',
+              sender: lastMessage.sender,
+              content: lastMessage.content,
+              messageId: lastMessage.messageId,
+              chatId: lastMessage.chatId,
+              replyToMessageId: lastMessage.replyToMessageId,
+              createdAt: lastMessage.createdAt || new Date().toISOString(),
+              role: lastMessage.role,
+              tool_calls: lastMessage.tool_calls
+            };
+            sendSSE({ type: EventType.MESSAGE, data: messageData });
+          } else if (lastMessage.role === 'assistant' && Array.isArray(lastMessage.tool_calls) && lastMessage.tool_calls.length > 0) {
+            // Detect unresolved tool calls by scanning persisted memory for completed tool messages
+            const completedToolCallIds = new Set<string>();
+            for (const m of memory) {
+              if (m.role === 'tool' && typeof m.tool_call_id === 'string') {
+                completedToolCallIds.add(String(m.tool_call_id));
+              }
+            }
+
+            for (const tc of lastMessage.tool_calls) {
+              const toolCallId = String((tc as any)?.id || '').trim();
+              const toolName = String((tc as any)?.function?.name || '').trim();
+              if (!toolCallId || completedToolCallIds.has(toolCallId)) continue;
+              // Synthesize a tool-start event so the UI can show pending work / HITL
+              sentToolCallIds.add(toolCallId);
+              sendSSE({
+                type: EventType.SSE,
+                data: {
+                  type: 'tool-start',
+                  messageId: toolCallId,
+                  agentName: lastMessage.agentId || undefined,
+                  chatId: lastMessage.chatId,
+                  toolExecution: {
+                    toolName,
+                    toolCallId,
+                    input: (tc as any)?.function?.arguments || {}
+                  }
+                }
+              });
+            }
+          }
+
+          // Also synthesize any pending HITL prompts derived from memory
+          try {
+            const pendingHitl = listPendingHitlPromptEventsFromMessages(memory || [], normalizedScopedChatId === undefined ? null : normalizedScopedChatId as any);
+            for (const h of pendingHitl) {
+              sendSSE({ type: EventType.SYSTEM, data: h });
+            }
+          } catch (hitlErr) {
+            loggerStream.debug(`[${context}] failed to synthesize HITL prompts:`, hitlErr);
+          }
+        }
+      }
+    } catch (error) {
+      loggerStream.debug(`[${context}] failed to synthesize persisted state:`, error);
+    } finally {
+      // Attach live listeners after synthesis to avoid race where resume emits before client subscribed
+      attachListeners();
+    }
+  })();
 
   // Cleanup function to remove all listeners
   const cleanupListeners = () => {
@@ -331,6 +468,10 @@ export function createSSEHandler(
       world.eventEmitter.removeListener(eventType, listener);
     }
     listeners.clear();
+    if (unsubscribeLogStream) {
+      unsubscribeLogStream();
+      unsubscribeLogStream = null;
+    }
   };
 
   // Handle client disconnect

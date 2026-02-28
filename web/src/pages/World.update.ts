@@ -44,6 +44,10 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2026-02-27: Enforced active-chat scoping for system-event ingestion (drop unscoped/mismatched system events when a chat is selected).
+ * - 2026-02-26: Preserved transient realtime log/system/error messages across same-chat refreshes (`chat-title-updated`, `agent-created`, HITL refresh) so SSE errors remain visible after metadata reload.
+ * - 2026-02-25: Added frontend resume/load trace logging in `initWorld` for chat switch ordering, persisted-memory hydration counts, and HITL replay source verification.
+ * - 2026-02-24: Reconstructed unresolved HITL prompts from persisted raw tool-call request/response pairs during init/chat switch (no event replay dependency).
  * - 2026-02-21: Prevented tool output expand/collapse actions from consuming pending auto-scroll state and jumping to transcript bottom.
  * - 2026-02-21: Switched project-folder selection to browser File API flow and preserved UI-enriched world agent fields after updates.
  * - 2026-02-21: Added `select-project-folder` handler to persist `working_directory` from composer Project button selection.
@@ -265,6 +269,61 @@ const deduplicateMessages = (messages: Message[], agents: Agent[] = []): Message
     });
 };
 
+function isTransientRealtimeMessage(message: Message): boolean {
+  return Boolean(
+    message?.logEvent ||
+    message?.worldEvent ||
+    message?.hasError ||
+    message?.type === 'error' ||
+    message?.type === 'log' ||
+    message?.type === 'system'
+  );
+}
+
+function preserveTransientMessagesAcrossRefresh(
+  existingMessages: Message[],
+  refreshedMessages: Message[],
+  activeChatId: string | null
+): Message[] {
+  if (!Array.isArray(existingMessages) || existingMessages.length === 0) {
+    return refreshedMessages;
+  }
+
+  const nextMessages = Array.isArray(refreshedMessages) ? [...refreshedMessages] : [];
+  const existingIds = new Set(
+    nextMessages
+      .map((message) => (typeof message?.id === 'string' ? message.id : ''))
+      .filter(Boolean)
+  );
+
+  const transients = existingMessages.filter((message) => {
+    if (!isTransientRealtimeMessage(message)) {
+      return false;
+    }
+
+    const messageChatId = message.chatId ?? null;
+    if (!activeChatId) {
+      return true;
+    }
+    if (messageChatId === null) {
+      return true;
+    }
+    return messageChatId === activeChatId;
+  });
+
+  for (const transient of transients) {
+    if (transient?.id && existingIds.has(transient.id)) {
+      continue;
+    }
+    nextMessages.push(transient);
+    if (transient?.id) {
+      existingIds.add(transient.id);
+    }
+  }
+
+  return nextMessages;
+}
+
 function mergeUpdatedWorldWithUiState(
   currentWorld: WorldComponentState['world'],
   updatedWorld: WorldComponentState['world']
@@ -407,6 +466,32 @@ const handleToolStart = (state: WorldComponentState, data: any): WorldComponentS
 };
 
 const handleToolProgress = (state: WorldComponentState, data: any): WorldComponentState => {
+  const hitlPrompt = HitlDomain.parseHitlPromptFromToolEvent(data);
+  if (hitlPrompt) {
+    let pausedState = state;
+    if (pausedState.debounceFrameId !== null) {
+      cancelAnimationFrame(pausedState.debounceFrameId);
+    }
+    pausedState = {
+      ...pausedState,
+      isWaiting: false,
+      isBusy: false,
+      activeTools: [],
+      pendingStreamUpdates: new Map(),
+      debounceFrameId: null
+    };
+    if (pausedState.elapsedIntervalId !== null) {
+      pausedState = stopElapsedTimer(pausedState);
+    }
+
+    const currentQueue = pausedState.hitlPromptQueue || [];
+    const nextQueue = HitlDomain.enqueueHitlPrompt(currentQueue, hitlPrompt);
+    return {
+      ...pausedState,
+      hitlPromptQueue: nextQueue,
+    };
+  }
+
   // Tool events are informational - don't control spinner
   // Spinner is controlled by world events (pending count)
   return handleToolProgressBase(state, data);
@@ -517,22 +602,47 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
     return;
   }
   try {
+    const initStartedAt = Date.now();
     const worldName = decodeURIComponent(name);
+    console.log(`[web:initWorld] start world=${worldName} requestedChat=${chatId || 'n/a'}`);
 
     // Default selectedSettingsTarget to 'world' on init (no persistence)
     state.selectedSettingsTarget = 'world';
     state.worldName = worldName;
     state.loading = true;
 
-    const world = await api.getWorld(worldName);
+    let world = await api.getWorld(worldName);
+    console.log(`[web:initWorld] getWorld loaded world=${worldName} backendCurrentChat=${world.currentChatId || 'n/a'} chats=${Array.isArray(world.chats) ? world.chats.length : 0}`);
     if (!world) {
       throw new Error('World not found: ' + worldName);
     }
 
     chatId = resolveActiveChatId(world, chatId) || undefined;
 
+    let replayedHitlQueue = state.hitlPromptQueue || [];
     if (world.currentChatId !== chatId && chatId) {
-      await api.setChat(worldName, chatId);
+      console.log(`[web:initWorld] setChat begin world=${worldName} from=${world.currentChatId || 'n/a'} to=${chatId}`);
+      const setChatResult = await api.setChat(worldName, chatId);
+      if (setChatResult?.world) {
+        world = setChatResult.world;
+        console.log(`[web:initWorld] setChat world-updated world=${worldName} backendCurrentChat=${world.currentChatId || 'n/a'}`);
+      }
+
+      const replayedFromBackend = Array.isArray(setChatResult?.hitlPrompts)
+        ? setChatResult.hitlPrompts
+          .map((entry) => {
+            const envelope = entry && typeof entry === 'object'
+              ? { chatId: entry.chatId ?? chatId ?? null, prompt: entry.prompt }
+              : null;
+            return envelope ? HitlDomain.parseHitlPromptRequest(envelope) : null;
+          })
+          .filter((prompt): prompt is NonNullable<typeof prompt> => Boolean(prompt))
+        : [];
+
+      if (replayedFromBackend.length > 0) {
+        replayedHitlQueue = replayedFromBackend;
+        console.log(`[web:initWorld] setChat hitl-prompts-from-backend count=${replayedFromBackend.length}`);
+      }
     }
 
     let rawMessages: any[] = [];
@@ -553,6 +663,11 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
     // Apply deduplication to loaded messages (same as SSE streaming path)
     // Pass agents array so user messages get correct seenByAgents
     const messages = deduplicateMessages([...rawMessages], agents);
+    if (!Array.isArray(replayedHitlQueue) || replayedHitlQueue.length === 0) {
+      replayedHitlQueue = HitlDomain.reconstructPendingHitlPromptsFromMessages(messages as unknown as Array<Record<string, unknown>>, chatId || null);
+      console.log(`[web:initWorld] hitl-prompts-reconstructed-from-messages count=${replayedHitlQueue.length}`);
+    }
+    console.log(`[web:initWorld] memory-hydrated world=${worldName} chat=${chatId || world.currentChatId || 'n/a'} rawMessages=${rawMessages.length} dedupMessages=${messages.length} elapsedMs=${Date.now() - initStartedAt}`);
     const selectedProjectPath = getEnvValueFromText(world.variables, 'working_directory');
 
     yield {
@@ -562,12 +677,14 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       selectedProjectPath,
       messages,
       rawMessages,
+      hitlPromptQueue: replayedHitlQueue,
       loading: false,
       needScroll: true,
       lastUserMessageText: null,
     };
 
   } catch (error: any) {
+    console.log(`[web:initWorld] error message=${error?.message || String(error)} requestedChat=${chatId || 'n/a'}`);
     yield {
       ...state,
       error: error.message || 'Failed to load world data',
@@ -585,6 +702,23 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
   const contentPayload = envelope && 'content' in envelope ? envelope.content : data;
   const structuredPayload =
     contentPayload && typeof contentPayload === 'object' ? contentPayload : null;
+  const activeChatId = state.currentChat?.id || state.world?.currentChatId || null;
+  const scopedSystemChatIdRaw =
+    structuredPayload && 'chatId' in structuredPayload
+      ? (structuredPayload as Record<string, unknown>).chatId
+      : envelope && 'chatId' in envelope
+        ? envelope.chatId
+        : undefined;
+  const scopedSystemChatId =
+    typeof scopedSystemChatIdRaw === 'string'
+      ? scopedSystemChatIdRaw.trim() || null
+      : scopedSystemChatIdRaw === null
+        ? null
+        : undefined;
+  if (activeChatId && (!scopedSystemChatId || scopedSystemChatId !== activeChatId)) {
+    return state;
+  }
+
   const eventType =
     (structuredPayload && typeof structuredPayload.eventType === 'string' && structuredPayload.eventType) ||
     (typeof contentPayload === 'string' ? contentPayload : null) ||
@@ -624,7 +758,16 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
     const activeChatId = newState.currentChat?.id || newState.world?.currentChatId || undefined;
     const updates = initWorld(newState, newState.worldName, activeChatId);
     for await (const update of updates) {
-      return { ...newState, ...update };
+      const mergedMessages = preserveTransientMessagesAcrossRefresh(
+        newState.messages || [],
+        (update as any).messages || [],
+        activeChatId || null
+      );
+      return {
+        ...newState,
+        ...update,
+        messages: mergedMessages
+      };
     }
   }
 
@@ -633,18 +776,17 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
     const activeChatId = newState.currentChat?.id || newState.world?.currentChatId || undefined;
     const updates = initWorld(newState, newState.worldName, activeChatId);
     for await (const update of updates) {
-      return { ...newState, ...update };
+      const mergedMessages = preserveTransientMessagesAcrossRefresh(
+        newState.messages || [],
+        (update as any).messages || [],
+        activeChatId || null
+      );
+      return {
+        ...newState,
+        ...update,
+        messages: mergedMessages
+      };
     }
-  }
-
-  const hitlPrompt = HitlDomain.parseHitlPromptRequest(data);
-  if (hitlPrompt) {
-    const currentQueue = newState.hitlPromptQueue || [];
-    const nextQueue = HitlDomain.enqueueHitlPrompt(currentQueue, hitlPrompt);
-    return {
-      ...newState,
-      hitlPromptQueue: nextQueue,
-    };
   }
 
   return newState;
@@ -1063,9 +1205,15 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         const activeChatId = state.currentChat?.id || state.world?.currentChatId || undefined;
         const updates = initWorld(state, state.worldName, activeChatId);
         for await (const update of updates) {
+          const mergedMessages = preserveTransientMessagesAcrossRefresh(
+            state.messages || [],
+            (update as any).messages || [],
+            activeChatId || null
+          );
           yield {
             ...state,
             ...update,
+            messages: mergedMessages,
             submittingHitlRequestId: null,
             hitlPromptQueue: HitlDomain.removeHitlPromptByRequestId((update.hitlPromptQueue || state.hitlPromptQueue || []), requestId)
           };
@@ -1444,10 +1592,6 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
 
       yield ChatHistoryDomain.createChatLoadingState(cleanState);
 
-      const result = await api.setChat(state.worldName, chatId);
-      if (!result.success) {
-        yield cleanState;
-      }
       const path = ChatHistoryDomain.buildChatRoutePath(state.worldName, chatId);
       app.route(path);
       history.pushState(null, '', path);

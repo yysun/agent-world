@@ -37,6 +37,8 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-27: Passed explicit `chatId` when publishing `tool-execution` system events so event routing never falls back to `world.currentChatId`.
+ * - 2026-02-27: Seeded continuation runs with already-loaded `load_skill` IDs from initial tool execution so immediate duplicate `load_skill` calls are suppressed in continuation.
  * - 2026-02-21: Passed `agentName` + minimal shell `llmResultMode` in initial tool-execution context so `shell_cmd` tool results stay status-only for LLM continuation and stdout assistant attribution remains consistent.
  * - 2026-02-16: Added `LOG_LLM_TOOL_BRIDGE` gate for LLM↔tool console bridge logs.
  * - 2026-02-16: Added explicit console debug logs for LLM↔tool request/result/error handoff payloads.
@@ -232,6 +234,25 @@ function sanitizeAndParseJSON(jsonString: string): Record<string, any> {
 
   // If all else fails, throw the original error with the sanitized string
   throw new Error(`Unable to parse or sanitize JSON. Original length: ${jsonString.length}, Sanitized length: ${sanitized.length}`);
+}
+
+function getSuccessfulLoadSkillIdForContinuationSeed(
+  toolName: string,
+  toolArgs: Record<string, any>,
+  serializedToolResult: string,
+): string | null {
+  if (toolName !== 'load_skill') {
+    return null;
+  }
+
+  const skillId = typeof toolArgs?.skill_id === 'string' ? toolArgs.skill_id.trim() : '';
+  if (!skillId) {
+    return null;
+  }
+
+  const normalizedResult = String(serializedToolResult || '');
+  const isSuccess = /<skill_context\b/i.test(normalizedResult) && !/<error>/i.test(normalizedResult);
+  return isSuccess ? skillId : null;
 }
 
 /**
@@ -810,7 +831,7 @@ export async function processAgentMessage(
             ...(toolArgs.parameters && { parameters: toolArgs.parameters }),
             ...(toolCall.function.name === 'shell_cmd' && { directory: trustedWorkingDirectory }),
             ...(toolCall.function.name !== 'shell_cmd' && toolArgs.directory && { directory: toolArgs.directory })
-          });
+          }, targetChatId);
           const serializedToolResult = typeof toolResult === 'string'
             ? toolResult
             : JSON.stringify(toolResult) ?? String(toolResult);
@@ -896,8 +917,14 @@ export async function processAgentMessage(
           // Pass explicit chatId for concurrency-safe continuation
           throwIfMessageProcessingStopped(processingHandle?.signal);
           const { continueLLMAfterToolExecution } = await import('./memory-manager.js');
+          const seededLoadSkillId = getSuccessfulLoadSkillIdForContinuationSeed(
+            toolCall.function.name,
+            toolArgs,
+            serializedToolResult,
+          );
           await continueLLMAfterToolExecution(world, agent, targetChatId, {
-            abortSignal: processingHandle?.signal
+            abortSignal: processingHandle?.signal,
+            ...(seededLoadSkillId ? { preloadedSkillIds: [seededLoadSkillId] } : {}),
           });
 
         } catch (error) {

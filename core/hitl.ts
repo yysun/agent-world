@@ -5,22 +5,28 @@
  * - Provide a world-scoped request/response flow for option-based HITL prompts.
  *
  * Key Features:
- * - Emits structured system events for option prompts (`hitl-option-request`).
+ * - Emits structured tool-progress events carrying HITL prompt payloads.
  * - Resolves pending requests when renderer/API submits an option response.
- * - Supports deterministic timeout fallback for option requests.
+ * - Exposes unresolved option prompts through a deterministic read model.
  * - Maintains pending request map for validation and lifecycle cleanup.
  *
  * Implementation Notes:
  * - Requests are keyed by `(worldId, requestId)` to avoid cross-world collisions.
- * - Timeout fallback defaults to `no` when available, otherwise first option.
+ * - Prompt read model is deterministic and scoped by `(worldId, chatId)`.
  * - Runtime is in-memory and process-local by design.
  *
  * Recent Changes:
+ * - 2026-02-26: Replaced direct `[hitl]` console traces with categorized structured logger events (`hitl`) for env-controlled filtering.
+ * - 2026-02-25: Added HITL runtime trace logs for request emission, replay, and resolution lifecycle diagnostics.
+ * - 2026-02-24: Removed HITL `system` event emission/replay and switched to tool-progress prompt payloads.
+ * - 2026-02-24: Added `listPendingHitlPromptEvents` to expose scoped pending HITL prompt payloads for web chat-switch replay.
+ * - 2026-02-24: Removed timeout auto-resolution and added deterministic replay helpers for unresolved HITL requests.
  * - 2026-02-20: Enforced global options-only HITL runtime by removing input-mode request/response paths.
  * - 2026-02-14: Added initial generic HITL option request/response runtime.
  */
 
-import { type World, type WorldSystemEvent } from './types.js';
+import { type AgentMessage, type World } from './types.js';
+import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
 
 export interface HitlOption {
@@ -62,14 +68,25 @@ interface PendingHitlOptionRequest {
   requestId: string;
   chatId: string | null;
   optionIds: Set<string>;
-  defaultOptionId: string;
+  sequence: number;
+  prompt: {
+    requestId: string;
+    title: string;
+    message: string;
+    options: HitlOption[];
+    defaultOptionId: string;
+    metadata: Record<string, unknown> | null;
+    agentName: string | null;
+    toolName: string;
+    toolCallId: string;
+  };
   metadata: Record<string, unknown> | null;
   resolve: (resolution: HitlResponseResolution) => void;
-  timeoutHandle: NodeJS.Timeout | null;
 }
 
-const DEFAULT_TIMEOUT_MS = 120_000;
 const pendingHitlRequests = new Map<string, PendingHitlOptionRequest>();
+let pendingRequestSequence = 0;
+const loggerHitl = createCategoryLogger('hitl');
 
 function getPendingKey(worldId: string, requestId: string): string {
   return `${worldId}::${requestId}`;
@@ -117,13 +134,6 @@ function normalizeWorldChatId(world: World, chatId: string | null | undefined): 
   return world.currentChatId ?? null;
 }
 
-function normalizeTimeoutMs(timeoutMs: unknown): number {
-  const timeoutMsRaw = Number(timeoutMs ?? DEFAULT_TIMEOUT_MS);
-  return Number.isFinite(timeoutMsRaw) && timeoutMsRaw > 0
-    ? Math.floor(timeoutMsRaw)
-    : DEFAULT_TIMEOUT_MS;
-}
-
 function resolvePendingRequest(params: {
   pendingKey: string;
   pending: PendingHitlOptionRequest;
@@ -131,10 +141,82 @@ function resolvePendingRequest(params: {
 }): void {
   const { pendingKey, pending, resolution } = params;
   pendingHitlRequests.delete(pendingKey);
-  if (pending.timeoutHandle) {
-    clearTimeout(pending.timeoutHandle);
-  }
   pending.resolve(resolution);
+}
+
+function normalizeChatId(chatId: string | null | undefined): string | null {
+  if (chatId === undefined || chatId === null) {
+    return null;
+  }
+  const normalized = String(chatId).trim();
+  return normalized || null;
+}
+
+function resolveHitlAgentName(world: World, requestedAgentName: string | null | undefined): string | null {
+  const explicit = String(requestedAgentName || '').trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  const worldMainAgent = String(world?.mainAgent || '').trim();
+  if (worldMainAgent) {
+    return worldMainAgent;
+  }
+
+  return null;
+}
+
+function emitPendingRequest(world: World, pending: PendingHitlOptionRequest): void {
+  const metadata = pending.prompt.metadata || null;
+  const toolExecutionMetadata = {
+    ...(metadata && typeof metadata === 'object' ? metadata : {}),
+    hitlPrompt: {
+      requestId: pending.prompt.requestId,
+      title: pending.prompt.title,
+      message: pending.prompt.message,
+      options: pending.prompt.options,
+      defaultOptionId: pending.prompt.defaultOptionId,
+      metadata,
+      agentName: pending.prompt.agentName,
+      chatId: pending.chatId,
+    },
+  };
+
+  world.eventEmitter.emit('world', {
+    agentName: pending.prompt.agentName || 'system',
+    type: 'tool-progress',
+    messageId: pending.prompt.toolCallId,
+    chatId: pending.chatId,
+    toolExecution: {
+      toolName: pending.prompt.toolName,
+      toolCallId: pending.prompt.toolCallId,
+      metadata: toolExecutionMetadata,
+    },
+  });
+
+  loggerHitl.debug('HITL pending request emitted', {
+    worldId: world.id,
+    chatId: pending.chatId || null,
+    requestId: pending.prompt.requestId,
+    toolName: pending.prompt.toolName,
+    toolCallId: pending.prompt.toolCallId,
+  });
+}
+
+function getSortedPendingRequestsForScope(worldId: string, chatId?: string | null): PendingHitlOptionRequest[] {
+  const normalizedChatId = normalizeChatId(chatId);
+  const scoped = [...pendingHitlRequests.values()].filter((pending) => {
+    if (pending.worldId !== worldId) {
+      return false;
+    }
+    if (normalizedChatId === null) {
+      return true;
+    }
+    return pending.chatId === normalizedChatId;
+  });
+
+  scoped.sort((left, right) => left.sequence - right.sequence);
+  return scoped;
 }
 
 function validateResponseScope(
@@ -170,11 +252,36 @@ export async function requestWorldOption(
     throw new Error('Cannot request HITL option without a valid world ID.');
   }
 
-  const requestId = String(request.requestId || '').trim() || generateId();
+  const requestMetadata = request.metadata && typeof request.metadata === 'object'
+    ? request.metadata
+    : null;
+  const explicitRequestId = String(request.requestId || '').trim();
+  const requestedToolCallId = requestMetadata && typeof requestMetadata.toolCallId === 'string'
+    ? String(requestMetadata.toolCallId).trim()
+    : '';
+  if (explicitRequestId && requestedToolCallId && explicitRequestId !== requestedToolCallId) {
+    throw new Error(`HITL requestId '${explicitRequestId}' must match toolCallId '${requestedToolCallId}'.`);
+  }
+  const requestId = explicitRequestId || requestedToolCallId || generateId();
   const chatId = normalizeWorldChatId(world, request.chatId);
-  const timeoutMs = normalizeTimeoutMs(request.timeoutMs);
   const defaultOptionId = resolveDefaultOptionId(normalizedOptions, request.defaultOptionId);
   const pendingKey = getPendingKey(worldId, requestId);
+  const sequence = ++pendingRequestSequence;
+  const requestedToolName = requestMetadata && typeof requestMetadata.tool === 'string'
+    ? String(requestMetadata.tool).trim()
+    : '';
+
+  const prompt: PendingHitlOptionRequest['prompt'] = {
+    requestId,
+    title: String(request.title || '').trim(),
+    message: String(request.message || '').trim(),
+    options: normalizedOptions,
+    defaultOptionId,
+    metadata: requestMetadata,
+    agentName: resolveHitlAgentName(world, request.agentName),
+    toolName: requestedToolName || 'human_intervention_request',
+    toolCallId: requestedToolCallId || requestId,
+  };
 
   return await new Promise<HitlOptionResolution>((resolve) => {
     const pending: PendingHitlOptionRequest = {
@@ -182,9 +289,9 @@ export async function requestWorldOption(
       requestId,
       chatId,
       optionIds: new Set(normalizedOptions.map((option) => option.id)),
-      defaultOptionId,
-      metadata: request.metadata || null,
-      timeoutHandle: null,
+      sequence,
+      prompt,
+      metadata: requestMetadata,
       resolve: (resolution) => {
         resolve({
           requestId: resolution.requestId,
@@ -196,44 +303,173 @@ export async function requestWorldOption(
       },
     };
 
-    pending.timeoutHandle = setTimeout(() => {
-      const timeoutPending = pendingHitlRequests.get(pendingKey);
-      if (!timeoutPending) {
-        return;
+    pendingHitlRequests.set(pendingKey, pending);
+    loggerHitl.debug('HITL request queued', {
+      worldId,
+      chatId: chatId || null,
+      requestId,
+      optionCount: normalizedOptions.length,
+    });
+    emitPendingRequest(world, pending);
+  });
+}
+
+function parseToolCallArguments(raw: unknown): Record<string, unknown> | null {
+  if (typeof raw !== 'string' || !raw.trim()) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeOptionsFromToolArgs(args: Record<string, unknown>): Array<{ id: string; label: string }> {
+  const options = Array.isArray(args.options) ? args.options : [];
+  const normalized: Array<{ id: string; label: string }> = [];
+  const seen = new Set<string>();
+
+  for (let index = 0; index < options.length; index += 1) {
+    const label = String(options[index] || '').trim();
+    if (!label) {
+      continue;
+    }
+    const dedupeKey = label.toLowerCase();
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+    seen.add(dedupeKey);
+    normalized.push({
+      id: `opt_${normalized.length + 1}`,
+      label,
+    });
+  }
+
+  return normalized;
+}
+
+function resolveDefaultOptionFromToolArgs(
+  normalizedOptions: Array<{ id: string; label: string }>,
+  args: Record<string, unknown>,
+): string {
+  const defaultOptionLabel = String(args.defaultOption || '').trim().toLowerCase();
+  if (defaultOptionLabel) {
+    const explicit = normalizedOptions.find((option) => option.label.toLowerCase() === defaultOptionLabel);
+    if (explicit) {
+      return explicit.id;
+    }
+  }
+  return normalizedOptions.find((option) => option.id === 'no')?.id || normalizedOptions[0]?.id || 'opt_1';
+}
+
+export function listPendingHitlPromptEventsFromMessages(
+  messages: AgentMessage[],
+  chatId?: string | null,
+): Array<{ chatId: string | null; prompt: { requestId: string; title: string; message: string; options: Array<{ id: string; label: string }>; defaultOptionId: string; metadata: Record<string, unknown> | null; agentName: string | null; toolName: string; toolCallId: string } }> {
+  const allMessages = Array.isArray(messages) ? messages : [];
+  const resolvedToolCallIds = new Set<string>();
+
+  for (const message of allMessages) {
+    if (message?.role !== 'tool') {
+      continue;
+    }
+    const toolCallId = String(message?.tool_call_id || '').trim();
+    if (!toolCallId) {
+      continue;
+    }
+    resolvedToolCallIds.add(toolCallId);
+  }
+
+  const unresolvedById = new Map<string, { chatId: string | null; prompt: { requestId: string; title: string; message: string; options: Array<{ id: string; label: string }>; defaultOptionId: string; metadata: Record<string, unknown> | null; agentName: string | null; toolName: string; toolCallId: string } }>();
+
+  for (const message of allMessages) {
+    if (message?.role !== 'assistant' || !Array.isArray(message?.tool_calls)) {
+      continue;
+    }
+
+    for (const toolCall of message.tool_calls) {
+      const toolName = String(toolCall?.function?.name || '').trim();
+      const toolCallId = String(toolCall?.id || '').trim();
+      if (!toolCallId || toolName !== 'human_intervention_request') {
+        continue;
       }
-      resolvePendingRequest({
-        pendingKey,
-        pending: timeoutPending,
-        resolution: {
-          requestId,
-          worldId,
-          chatId,
-          optionId: timeoutPending.defaultOptionId,
-          source: 'timeout',
+      if (resolvedToolCallIds.has(toolCallId) || unresolvedById.has(toolCallId)) {
+        continue;
+      }
+
+      const args = parseToolCallArguments(toolCall?.function?.arguments);
+      if (!args) {
+        continue;
+      }
+
+      const options = normalizeOptionsFromToolArgs(args);
+      if (options.length === 0) {
+        continue;
+      }
+
+      const messageChatId = message?.chatId ? String(message.chatId) : null;
+      const normalizedChatId = messageChatId || (chatId ? String(chatId) : null);
+      const metadata = args.metadata && typeof args.metadata === 'object' && !Array.isArray(args.metadata)
+        ? (args.metadata as Record<string, unknown>)
+        : null;
+
+      unresolvedById.set(toolCallId, {
+        chatId: normalizedChatId,
+        prompt: {
+          requestId: toolCallId,
+          title: 'Human input required',
+          message: String(args.question || args.prompt || '').trim(),
+          options,
+          defaultOptionId: resolveDefaultOptionFromToolArgs(options, args),
+          metadata,
+          agentName: String(message?.sender || '').trim() || null,
+          toolName,
+          toolCallId,
         },
       });
-    }, timeoutMs);
+    }
+  }
 
-    pendingHitlRequests.set(pendingKey, pending);
+  return [...unresolvedById.values()];
+}
 
-    const event: WorldSystemEvent = {
-      messageId: generateId(),
-      timestamp: new Date(),
-      chatId,
-      content: {
-        eventType: 'hitl-option-request',
-        requestId,
-        title: String(request.title || '').trim(),
-        message: String(request.message || '').trim(),
-        options: normalizedOptions,
-        defaultOptionId,
-        timeoutMs,
-        metadata: request.metadata || null,
-        agentName: request.agentName || null,
-      },
-    };
-    world.eventEmitter.emit('system', event);
+export function replayPendingHitlRequests(world: World, chatId?: string | null): number {
+  const worldId = String(world?.id || '').trim();
+  if (!worldId) {
+    return 0;
+  }
+
+  const pendingForScope = getSortedPendingRequestsForScope(worldId, chatId);
+  loggerHitl.debug('HITL pending requests replayed', {
+    worldId,
+    chatId: chatId || null,
+    count: pendingForScope.length,
   });
+  for (const pending of pendingForScope) {
+    emitPendingRequest(world, pending);
+  }
+  return pendingForScope.length;
+}
+
+export function listPendingHitlPromptEvents(
+  world: World,
+  chatId?: string | null,
+): Array<{ chatId: string | null; prompt: PendingHitlOptionRequest['prompt'] }> {
+  const worldId = String(world?.id || '').trim();
+  if (!worldId) {
+    return [];
+  }
+
+  const pendingForScope = getSortedPendingRequestsForScope(worldId, chatId);
+  return pendingForScope.map((pending) => ({
+    chatId: pending.chatId,
+    prompt: pending.prompt,
+  }));
 }
 
 export function submitWorldOptionResponse(params: {
@@ -256,21 +492,44 @@ export function submitWorldHitlResponse(params: {
   const optionId = String(params.optionId || '').trim();
 
   if (!worldId || !requestId || !optionId) {
+    loggerHitl.warn('HITL response rejected: invalid payload', {
+      worldId: worldId || null,
+      requestId: requestId || null,
+      optionId: optionId || null,
+    });
     return { accepted: false, reason: 'worldId, requestId, and optionId are required.' };
   }
 
   const pendingKey = getPendingKey(worldId, requestId);
   const pending = pendingHitlRequests.get(pendingKey);
   if (!pending) {
+    loggerHitl.warn('HITL response rejected: request missing', {
+      worldId,
+      requestId,
+      optionId,
+    });
     return { accepted: false, reason: `No pending HITL request found for requestId '${requestId}'.` };
   }
 
   const scopeValidation = validateResponseScope(pending, params.chatId);
   if (!scopeValidation.valid) {
+    loggerHitl.warn('HITL response rejected: scope mismatch', {
+      worldId,
+      requestId,
+      optionId,
+      reason: scopeValidation.reason,
+      expectedChatId: pending.chatId,
+      providedChatId: params.chatId ?? null,
+    });
     return { accepted: false, reason: scopeValidation.reason };
   }
 
   if (!pending.optionIds.has(optionId)) {
+    loggerHitl.warn('HITL response rejected: invalid option', {
+      worldId,
+      requestId,
+      optionId,
+    });
     return { accepted: false, reason: `Invalid option '${optionId}' for requestId '${requestId}'.` };
   }
 
@@ -286,14 +545,17 @@ export function submitWorldHitlResponse(params: {
     },
   });
 
+  loggerHitl.debug('HITL response accepted', {
+    worldId,
+    chatId: pending.chatId || null,
+    requestId,
+    optionId,
+  });
+
   return { accepted: true, metadata: pending.metadata };
 }
 
 export function clearHitlStateForTests(): void {
-  for (const pending of pendingHitlRequests.values()) {
-    if (pending.timeoutHandle) {
-      clearTimeout(pending.timeoutHandle);
-    }
-  }
   pendingHitlRequests.clear();
+  pendingRequestSequence = 0;
 }

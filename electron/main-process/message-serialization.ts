@@ -12,6 +12,7 @@
  * - Runtime validation remains in higher-level handlers.
  *
  * Recent Changes:
+ * - 2026-02-27: Included persisted `tool_calls`, `tool_call_id`, and `toolCallStatus` in session-message serialization so renderer can consolidate tool request/result cards after loading chat history.
  * - 2026-02-21: Preserved assistant tool-call metadata (`tool_calls`, `toolCallStatus`) in realtime message serialization so renderer can reliably render tool-request rows.
  * - 2026-02-21: Included SSE `toolName` and `stream` fields in realtime serialization so renderer can label/format tool-stream rows correctly.
  * - 2026-02-19: Added realtime CRUD-event serialization so renderer can refresh world/agent state after background updates.
@@ -160,7 +161,12 @@ export function serializeMessage(message: any): Record<string, unknown> | null {
     chatId: message.chatId || null,
     messageId,
     replyToMessageId: message.replyToMessageId || null,
-    fromAgentId: message.agentId || null
+    fromAgentId: message.agentId || null,
+    tool_calls: Array.isArray(message?.tool_calls) ? message.tool_calls : undefined,
+    tool_call_id: typeof message?.tool_call_id === 'string' ? message.tool_call_id : undefined,
+    toolCallStatus: message?.toolCallStatus && typeof message.toolCallStatus === 'object'
+      ? message.toolCallStatus
+      : undefined,
   };
 }
 
@@ -279,6 +285,7 @@ export function serializeRealtimeToolEvent(
       result: event?.result || toolExecution?.result || null,
       error: event?.error || toolExecution?.error || null,
       progress: event?.progress || null,
+      metadata: toolExecution?.metadata || null,
       agentId: event?.agentId || null,
       agentName: event?.agentName || null,
       createdAt: new Date().toISOString()

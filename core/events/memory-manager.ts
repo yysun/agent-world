@@ -20,7 +20,14 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-27: Passed explicit chat scope to continuation system events (`publishEvent`) to prevent fallback routing to `world.currentChatId` during chat switches.
+ * - 2026-02-27: Suppress repeated identical `load_skill` tool calls within the same continuation run once a prior same-run load succeeded.
+ * - 2026-02-27: Added per-chat/agent continuation run lock in `continueLLMAfterToolExecution` to skip concurrent duplicate continuation runs while tools are pending/executing (prevents duplicate HITL approval prompts).
+ * - 2026-02-26: Replaced `resumePendingToolCallsForChat` console traces with categorized structured logger events (`chat.restore.resume.tools`) for env-controlled restore diagnostics.
  * - 2026-02-24: Commented out hardcoded Infinite-Etude handoff safeguard to respect separation of concerns (logic moved to agent prompt).
+ * - 2026-02-25: Added detailed resume tracing in `resumePendingToolCallsForChat` (start/skip/execute/error/continue) for cross-layer restore diagnostics.
+ * - 2026-02-25: Added duplicate messageId guard in `saveIncomingMessageToMemory` so chat-restore replay can re-emit pending user messages without duplicating persisted agent memory.
+ * - 2026-02-25: Added `resumePendingToolCallsForChat` to restore unresolved persisted tool calls (e.g. `load_skill`) on chat load/switch and continue the LLM loop.
  * - 2026-02-21: Shell tool continuation context now requests minimal LLM result mode (`status`/`exit_code`) and passes agent name for assistant-stream shell SSE attribution.
  * - 2026-02-20: Added Infinite-Etude handoff safeguard to enforce Pedagogue -> Engraver final mention when missing.
  * - 2026-02-16: Added plain-text tool-intent fallback parser in continuation to synthesize executable `tool_calls` when providers return `Calling tool: ...` text.
@@ -82,6 +89,7 @@ const loggerAgent = createCategoryLogger('agent');
 const loggerTurnLimit = createCategoryLogger('turnlimit');
 const loggerChatTitle = createCategoryLogger('chattitle');
 const loggerAutoMention = createCategoryLogger('automention');
+const loggerRestoreResumeTools = createCategoryLogger('chat.restore.resume.tools');
 const TITLE_PROMPT_MAX_TURNS = 24;
 const TITLE_PROMPT_MAX_CHARS_PER_TURN = 240;
 
@@ -92,6 +100,76 @@ async function getStorageWrappers(): Promise<StorageAPI> {
     storageWrappers = await createStorageWithWrappers();
   }
   return storageWrappers!;
+}
+
+type ActiveContinuationRun = {
+  runId: string;
+  depth: number;
+};
+
+const activeContinuationRuns = new Map<string, ActiveContinuationRun>();
+const continuationRunLoadedSkills = new Map<string, Set<string>>();
+
+function normalizeContinuationChatId(chatId: string | null | undefined): string {
+  if (chatId === undefined || chatId === null) {
+    return '__null__';
+  }
+  const normalized = String(chatId).trim();
+  return normalized || '__null__';
+}
+
+function getContinuationScopeKey(worldId: string, agentId: string, chatId: string | null | undefined): string {
+  return `${worldId}::${agentId}::${normalizeContinuationChatId(chatId)}`;
+}
+
+function enterContinuationScope(scopeKey: string, runId: string): boolean {
+  const activeRun = activeContinuationRuns.get(scopeKey);
+  if (!activeRun) {
+    activeContinuationRuns.set(scopeKey, { runId, depth: 1 });
+    return true;
+  }
+  if (activeRun.runId !== runId) {
+    return false;
+  }
+  activeRun.depth += 1;
+  return true;
+}
+
+function leaveContinuationScope(scopeKey: string, runId: string): void {
+  const activeRun = activeContinuationRuns.get(scopeKey);
+  if (!activeRun || activeRun.runId !== runId) {
+    return;
+  }
+  activeRun.depth -= 1;
+  if (activeRun.depth <= 0) {
+    activeContinuationRuns.delete(scopeKey);
+  }
+}
+
+function isContinuationRunActive(runId: string): boolean {
+  for (const activeRun of activeContinuationRuns.values()) {
+    if (activeRun.runId === runId) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function getLoadedSkillsForContinuationRun(runId: string): Set<string> {
+  const existing = continuationRunLoadedSkills.get(runId);
+  if (existing) {
+    return existing;
+  }
+  const created = new Set<string>();
+  continuationRunLoadedSkills.set(runId, created);
+  return created;
+}
+
+function cleanupContinuationRunState(runId: string): void {
+  if (isContinuationRunActive(runId)) {
+    return;
+  }
+  continuationRunLoadedSkills.delete(runId);
 }
 
 type TitlePromptMessage = {
@@ -236,6 +314,384 @@ function parseToolCallArguments(rawArguments: unknown): Record<string, any> {
   }
 
   return {};
+}
+
+function getLoadSkillIdFromToolArgs(toolArgs: Record<string, any>): string | null {
+  const skillId = typeof toolArgs?.skill_id === 'string' ? toolArgs.skill_id.trim() : '';
+  return skillId || null;
+}
+
+function getLoadSkillIdFromRawToolArguments(rawArguments: unknown): string | null {
+  const parsed = parseToolCallArguments(rawArguments);
+  return getLoadSkillIdFromToolArgs(parsed);
+}
+
+function isSuccessfulLoadSkillResult(toolResult: string): boolean {
+  const normalized = String(toolResult || '');
+  return /<skill_context\b/i.test(normalized) && !/<error>/i.test(normalized);
+}
+
+function getLatestUnresolvedToolCallForChat(
+  agent: Agent,
+  chatId: string
+): { assistantMessage: AgentMessage; toolCall: { id: string; function: { name: string; arguments: unknown } } } | null {
+  const chatMessages = agent.memory.filter((message) => message.chatId === chatId);
+  if (!chatMessages.length) {
+    return null;
+  }
+
+  const completedToolCallIds = new Set<string>();
+  for (const message of chatMessages) {
+    if (message.role === 'tool' && typeof message.tool_call_id === 'string' && message.tool_call_id.trim()) {
+      completedToolCallIds.add(message.tool_call_id.trim());
+    }
+  }
+
+  for (let index = chatMessages.length - 1; index >= 0; index--) {
+    const message = chatMessages[index];
+    if (message.role !== 'assistant' || !Array.isArray(message.tool_calls) || message.tool_calls.length === 0) {
+      continue;
+    }
+
+    for (const toolCall of message.tool_calls) {
+      const toolCallId = String((toolCall as any)?.id || '').trim();
+      const toolName = String((toolCall as any)?.function?.name || '').trim();
+      if (!toolCallId || !toolName) {
+        continue;
+      }
+      if (completedToolCallIds.has(toolCallId)) {
+        continue;
+      }
+
+      return {
+        assistantMessage: message,
+        toolCall: {
+          id: toolCallId,
+          function: {
+            name: toolName,
+            arguments: (toolCall as any)?.function?.arguments,
+          },
+        },
+      };
+    }
+  }
+
+  return null;
+}
+
+export async function resumePendingToolCallsForChat(
+  world: World,
+  chatId: string,
+  targetAssistantMessageId?: string
+): Promise<number> {
+  if (!chatId) {
+    return 0;
+  }
+
+  const resumeStartedAt = Date.now();
+  loggerRestoreResumeTools.debug('Resume pending tool calls started', {
+    worldId: world.id,
+    chatId,
+    targetAssistantMessageId: targetAssistantMessageId || null,
+  });
+
+  const { getMCPToolsForWorld } = await import('../mcp-server-registry.js');
+  const mcpTools = await getMCPToolsForWorld(world.id);
+  const storage = await getStorageWrappers();
+
+  let resumedCount = 0;
+
+  for (const agent of world.agents.values()) {
+    const pending = getLatestUnresolvedToolCallForChat(agent, chatId);
+    if (!pending) {
+      loggerRestoreResumeTools.debug('Resume pending tool calls skipped agent with no pending tool call', {
+        worldId: world.id,
+        chatId,
+        agentId: agent.id,
+      });
+      continue;
+    }
+
+    if (
+      targetAssistantMessageId
+      && pending.assistantMessage.messageId
+      && pending.assistantMessage.messageId !== targetAssistantMessageId
+    ) {
+      loggerRestoreResumeTools.debug('Resume pending tool calls skipped assistant target mismatch', {
+        worldId: world.id,
+        chatId,
+        agentId: agent.id,
+        pendingAssistantMessageId: pending.assistantMessage.messageId || null,
+        targetAssistantMessageId,
+      });
+      continue;
+    }
+
+    const { assistantMessage, toolCall } = pending;
+    loggerRestoreResumeTools.debug('Resume pending tool calls found pending tool call', {
+      worldId: world.id,
+      chatId,
+      agentId: agent.id,
+      toolName: toolCall.function.name,
+      toolCallId: toolCall.id,
+      assistantMessageId: assistantMessage.messageId || null,
+    });
+    let toolArgs: Record<string, any> = {};
+    try {
+      toolArgs = parseToolCallArguments(toolCall.function.arguments);
+    } catch (parseError) {
+      loggerRestoreResumeTools.warn('Resume pending tool calls failed to parse tool arguments', {
+        worldId: world.id,
+        chatId,
+        agentId: agent.id,
+        toolName: toolCall.function.name,
+        toolCallId: toolCall.id,
+        error: parseError instanceof Error ? parseError.message : String(parseError),
+      });
+      const errorContent = `Error executing tool: Invalid JSON in tool arguments: ${parseError instanceof Error ? parseError.message : String(parseError)}`;
+      const toolErrorMessage: AgentMessage = {
+        role: 'tool',
+        content: errorContent,
+        tool_call_id: toolCall.id,
+        sender: agent.id,
+        createdAt: new Date(),
+        chatId,
+        messageId: generateId(),
+        replyToMessageId: assistantMessage.messageId,
+        agentId: agent.id,
+      };
+      agent.memory.push(toolErrorMessage);
+      if (assistantMessage.toolCallStatus) {
+        assistantMessage.toolCallStatus[toolCall.id] = { complete: true, result: errorContent };
+      }
+      await storage.saveAgent(world.id, agent);
+      await continueLLMAfterToolExecution(world, agent, chatId);
+      loggerRestoreResumeTools.debug('Resume pending tool calls continued after parse error', {
+        worldId: world.id,
+        chatId,
+        agentId: agent.id,
+        toolCallId: toolCall.id,
+      });
+      resumedCount += 1;
+      continue;
+    }
+
+    const toolDef = mcpTools[toolCall.function.name];
+    if (!toolDef) {
+      loggerRestoreResumeTools.warn('Resume pending tool calls tool definition missing', {
+        worldId: world.id,
+        chatId,
+        agentId: agent.id,
+        toolName: toolCall.function.name,
+        toolCallId: toolCall.id,
+      });
+      const errorContent = `Error executing tool: Tool not found: ${toolCall.function.name}`;
+      const toolErrorMessage: AgentMessage = {
+        role: 'tool',
+        content: errorContent,
+        tool_call_id: toolCall.id,
+        sender: agent.id,
+        createdAt: new Date(),
+        chatId,
+        messageId: generateId(),
+        replyToMessageId: assistantMessage.messageId,
+        agentId: agent.id,
+      };
+      agent.memory.push(toolErrorMessage);
+      if (assistantMessage.toolCallStatus) {
+        assistantMessage.toolCallStatus[toolCall.id] = { complete: true, result: errorContent };
+      }
+      publishToolEvent(world, {
+        agentName: agent.id,
+        type: 'tool-error',
+        messageId: toolCall.id,
+        chatId,
+        toolExecution: {
+          toolName: toolCall.function.name,
+          toolCallId: toolCall.id,
+          input: toolArgs,
+          error: `Tool not found: ${toolCall.function.name}`,
+        },
+      });
+      await storage.saveAgent(world.id, agent);
+      await continueLLMAfterToolExecution(world, agent, chatId);
+      loggerRestoreResumeTools.debug('Resume pending tool calls continued after missing tool definition', {
+        worldId: world.id,
+        chatId,
+        agentId: agent.id,
+        toolCallId: toolCall.id,
+      });
+      resumedCount += 1;
+      continue;
+    }
+
+    loggerRestoreResumeTools.debug('Resume pending tool calls executing tool', {
+      worldId: world.id,
+      chatId,
+      agentId: agent.id,
+      toolName: toolCall.function.name,
+      toolCallId: toolCall.id,
+    });
+    let seededLoadSkillIdForContinuation: string | null = null;
+
+    publishToolEvent(world, {
+      agentName: agent.id,
+      type: 'tool-start',
+      messageId: toolCall.id,
+      chatId,
+      toolExecution: {
+        toolName: toolCall.function.name,
+        toolCallId: toolCall.id,
+        input: toolArgs,
+      },
+    });
+
+    try {
+      const trustedWorkingDirectory = String(
+        getEnvValueFromText(world.variables, 'working_directory') || getDefaultWorkingDirectory()
+      ).trim() || getDefaultWorkingDirectory();
+
+      const toolContext = {
+        world,
+        messages: agent.memory,
+        toolCallId: toolCall.id,
+        chatId,
+        workingDirectory: trustedWorkingDirectory,
+        agentName: agent.id,
+        llmResultMode: toolCall.function.name === 'shell_cmd' ? 'minimal' : 'verbose',
+      };
+
+      const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);
+      const serializedToolResult = typeof toolResult === 'string'
+        ? toolResult
+        : JSON.stringify(toolResult) ?? String(toolResult);
+      if (toolCall.function.name === 'load_skill') {
+        const requestedSkillId = getLoadSkillIdFromToolArgs(toolArgs);
+        if (requestedSkillId && isSuccessfulLoadSkillResult(serializedToolResult)) {
+          seededLoadSkillIdForContinuation = requestedSkillId;
+        }
+      }
+
+      const toolResultMessage: AgentMessage = {
+        role: 'tool',
+        content: serializedToolResult,
+        tool_call_id: toolCall.id,
+        sender: agent.id,
+        createdAt: new Date(),
+        chatId,
+        messageId: generateId(),
+        replyToMessageId: assistantMessage.messageId,
+        agentId: agent.id,
+      };
+      agent.memory.push(toolResultMessage);
+
+      if (assistantMessage.toolCallStatus) {
+        assistantMessage.toolCallStatus[toolCall.id] = {
+          complete: true,
+          result: serializedToolResult,
+        };
+      }
+
+      publishToolEvent(world, {
+        agentName: agent.id,
+        type: 'tool-result',
+        messageId: toolCall.id,
+        chatId,
+        toolExecution: {
+          toolName: toolCall.function.name,
+          toolCallId: toolCall.id,
+          input: toolArgs,
+          result: serializedToolResult.slice(0, 4000),
+          resultType: typeof toolResult === 'string'
+            ? 'string'
+            : Array.isArray(toolResult)
+              ? 'array'
+              : toolResult === null
+                ? 'null'
+                : 'object',
+          resultSize: serializedToolResult.length,
+        },
+      });
+      loggerRestoreResumeTools.debug('Resume pending tool calls tool execution result persisted', {
+        worldId: world.id,
+        chatId,
+        agentId: agent.id,
+        toolName: toolCall.function.name,
+        toolCallId: toolCall.id,
+        resultSize: serializedToolResult.length,
+      });
+    } catch (toolError) {
+      loggerRestoreResumeTools.warn('Resume pending tool calls tool execution failed', {
+        worldId: world.id,
+        chatId,
+        agentId: agent.id,
+        toolName: toolCall.function.name,
+        toolCallId: toolCall.id,
+        error: toolError instanceof Error ? toolError.message : String(toolError),
+      });
+      const errorContent = `Error executing tool: ${toolError instanceof Error ? toolError.message : String(toolError)}`;
+      const toolErrorMessage: AgentMessage = {
+        role: 'tool',
+        content: errorContent,
+        tool_call_id: toolCall.id,
+        sender: agent.id,
+        createdAt: new Date(),
+        chatId,
+        messageId: generateId(),
+        replyToMessageId: assistantMessage.messageId,
+        agentId: agent.id,
+      };
+      agent.memory.push(toolErrorMessage);
+
+      if (assistantMessage.toolCallStatus) {
+        assistantMessage.toolCallStatus[toolCall.id] = {
+          complete: true,
+          result: errorContent,
+        };
+      }
+
+      publishToolEvent(world, {
+        agentName: agent.id,
+        type: 'tool-error',
+        messageId: toolCall.id,
+        chatId,
+        toolExecution: {
+          toolName: toolCall.function.name,
+          toolCallId: toolCall.id,
+          input: toolArgs,
+          error: toolError instanceof Error ? toolError.message : String(toolError),
+        },
+      });
+    }
+
+    await storage.saveAgent(world.id, agent);
+    loggerRestoreResumeTools.debug('Resume pending tool calls saved agent state', {
+      worldId: world.id,
+      chatId,
+      agentId: agent.id,
+      toolCallId: toolCall.id,
+    });
+    await continueLLMAfterToolExecution(world, agent, chatId, {
+      ...(seededLoadSkillIdForContinuation ? { preloadedSkillIds: [seededLoadSkillIdForContinuation] } : {}),
+    });
+    loggerRestoreResumeTools.debug('Resume pending tool calls continued LLM after tool execution', {
+      worldId: world.id,
+      chatId,
+      agentId: agent.id,
+      toolCallId: toolCall.id,
+      ...(seededLoadSkillIdForContinuation ? { seededLoadSkillIdForContinuation } : {}),
+    });
+    resumedCount += 1;
+  }
+
+  loggerRestoreResumeTools.debug('Resume pending tool calls completed', {
+    worldId: world.id,
+    chatId,
+    resumedCount,
+    elapsedMs: Date.now() - resumeStartedAt,
+  });
+
+  return resumedCount;
 }
 
 function decodeControlTokens(value: string): string {
@@ -427,6 +883,21 @@ export async function saveIncomingMessageToMemory(
     // Parse message content to detect enhanced format (e.g., tool results)
     const { message: parsedMessage } = parseMessageContent(messageEvent.content, 'user');
 
+    if (messageEvent.messageId && targetChatId) {
+      const duplicate = agent.memory.some((message) =>
+        message.chatId === targetChatId && message.messageId === messageEvent.messageId
+      );
+      if (duplicate) {
+        loggerMemory.debug('Skipping duplicate incoming message memory save', {
+          worldId: world.id,
+          agentId: agent.id,
+          chatId: targetChatId,
+          messageId: messageEvent.messageId,
+        });
+        return;
+      }
+    }
+
     const userMessage: AgentMessage = {
       ...parsedMessage,
       sender: messageEvent.sender,
@@ -468,9 +939,39 @@ export async function continueLLMAfterToolExecution(
     hopCount?: number;
     emptyTextRetryCount?: number;
     emptyToolCallRetryCount?: number;
+    continuationRunId?: string;
+    transientContinuationInstruction?: string;
+    preloadedSkillIds?: string[];
   }
 ): Promise<void> {
-  const completeActivity = beginWorldActivity(world, `agent:${agent.id}`, chatId ?? undefined);
+  const continuationChatId = chatId !== undefined ? chatId : world.currentChatId ?? null;
+  const targetChatId = continuationChatId;
+  const continuationRunId = String(options?.continuationRunId || '').trim() || generateId();
+  const continuationScopeKey = getContinuationScopeKey(world.id, agent.id, continuationChatId);
+  const enteredScope = enterContinuationScope(continuationScopeKey, continuationRunId);
+  if (!enteredScope) {
+    loggerAgent.debug('Skipping duplicate continuation run while another run is active', {
+      worldId: world.id,
+      agentId: agent.id,
+      chatId: continuationChatId,
+    });
+    logToolBridge('CONTINUE SKIP_INFLIGHT', {
+      worldId: world.id,
+      agentId: agent.id,
+      chatId: continuationChatId,
+      responseType: 'skipped',
+    });
+    return;
+  }
+
+  const completeActivity = beginWorldActivity(world, `agent:${agent.id}`, targetChatId ?? undefined);
+  const loadedSkillsForRun = getLoadedSkillsForContinuationRun(continuationRunId);
+  for (const preloadedSkillId of options?.preloadedSkillIds || []) {
+    const normalizedSkillId = String(preloadedSkillId || '').trim();
+    if (normalizedSkillId) {
+      loadedSkillsForRun.add(normalizedSkillId);
+    }
+  }
   try {
     let hopCount = options?.hopCount ?? 0;
     const maxToolHops = 50;
@@ -478,7 +979,7 @@ export async function continueLLMAfterToolExecution(
     const maxEmptyTextRetries = 2;
     const emptyToolCallRetryCount = options?.emptyToolCallRetryCount ?? 0;
     const maxEmptyToolCallRetries = 2;
-    let transientGuardrailError: string | undefined;
+    let transientGuardrailError: string | undefined = options?.transientContinuationInstruction;
 
     if (hopCount > maxToolHops) {
       const guardrailErrorMessage = `[Error] Tool continuation exceeded ${maxToolHops} hops. Guardrail triggered; reporting error and continuing.`;
@@ -486,7 +987,7 @@ export async function continueLLMAfterToolExecution(
 
       loggerAgent.error('Tool continuation hop limit reached; reporting error and continuing loop', {
         agentId: agent.id,
-        chatId: chatId ?? world.currentChatId ?? null,
+        chatId: targetChatId,
         hopCount,
         maxToolHops,
       });
@@ -494,13 +995,13 @@ export async function continueLLMAfterToolExecution(
       publishEvent(world, 'system', {
         message: guardrailErrorMessage,
         type: 'error',
-      });
+      }, targetChatId);
 
       publishToolEvent(world, {
         agentName: agent.id,
         type: 'tool-error',
         messageId: guardrailToolCallId,
-        chatId: chatId ?? world.currentChatId ?? null,
+        chatId: targetChatId,
         toolExecution: {
           toolName: '__tool_continuation_guardrail__',
           toolCallId: guardrailToolCallId,
@@ -511,7 +1012,7 @@ export async function continueLLMAfterToolExecution(
       logToolBridge('CONTINUE HOP_GUARDRAIL', {
         worldId: world.id,
         agentId: agent.id,
-        chatId: chatId ?? world.currentChatId ?? null,
+        chatId: targetChatId,
         hopCount,
         maxToolHops,
         guardrailToolCallId,
@@ -523,9 +1024,6 @@ export async function continueLLMAfterToolExecution(
     }
 
     throwIfMessageProcessingStopped(options?.abortSignal);
-
-    // Use explicit chatId when provided, fallback to world.currentChatId.
-    const targetChatId = chatId !== undefined ? chatId : world.currentChatId;
 
     // Filter memory to current chat only
     const currentChatMessages = agent.memory.filter(m => m.chatId === targetChatId);
@@ -840,6 +1338,7 @@ export async function continueLLMAfterToolExecution(
             ...options,
             hopCount: hopCount + 1,
             emptyToolCallRetryCount: emptyToolCallRetryCount + 1,
+            continuationRunId,
           });
           return;
         }
@@ -847,6 +1346,36 @@ export async function continueLLMAfterToolExecution(
         publishEvent(world, 'system', {
           message: '[Warning] Agent repeatedly returned invalid tool calls after tool execution. Please refine the prompt.',
           type: 'warning',
+        }, targetChatId);
+        return;
+      }
+
+      let requestedLoadSkillId: string | null = null;
+      if (toolCall.function.name === 'load_skill') {
+        try {
+          requestedLoadSkillId = getLoadSkillIdFromRawToolArguments(toolCall.function.arguments);
+        } catch {
+          requestedLoadSkillId = null;
+        }
+      }
+
+      if (requestedLoadSkillId && loadedSkillsForRun.has(requestedLoadSkillId)) {
+        loggerAgent.debug('Suppressing duplicate load_skill call in continuation run', {
+          worldId: world.id,
+          agentId: agent.id,
+          chatId: targetChatId,
+          continuationRunId,
+          skillId: requestedLoadSkillId,
+          toolCallId: toolCall.id,
+        });
+
+        throwIfMessageProcessingStopped(options?.abortSignal);
+        await continueLLMAfterToolExecution(world, agent, targetChatId, {
+          ...options,
+          hopCount: hopCount + 1,
+          continuationRunId,
+          transientContinuationInstruction:
+            `System notice: Suppressed duplicate load_skill("${requestedLoadSkillId}") in this run because the skill was already loaded. Continue the task using the existing skill context without calling load_skill again for this skill.`,
         });
         return;
       }
@@ -935,6 +1464,7 @@ export async function continueLLMAfterToolExecution(
         await continueLLMAfterToolExecution(world, agent, targetChatId, {
           ...options,
           hopCount: hopCount + 1,
+          continuationRunId,
         });
         return;
       }
@@ -942,6 +1472,7 @@ export async function continueLLMAfterToolExecution(
       let toolArgs: Record<string, any> = {};
       try {
         toolArgs = parseToolCallArguments(toolCall.function.arguments);
+        requestedLoadSkillId = requestedLoadSkillId || getLoadSkillIdFromToolArgs(toolArgs);
       } catch (parseError) {
         const parseErrorResult: AgentMessage = {
           role: 'tool',
@@ -980,6 +1511,7 @@ export async function continueLLMAfterToolExecution(
         await continueLLMAfterToolExecution(world, agent, targetChatId, {
           ...options,
           hopCount: hopCount + 1,
+          continuationRunId,
         });
         return;
       }
@@ -1015,6 +1547,14 @@ export async function continueLLMAfterToolExecution(
         const serializedToolResult = typeof toolResult === 'string'
           ? toolResult
           : JSON.stringify(toolResult) ?? String(toolResult);
+
+        if (
+          toolCall.function.name === 'load_skill'
+          && requestedLoadSkillId
+          && isSuccessfulLoadSkillResult(serializedToolResult)
+        ) {
+          loadedSkillsForRun.add(requestedLoadSkillId);
+        }
 
         const toolResultMessage: AgentMessage = {
           role: 'tool',
@@ -1106,6 +1646,7 @@ export async function continueLLMAfterToolExecution(
       await continueLLMAfterToolExecution(world, agent, targetChatId, {
         ...options,
         hopCount: hopCount + 1,
+        continuationRunId,
       });
       return;
     }
@@ -1132,6 +1673,7 @@ export async function continueLLMAfterToolExecution(
         await continueLLMAfterToolExecution(world, agent, targetChatId, {
           ...options,
           emptyTextRetryCount: emptyTextRetryCount + 1,
+          continuationRunId,
         });
         return;
       }
@@ -1151,7 +1693,7 @@ export async function continueLLMAfterToolExecution(
         publishEvent(world, 'system', {
           message: '[Warning] Agent returned empty follow-up after tool execution. Please retry or refine the prompt.',
           type: 'warning'
-        });
+        }, targetChatId);
 
         logToolBridge('CONTINUE EMPTY_TEXT_STOP', {
           worldId: world.id,
@@ -1206,14 +1748,14 @@ export async function continueLLMAfterToolExecution(
     if (isMessageProcessingCanceledError(error) || options?.abortSignal?.aborted) {
       loggerAgent.info('Skipped continuation after stop request', {
         agentId: agent.id,
-        chatId: chatId ?? world.currentChatId ?? null,
+        chatId: targetChatId,
         error: error instanceof Error ? error.message : String(error)
       });
 
       logToolBridge('CONTINUE CANCELED', {
         worldId: world.id,
         agentId: agent.id,
-        chatId: chatId ?? world.currentChatId ?? null,
+        chatId: targetChatId,
         error: error instanceof Error ? error.message : String(error),
       });
       return;
@@ -1226,15 +1768,17 @@ export async function continueLLMAfterToolExecution(
     publishEvent(world, 'system', {
       message: `[Error] ${(error as Error).message}`,
       type: 'error'
-    });
+    }, targetChatId);
 
     logToolBridge('CONTINUE ERROR', {
       worldId: world.id,
       agentId: agent.id,
-      chatId: chatId ?? world.currentChatId ?? null,
+      chatId: targetChatId,
       error: error instanceof Error ? error.message : String(error),
     });
   } finally {
+    leaveContinuationScope(continuationScopeKey, continuationRunId);
+    cleanupContinuationRunState(continuationRunId);
     completeActivity();
   }
 }

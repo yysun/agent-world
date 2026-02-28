@@ -27,6 +27,7 @@
  * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
+ * - 2026-02-27: Normalized overlong tool-call IDs to OpenAI's 40-char limit and preserved assistant/tool ID linkage in outbound message conversion.
  * - 2026-02-16: Fixed streaming tool-call chunk merge to preserve delayed tool `id`/`name` fields across deltas.
  * - 2026-02-13: Added abort-signal support for streaming and non-streaming calls to enable chat stop cancellation.
  * - 2026-02-07: Tool definitions now attached for all providers including Ollama
@@ -48,6 +49,135 @@ import { generateFallbackId } from './tool-utils.js';
 
 const logger = createCategoryLogger('openai');
 const mcpLogger = createCategoryLogger('mcp.execution');
+const OPENAI_TOOL_CALL_ID_MAX_LENGTH = 40;
+
+function fnv1a32(input: string, reverse = false): number {
+  let hash = 2166136261;
+  if (reverse) {
+    for (let i = input.length - 1; i >= 0; i -= 1) {
+      hash ^= input.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+  } else {
+    for (let i = 0; i < input.length; i += 1) {
+      hash ^= input.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+  }
+  return hash >>> 0;
+}
+
+function shortenToolCallIdForOpenAI(rawId: string): string {
+  const trimmed = rawId.trim();
+  if (!trimmed) return '';
+  if (trimmed.length <= OPENAI_TOOL_CALL_ID_MAX_LENGTH) return trimmed;
+
+  const hash = `${fnv1a32(trimmed).toString(36)}${fnv1a32(trimmed, true).toString(36)}`.slice(0, 10);
+  const prefixLength = Math.max(1, OPENAI_TOOL_CALL_ID_MAX_LENGTH - hash.length - 1);
+  return `${trimmed.slice(0, prefixLength)}_${hash}`;
+}
+
+function collectHistoricalToolCallIds(messages: ChatMessage[]): string[] {
+  const ids: string[] = [];
+  for (const message of messages) {
+    if (message.role === 'assistant' && Array.isArray(message.tool_calls)) {
+      for (const toolCall of message.tool_calls) {
+        ids.push(String((toolCall as any)?.id || ''));
+      }
+    }
+    if (message.role === 'tool') {
+      ids.push(String((message as any)?.tool_call_id || ''));
+    }
+  }
+  return ids;
+}
+
+type OpenAIMessageParam = OpenAI.Chat.Completions.ChatCompletionMessageParam;
+type OpenAIAssistantMessageParam = OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam;
+
+function finalizePendingAssistantToolCalls(
+  converted: OpenAIMessageParam[],
+  pending: {
+    assistantIndex: number;
+    expectedIds: Set<string>;
+    resolvedIds: Set<string>;
+  }
+): void {
+  const assistantMessage = converted[pending.assistantIndex] as OpenAIAssistantMessageParam | undefined;
+  if (!assistantMessage || assistantMessage.role !== 'assistant') {
+    return;
+  }
+
+  const currentToolCalls = Array.isArray((assistantMessage as any).tool_calls)
+    ? (assistantMessage as any).tool_calls
+    : [];
+  const resolvedToolCalls = currentToolCalls.filter((tc: any) => pending.resolvedIds.has(String(tc?.id || '')));
+
+  if (resolvedToolCalls.length > 0) {
+    (assistantMessage as any).tool_calls = resolvedToolCalls;
+    return;
+  }
+
+  if (assistantMessage.content && String(assistantMessage.content).trim()) {
+    delete (assistantMessage as any).tool_calls;
+    return;
+  }
+
+  converted.splice(pending.assistantIndex, 1);
+}
+
+function createToolCallIdAllocator(seedIds: string[] = []): (originalId?: string) => string {
+  const normalizedByOriginal = new Map<string, string>();
+  const usedIds = new Set<string>();
+
+  const reserveUnique = (candidate: string): string => {
+    const safeCandidate = (candidate || generateFallbackId()).slice(0, OPENAI_TOOL_CALL_ID_MAX_LENGTH);
+    if (!usedIds.has(safeCandidate)) {
+      usedIds.add(safeCandidate);
+      return safeCandidate;
+    }
+
+    let suffix = 1;
+    while (true) {
+      const suffixToken = `_${suffix.toString(36)}`;
+      const nextCandidate = `${safeCandidate.slice(0, OPENAI_TOOL_CALL_ID_MAX_LENGTH - suffixToken.length)}${suffixToken}`;
+      if (!usedIds.has(nextCandidate)) {
+        usedIds.add(nextCandidate);
+        return nextCandidate;
+      }
+      suffix += 1;
+    }
+  };
+
+  const allocate = (originalId?: string): string => {
+    const raw = typeof originalId === 'string' ? originalId.trim() : '';
+    if (!raw) {
+      return reserveUnique(shortenToolCallIdForOpenAI(generateFallbackId()));
+    }
+
+    const existing = normalizedByOriginal.get(raw);
+    if (existing) return existing;
+
+    const shortened = shortenToolCallIdForOpenAI(raw);
+    const normalized = reserveUnique(shortened);
+    normalizedByOriginal.set(raw, normalized);
+
+    if (normalized !== raw) {
+      logger.warn('OpenAI Direct: normalized tool_call id for API compatibility', {
+        originalLength: raw.length,
+        normalizedLength: normalized.length,
+      });
+    }
+
+    return normalized;
+  };
+
+  for (const seedId of seedIds) {
+    allocate(seedId);
+  }
+
+  return allocate;
+}
 
 /**
  * OpenAI client factory for standard OpenAI API
@@ -105,34 +235,98 @@ export function createOllamaClient(config: OllamaConfig): OpenAI {
   });
 }
 function convertMessagesToOpenAI(messages: ChatMessage[]): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
-  return messages.map(message => {
-    switch (message.role) {
-      case 'system':
-        return {
-          role: 'system',
-          content: message.content,
-        };
-      case 'user':
-        return {
-          role: 'user',
-          content: message.content,
-        };
-      case 'assistant':
-        return {
-          role: 'assistant',
-          content: message.content,
-          ...(message.tool_calls && { tool_calls: message.tool_calls }),
-        };
-      case 'tool':
-        return {
+  const allocateToolCallId = createToolCallIdAllocator(collectHistoricalToolCallIds(messages));
+  const converted: OpenAIMessageParam[] = [];
+  let pendingAssistant: {
+    assistantIndex: number;
+    expectedIds: Set<string>;
+    resolvedIds: Set<string>;
+  } | null = null;
+
+  const closePendingAssistant = () => {
+    if (!pendingAssistant) return;
+    finalizePendingAssistantToolCalls(converted, pendingAssistant);
+    pendingAssistant = null;
+  };
+
+  for (const message of messages) {
+    if (pendingAssistant && message.role === 'tool') {
+      const toolCallId = allocateToolCallId(message.tool_call_id);
+      if (
+        pendingAssistant.expectedIds.has(toolCallId)
+        && !pendingAssistant.resolvedIds.has(toolCallId)
+      ) {
+        converted.push({
           role: 'tool',
           content: message.content,
-          tool_call_id: message.tool_call_id!,
+          tool_call_id: toolCallId,
+        });
+        pendingAssistant.resolvedIds.add(toolCallId);
+
+        if (pendingAssistant.resolvedIds.size === pendingAssistant.expectedIds.size) {
+          pendingAssistant = null;
+        }
+      } else {
+        logger.debug('OpenAI Direct: dropping unexpected tool message during conversion', {
+          toolCallId,
+        });
+      }
+      continue;
+    }
+
+    if (pendingAssistant && message.role !== 'tool') {
+      closePendingAssistant();
+    }
+
+    switch (message.role) {
+      case 'system':
+        converted.push({
+          role: 'system',
+          content: message.content,
+        });
+        break;
+      case 'user':
+        converted.push({
+          role: 'user',
+          content: message.content,
+        });
+        break;
+      case 'assistant': {
+        const mappedToolCalls = Array.isArray(message.tool_calls)
+          ? message.tool_calls.map((toolCall: any) => ({
+            ...toolCall,
+            id: allocateToolCallId(toolCall?.id),
+          }))
+          : [];
+
+        const assistantMessage: OpenAIAssistantMessageParam = {
+          role: 'assistant',
+          content: message.content,
+          ...(mappedToolCalls.length > 0 ? { tool_calls: mappedToolCalls as any } : {}),
         };
+        converted.push(assistantMessage);
+
+        if (mappedToolCalls.length > 0) {
+          pendingAssistant = {
+            assistantIndex: converted.length - 1,
+            expectedIds: new Set(mappedToolCalls.map((tc: any) => String(tc.id))),
+            resolvedIds: new Set<string>(),
+          };
+        }
+        break;
+      }
+      case 'tool':
+        logger.debug('OpenAI Direct: dropping orphaned tool message during conversion', {
+          toolCallId: message.tool_call_id,
+        });
+        break;
       default:
         throw new Error(`Unsupported message role: ${(message as any).role}`);
     }
-  });
+  }
+
+  closePendingAssistant();
+  return converted;
 }
 
 /**
@@ -261,9 +455,10 @@ export async function streamOpenAIResponse(
         toolCount: validCalls.length,
         toolNames: validCalls.map(fc => fc.function?.name)
       });
+      const allocateToolCallId = createToolCallIdAllocator();
 
       const toolCallsFormatted = validCalls.map(fc => ({
-        id: fc.id || generateFallbackId(),
+        id: allocateToolCallId(fc.id),
         type: 'function' as const,
         function: {
           name: fc.function!.name!,
@@ -368,11 +563,12 @@ export async function generateOpenAIResponse(
         toolCount: validToolCalls.length,
         toolNames: validToolCalls.map(tc => tc.type === 'function' ? tc.function.name : 'unknown')
       });
+      const allocateToolCallId = createToolCallIdAllocator();
 
       const toolCallsFormatted = validToolCalls.map(tc => {
         const funcCall = tc as OpenAI.Chat.Completions.ChatCompletionMessageFunctionToolCall;
         return {
-          id: tc.id || generateFallbackId(),
+          id: allocateToolCallId(tc.id),
           type: 'function' as const,
           function: {
             name: funcCall.function.name,

@@ -303,6 +303,8 @@ async function buildAgentSkillsPromptSection(): Promise<string> {
     '1. Review the <available_skills> list below.',
     "2. If the user's request matches a skill's purpose, use the load_skill with skill id tool",
     '   to fetch the full instructions.',
+    '3. IMPORTANT: Pass `skill_id` as the exact string from `<id>` (character-for-character).',
+    '   Do not rewrite case, hyphens, or underscores (e.g., keep `skill-creator` exactly as shown).',
     '',
     '<available_skills>',
   ];

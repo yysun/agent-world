@@ -12,6 +12,8 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-02-26: Added env-derived renderer logging config endpoint and replaced session/message console traces with categorized injected logger calls.
+ * - 2026-02-25: Added optional `world:import` source support for GitHub shorthand (`@awesome-agent-world/<world-name>`) via secure temp staging.
  * - 2026-02-20: Enforced options-only `hitl:respond` handler payload validation.
  * - 2026-02-19: Simplified desktop world export to file-storage-only (removed SQLite export option).
  * - 2026-02-19: Added CLI-parity world import/export handlers for folder-validated imports, id/name conflict checks, and storage-target export flows.
@@ -19,9 +21,11 @@
  * - 2026-02-16: Added optional `projectPath` filter support for `listSkillRegistry` so project-scope skill discovery can follow the currently selected project folder.
  * - 2026-02-16: Added `session:branchFromMessage` IPC handler to create a branched chat and copy source-chat messages up to an assistant message.
  * - 2026-02-16: Updated `listSkillRegistry` to return scope-filtered skills (global/project) using the same env-driven rules as system-prompt skill injection.
+ * - 2026-02-23: Removed redundant message-existence pre-check from `editMessageInChat` to fix "404 Message not found" false positives.
+ *   - Pre-check used core `getMemory` (requires world in runtime store) which could fail when message exists in SQLite.
+ *   - `editUserMessage` uses `getActiveSubscribedWorld` fallback making it resilient; pre-check was redundant.
  * - 2026-02-15: Aligned `message:edit` IPC preconditions with web/API semantics.
  *   - Validates chat existence before edit delegation.
- *   - Validates target message exists in chat and is a user-role message.
  * - 2026-02-14: Added `hitl:respond` IPC handler to resolve core pending HITL option requests from renderer selections.
  * - 2026-02-14: Added `listSkillRegistry` IPC handler to sync/read core skill registry entries for empty-chat welcome rendering.
  * - 2026-02-14: Simplified edit-message IPC flow to delegate to core `editUserMessage` without runtime subscription refresh/rebind side effects.
@@ -53,6 +57,61 @@ interface WorkspaceStateLike {
   workspacePath: string | null;
   storagePath: string | null;
   coreInitialized: boolean;
+}
+
+type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
+
+interface LoggerLike {
+  debug: (message: string, data?: unknown) => void;
+  info: (message: string, data?: unknown) => void;
+  warn: (message: string, data?: unknown) => void;
+  error: (message: string, data?: unknown) => void;
+}
+
+const NOOP_LOGGER: LoggerLike = {
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined
+};
+
+const VALID_LOG_LEVELS: LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error'];
+const VALID_LOG_LEVEL_SET = new Set<LogLevel>(VALID_LOG_LEVELS);
+
+function normalizeCategoryKey(raw: string): string {
+  if (!raw) return '';
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9.]+/g, '.')
+    .replace(/\.+/g, '.')
+    .replace(/^\.|\.$/g, '');
+}
+
+function toLogLevel(value: unknown): LogLevel | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase() as LogLevel;
+  return VALID_LOG_LEVEL_SET.has(normalized) ? normalized : null;
+}
+
+function getRendererLoggingConfigFromEnv(): {
+  globalLevel: LogLevel;
+  categoryLevels: Record<string, LogLevel>;
+  nodeEnv: string;
+} {
+  const globalLevel = toLogLevel(process.env.LOG_LEVEL) || 'error';
+  const categoryLevels: Record<string, LogLevel> = {};
+
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!key.startsWith('LOG_') || key === 'LOG_LEVEL') continue;
+    const level = toLogLevel(value);
+    if (!level) continue;
+    const category = normalizeCategoryKey(key.slice(4).toLowerCase().replace(/_/g, '.'));
+    if (!category) continue;
+    categoryLevels[category] = level;
+  }
+
+  const nodeEnv = String(process.env.NODE_ENV || 'development').trim() || 'development';
+  return { globalLevel, categoryLevels, nodeEnv };
 }
 
 interface MainIpcHandlerFactoryDependencies {
@@ -91,12 +150,38 @@ interface MainIpcHandlerFactoryDependencies {
     reason?: string;
   };
   stopMessageProcessing: (worldId: string, chatId: string) => Promise<any> | any;
+  activateChatWithSnapshot: (worldId: string, chatId: string) => Promise<{ world: any; chatId: string; hitlPrompts: any[] } | null>;
   restoreChat: (worldId: string, chatId: string) => Promise<any>;
   updateWorld: (worldId: string, updates: Record<string, unknown>) => Promise<any>;
   editUserMessage: (worldId: string, messageId: string, newContent: string, chatId: string) => Promise<any>;
   removeMessagesFrom: (worldId: string, messageId: string, chatId: string) => Promise<any>;
   createStorage: (config: any) => Promise<any>;
   createStorageFromEnv: () => Promise<any>;
+  loggerIpc?: LoggerLike;
+  loggerIpcSession?: LoggerLike;
+  loggerIpcMessages?: LoggerLike;
+  GitHubWorldImportError: new (...args: any[]) => GitHubWorldImportErrorLike;
+  stageGitHubWorldFromShorthand: (shorthand: string) => Promise<GitHubWorldImportStagedResult>;
+}
+
+interface GitHubWorldImportSource {
+  shorthand: string;
+  owner: string;
+  repo: string;
+  branch: string;
+  worldPath: string;
+  commitSha: string | null;
+}
+
+interface GitHubWorldImportStagedResult {
+  stagingRootPath: string;
+  worldFolderPath: string;
+  source: GitHubWorldImportSource;
+  cleanup: () => Promise<void>;
+}
+
+interface GitHubWorldImportErrorLike extends Error {
+  details?: Record<string, unknown>;
 }
 
 export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDependencies) {
@@ -125,12 +210,18 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     publishMessage,
     submitWorldHitlResponse,
     stopMessageProcessing,
+    activateChatWithSnapshot,
     restoreChat,
     updateWorld,
     editUserMessage,
     removeMessagesFrom,
     createStorage,
-    createStorageFromEnv
+    createStorageFromEnv,
+    loggerIpc = NOOP_LOGGER,
+    loggerIpcSession = NOOP_LOGGER,
+    loggerIpcMessages = NOOP_LOGGER,
+    GitHubWorldImportError,
+    stageGitHubWorldFromShorthand
   } = dependencies;
 
   interface StorageLike {
@@ -615,10 +706,13 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     return { success: true, worldId };
   }
 
-  async function importWorld() {
+  async function importWorld(payload?: any) {
     const mainWindow = getMainWindow();
     if (!mainWindow) throw new Error('Main window not initialized');
-    const selectedWorldFolder = await pickTargetDirectory(mainWindow, 'Import World Folder', 'Import');
+    const requestedSource = String(payload?.source || '').trim();
+    const selectedWorldFolder = requestedSource
+      || await pickTargetDirectory(mainWindow, 'Import World Folder', 'Import');
+    let stagedGitHubWorld: GitHubWorldImportStagedResult | null = null;
 
     if (!selectedWorldFolder) {
       return {
@@ -631,8 +725,23 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     try {
       await ensureCoreReady();
 
-      const absoluteWorldFolder = path.resolve(path.normalize(selectedWorldFolder));
-      const validationError = getWorldFolderValidationError(absoluteWorldFolder);
+      let resolvedWorldFolder = path.resolve(path.normalize(selectedWorldFolder));
+      let sourceMetadata: {
+        shorthand: string;
+        owner: string;
+        repo: string;
+        branch: string;
+        worldPath: string;
+        commitSha: string | null;
+      } | null = null;
+
+      if (selectedWorldFolder.startsWith('@')) {
+        stagedGitHubWorld = await stageGitHubWorldFromShorthand(selectedWorldFolder);
+        resolvedWorldFolder = path.resolve(path.normalize(stagedGitHubWorld.worldFolderPath));
+        sourceMetadata = stagedGitHubWorld.source;
+      }
+
+      const validationError = getWorldFolderValidationError(resolvedWorldFolder);
       if (validationError) {
         return {
           success: false,
@@ -641,8 +750,8 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
         };
       }
 
-      const sourceWorldId = path.basename(absoluteWorldFolder);
-      const sourceRootPath = path.dirname(absoluteWorldFolder);
+      const sourceWorldId = path.basename(resolvedWorldFolder);
+      const sourceRootPath = path.dirname(resolvedWorldFolder);
       const sourceStorage = await createStorage({
         type: 'file',
         rootPath: sourceRootPath
@@ -751,15 +860,36 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
           agents: sourceAgents.length,
           chats: sourceChats.length,
           events: eventCount
-        }
+        },
+        source: sourceMetadata || undefined
       };
     } catch (error) {
+      if (error instanceof GitHubWorldImportError) {
+        const details = error.details || {};
+        const owner = String(details.owner || '');
+        const repo = String(details.repo || '');
+        const branch = String(details.branch || '');
+        const worldPath = String(details.worldPath || '');
+        const resolvedSource = owner && repo && branch && worldPath
+          ? `${owner}/${repo}@${branch}:${worldPath}`
+          : undefined;
+        return {
+          success: false,
+          error: error.message,
+          message: `Failed to import world: ${error.message}`,
+          source: resolvedSource,
+        };
+      }
       const err = error as Error;
       return {
         success: false,
         error: err.message || 'Unknown error',
         message: `Failed to import world: ${err.message || 'Unknown error occurred'}`
       };
+    } finally {
+      if (stagedGitHubWorld) {
+        await stagedGitHubWorld.cleanup();
+      }
     }
   }
 
@@ -959,13 +1089,28 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!id) throw new Error('World ID is required.');
     if (!sessionId) throw new Error('Session ID is required.');
 
-    const world = await restoreChat(id, sessionId);
-    if (!world) throw new Error(`World or session not found: ${id}/${sessionId}`);
+    const selectStartedAt = Date.now();
+    loggerIpcSession.debug('Session selection started', {
+      worldId: id,
+      requestedChatId: sessionId
+    });
+
+    const activated = await activateChatWithSnapshot(id, sessionId);
+    if (!activated) throw new Error(`World or session not found: ${id}/${sessionId}`);
     const refreshWarning = await refreshWorldSubscription(id);
+
+    loggerIpcSession.debug('Session selection completed', {
+      worldId: id,
+      requestedChatId: sessionId,
+      resolvedChatId: activated.chatId || sessionId,
+      refreshWarning: refreshWarning || null,
+      elapsedMs: Date.now() - selectStartedAt
+    });
 
     return {
       worldId: id,
-      chatId: world.currentChatId || sessionId,
+      chatId: activated.chatId || sessionId,
+      hitlPrompts: Array.isArray(activated.hitlPrompts) ? activated.hitlPrompts : [],
       ...(refreshWarning ? { refreshWarning } : {})
     };
   }
@@ -976,8 +1121,18 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!id) throw new Error('World ID is required.');
 
     const requestedChatId = chatId ? String(chatId) : null;
+    loggerIpcMessages.debug('Session messages load started', {
+      worldId: id,
+      chatId: requestedChatId
+    });
     const memory = await getMemory(id, requestedChatId);
     if (!memory) return [];
+
+    loggerIpcMessages.debug('Session messages loaded', {
+      worldId: id,
+      chatId: requestedChatId,
+      messageCount: memory.length
+    });
 
     return normalizeSessionMessages(memory.map((message: any) => serializeMessage(message)));
   }
@@ -1073,20 +1228,6 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       throw new Error(`404 Chat not found: ${chatId}`);
     }
 
-    const memory = await getMemory(worldId, chatId);
-    const targetMessage = Array.isArray(memory)
-      ? memory.find((entry: any) => String(entry?.messageId || '') === messageId)
-      : null;
-
-    if (!targetMessage) {
-      throw new Error(`404 Message not found: ${messageId}`);
-    }
-
-    const targetRole = String(targetMessage?.role || '').toLowerCase();
-    if (targetRole !== 'user') {
-      throw new Error('400 Can only edit user messages');
-    }
-
     return editUserMessage(worldId, messageId, newContent, chatId);
   }
 
@@ -1141,6 +1282,16 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     });
   }
 
+  function getLoggingConfig() {
+    const config = getRendererLoggingConfigFromEnv();
+    loggerIpc.debug('Resolved renderer logging config', {
+      globalLevel: config.globalLevel,
+      categoryCount: Object.keys(config.categoryLevels).length,
+      nodeEnv: config.nodeEnv
+    });
+    return config;
+  }
+
   async function openFileDialog() {
     const mainWindow = getMainWindow();
     if (!mainWindow) throw new Error('Main window not initialized');
@@ -1179,6 +1330,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     sendChatMessage,
     editMessageInChat,
     respondHitlOption,
+    getLoggingConfig,
     stopChatMessage,
     deleteMessageFromChat,
     getChatEvents
