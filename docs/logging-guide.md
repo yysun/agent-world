@@ -126,6 +126,20 @@ LOG_LLM_TOOL_BRIDGE=debug npm run web:dev
 - Truncated payload previews for arguments/results/content
 - Category-tagged events under `llm.tool.bridge`
 
+#### 9. End-to-End Feature Path Trace (Recommended)
+
+```bash
+LOG_TURN_TRACE=debug LOG_LLM_PREP=debug LOG_LLM_REQUEST_META=debug LOG_LLM_RESPONSE_META=debug LOG_TOOL_CALL=debug LOG_TOOL_CONTINUATION=debug LOG_MESSAGE_PUBLISH=debug npm run web:dev
+```
+
+**What you'll see:**
+- Per-turn start/end trace markers (`turn.trace`)
+- Message-prep summary and filtering diagnostics (`llm.prep`)
+- LLM request/response metadata (`llm.request.meta`, `llm.response.meta`)
+- Tool call request/result/error stages (`tool.call.*`)
+- Tool continuation retries/fallbacks/cancel/error (`tool.continuation`)
+- Final message publish stage (`message.publish`)
+
 ---
 
 ## Available Categories
@@ -148,6 +162,11 @@ LOG_LLM_TOOL_BRIDGE=debug npm run web:dev
 | `llm.openai` | OpenAI provider | OpenAI API issues | `LOG_LLM_OPENAI=debug` |
 | `llm.anthropic` | Anthropic provider | Claude API issues | `LOG_LLM_ANTHROPIC=debug` |
 | `llm.google` | Google provider | Gemini API issues | `LOG_LLM_GOOGLE=debug` |
+| `llm.prep` | LLM input preparation | Message filtering/pruning/system prompt shaping | `LOG_LLM_PREP=debug` |
+| `llm.request.meta` | LLM request metadata | Provider/model/message/tool counts for request boundary | `LOG_LLM_REQUEST_META=debug` |
+| `llm.request.raw` | Raw outbound LLM payload (redacted) | Deep request-payload diagnostics | `LOG_LLM_REQUEST_RAW=debug` |
+| `llm.response.meta` | LLM response metadata | Response type/content/tool-call counts/usage diagnostics | `LOG_LLM_RESPONSE_META=debug` |
+| `llm.response.raw` | Raw inbound LLM payload (redacted) | Deep response-payload diagnostics | `LOG_LLM_RESPONSE_RAW=debug` |
 | `llm.tool.bridge` | LLM↔tool handoff payloads | Tool invocation/result bridge diagnostics | `LOG_LLM_TOOL_BRIDGE=debug` |
 | `llm.manager` | Provider management | Provider selection issues | `LOG_LLM_MANAGER=debug` |
 | `llm.config` | LLM configuration | Config errors | `LOG_LLM_CONFIG=info` |
@@ -158,6 +177,12 @@ LOG_LLM_TOOL_BRIDGE=debug npm run web:dev
 | `chat.restore` | Chat restore lifecycle | Restore chat switch/load ordering issues | `LOG_CHAT_RESTORE=debug` |
 | `chat.restore.resume` | Restore auto-resume decisions | Pending user/tool-call-last resume diagnostics | `LOG_CHAT_RESTORE_RESUME=debug` |
 | `chat.restore.resume.tools` | Restore pending tool-call execution | Tool resume parse/execute/continue diagnostics | `LOG_CHAT_RESTORE_RESUME_TOOLS=debug` |
+| `message.publish` | Final message publish stage | Published assistant/tool result tracing | `LOG_MESSAGE_PUBLISH=debug` |
+| `turn.trace` | End-to-end turn lifecycle | Per-turn request-path start/end correlation | `LOG_TURN_TRACE=debug` |
+| `tool.call.request` | Tool request stage | LLM->tool request diagnostics | `LOG_TOOL_CALL_REQUEST=debug` |
+| `tool.call.response` | Tool success result stage | Tool result->LLM diagnostics | `LOG_TOOL_CALL_RESPONSE=debug` |
+| `tool.call.error` | Tool failure result stage | Tool error->LLM diagnostics | `LOG_TOOL_CALL_ERROR=debug` |
+| `tool.continuation` | Post-tool continuation stage | Continuation retry/fallback/cancel/error diagnostics | `LOG_TOOL_CONTINUATION=debug` |
 | **World/Agent** | | | |
 | `world.lifecycle` | World start/stop | World not running | `LOG_WORLD_LIFECYCLE=info` |
 | `world.state` | State changes | State transitions | `LOG_WORLD_STATE=debug` |
@@ -235,7 +260,23 @@ LOG_LEVEL=debug npm run web:dev
 | `llm.openai` | OpenAI provider | API calls, streaming, errors | `LOG_LLM_OPENAI=debug` |
 | `llm.anthropic` | Anthropic provider | Claude API calls, tool use | `LOG_LLM_ANTHROPIC=debug` |
 | `llm.google` | Google provider | Gemini API calls, responses | `LOG_LLM_GOOGLE=debug` |
+| `llm.prep` | Message preparation | Include/exclude/pruning diagnostics before provider call | `LOG_LLM_PREP=debug` |
+| `llm.request.meta` | Request boundary metadata | Provider/model/tool/message counts | `LOG_LLM_REQUEST_META=debug` |
+| `llm.request.raw` | Raw request payload (redacted) | Raw outbound payload diagnostics | `LOG_LLM_REQUEST_RAW=debug` |
+| `llm.response.meta` | Response boundary metadata | Response type/content/tool count diagnostics | `LOG_LLM_RESPONSE_META=debug` |
+| `llm.response.raw` | Raw response payload (redacted) | Raw inbound payload diagnostics | `LOG_LLM_RESPONSE_RAW=debug` |
 | `llm.tool.bridge` | LLM↔tool handoff logging | LLM->tool, tool->LLM, and tool error bridge payload previews | `LOG_LLM_TOOL_BRIDGE=debug` |
+
+### Feature-Path Operations
+
+| Category | Purpose | Key Events | Enable With |
+|----------|---------|------------|-------------|
+| `turn.trace` | Turn lifecycle trace | Start/end status and duration for each processed turn | `LOG_TURN_TRACE=debug` |
+| `tool.call.request` | Tool request stage | LLM->tool handoff diagnostics | `LOG_TOOL_CALL_REQUEST=debug` |
+| `tool.call.response` | Tool result stage | Tool success result diagnostics | `LOG_TOOL_CALL_RESPONSE=debug` |
+| `tool.call.error` | Tool error stage | Tool failure diagnostics | `LOG_TOOL_CALL_ERROR=debug` |
+| `tool.continuation` | Post-tool continuation | Continue/retry/fallback/cancel/error diagnostics | `LOG_TOOL_CONTINUATION=debug` |
+| `message.publish` | Publish stage | Final assistant response publish diagnostics | `LOG_MESSAGE_PUBLISH=debug` |
 
 ### Chat Operations
 
@@ -527,6 +568,15 @@ LOG_CHAT_SESSION=info
 LOG_LLM_OPENAI=debug
 LOG_EVENTS_AGENT=debug
 LOG_LLM_TOOL_BRIDGE=debug
+
+# Feature-path diagnostics
+LOG_TURN_TRACE=debug
+LOG_LLM_PREP=debug
+LOG_LLM_REQUEST_META=debug
+LOG_LLM_RESPONSE_META=debug
+LOG_TOOL_CALL=debug
+LOG_TOOL_CONTINUATION=debug
+LOG_MESSAGE_PUBLISH=debug
 ```
 
 ---
@@ -676,6 +726,12 @@ LOG_EVENTS_AGENT=debug LOG_LLM=debug npm run web:dev
 
 # Debugging MCP integration
 LOG_MCP=debug npm run web:dev
+
+# Debugging one complete feature path (no raw payloads)
+LOG_TURN_TRACE=debug LOG_LLM_PREP=debug LOG_LLM_REQUEST_META=debug LOG_LLM_RESPONSE_META=debug LOG_TOOL_CALL=debug LOG_TOOL_CONTINUATION=debug LOG_MESSAGE_PUBLISH=debug npm run web:dev
+
+# Debugging raw LLM payloads (redacted)
+LOG_LLM_REQUEST_RAW=debug LOG_LLM_RESPONSE_RAW=debug npm run web:dev
 ```
 
 ### Log Streaming and Analysis

@@ -20,6 +20,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-28: Added canonical `message.publish` logs for assistant publish events in direct and continuation response paths.
  * - 2026-02-27: Passed explicit chat scope to continuation system events (`publishEvent`) to prevent fallback routing to `world.currentChatId` during chat switches.
  * - 2026-02-27: Suppress repeated identical `load_skill` tool calls within the same continuation run once a prior same-run load succeeded.
  * - 2026-02-27: Added per-chat/agent continuation run lock in `continueLLMAfterToolExecution` to skip concurrent duplicate continuation runs while tools are pending/executing (prevents duplicate HITL approval prompts).
@@ -90,6 +91,7 @@ const loggerTurnLimit = createCategoryLogger('turnlimit');
 const loggerChatTitle = createCategoryLogger('chattitle');
 const loggerAutoMention = createCategoryLogger('automention');
 const loggerRestoreResumeTools = createCategoryLogger('chat.restore.resume.tools');
+const loggerMessagePublish = createCategoryLogger('message.publish');
 const TITLE_PROMPT_MAX_TURNS = 24;
 const TITLE_PROMPT_MAX_CHARS_PER_TURN = 240;
 
@@ -1739,6 +1741,16 @@ export async function continueLLMAfterToolExecution(
     // Publish the response message using the same messageId from streaming
     publishMessageWithId(world, sanitizedResponse, agent.id, messageId, targetChatId, undefined);
 
+    loggerMessagePublish.debug('Published assistant response message', {
+      worldId: world.id,
+      chatId: targetChatId,
+      agentId: agent.id,
+      messageId,
+      turnId: messageId,
+      responseLength: sanitizedResponse.length,
+      source: 'continuation',
+    });
+
     loggerAgent.debug('Agent response published after tool execution', {
       agentId: agent.id,
       messageId,
@@ -1855,6 +1867,17 @@ export async function handleTextResponse(
 
   // Publish the response message using the same messageId from streaming
   publishMessageWithId(world, finalResponse, agent.id, messageId, targetChatId, messageEvent.messageId);
+
+  loggerMessagePublish.debug('Published assistant response message', {
+    worldId: world.id,
+    chatId: targetChatId,
+    agentId: agent.id,
+    messageId,
+    turnId: messageId,
+    replyToMessageId: messageEvent.messageId,
+    responseLength: finalResponse.length,
+    source: 'direct',
+  });
 
   loggerAgent.debug('Agent response published', {
     agentId: agent.id,

@@ -20,35 +20,43 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type LoggerSpies = {
-  trace: ReturnType<typeof vi.fn>;
-  debug: ReturnType<typeof vi.fn>;
-  info: ReturnType<typeof vi.fn>;
-  warn: ReturnType<typeof vi.fn>;
-  error: ReturnType<typeof vi.fn>;
   initializeLogger: ReturnType<typeof vi.fn>;
+  calls: Array<{
+    category: string;
+    level: 'trace' | 'debug' | 'info' | 'warn' | 'error';
+    message: unknown;
+    data: unknown;
+  }>;
 };
 
 async function loadModuleWithLoggerSpies() {
   vi.resetModules();
 
   const spies: LoggerSpies = {
-    trace: vi.fn(),
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
     initializeLogger: vi.fn(),
+    calls: [],
   };
 
   vi.doMock('../../../core/logger.js', () => ({
     initializeLogger: spies.initializeLogger,
-    createCategoryLogger: vi.fn(() => ({
-      trace: spies.trace,
-      debug: spies.debug,
-      info: spies.info,
-      warn: spies.warn,
-      error: spies.error,
+    createCategoryLogger: vi.fn((category: string) => ({
+      trace: (message: unknown, data?: unknown) => {
+        spies.calls.push({ category, level: 'trace', message, data });
+      },
+      debug: (message: unknown, data?: unknown) => {
+        spies.calls.push({ category, level: 'debug', message, data });
+      },
+      info: (message: unknown, data?: unknown) => {
+        spies.calls.push({ category, level: 'info', message, data });
+      },
+      warn: (message: unknown, data?: unknown) => {
+        spies.calls.push({ category, level: 'warn', message, data });
+      },
+      error: (message: unknown, data?: unknown) => {
+        spies.calls.push({ category, level: 'error', message, data });
+      },
     })),
+    shouldLogForCategory: vi.fn(() => false),
   }));
 
   const mod = await import('../../../core/events/tool-bridge-logging.js');
@@ -100,8 +108,20 @@ describe('tool-bridge-logging behavior', () => {
         'llm.tool.bridge': 'debug',
       },
     });
-    expect(spies.debug).toHaveBeenCalledTimes(1);
-    const payload = spies.debug.mock.calls[0][1];
+    const canonicalCall = spies.calls.find(call =>
+      call.category === 'tool.call.request'
+      && call.level === 'debug'
+      && call.message === 'Tool path event'
+    );
+    expect(canonicalCall).toBeTruthy();
+
+    const bridgeCall = spies.calls.find(call =>
+      call.category === 'llm.tool.bridge'
+      && call.level === 'debug'
+      && call.message === 'LLM tool bridge event'
+    );
+    expect(bridgeCall).toBeTruthy();
+    const payload = bridgeCall?.data as Record<string, unknown>;
     expect(payload.direction).toBe('LLM->TOOLS');
     expect(payload.type).toBe('tool_call');
     expect(payload.tool).toBe('list_files');
@@ -115,8 +135,18 @@ describe('tool-bridge-logging behavior', () => {
 
     mod.logToolBridge('TOOLS->LLM', 'z'.repeat(350));
 
-    expect(spies.info).toHaveBeenCalledTimes(1);
-    const payload = spies.info.mock.calls[0][1];
+    const canonicalCall = spies.calls.find(call =>
+      call.category === 'tool.call.response'
+      && call.level === 'debug'
+      && call.message === 'Tool path event'
+    );
+    expect(canonicalCall).toBeTruthy();
+
+    const payload = spies.calls.find(call =>
+      call.category === 'llm.tool.bridge'
+      && call.level === 'info'
+    )?.data as Record<string, unknown>;
+    expect(payload).toBeTruthy();
     expect(payload.direction).toBe('TOOLS->LLM');
     expect(String(payload.payload)).toContain('...[50 more]');
   });
@@ -125,12 +155,16 @@ describe('tool-bridge-logging behavior', () => {
     process.env.LOG_LLM_TOOL_BRIDGE = 'warn';
     let loaded = await loadModuleWithLoggerSpies();
     loaded.mod.logToolBridge('bridge', { type: 'event' });
-    expect(loaded.spies.warn).toHaveBeenCalledTimes(1);
+    expect(loaded.spies.calls.some(call =>
+      call.category === 'llm.tool.bridge' && call.level === 'warn'
+    )).toBe(true);
 
     process.env.LOG_LLM_TOOL_BRIDGE = 'error';
     loaded = await loadModuleWithLoggerSpies();
     loaded.mod.logToolBridge('bridge', { type: 'event' });
-    expect(loaded.spies.error).toHaveBeenCalledTimes(1);
+    expect(loaded.spies.calls.some(call =>
+      call.category === 'llm.tool.bridge' && call.level === 'error'
+    )).toBe(true);
   });
 
   it('serializes circular values safely and truncates long previews', async () => {
