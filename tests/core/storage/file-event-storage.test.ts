@@ -5,6 +5,7 @@
  * - Verifies concurrent `saveEvent` calls serialize correctly for the same chat file
  * - Verifies recovery path for JSON files with valid array content plus trailing corruption
  * - Verifies recovered files are rewritten into valid JSON
+ * - Verifies filtering, deduplication, deletion, and compaction behaviors
  *
  * Implementation Notes:
  * - Uses fully mocked `fs` and `fs/promises` to avoid real file-system I/O
@@ -12,6 +13,7 @@
  * - Uses `system` events to avoid message/tool metadata validation constraints
  *
  * Recent Changes:
+ * - 2026-02-27: Added filtering/delete/compact/getLatestSeq and duplicate handling coverage.
  * - 2026-02-08: Added regression tests for lock queueing and trailing JSON recovery
  */
 
@@ -45,7 +47,10 @@ describe('FileEventStorage', () => {
     mockFiles.clear();
 
     vi.mocked(fsModule.existsSync).mockImplementation((filePath: any) => {
-      return mockFiles.has(String(filePath));
+      const key = String(filePath);
+      if (mockFiles.has(key)) return true;
+      const prefix = `${key.replace(/\/$/, '')}/`;
+      return Array.from(mockFiles.keys()).some((path) => path.startsWith(prefix));
     });
 
     vi.mocked(fsPromises.mkdir).mockResolvedValue(undefined);
@@ -140,5 +145,95 @@ describe('FileEventStorage', () => {
     expect(() => JSON.parse(rewritten!)).not.toThrow();
     expect(rewritten).not.toContain('"corrupted": true');
     expect(vi.mocked(fsPromises.rename)).toHaveBeenCalled();
+  });
+
+  it('applies type/time/sequence filters and supports descending limit queries', async () => {
+    const storage = new FileEventStorage({ baseDir });
+
+    const baseTime = new Date('2026-02-08T10:00:00.000Z');
+    await storage.saveEvents([
+      { ...createSystemEvent(1), type: 'system', createdAt: new Date(baseTime.getTime()) },
+      { ...createSystemEvent(2), type: 'sse', createdAt: new Date(baseTime.getTime() + 1_000) },
+      { ...createSystemEvent(3), type: 'tool-start', createdAt: new Date(baseTime.getTime() + 2_000) },
+    ]);
+
+    const filtered = await storage.getEventsByWorldAndChat(worldId, chatId, {
+      sinceSeq: 1,
+      sinceTime: new Date(baseTime.getTime() + 500),
+      types: ['sse', 'tool-start'],
+      order: 'desc',
+      limit: 1,
+    });
+
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].id).toBe('evt-3');
+  });
+
+  it('ignores duplicate event IDs for single and batch writes', async () => {
+    const storage = new FileEventStorage({ baseDir });
+
+    const event = createSystemEvent(1);
+    await storage.saveEvent(event);
+    await storage.saveEvent(event);
+    await storage.saveEvents([event, createSystemEvent(2)]);
+
+    const events = await storage.getEventsByWorldAndChat(worldId, chatId);
+    expect(events).toHaveLength(2);
+    expect(events.map((item) => item.id)).toEqual(['evt-1', 'evt-2']);
+    expect(events.map((item) => item.seq)).toEqual([1, 2]);
+  });
+
+  it('returns event ranges and latest sequence with cache updates', async () => {
+    const storage = new FileEventStorage({ baseDir });
+
+    await storage.saveEvents([createSystemEvent(1), createSystemEvent(2), createSystemEvent(3)]);
+    expect(await storage.getLatestSeq(worldId, chatId)).toBe(3);
+
+    const range = await storage.getEventRange(worldId, chatId, 2, 3);
+    expect(range).toHaveLength(2);
+    expect(range.map((item) => item.id)).toEqual(['evt-2', 'evt-3']);
+  });
+
+  it('deletes chat and world event files and compacts existing files', async () => {
+    const storage = new FileEventStorage({ baseDir });
+
+    await storage.saveEvents([
+      createSystemEvent(1),
+      createSystemEvent(2),
+      {
+        id: 'evt-world-2',
+        worldId: 'world-2',
+        chatId: 'chat-9',
+        type: 'system',
+        payload: { world: 2 },
+        meta: { source: 'test' },
+        createdAt: new Date('2026-02-08T00:00:09.000Z'),
+      },
+    ]);
+
+    const writesBeforeCompact = vi.mocked(fsPromises.writeFile).mock.calls.length;
+    await storage.compact(worldId, chatId);
+    expect(vi.mocked(fsPromises.writeFile).mock.calls.length).toBeGreaterThan(writesBeforeCompact);
+
+    const deletedChat = await storage.deleteEventsByWorldAndChat(worldId, chatId);
+    expect(deletedChat).toBe(2);
+    expect(await storage.getLatestSeq(worldId, chatId)).toBe(0);
+
+    const deletedWorld = await storage.deleteEventsByWorld('world-2');
+    expect(deletedWorld).toBe(1);
+  });
+
+  it('returns zero for missing chat/world deletions and handles delete-world read errors', async () => {
+    const storage = new FileEventStorage({ baseDir });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    expect(await storage.deleteEventsByWorldAndChat('missing-world', 'missing-chat')).toBe(0);
+    expect(await storage.deleteEventsByWorld('missing-world')).toBe(0);
+
+    mockFiles.set(`${baseDir}/error-world/events/chat-a.json`, '[]');
+    vi.mocked(fsPromises.readdir).mockRejectedValueOnce(new Error('readdir failed'));
+    const deleted = await storage.deleteEventsByWorld('error-world');
+    expect(deleted).toBe(0);
+    expect(errorSpy).toHaveBeenCalled();
   });
 });

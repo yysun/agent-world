@@ -277,6 +277,7 @@ npm test              # Run all unit tests
 npm run test:watch    # Watch mode with hot reload
 npm run test:ui       # Visual test UI
 npm run test:coverage # Generate coverage report
+npm run test:coverage:gate # Coverage + core threshold gate + subsystem scorecard
 ```
 
 **Run specific tests:**
@@ -288,9 +289,22 @@ npm test -- message-saving      # Test files matching pattern
 **Integration tests:**
 ```bash
 npm run test:integration  # Run integration tests with real filesystem
+npm run ci:test           # CI gate: coverage threshold + integration
 ```
 
 Agent World uses Vitest for fast, modern testing with native TypeScript support.
+
+### Coverage Gates
+
+`npm run test:coverage:gate` enforces minimum core coverage thresholds and generates a subsystem scorecard:
+- core statements >= 68%
+- core branches >= 56%
+- core functions >= 75%
+- core lines >= 69%
+
+The scorecard is written to:
+- `coverage/scorecard.md`
+- `coverage/scorecard.json`
 
 ## Logging and Debugging
 

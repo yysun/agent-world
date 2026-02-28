@@ -50,13 +50,17 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
+    "coverage:scorecard": "node scripts/coverage-scorecard.mjs",
+    "test:coverage:gate": "npm run test:coverage && npm run coverage:scorecard",
     "test:db": "npx tsx tests/db/migration-tests.ts",
     "test:e2e": "npx tsx tests/e2e/test-agent-response-rules.ts",
     "test:e2e:interactive": "npx tsx tests/e2e/test-agent-response-rules.ts -i",
     "integration": "vitest run --config vitest.integration.config.ts",
+    "ci:test": "npm run test:coverage:gate && npm run integration",
     "pkill": "pkill -f tsx",
     "opik:eval": "npx tsx tests/opik/eval-robustness.ts",
-    "opik:storage-export-world": "npx tsx scripts/opik-export-world-storage.ts"
+    "opik:storage-export-world": "npx tsx scripts/opik-export-world-storage.ts",
+    "test:integration": "npm run integration"
   },
   "description": "World-mediated agent management system with clean API surface",
   "keywords": [

@@ -29,6 +29,7 @@
  * - Removed: SQL transactions, heartbeat monitoring, stuck detection, priority ordering
  * - Kept: Core queue operations, per-world locking, auto-retry, statistics
  * - All 31 unit tests pass with in-memory implementation
+ * - 2026-02-27: Fixed completion/failure matching to use queue `messageId` consistently with the public interface.
  */
 
 
@@ -262,7 +263,7 @@ export function createMemoryQueueStorage(): QueueStorage {
   async function markCompleted(messageId: string): Promise<void> {
     // Find and remove from processing
     for (const [worldId, message] of processing) {
-      if (message.id === messageId) {
+      if (message.messageId === messageId) {
         message.status = 'completed';
         message.completedAt = new Date();
         processing.delete(worldId);
@@ -277,7 +278,7 @@ export function createMemoryQueueStorage(): QueueStorage {
   async function markFailed(messageId: string, error: string): Promise<void> {
     // Find message in processing
     for (const [worldId, message] of processing) {
-      if (message.id === messageId) {
+      if (message.messageId === messageId) {
         message.error = error;
         message.retryCount++;
 
@@ -449,5 +450,4 @@ export function createMemoryQueueStorage(): QueueStorage {
     getMessage
   };
 }
-
 

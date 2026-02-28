@@ -2,27 +2,252 @@
  * Unit Tests for GitHub World Import Utilities
  *
  * Purpose:
- * - Validate shorthand resolution and path-safety guards for GitHub world import sources.
+ * - Validate shorthand resolution, safety guards, and staging behavior for GitHub world import sources.
  *
  * Key Features:
  * - Confirms supported alias mapping and world-path derivation.
  * - Confirms invalid shorthand and unsupported alias errors.
  * - Confirms unsafe relative path rejection.
+ * - Confirms staging lifecycle success and cleanup-on-failure paths.
  *
  * Implementation Notes:
- * - Uses pure utility-level tests without network access.
+ * - Uses mocked network and filesystem APIs for deterministic staging coverage.
  * - Uses Vitest expectations for explicit error-code assertions.
  *
  * Recent Changes:
+ * - 2026-02-27: Added stageGitHubWorldFromShorthand success/error/limit tests with mocked fetch and fs.
  * - 2026-02-25: Added baseline unit coverage for GitHub shorthand import resolver.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const fsPromisesMocks = vi.hoisted(() => ({
+  mkdir: vi.fn(async () => undefined),
+  mkdtemp: vi.fn(async () => '/tmp/agent-world-github-import-staging'),
+  rm: vi.fn(async () => undefined),
+  writeFile: vi.fn(async () => undefined),
+}));
+
+vi.mock('node:fs/promises', () => fsPromisesMocks);
+vi.mock('node:os', () => ({
+  tmpdir: () => '/tmp',
+}));
+vi.mock('node:path', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:path')>();
+  return actual;
+});
+
 import {
   ensureSafeRelativePath,
   GitHubWorldImportError,
   resolveGitHubWorldShorthand,
+  stageGitHubWorldFromShorthand,
 } from '../../core/storage/github-world-import.js';
+
+function jsonResponse(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+function bytesResponse(text: string, status = 200): Response {
+  return new Response(text, { status });
+}
+
+describe('stageGitHubWorldFromShorthand', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    fsPromisesMocks.mkdtemp.mockResolvedValue('/tmp/agent-world-github-import-staging');
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('stages files and returns source metadata with cleanup callback', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ sha: 'abc123' }))
+      .mockResolvedValueOnce(jsonResponse([
+        {
+          type: 'file',
+          path: 'data/worlds/infinite-etude/config.json',
+          download_url: 'https://download/config',
+        },
+        {
+          type: 'dir',
+          path: 'data/worlds/infinite-etude/agents',
+        },
+      ]))
+      .mockResolvedValueOnce(jsonResponse([
+        {
+          type: 'file',
+          path: 'data/worlds/infinite-etude/agents/alpha.json',
+          download_url: 'https://download/alpha',
+        },
+      ]))
+      .mockResolvedValueOnce(bytesResponse('{"id":"infinite-etude"}'))
+      .mockResolvedValueOnce(bytesResponse('{"id":"alpha"}'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const staged = await stageGitHubWorldFromShorthand('@awesome-agent-world/infinite-etude', {
+      tempPrefix: 'aw-stage-',
+      requestTimeoutMs: 1_000,
+    });
+
+    expect(fsPromisesMocks.mkdtemp).toHaveBeenCalledWith('/tmp/aw-stage-');
+    expect(staged.stagingRootPath).toBe('/tmp/agent-world-github-import-staging');
+    expect(staged.worldFolderPath).toBe('/tmp/agent-world-github-import-staging/infinite-etude');
+    expect(staged.source).toEqual({
+      shorthand: '@awesome-agent-world/infinite-etude',
+      owner: 'yysun',
+      repo: 'awesome-agent-world',
+      branch: 'main',
+      worldPath: 'data/worlds/infinite-etude',
+      commitSha: 'abc123',
+    });
+
+    expect(fsPromisesMocks.mkdir).toHaveBeenCalledWith(
+      '/tmp/agent-world-github-import-staging/infinite-etude',
+      { recursive: true },
+    );
+    expect(fsPromisesMocks.mkdir).toHaveBeenCalledWith(
+      '/tmp/agent-world-github-import-staging/infinite-etude/agents',
+      { recursive: true },
+    );
+    expect(fsPromisesMocks.writeFile).toHaveBeenCalledTimes(2);
+    expect(fsPromisesMocks.rm).not.toHaveBeenCalled();
+
+    await staged.cleanup();
+    expect(fsPromisesMocks.rm).toHaveBeenCalledWith('/tmp/agent-world-github-import-staging', {
+      recursive: true,
+      force: true,
+    });
+  });
+
+  it('cleans up staging root when no files are found', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ sha: 'abc123' }))
+      .mockResolvedValueOnce(jsonResponse([])));
+
+    await expect(
+      stageGitHubWorldFromShorthand('@awesome-agent-world/infinite-etude'),
+    ).rejects.toMatchObject({
+      name: 'GitHubWorldImportError',
+      code: 'source-not-found',
+    });
+
+    expect(fsPromisesMocks.rm).toHaveBeenCalledWith('/tmp/agent-world-github-import-staging', {
+      recursive: true,
+      force: true,
+    });
+  });
+
+  it('enforces byte limits and cleans up after limit failures', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ sha: 'abc123' }))
+      .mockResolvedValueOnce(jsonResponse([
+        {
+          type: 'file',
+          path: 'data/worlds/infinite-etude/config.json',
+          download_url: 'https://download/config',
+        },
+      ]))
+      .mockResolvedValueOnce(bytesResponse('123456789')));
+
+    await expect(
+      stageGitHubWorldFromShorthand('@awesome-agent-world/infinite-etude', { maxTotalBytes: 3 }),
+    ).rejects.toMatchObject({
+      name: 'GitHubWorldImportError',
+      code: 'limits-exceeded',
+    });
+
+    expect(fsPromisesMocks.rm).toHaveBeenCalledWith('/tmp/agent-world-github-import-staging', {
+      recursive: true,
+      force: true,
+    });
+  });
+
+  it('cleans up and raises fetch-failed when file download rejects', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ sha: 'abc123' }))
+      .mockResolvedValueOnce(jsonResponse([
+        {
+          type: 'file',
+          path: 'data/worlds/infinite-etude/config.json',
+          download_url: 'https://download/config',
+        },
+      ]))
+      .mockRejectedValueOnce(new Error('network timeout')));
+
+    await expect(
+      stageGitHubWorldFromShorthand('@awesome-agent-world/infinite-etude'),
+    ).rejects.toMatchObject({
+      name: 'GitHubWorldImportError',
+      code: 'fetch-failed',
+    });
+
+    expect(fsPromisesMocks.rm).toHaveBeenCalledWith('/tmp/agent-world-github-import-staging', {
+      recursive: true,
+      force: true,
+    });
+  });
+
+  it('rejects unsupported entry types while listing source files', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ sha: 'abc123' }))
+      .mockResolvedValueOnce(jsonResponse([
+        {
+          type: 'symlink',
+          path: 'data/worlds/infinite-etude/symlink',
+        },
+      ])));
+
+    await expect(
+      stageGitHubWorldFromShorthand('@awesome-agent-world/infinite-etude'),
+    ).rejects.toMatchObject({
+      name: 'GitHubWorldImportError',
+      code: 'unsupported-entry-type',
+    });
+
+    expect(fsPromisesMocks.rm).toHaveBeenCalledWith('/tmp/agent-world-github-import-staging', {
+      recursive: true,
+      force: true,
+    });
+  });
+
+  it('rejects file entries that omit download_url', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ sha: 'abc123' }))
+      .mockResolvedValueOnce(jsonResponse([
+        {
+          type: 'file',
+          path: 'data/worlds/infinite-etude/config.json',
+          download_url: null,
+        },
+      ])));
+
+    await expect(
+      stageGitHubWorldFromShorthand('@awesome-agent-world/infinite-etude'),
+    ).rejects.toMatchObject({
+      name: 'GitHubWorldImportError',
+      code: 'fetch-failed',
+    });
+  });
+
+  it('maps GitHub 404 listing to source-not-found error code', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ sha: 'abc123' }))
+      .mockResolvedValueOnce(new Response('', { status: 404 })));
+
+    await expect(
+      stageGitHubWorldFromShorthand('@awesome-agent-world/infinite-etude'),
+    ).rejects.toMatchObject({
+      name: 'GitHubWorldImportError',
+      code: 'source-not-found',
+    });
+  });
+});
 
 describe('resolveGitHubWorldShorthand', () => {
   it('resolves supported alias and world name', () => {

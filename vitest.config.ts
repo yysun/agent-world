@@ -9,7 +9,7 @@
  * 
  * Features:
  * - Node.js test environment for backend code
- * - Coverage reporting excluding API and CLI code
+ * - Coverage reporting for core runtime + selected server contracts
  * - Mock support with auto-reset between tests
  * - Workspace module resolution via vite-tsconfig-paths
  * - Sequential test file execution (fileParallelism: false)
@@ -40,8 +40,8 @@ export default defineConfig({
     // Coverage configuration (v8 instead of istanbul)
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'lcov', 'html'],
-      include: ['core/**/*.ts'],
+      reporter: ['text', 'lcov', 'html', 'json-summary'],
+      include: ['core/**/*.ts', 'server/api.ts', 'server/sse-handler.ts'],
       exclude: [
         'core/**/*.d.ts',
         'core/cli/**',
