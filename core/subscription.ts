@@ -11,6 +11,7 @@
  * - Uses world-id keyed runtime tracking with safe register/unregister semantics.
  *
  * Recent Changes:
+ * - 2026-02-28: Re-applied world-level message subscriptions during runtime refresh to preserve chat-title scheduling after session/world updates.
  * - 2026-02-14: Added active runtime world tracking and `getActiveSubscribedWorld()` for core edit-message resubmission to publish on live emitters.
  */
 
@@ -111,6 +112,10 @@ export async function startWorld(world: World, client: ClientConnection): Promis
       // Clean up all event listeners
       await cleanupWorldSubscription(currentWorld, worldEventListeners);
 
+      if (typeof currentWorld._worldMessagesUnsubscriber === 'function') {
+        currentWorld._worldMessagesUnsubscriber();
+      }
+
       // Remove all listeners from the EventEmitter to prevent memory leaks
       currentWorld.eventEmitter.removeAllListeners();
 
@@ -165,6 +170,7 @@ export async function startWorld(world: World, client: ClientConnection): Promis
       for (const agent of currentWorld.agents.values()) {
         subscribeAgentToMessages(currentWorld, agent);
       }
+      subscribeWorldToMessages(currentWorld);
 
       logger.debug('World subscription refreshed', {
         worldId: currentWorld.id,

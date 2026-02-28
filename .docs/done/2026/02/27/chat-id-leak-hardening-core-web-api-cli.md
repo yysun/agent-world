@@ -83,3 +83,24 @@ Result:
 
 - This pass covered chat-leak protection in core runtime event routing and web/API/CLI client/server surfaces.
 - There are other unrelated uncommitted workspace changes present outside this scoped fix set.
+
+## 2026-02-28 Follow-up (Electron + Core)
+
+Follow-up fix set for Electron edit behavior and chat-title safety:
+
+1. Electron edit resubmission now targets the active subscribed world runtime
+- Updated `electron/main-process/ipc-handlers.ts` so `message:edit` calls `ensureWorldSubscribed(worldId)` and passes that world to core `editUserMessage(...)`.
+- Prevents edited-message resubmission from publishing on a detached runtime emitter that renderer subscriptions do not observe.
+
+2. Core subscription refresh now restores world-level title listener
+- Updated `core/subscription.ts` refresh path to call `subscribeWorldToMessages(currentWorld)` after world recreation.
+- Added tracked world message unsubscribe handle in `core/types.ts` + `core/events/subscribers.ts` to keep world-level message listener setup idempotent/clean.
+
+3. Core edit-title reset now rolls back when resubmission fails
+- Updated `core/managers.ts` so auto-generated-title reset (`<generated title> -> New Chat`) records prior title and restores it when message republish throws.
+- Prevents stale title regression where an existing chat could remain incorrectly renamed to `New Chat` after failed edit resubmission.
+
+4. Regression coverage added
+- `tests/core/message-edit.test.ts`: title reset rollback on resubmission publish failure.
+- `tests/core/subscription-refresh-title-listener.test.ts`: world message listener rebind after subscription refresh.
+- `tests/electron/main/main-ipc-handlers.test.ts`: edit handler injects subscribed world into core edit flow.

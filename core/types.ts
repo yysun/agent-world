@@ -9,6 +9,7 @@
  * - Comprehensive LLM provider enumeration (OpenAI, Anthropic, Azure, Google, XAI, Ollama)
  *
  * Recent Changes:
+ * - 2026-02-28: Added optional world-level message subscription cleanup handle (`_worldMessagesUnsubscriber`) for refresh-safe title listener rebinds.
  * - 2026-02-13: Added world-level `mainAgent` routing field and agent-level `autoReply` flag.
  * - 2026-02-13: Added optional storage compare-and-set helper for chat title updates (`updateChatNameIfCurrent`).
  * - 2026-02-13: Added optional `chatId` to world tool events for session-scoped realtime routing.
@@ -370,6 +371,7 @@ export interface World {
   _eventPersistenceCleanup?: () => void; // Internal cleanup function for event listeners
   _activityListenerCleanup?: () => void; // Internal cleanup function for activity listener
   _agentUnsubscribers?: Map<string, () => void>; // Per-agent message listener unsubscribe functions
+  _worldMessagesUnsubscriber?: () => void; // World-level message listener unsubscribe for title scheduling
 }
 
 // Unified Storage Interface - Consolidated from StorageManager and StorageAPI

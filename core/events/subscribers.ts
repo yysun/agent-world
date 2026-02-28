@@ -20,6 +20,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-28: Made world message subscription idempotent and tracked its cleanup handle to prevent title-listener loss/duplication after runtime refreshes.
  * - 2026-02-27: Switched idle title generation targeting to event-scoped `chatId` and ignored unscoped idle events to prevent cross-chat renames after chat switches.
  * - 2026-02-22: Persist incoming human messages to agent memory even when agents do not respond (e.g., invalid @mention), preventing UI-only unsaved messages.
  * - 2026-02-20: Publish chat-title update notifications as structured `system` events (`chat-title-updated`).
@@ -319,7 +320,11 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
  * Subscribe world to messages with cleanup function
  */
 export function subscribeWorldToMessages(world: World): () => void {
-  return subscribeToMessages(world, async (event: WorldMessageEvent) => {
+  if (typeof world._worldMessagesUnsubscriber === 'function') {
+    return world._worldMessagesUnsubscriber;
+  }
+
+  const unsubscribe = subscribeToMessages(world, async (event: WorldMessageEvent) => {
     const targetChatId = event.chatId ?? world.currentChatId ?? null;
     if (!targetChatId) return;
     if (!isHumanSender(event.sender)) return;
@@ -329,6 +334,16 @@ export function subscribeWorldToMessages(world: World): () => void {
 
     scheduleNoActivityTitleUpdate(world, targetChatId, event.content || '');
   });
+
+  const trackedUnsubscribe = () => {
+    unsubscribe();
+    if (world._worldMessagesUnsubscriber === trackedUnsubscribe) {
+      world._worldMessagesUnsubscriber = undefined;
+    }
+  };
+
+  world._worldMessagesUnsubscriber = trackedUnsubscribe;
+  return trackedUnsubscribe;
 }
 
 /**

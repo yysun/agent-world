@@ -11,6 +11,7 @@
  * - Mocks the Electron `dialog` module virtually to avoid runtime Electron dependency.
  *
  * Recent Changes:
+ * - 2026-02-28: Added edit-message IPC coverage asserting the subscribed runtime world is injected into core `editUserMessage` for realtime-safe resubmission events.
  * - 2026-02-26: Added coverage for env-derived renderer logging config payload (`getLoggingConfig`).
  * - 2026-02-15: Added edit-message guardrail coverage for chat existence and user-role-only enforcement parity with web/API.
  * - 2026-02-14: Added `hitl:respond` handler coverage for core HITL option resolution delegation.
@@ -144,7 +145,7 @@ describe('createMainIpcHandlers.getLoggingConfig', () => {
 });
 
 describe('createMainIpcHandlers.editMessageInChat', () => {
-  it('delegates edit operations to core editUserMessage without runtime refresh', async () => {
+  it('delegates edit operations to core editUserMessage using the active subscribed world', async () => {
     const editUserMessage = vi.fn(async () => ({
       success: true,
       messagesRemovedTotal: 2,
@@ -152,12 +153,15 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
       newMessageId: 'new-msg-1'
     }));
     const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1' }));
+    const subscribedWorld = { id: 'world-1', eventEmitter: {} };
+    const ensureWorldSubscribed = vi.fn(async () => subscribedWorld);
     const getMemory = vi.fn(async () => ([
       { messageId: 'msg-1', role: 'user', chatId: 'chat-1' }
     ]));
     const refreshWorldSubscription = vi.fn(async () => null);
     const { handlers } = await createHandlers({
       editUserMessage,
+      ensureWorldSubscribed,
       refreshWorldSubscription,
       restoreChat,
       getMemory
@@ -170,7 +174,8 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
       newContent: 'updated prompt'
     });
 
-    expect(editUserMessage).toHaveBeenCalledWith('world-1', 'msg-1', 'updated prompt', 'chat-1');
+    expect(ensureWorldSubscribed).toHaveBeenCalledWith('world-1');
+    expect(editUserMessage).toHaveBeenCalledWith('world-1', 'msg-1', 'updated prompt', 'chat-1', subscribedWorld);
     expect(restoreChat).toHaveBeenCalledWith('world-1', 'chat-1');
     expect(refreshWorldSubscription).not.toHaveBeenCalled();
     expect(result).toMatchObject({
@@ -186,6 +191,8 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
       resubmissionStatus: 'failed',
       resubmissionError: 'resubmit failed'
     }));
+    const subscribedWorld = { id: 'world-1', eventEmitter: {} };
+    const ensureWorldSubscribed = vi.fn(async () => subscribedWorld);
     const refreshWorldSubscription = vi.fn(async () => 'refresh failed');
     const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1' }));
     const getMemory = vi.fn(async () => ([
@@ -193,6 +200,7 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
     ]));
     const { handlers } = await createHandlers({
       editUserMessage,
+      ensureWorldSubscribed,
       refreshWorldSubscription,
       restoreChat,
       getMemory
@@ -205,7 +213,8 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
       newContent: 'updated prompt'
     });
 
-    expect(editUserMessage).toHaveBeenCalledWith('world-1', 'msg-1', 'updated prompt', 'chat-1');
+    expect(ensureWorldSubscribed).toHaveBeenCalledWith('world-1');
+    expect(editUserMessage).toHaveBeenCalledWith('world-1', 'msg-1', 'updated prompt', 'chat-1', subscribedWorld);
     expect(refreshWorldSubscription).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       success: true,

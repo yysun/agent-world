@@ -12,6 +12,7 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-02-28: `message:edit` now resolves and passes the active subscribed world into core edit resubmission so edited turns publish on the same realtime emitter the renderer listens to.
  * - 2026-02-26: Added env-derived renderer logging config endpoint and replaced session/message console traces with categorized injected logger calls.
  * - 2026-02-25: Added optional `world:import` source support for GitHub shorthand (`@awesome-agent-world/<world-name>`) via secure temp staging.
  * - 2026-02-20: Enforced options-only `hitl:respond` handler payload validation.
@@ -153,7 +154,7 @@ interface MainIpcHandlerFactoryDependencies {
   activateChatWithSnapshot: (worldId: string, chatId: string) => Promise<{ world: any; chatId: string; hitlPrompts: any[] } | null>;
   restoreChat: (worldId: string, chatId: string) => Promise<any>;
   updateWorld: (worldId: string, updates: Record<string, unknown>) => Promise<any>;
-  editUserMessage: (worldId: string, messageId: string, newContent: string, chatId: string) => Promise<any>;
+  editUserMessage: (worldId: string, messageId: string, newContent: string, chatId: string, targetWorld?: any) => Promise<any>;
   removeMessagesFrom: (worldId: string, messageId: string, chatId: string) => Promise<any>;
   createStorage: (config: any) => Promise<any>;
   createStorageFromEnv: () => Promise<any>;
@@ -1228,7 +1229,8 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       throw new Error(`404 Chat not found: ${chatId}`);
     }
 
-    return editUserMessage(worldId, messageId, newContent, chatId);
+    const world = await ensureWorldSubscribed(worldId);
+    return editUserMessage(worldId, messageId, newContent, chatId, world as any);
   }
 
   async function deleteMessageFromChat(payload: any) {
