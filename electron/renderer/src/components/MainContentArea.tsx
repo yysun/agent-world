@@ -6,6 +6,7 @@
  * Key Features:
  * - Renders message list panel with inline working indicator behavior.
  * - Renders composer bar with send/stop semantics.
+ * - Renders status bar in the same main section column for composer-aligned placement.
  * - Renders right panel shell and nested right panel content.
  *
  * Implementation Notes:
@@ -13,6 +14,7 @@
  * - Preserves existing render order and layout structure from the previous inline block.
  *
  * Recent Changes:
+ * - 2026-02-28: Moved status-bar slot into the composer column so status content aligns with composer width/position.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component decomposition.
  * - 2026-02-17: Simplified integration contract to grouped prop objects for message/composer/right-panel composition.
  */
@@ -27,6 +29,7 @@ export default function MainContentArea({
   composerProps,
   rightPanelShellProps,
   rightPanelContentProps,
+  statusBar,
 }) {
   return (
     <div className="flex min-h-0 flex-1">
@@ -34,6 +37,7 @@ export default function MainContentArea({
         <MessageListPanel {...messageListProps} />
 
         <ComposerBar {...composerProps} />
+        {statusBar}
       </section>
 
       <RightPanelShell {...rightPanelShellProps}>

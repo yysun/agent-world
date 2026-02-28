@@ -8,13 +8,14 @@
  * Key Features:
  * - Shows animated pulse + per-agent names while agents are working.
  * - Shows static "Done" indicator when complete.
- * - Shows nothing when idle.
+ * - Keeps a stable bar container mounted and clears content when idle.
  *
  * Implementation Notes:
  * - Consumes output of useWorkingStatus hook via App.tsx props.
  * - Reuses ActivityPulse and ThinkingIndicator for animation consistency.
  *
  * Recent Changes:
+ * - 2026-02-28: Preserved an always-mounted status bar row so hide behavior clears content instead of removing layout space.
  * - 2026-02-22: Created as part of status-registry migration (Phase 7.1).
  */
 
@@ -39,7 +40,7 @@ export default function WorkingStatusBar({ chatStatus, agentStatuses, notificati
   if (notification) {
     return (
       <div className="px-4 pb-1">
-        <div className={`mx-auto flex w-full max-w-[750px] items-center gap-1.5 text-xs ${notificationTextClass[notification.kind] ?? 'text-muted-foreground'}`}>
+        <div className={`mx-auto flex min-h-5 w-full max-w-[750px] items-center gap-1.5 text-xs ${notificationTextClass[notification.kind] ?? 'text-muted-foreground'}`}>
           <span>{notification.text}</span>
         </div>
       </div>
@@ -47,13 +48,17 @@ export default function WorkingStatusBar({ chatStatus, agentStatuses, notificati
   }
 
   if (chatStatus === 'idle') {
-    return null;
+    return (
+      <div className="px-4 pb-1">
+        <div className="mx-auto flex min-h-5 w-full max-w-[750px] items-center text-xs text-muted-foreground" aria-hidden="true" />
+      </div>
+    );
   }
 
   if (chatStatus === 'complete') {
     return (
       <div className="px-4 pb-1">
-        <div className="mx-auto flex w-full max-w-[750px] items-center gap-1.5 text-xs text-muted-foreground">
+        <div className="mx-auto flex min-h-5 w-full max-w-[750px] items-center gap-1.5 text-xs text-muted-foreground">
           <span className="text-green-500">✓</span>
           <span>Done</span>
         </div>
@@ -66,7 +71,7 @@ export default function WorkingStatusBar({ chatStatus, agentStatuses, notificati
 
   return (
     <div className="px-4 pb-1">
-      <div className="mx-auto flex w-full max-w-[750px] items-center gap-2">
+      <div className="mx-auto flex min-h-5 w-full max-w-[750px] items-center gap-2">
         <ActivityPulse isActive={true} />
         {workingAgents.length > 0 ? (
           <div className="flex items-center gap-2 flex-wrap">
