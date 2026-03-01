@@ -263,7 +263,7 @@ describe('World activity-based title update', () => {
     expect(mocks.updateChatNameIfCurrent).not.toHaveBeenCalled();
   });
 
-  test('builds title prompt from filtered deduplicated bounded chat transcript', async () => {
+  test('builds title prompt from latest user message only', async () => {
     const noisyMessages = [
       { role: 'user', content: 'Very old user message', messageId: 'old-1' },
       ...Array.from({ length: 30 }).map((_, index) => ({
@@ -296,11 +296,13 @@ describe('World activity-based title update', () => {
     const promptContent = promptMessages?.[0]?.content ?? '';
     const scopedChatId = mocks.generateAgentResponse.mock.calls.at(-1)?.[5];
 
+    expect(promptContent).not.toContain('-assistant:');
     expect(promptContent).not.toContain('-tool:');
     expect(promptContent).not.toContain('-system:');
-    expect((promptContent.match(/-user: Duplicate prompt line/g) || []).length).toBe(1);
+    expect((promptContent.match(/-user:/g) || []).length).toBe(1);
+    expect(promptContent).toContain('-user: Duplicate prompt line');
     expect(promptContent).not.toContain('Very old user message');
-    expect(promptContent).toContain('Recent turn 29');
+    expect(promptContent).not.toContain('Recent turn 29');
     expect(scopedChatId).toBe('chat-1');
   });
 

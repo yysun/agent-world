@@ -24,6 +24,7 @@
  * - 2026-02-27: Passed explicit chat scope to continuation system events (`publishEvent`) to prevent fallback routing to `world.currentChatId` during chat switches.
  * - 2026-02-27: Suppress repeated identical `load_skill` tool calls within the same continuation run once a prior same-run load succeeded.
  * - 2026-02-27: Added per-chat/agent continuation run lock in `continueLLMAfterToolExecution` to skip concurrent duplicate continuation runs while tools are pending/executing (prevents duplicate HITL approval prompts).
+ * - 2026-03-01: Expanded script-like shell command detection to treat path-based interpreter executables (for example `.venv/bin/python`) as script hosts so continuation prefers smart shell result mode after skill-driven script calls.
  * - 2026-02-26: Replaced `resumePendingToolCallsForChat` console traces with categorized structured logger events (`chat.restore.resume.tools`) for env-controlled restore diagnostics.
  * - 2026-02-24: Commented out hardcoded Infinite-Etude handoff safeguard to respect separation of concerns (logic moved to agent prompt).
  * - 2026-02-25: Added detailed resume tracing in `resumePendingToolCallsForChat` (start/skip/execute/error/continue) for cross-layer restore diagnostics.
@@ -92,7 +93,6 @@ const loggerChatTitle = createCategoryLogger('chattitle');
 const loggerAutoMention = createCategoryLogger('automention');
 const loggerRestoreResumeTools = createCategoryLogger('chat.restore.resume.tools');
 const loggerMessagePublish = createCategoryLogger('message.publish');
-const TITLE_PROMPT_MAX_TURNS = 24;
 const TITLE_PROMPT_MAX_CHARS_PER_TURN = 240;
 
 // Storage wrapper instance - initialized lazily
@@ -111,6 +111,7 @@ type ActiveContinuationRun = {
 
 const activeContinuationRuns = new Map<string, ActiveContinuationRun>();
 const continuationRunLoadedSkills = new Map<string, Set<string>>();
+const continuationRunShellCommandResults = new Map<string, Map<string, string>>();
 
 function normalizeContinuationChatId(chatId: string | null | undefined): string {
   if (chatId === undefined || chatId === null) {
@@ -167,11 +168,47 @@ function getLoadedSkillsForContinuationRun(runId: string): Set<string> {
   return created;
 }
 
+function getShellCommandResultsForContinuationRun(runId: string): Map<string, string> {
+  const existing = continuationRunShellCommandResults.get(runId);
+  if (existing) {
+    return existing;
+  }
+  const created = new Map<string, string>();
+  continuationRunShellCommandResults.set(runId, created);
+  return created;
+}
+
+function normalizeShellCommandParameterList(parameters: unknown): string[] {
+  if (!Array.isArray(parameters)) {
+    return [];
+  }
+  return parameters.map((parameter) => String(parameter));
+}
+
+function buildShellCommandSignature(toolArgs: Record<string, any>, trustedWorkingDirectory: string): string {
+  const command = String(toolArgs?.command || '').trim();
+  const parameters = normalizeShellCommandParameterList(toolArgs?.parameters);
+  const requestedDirectory = typeof toolArgs?.directory === 'string' && toolArgs.directory.trim()
+    ? toolArgs.directory.trim()
+    : trustedWorkingDirectory;
+  const outputFormat = typeof toolArgs?.output_format === 'string' ? toolArgs.output_format : 'markdown';
+  const outputDetail = typeof toolArgs?.output_detail === 'string' ? toolArgs.output_detail : 'minimal';
+
+  return JSON.stringify({
+    command,
+    parameters,
+    directory: requestedDirectory,
+    outputFormat,
+    outputDetail,
+  });
+}
+
 function cleanupContinuationRunState(runId: string): void {
   if (isContinuationRunActive(runId)) {
     return;
   }
   continuationRunLoadedSkills.delete(runId);
+  continuationRunShellCommandResults.delete(runId);
 }
 
 type TitlePromptMessage = {
@@ -203,39 +240,37 @@ function clipTitlePromptText(content: string): string {
   return `${content.substring(0, TITLE_PROMPT_MAX_CHARS_PER_TURN - 3)}...`;
 }
 
-function buildTitlePromptMessages(messages: AgentMessage[]): TitlePromptMessage[] {
-  const dedupKeys = new Set<string>();
-  const filtered: TitlePromptMessage[] = [];
+function selectTitleSourceUserMessage(messages: AgentMessage[], content: string): string {
+  const contentCandidate = normalizeTitlePromptText(content || '');
+  if (contentCandidate) {
+    return clipTitlePromptText(contentCandidate);
+  }
 
-  for (const message of messages) {
-    if (message.role !== 'user' && message.role !== 'assistant') {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || message.role !== 'user' || typeof message.content !== 'string') {
       continue;
     }
-    if (typeof message.content !== 'string') {
-      continue;
-    }
-
     const normalized = normalizeTitlePromptText(message.content);
     if (!normalized) {
       continue;
     }
-
-    const clipped = clipTitlePromptText(normalized);
-    const dedupKey = message.messageId
-      ? `id:${message.messageId}`
-      : `${message.role}:${clipped.toLowerCase()}`;
-    if (dedupKeys.has(dedupKey)) {
-      continue;
-    }
-
-    dedupKeys.add(dedupKey);
-    filtered.push({
-      role: message.role,
-      content: clipped
-    });
+    return clipTitlePromptText(normalized);
   }
 
-  return filtered.slice(-TITLE_PROMPT_MAX_TURNS);
+  return '';
+}
+
+function buildTitlePromptMessages(messages: AgentMessage[], content: string): TitlePromptMessage[] {
+  const sourceMessage = selectTitleSourceUserMessage(messages, content);
+  if (!sourceMessage) {
+    return [];
+  }
+
+  return [{
+    role: 'user',
+    content: sourceMessage
+  }];
 }
 
 function sanitizeGeneratedTitle(rawTitle: string): string {
@@ -331,6 +366,63 @@ function getLoadSkillIdFromRawToolArguments(rawArguments: unknown): string | nul
 function isSuccessfulLoadSkillResult(toolResult: string): boolean {
   const normalized = String(toolResult || '');
   return /<skill_context\b/i.test(normalized) && !/<error>/i.test(normalized);
+}
+
+function hasSuccessfulSkillContextInChat(messages: AgentMessage[], chatId: string | null | undefined): boolean {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.chatId !== chatId) {
+      continue;
+    }
+    if (message?.role !== 'tool') {
+      continue;
+    }
+    if (isSuccessfulLoadSkillResult(String(message?.content || ''))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isScriptLikeShellCommand(toolArgs: Record<string, any>): boolean {
+  const command = String(toolArgs?.command || '').trim().toLowerCase();
+  const parameters = Array.isArray(toolArgs?.parameters)
+    ? toolArgs.parameters.map((parameter) => String(parameter || '').trim().toLowerCase()).filter(Boolean)
+    : [];
+
+  if (!command) {
+    return false;
+  }
+
+  const scriptHostCommands = new Set(['python', 'python3', 'node', 'bash', 'sh', 'zsh']);
+  const commandBasename = command.split(/[\\/]/).pop() || command;
+  const normalizedCommandBasename = commandBasename.replace(/\.exe$/i, '');
+  const isPythonVariant = /^python\d+(\.\d+)?$/.test(normalizedCommandBasename);
+  const scriptExtensionPattern = /\.(py|sh|bash|zsh|js|mjs|cjs|ts)$/i;
+  if (scriptHostCommands.has(command) || scriptHostCommands.has(normalizedCommandBasename) || isPythonVariant) {
+    return parameters.some((parameter) => parameter.startsWith('scripts/') || scriptExtensionPattern.test(parameter));
+  }
+
+  return command.startsWith('scripts/') || scriptExtensionPattern.test(command);
+}
+
+function resolveShellContinuationLlmResultMode(options: {
+  toolName: string;
+  toolArgs: Record<string, any>;
+  memory: AgentMessage[];
+  chatId: string | null | undefined;
+}): 'minimal' | 'smart' | 'verbose' {
+  if (options.toolName !== 'shell_cmd') {
+    return 'verbose';
+  }
+
+  const skillContextActive = hasSuccessfulSkillContextInChat(options.memory, options.chatId);
+  const scriptLikeShellCommand = isScriptLikeShellCommand(options.toolArgs);
+  if (skillContextActive && scriptLikeShellCommand) {
+    return 'smart';
+  }
+
+  return 'minimal';
 }
 
 function getLatestUnresolvedToolCallForChat(
@@ -560,7 +652,12 @@ export async function resumePendingToolCallsForChat(
         chatId,
         workingDirectory: trustedWorkingDirectory,
         agentName: agent.id,
-        llmResultMode: toolCall.function.name === 'shell_cmd' ? 'minimal' : 'verbose',
+        llmResultMode: resolveShellContinuationLlmResultMode({
+          toolName: toolCall.function.name,
+          toolArgs,
+          memory: agent.memory,
+          chatId,
+        }),
       };
 
       const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);
@@ -968,6 +1065,7 @@ export async function continueLLMAfterToolExecution(
 
   const completeActivity = beginWorldActivity(world, `agent:${agent.id}`, targetChatId ?? undefined);
   const loadedSkillsForRun = getLoadedSkillsForContinuationRun(continuationRunId);
+  const shellCommandResultsForRun = getShellCommandResultsForContinuationRun(continuationRunId);
   for (const preloadedSkillId of options?.preloadedSkillIds || []) {
     const normalizedSkillId = String(preloadedSkillId || '').trim();
     if (normalizedSkillId) {
@@ -1518,6 +1616,68 @@ export async function continueLLMAfterToolExecution(
         return;
       }
 
+      let shellCommandSignature: string | null = null;
+      if (toolCall.function.name === 'shell_cmd') {
+        shellCommandSignature = buildShellCommandSignature(toolArgs, trustedWorkingDirectory);
+        const reusedShellCommandResult = shellCommandResultsForRun.get(shellCommandSignature);
+        if (reusedShellCommandResult !== undefined) {
+          loggerAgent.debug('Suppressing duplicate shell_cmd call in continuation run', {
+            worldId: world.id,
+            agentId: agent.id,
+            chatId: targetChatId,
+            continuationRunId,
+            toolCallId: toolCall.id,
+          });
+
+          const reusedToolResultMessage: AgentMessage = {
+            role: 'tool',
+            content: reusedShellCommandResult,
+            tool_call_id: toolCall.id,
+            sender: agent.id,
+            createdAt: new Date(),
+            chatId: targetChatId,
+            messageId: generateId(),
+            replyToMessageId: messageId,
+            agentId: agent.id,
+          };
+          agent.memory.push(reusedToolResultMessage);
+
+          if (assistantToolCallMessage.toolCallStatus) {
+            assistantToolCallMessage.toolCallStatus[toolCall.id] = {
+              complete: true,
+              result: reusedShellCommandResult,
+            };
+          }
+
+          publishToolEvent(world, {
+            agentName: agent.id,
+            type: 'tool-result',
+            messageId: toolCall.id,
+            chatId: targetChatId,
+            toolExecution: {
+              toolName: toolCall.function.name,
+              toolCallId: toolCall.id,
+              input: toolArgs,
+              result: reusedShellCommandResult.slice(0, 4000),
+              resultType: 'string',
+              resultSize: reusedShellCommandResult.length,
+              metadata: { reusedFromContinuationRun: true },
+            },
+          });
+
+          const storage = await getStorageWrappers();
+          await storage.saveAgent(world.id, agent);
+          await continueLLMAfterToolExecution(world, agent, targetChatId, {
+            ...options,
+            hopCount: hopCount + 1,
+            continuationRunId,
+            transientContinuationInstruction:
+              'System notice: Suppressed duplicate shell_cmd call in this continuation run and reused its previous result. Continue from the existing command output without rerunning the same command.',
+          });
+          return;
+        }
+      }
+
       publishToolEvent(world, {
         agentName: agent.id,
         type: 'tool-start',
@@ -1542,7 +1702,12 @@ export async function continueLLMAfterToolExecution(
           abortSignal: options?.abortSignal,
           workingDirectory: trustedWorkingDirectory,
           agentName: agent.id,
-          llmResultMode: toolCall.function.name === 'shell_cmd' ? 'minimal' : 'verbose',
+          llmResultMode: resolveShellContinuationLlmResultMode({
+            toolName: toolCall.function.name,
+            toolArgs,
+            memory: agent.memory,
+            chatId: targetChatId,
+          }),
         };
 
         const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);
@@ -1556,6 +1721,9 @@ export async function continueLLMAfterToolExecution(
           && isSuccessfulLoadSkillResult(serializedToolResult)
         ) {
           loadedSkillsForRun.add(requestedLoadSkillId);
+        }
+        if (toolCall.function.name === 'shell_cmd' && shellCommandSignature) {
+          shellCommandResultsForRun.set(shellCommandSignature, serializedToolResult);
         }
 
         const toolResultMessage: AgentMessage = {
@@ -1936,10 +2104,7 @@ export async function generateChatTitleFromMessages(
     const storage = await getStorageWrappers();
     // Load messages for the target chat only, not all messages.
     messages = targetChatId ? await storage.getMemory(world.id, targetChatId) : [];
-    if (content) {
-      messages.push({ role: 'user', content } as AgentMessage);
-    }
-    promptMessages = buildTitlePromptMessages(messages);
+    promptMessages = buildTitlePromptMessages(messages, content);
 
     loggerChatTitle.debug('Calling LLM for title generation', {
       messageCount: messages.length,
