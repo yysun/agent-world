@@ -1086,6 +1086,7 @@ legend {
 /* Ensure tool output spans message width despite doodle's fieldset descendant max-width rule */
 .chat-fieldset .message .tool-output-container,
 .chat-fieldset .message .tool-output-content,
+.chat-fieldset .message .merged-tool-card,
 .chat-fieldset .message .tool-output-text {
   width: 100%;
   max-width: 100% !important;
@@ -3764,4 +3765,64 @@ legend {
   font-size: 0.8125rem;
   font-weight: 500;
   text-align: center;
+}
+
+/* Merged Tool Card */
+.merged-tool-card {
+  margin: 8px 0;
+  border: none;
+  border-radius: 6px;
+  overflow: hidden;
+  background-color: var(--bg-secondary);
+}
+
+.tool-status {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.tool-status-done {
+  color: #10b981;
+}
+
+.tool-status-failed {
+  color: #ef4444;
+}
+
+.tool-status-running {
+  color: #f59e0b;
+}
+
+.merged-tool-body {
+  padding: 4px 0;
+}
+
+.tool-result-block {
+  border-top: 1px solid var(--border-subtle, rgba(148, 163, 184, 0.2));
+  padding: 6px 0;
+}
+
+.tool-args {
+  margin: 0 12px 4px;
+  background-color: var(--bg-tertiary, #1e1e1e);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.tool-call-name {
+  padding: 4px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.tool-waiting {
+  padding: 8px 12px;
+  display: block;
+  font-size: 0.8125rem;
+  color: var(--text-tertiary);
+  font-style: italic;
 }

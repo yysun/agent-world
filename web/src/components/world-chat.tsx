@@ -25,6 +25,7 @@ import toKebabCase from '../utils/toKebabCase';
 import { SenderType, getSenderType } from '../utils/sender-type.js';
 import { shouldHideWorldChatMessage } from '../domain/message-visibility';
 import { isToolResultMessage, renderMessageContent } from '../domain/message-content';
+import { buildCombinedRenderableMessages } from '../domain/tool-merge';
 import { ActivityPulse, ElapsedTimeCounter } from './activity-indicators';
 import { AgentQueueDisplay } from './agent-queue-display';
 
@@ -233,6 +234,8 @@ export default function WorldChat(props: WorldChatProps) {
     })()
     : messages;  // No filters = use pre-deduplicated messages
 
+  const renderableMessages = buildCombinedRenderableMessages(filteredMessages);
+
   const getMessageRowAlignmentClass = (senderType: SenderType, isCrossAgentMessage: boolean): string => {
     if (senderType === SenderType.HUMAN || isCrossAgentMessage) {
       return 'message-row-left';
@@ -303,47 +306,10 @@ export default function WorldChat(props: WorldChatProps) {
           ) : filteredMessages.length === 0 ? (
             <div className="no-messages">No messages yet. Start a conversation!</div>
           ) : (
-            filteredMessages.map((message, index) => {
+            renderableMessages.map((message, index) => {
               // Skip messages that should be hidden (internal tool result messages)
               if (shouldHideWorldChatMessage(message)) {
                 return null;
-              }
-
-              // Render log events (server logs)
-              if (message.logEvent) {
-                const isExpanded = !!message.isLogExpanded;
-                const logSummaryText = String(message.text || message.logEvent.message || '').trim() || 'Log event';
-                let formattedArgs: string | null = null;
-                if (message.logEvent.data !== undefined) {
-                  try {
-                    formattedArgs = JSON.stringify(message.logEvent.data, null, 2);
-                  } catch (error) {
-                    formattedArgs = String(message.logEvent.data);
-                  }
-                }
-
-                return (
-                  <div key={message.id || 'log-' + index} className="log-message">
-                    <button
-                      type="button"
-                      className="log-header"
-                      aria-expanded={isExpanded}
-                      $onclick={['toggle-log-details', message.id || `log-${index}`]}
-                    >
-                      <span className={`log-dot ${message.logEvent.level}`}></span>
-                      <span className="log-category">{message.logEvent.category}</span>
-                      <span className="log-content">{logSummaryText}</span>
-                      <span className="log-toggle-icon" aria-hidden="true">
-                        {isExpanded ? '▲' : '▼'}
-                      </span>
-                    </button>
-                    {isExpanded && (
-                      <pre className="log-details">
-                        {formattedArgs ?? 'No additional details'}
-                      </pre>
-                    )}
-                  </div>
-                );
               }
 
               // Render world events (system and world)

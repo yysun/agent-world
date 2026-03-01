@@ -841,36 +841,7 @@ export const handleLogEvent = <T extends SSEComponentState>(state: T, data: any)
     fullLogEvent: logEvent
   });
 
-  // Generate unique ID to avoid duplicates
-  const uniqueId = `log-${logEvent.messageId || Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-
-  // For error-level logs, include error details from logEvent.data if available
-  let displayText = logEvent.message;
-  if (logEvent.level === 'error' && logEvent.data) {
-    const errorDetail = extractErrorDetailFromLogEvent(logEvent);
-    if (errorDetail) {
-      displayText = `${logEvent.message}: ${errorDetail}`;
-    }
-  }
-
-  const logMessage = {
-    id: uniqueId,
-    sender: 'system',
-    text: displayText,
-    createdAt: new Date(logEvent.timestamp),
-    type: 'log',
-    logEvent: logEvent,
-    isLogExpanded: false,
-    // Ensure log messages are always displayed
-    messageId: uniqueId,
-    worldName: data.worldName || streamingState.currentWorldName
-  } as any;
-
-  return {
-    ...state,
-    messages: [...(state.messages || []), logMessage],
-    needScroll: true  // Auto-scroll to new log messages
-  };
+  return state;
 };
 
 // PHASE 2.2 ENHANCEMENT: Tool execution event handlers

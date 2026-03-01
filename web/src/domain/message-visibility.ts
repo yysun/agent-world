@@ -58,6 +58,7 @@ function isInternalToolProtocolRow(message: Message): boolean {
 }
 
 export function shouldHideWorldChatMessage(message: Message): boolean {
+  if (Boolean((message as any)?.logEvent)) return true;
   if (message?.isToolEvent && !message?.isToolStreaming) {
     return true;
   }

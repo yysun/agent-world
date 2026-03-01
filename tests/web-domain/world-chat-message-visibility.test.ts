@@ -6,6 +6,7 @@
  *
  * Key Features:
  * - Suppresses assistant HITL tool-call placeholder rows.
+ * - Suppresses messages that carry a logEvent (server log events).
  * - Preserves normal assistant rows.
  * - Keeps existing internal protocol tool_result filtering behavior.
  *
@@ -14,6 +15,7 @@
  * - Uses deterministic in-memory message fixtures.
  *
  * Summary of Recent Changes:
+ * - 2026-03-01: Added regression coverage for hiding messages with logEvent (server logs).
  * - 2026-02-28: Added regression coverage for hiding assistant `human_intervention_request` placeholder rows.
  */
 
@@ -72,6 +74,20 @@ describe('web world chat message visibility', () => {
       messageId: 'msg-normal-1',
     });
 
+    expect(shouldHideWorldChatMessage(message)).toBe(false);
+  });
+
+  it('hides messages that carry a logEvent (server log events)', () => {
+    const message = createMessage({
+      text: 'some log message',
+    }) as any;
+    message.logEvent = { level: 'info', category: 'llm', message: 'some log message', timestamp: Date.now() };
+
+    expect(shouldHideWorldChatMessage(message)).toBe(true);
+  });
+
+  it('does not hide messages without a logEvent', () => {
+    const message = createMessage({ text: 'normal assistant response' });
     expect(shouldHideWorldChatMessage(message)).toBe(false);
   });
 });
