@@ -153,6 +153,11 @@ vi.mock('../../core/file-tools.js', () => ({
     parameters: { type: 'object', properties: {} },
     execute: vi.fn(),
   })),
+  createWriteFileToolDefinition: vi.fn(() => ({
+    description: 'write-file',
+    parameters: { type: 'object', properties: {} },
+    execute: vi.fn(),
+  })),
   createListFilesToolDefinition: vi.fn(() => ({
     description: 'list-files',
     parameters: { type: 'object', properties: {} },
@@ -362,6 +367,7 @@ describe('mcp-server-registry behavior', () => {
     const toolsFirst = await getMCPToolsForWorld('world-1');
     expect(toolsFirst).toHaveProperty('shell_cmd');
     expect(toolsFirst).toHaveProperty('web_fetch');
+    expect(toolsFirst).toHaveProperty('write_file');
     expect(toolsFirst).toHaveProperty('demo_lookup');
     expect(mockClientListTools).toHaveBeenCalledTimes(1);
 

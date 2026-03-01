@@ -2,7 +2,7 @@
  * File Tools Module - Built-in workspace inspection tools for LLM workflows.
  *
  * Features:
- * - Exposes built-in `read_file`, `list_files`, and `grep` tool definitions
+ * - Exposes built-in `read_file`, `write_file`, `list_files`, and `grep` tool definitions
  * - Supports bounded line-based file reads with offset and limit
  * - Provides deterministic directory listing with optional hidden-file support
  * - Performs recursive text search with plain-text or regex matching
@@ -15,6 +15,7 @@
  * - Errors are returned as tool-friendly `Error:` strings
  *
  * Recent Changes:
+ * - 2026-02-28: Added built-in `write_file` tool with explicit `create`/`overwrite` modes and trusted-scope path enforcement.
  * - 2026-02-21: Added `list_files` output bounding (`maxEntries`) and optional `includePattern` filtering with truncation metadata to reduce continuation token spikes and tool-hop churn on large workspaces.
  * - 2026-02-19: Aligned file-tool path behavior with `shell_cmd`: `list_files` now defaults to trusted working directory when `path` is omitted, and `read_file` accepts `path` alias.
  * - 2026-02-16: Switched `list_files` scanning to `fast-glob` with depth control and default ignore rules.
@@ -47,6 +48,8 @@ const MAX_LIST_MAX_ENTRIES = 2000;
 const DEFAULT_GREP_MAX_RESULTS = 200;
 const MAX_GREP_MAX_RESULTS = 2000;
 const MAX_GREP_FILE_BYTES = 1024 * 1024;
+
+type WriteMode = 'create' | 'overwrite';
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -289,6 +292,124 @@ export function createReadFileToolDefinition() {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return `Error: read_file failed - ${message}`;
+      }
+    },
+  };
+}
+
+function normalizeWriteMode(mode: unknown): WriteMode {
+  if (mode === undefined || mode === null || mode === '') {
+    return 'overwrite';
+  }
+
+  const normalizedMode = String(mode).trim().toLowerCase();
+  if (normalizedMode === 'create' || normalizedMode === 'overwrite') {
+    return normalizedMode;
+  }
+
+  throw new Error(`Invalid mode '${String(mode)}'. Expected 'create' or 'overwrite'.`);
+}
+
+export function createWriteFileToolDefinition() {
+  return {
+    description:
+      'Write text content to a file inside the trusted working-directory scope. Supports explicit create-only and overwrite modes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        filePath: {
+          type: 'string',
+          description: 'Target file path. Relative paths resolve from runtime working directory.',
+        },
+        path: {
+          type: 'string',
+          description: 'Alias for filePath.',
+        },
+        content: {
+          type: 'string',
+          description: 'UTF-8 text content to write.',
+        },
+        mode: {
+          type: 'string',
+          enum: ['create', 'overwrite'],
+          description: "Write mode. 'create' fails if the file exists. 'overwrite' replaces existing content (default).",
+        },
+      },
+      required: ['content'],
+      additionalProperties: false,
+    },
+    execute: async (args: any, _sequenceId?: string, _parentToolCall?: string, context?: ToolContext) => {
+      try {
+        const trustedWorkingDirectory = getTrustedWorkingDirectory(context);
+        const requestedFilePath = String(args.filePath ?? args.path ?? '').trim();
+        if (!requestedFilePath) {
+          return 'Error: write_file failed - filePath is required';
+        }
+
+        if (typeof args.content !== 'string') {
+          return 'Error: write_file failed - content must be a string';
+        }
+
+        const mode = normalizeWriteMode(args.mode);
+        const resolvedPath = resolveTargetPath(requestedFilePath, trustedWorkingDirectory);
+        ensurePathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory);
+
+        let fileExists = false;
+        try {
+          const stat = await fs.stat(resolvedPath);
+          if (stat.isDirectory()) {
+            return 'Error: write_file failed - target path is a directory';
+          }
+          fileExists = true;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException | undefined)?.code;
+          if (code !== 'ENOENT') {
+            throw error;
+          }
+        }
+
+        if (mode === 'create' && fileExists) {
+          return `Error: write_file failed - file already exists: ${resolvedPath}`;
+        }
+
+        const parentDirectory = path.dirname(resolvedPath);
+        ensurePathWithinTrustedDirectory(parentDirectory, trustedWorkingDirectory);
+        await fs.mkdir(parentDirectory, { recursive: true });
+        try {
+          await fs.writeFile(
+            resolvedPath,
+            args.content,
+            mode === 'create'
+              ? { encoding: 'utf8', flag: 'wx' }
+              : { encoding: 'utf8', flag: 'w' },
+          );
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException | undefined)?.code;
+          if (code === 'EEXIST' && mode === 'create') {
+            return `Error: write_file failed - file already exists: ${resolvedPath}`;
+          }
+          throw error;
+        }
+
+        const created = !fileExists;
+        const bytesWritten = Buffer.byteLength(args.content, 'utf8');
+        return JSON.stringify(
+          {
+            ok: true,
+            status: 'success',
+            filePath: resolvedPath,
+            mode,
+            operation: created ? 'created' : 'updated',
+            created,
+            updated: !created,
+            bytesWritten,
+          },
+          null,
+          2,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return `Error: write_file failed - ${message}`;
       }
     },
   };

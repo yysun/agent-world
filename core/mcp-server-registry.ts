@@ -124,6 +124,7 @@ import { createHitlToolDefinition } from './hitl-tool.js';
 import { createWebFetchToolDefinition } from './web-fetch-tool.js';
 import {
   createReadFileToolDefinition,
+  createWriteFileToolDefinition,
   createListFilesToolDefinition,
   createGrepToolDefinition,
 } from './file-tools.js';
@@ -1610,6 +1611,7 @@ export async function updateMCPServersForWorld(worldId: string, newMcpConfig: st
  * - human_intervention_request: Ask a human question with options (single-step selection)
  * - web_fetch: Fetch URL content and convert to markdown
  * - read_file: Read file contents with pagination controls
+ * - write_file: Write text content into files within trusted scope
  * - list_files: List directory entries
  * - grep: Recursive text search across files
  * 
@@ -1622,6 +1624,7 @@ function getBuiltInTools(): Record<string, any> {
   const hitlTool = createHitlToolDefinition();
   const webFetchTool = createWebFetchToolDefinition();
   const readFileTool = createReadFileToolDefinition();
+  const writeFileTool = createWriteFileToolDefinition();
   const listFilesTool = createListFilesToolDefinition();
   const grepTool = createGrepToolDefinition();
 
@@ -1632,6 +1635,7 @@ function getBuiltInTools(): Record<string, any> {
     'human_intervention_request': wrapToolWithValidation(hitlTool, 'human_intervention_request'),
     'web_fetch': wrapToolWithValidation(webFetchTool, 'web_fetch'),
     'read_file': wrapToolWithValidation(readFileTool, 'read_file'),
+    'write_file': wrapToolWithValidation(writeFileTool, 'write_file'),
     'list_files': wrapToolWithValidation(listFilesTool, 'list_files'),
     'grep': wrapToolWithValidation(grepTool, 'grep'),
     'grep_search': wrapToolWithValidation(grepTool, 'grep_search'),
