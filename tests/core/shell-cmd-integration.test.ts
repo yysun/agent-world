@@ -96,9 +96,7 @@ describe('shell_cmd integration with worlds', () => {
     expect(tools.grep.parameters).toBeDefined();
     expect(tools.grep.execute).toBeInstanceOf(Function);
 
-    // Backward compatibility alias
-    expect(tools).toHaveProperty('grep_search');
-    expect(tools.grep_search).toBeDefined();
+    expect(tools).not.toHaveProperty('grep_search');
   });
 
   test('should execute read_file, list_files, and grep tools through tool interface', async () => {

@@ -14,7 +14,7 @@
  * - Verifies tool_call_id handling with fallback
  *
  * Recent changes:
- * - 2026-03-01: Added `.includePattern` alias normalization coverage for `list_files` and `grep_search` backward compatibility.
+ * - 2026-03-01: Added `.includePattern` alias normalization coverage for `list_files` and `grep`.
  * - 2026-02-27: Added removed HITL confirmation-arg coverage to verify silent stripping for backward compatibility.
  * - 2026-02-20: Added alias normalization coverage for `create_agent` (`auto-reply` and `next agent` variants).
  */
@@ -387,7 +387,7 @@ describe('Tool Utils - validateToolParameters', () => {
     expect(validation.correctedArgs).toEqual({ path: '.', includePattern: '**/*.ts' });
   });
 
-  test('normalizes grep_search .includePattern alias to includePattern', () => {
+  test('normalizes grep .includePattern alias to includePattern', () => {
     const schema = {
       type: 'object',
       properties: {
@@ -401,7 +401,7 @@ describe('Tool Utils - validateToolParameters', () => {
     const validation = validateToolParameters(
       { query: 'foo', '.includePattern': '**/*.ts' },
       schema,
-      'grep_search',
+      'grep',
     );
 
     expect(validation.valid).toBe(true);

@@ -1638,7 +1638,6 @@ function getBuiltInTools(): Record<string, any> {
     'write_file': wrapToolWithValidation(writeFileTool, 'write_file'),
     'list_files': wrapToolWithValidation(listFilesTool, 'list_files'),
     'grep': wrapToolWithValidation(grepTool, 'grep'),
-    'grep_search': wrapToolWithValidation(grepTool, 'grep_search'),
   };
 }
 

@@ -13,7 +13,7 @@
  * - Pure unit tests; no storage, world setup, or external provider calls.
  *
  * Recent Changes:
- * - 2026-03-01: Added regression coverage ensuring grep/grep_search guidance uses `includePattern` and forbids `.includePattern`.
+ * - 2026-03-01: Added regression coverage ensuring grep guidance uses `includePattern` and forbids `.includePattern`.
  * - 2026-03-01: Updated guidance coverage to remove mandatory pre-tool planning narration and enforce concise result-focused tool messaging.
  * - 2026-03-01: Added coverage for global pre-tool planning narration guidance before tool calls.
  * - 2026-02-21: Added initial coverage for `list_files` prompt hinting to reduce oversized listing results.
@@ -49,8 +49,8 @@ describe('buildToolUsagePromptSection', () => {
   });
 
   test('includes grep guidance with exact includePattern key', () => {
-    const content = buildToolUsagePromptSection({ toolNames: ['grep_search'] });
-    expect(content).toContain('grep/grep_search');
+    const content = buildToolUsagePromptSection({ toolNames: ['grep'] });
+    expect(content).toContain('For grep');
     expect(content).toContain('includePattern');
     expect(content).toContain('no leading dot');
     expect(content).toContain('Do not send .includePattern.');

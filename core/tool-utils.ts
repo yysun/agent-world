@@ -16,7 +16,7 @@
  * - Consistent parameter validation for both MCP and built-in tools
  *
  * Recent Changes:
- * - 2026-03-01: Added backward-compatible normalization for `.includePattern` -> `includePattern` in `list_files` and `grep`/`grep_search`.
+ * - 2026-03-01: Added backward-compatible normalization for `.includePattern` -> `includePattern` in `list_files` and `grep`.
  * - 2026-02-20: Enforced JSON-schema `additionalProperties: false` by rejecting unknown tool arguments during validation.
  * - 2026-02-27: Added backward-compat cleanup for removed HITL confirmation args by stripping them before schema validation.
  * - 2026-02-27: Removed deprecated `human_intervention_request` confirmation argument alias normalization; kept `prompt` -> `question` and `default_option` -> `defaultOption`.
@@ -64,7 +64,7 @@ function normalizeKnownParameterAliases(toolName: string, args: any): {
   }
 
   if (
-    (toolName === 'grep' || toolName === 'grep_search')
+    toolName === 'grep'
     && normalizedArgs.directoryPath === undefined
     && normalizedArgs.directory !== undefined
   ) {
@@ -74,7 +74,7 @@ function normalizeKnownParameterAliases(toolName: string, args: any): {
   }
 
   if (
-    (toolName === 'grep' || toolName === 'grep_search')
+    toolName === 'grep'
     && normalizedArgs.directoryPath === undefined
     && normalizedArgs.path !== undefined
   ) {
@@ -84,7 +84,7 @@ function normalizeKnownParameterAliases(toolName: string, args: any): {
   }
 
   if (
-    (toolName === 'grep' || toolName === 'grep_search')
+    toolName === 'grep'
     && normalizedArgs.includePattern === undefined
     && normalizedArgs['.includePattern'] !== undefined
   ) {
