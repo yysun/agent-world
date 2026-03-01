@@ -34,6 +34,7 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-03-01: Added explicit `grep`/`grep_search` prompt guidance to require `includePattern` (no leading dot) and reduce tool-parameter validation failures.
  * - 2026-03-01: Added global pre-tool planning guidance so all tool-enabled agents narrate next steps before calling tools.
  * - 2026-03-01: Added `available_skills` prompt rule requiring explicit post-`load_skill` acknowledgment before taking action.
  * - 2026-02-21: Added `list_files` prompt guidance to prefer `includePattern` and bounded `maxEntries` for file-type searches to reduce oversized tool results and continuation churn.
@@ -224,6 +225,7 @@ export function buildToolUsagePromptSection(options: { toolNames: string[] }): s
   const normalizedToolNames = new Set(toolNames.map((toolName) => toolName.toLowerCase()));
   const hasHitlTool = normalizedToolNames.has('human_intervention_request');
   const hasListFilesTool = normalizedToolNames.has('list_files');
+  const hasGrepTool = normalizedToolNames.has('grep') || normalizedToolNames.has('grep_search');
 
   const lines = [
     'You have access to tools.',
@@ -243,6 +245,12 @@ export function buildToolUsagePromptSection(options: { toolNames: string[] }): s
   if (hasListFilesTool) {
     lines.push(
       'When using list_files for file-type searches, always narrow with includePattern (for example, **/*.md) and keep maxEntries small to avoid oversized results.'
+    );
+  }
+
+  if (hasGrepTool) {
+    lines.push(
+      'For grep/grep_search, pass filters as includePattern (exact key, no leading dot). Do not send .includePattern.'
     );
   }
 

@@ -16,6 +16,7 @@
  * - Consistent parameter validation for both MCP and built-in tools
  *
  * Recent Changes:
+ * - 2026-03-01: Added backward-compatible normalization for `.includePattern` -> `includePattern` in `list_files` and `grep`/`grep_search`.
  * - 2026-02-20: Enforced JSON-schema `additionalProperties: false` by rejecting unknown tool arguments during validation.
  * - 2026-02-27: Added backward-compat cleanup for removed HITL confirmation args by stripping them before schema validation.
  * - 2026-02-27: Removed deprecated `human_intervention_request` confirmation argument alias normalization; kept `prompt` -> `question` and `default_option` -> `defaultOption`.
@@ -46,6 +47,12 @@ function normalizeKnownParameterAliases(toolName: string, args: any): {
     corrections.push("directory -> path");
   }
 
+  if (toolName === 'list_files' && normalizedArgs.includePattern === undefined && normalizedArgs['.includePattern'] !== undefined) {
+    normalizedArgs.includePattern = normalizedArgs['.includePattern'];
+    delete normalizedArgs['.includePattern'];
+    corrections.push('.includePattern -> includePattern');
+  }
+
   if (
     (toolName === 'read_file' || toolName === 'read_files')
     && normalizedArgs.filePath === undefined
@@ -74,6 +81,16 @@ function normalizeKnownParameterAliases(toolName: string, args: any): {
     normalizedArgs.directoryPath = normalizedArgs.path;
     delete normalizedArgs.path;
     corrections.push("path -> directoryPath");
+  }
+
+  if (
+    (toolName === 'grep' || toolName === 'grep_search')
+    && normalizedArgs.includePattern === undefined
+    && normalizedArgs['.includePattern'] !== undefined
+  ) {
+    normalizedArgs.includePattern = normalizedArgs['.includePattern'];
+    delete normalizedArgs['.includePattern'];
+    corrections.push('.includePattern -> includePattern');
   }
 
   if (toolName === 'create_agent') {
