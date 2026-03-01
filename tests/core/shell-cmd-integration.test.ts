@@ -487,6 +487,40 @@ describe('shell_cmd integration with worlds', () => {
     expect(result).not.toContain('### Standard Output');
   });
 
+  test('should redact image data-uri stdout in llm smart mode', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    const tempRoot = await mkdtemp(path.join(tmpdir(), 'shell-smart-redact-'));
+    const payloadFile = path.join(tempRoot, 'payload.txt');
+    await writeFile(payloadFile, '![score](data:image/svg+xml;base64,AAAABBBBCCCCDDDDEEEE)', 'utf8');
+
+    let result = '';
+    try {
+      result = await shellCmdTool.execute(
+        {
+          command: 'cat',
+          parameters: ['payload.txt']
+        },
+        undefined,
+        undefined,
+        {
+          llmResultMode: 'smart',
+          world: {
+            id: worldId(),
+            variables: `working_directory=${tempRoot}`
+          },
+          workingDirectory: tempRoot,
+        }
+      );
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+
+    expect(result).toContain('stdout omitted from LLM context');
+    expect(result).not.toContain('data:image/svg+xml;base64,AAAABBBBCCCCDDDDEEEE');
+  });
+
   test('should stream stdout as assistant message, stream stderr as tool-stream, and persist only finalized stdout', async () => {
     const tools = await getMCPToolsForWorld(worldId());
     const shellCmdTool = tools.shell_cmd;

@@ -16,7 +16,7 @@
  * - Uses mocked in-memory fs APIs only (no filesystem access)
  *
  * Recent changes:
- * - 2026-03-01: Added coverage for `AGENT_WORLD_LOAD_SKILL_MINIMAL_CHECK_MODE` to ensure compact script outputs and skipped reference-file discovery.
+ * - 2026-03-01: Removed minimal-check mode assertions and updated coverage so load_skill always performs script/reference preflight.
  * - 2026-03-01: Added assertions for acknowledgment-first execution directive steps and regression coverage for empty-description fallback to skill ID.
  * - 2026-02-24: Updated coverage: non-zero exits surface as informational output (not blocking errors).
  * - 2026-02-24: Updated coverage to verify skill scripts execute with cwd = skill root directory (not project cwd).
@@ -166,10 +166,12 @@ describe('core/load-skill-tool', () => {
     expect(result).toContain('<execution_directive>');
     expect(result).toContain('specialized pdf-extract protocol');
     expect(result).toContain('Skill purpose: Extract PDF content');
-    expect(result).toContain('1. REQUIRED: Begin your response by telling the user which skill was loaded, its purpose, and what you intend to do.');
-    expect(result).toContain('4. Always state your intended approach before executing, whether the workflow is single-step or multi-step.');
+    expect(result).toContain('1. Acknowledge which skill was loaded and apply it directly to the user request.');
+    expect(result).toContain('4. Execute required steps directly; avoid unnecessary planning narration unless the user explicitly asks for a plan.');
+    expect(result).toContain('5. Keep tool-related assistant text concise and result-focused.');
+    expect(result).not.toContain('first provide a brief intent statement');
     expect(result).not.toContain('If the workflow is multi-step');
-    expect(result).toContain('6. After each significant step, briefly confirm what was completed and what comes next.');
+    expect(result).not.toContain('After each significant step, briefly confirm what was completed and what comes next.');
   });
 
   it('falls back to skill id when skill description is empty in execution directive', async () => {
@@ -309,8 +311,8 @@ describe('core/load-skill-tool', () => {
     expect(mockedFormatResultForLLM).toHaveBeenCalledTimes(1);
   });
 
-  it('uses minimal-check mode to skip reference-file discovery and compact script output', async () => {
-    process.env.AGENT_WORLD_LOAD_SKILL_MINIMAL_CHECK_MODE = 'true';
+  it('runs preflight checks when env var is unset', async () => {
+    delete process.env.AGENT_WORLD_LOAD_SKILL_MINIMAL_CHECK_MODE;
     mockedGetSkill.mockReturnValue({
       skill_id: 'pdf-extract',
       description: 'Extract PDF content',
@@ -320,8 +322,7 @@ describe('core/load-skill-tool', () => {
     mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
     vi.mocked(fs.readFile).mockResolvedValue([
       '# PDF Extraction Instructions',
-      'Run `scripts/build.sh` before processing.',
-      'Optional command form: bash scripts/build.sh',
+      'Run this command before processing: bash scripts/build.sh',
     ].join('\n') as any);
     vi.mocked((fs as any).stat).mockImplementation(async (targetPath: string) => {
       if (String(targetPath).endsWith('/skills/pdf-extract/scripts/build.sh')) {
@@ -343,9 +344,56 @@ describe('core/load-skill-tool', () => {
     );
 
     expect(result).toContain('<active_resources>');
-    expect(result).toContain('Script completed successfully (exit code 0).');
-    expect(result).not.toContain('<reference_files>');
-    expect(mockedFormatResultForLLM).not.toHaveBeenCalled();
+    expect(result).toContain('<reference_files>');
+    expect(result).toContain('formatted script output');
+    expect(result).not.toContain('Skill preflight checks for script/data files are disabled in this mode.');
+    expect(result).toContain('skill root: /skills/pdf-extract');
+    expect(mockedExecuteShellCommand).toHaveBeenCalledTimes(1);
+    expect(mockedValidateShellCommandScope).toHaveBeenCalledTimes(1);
+    expect(vi.mocked((fs as any).stat)).toHaveBeenCalled();
+    expect(mockedFormatResultForLLM).toHaveBeenCalledTimes(1);
+    expect(vi.mocked((fs as any).readdir)).not.toHaveBeenCalled();
+  });
+
+  it('ignores deprecated minimal-mode env flag and still runs preflight checks', async () => {
+    process.env.AGENT_WORLD_LOAD_SKILL_MINIMAL_CHECK_MODE = 'true';
+    mockedGetSkill.mockReturnValue({
+      skill_id: 'pdf-extract',
+      description: 'Extract PDF content',
+      hash: 'e99a18ad',
+      lastUpdated: '2026-02-14T12:00:00.000Z',
+    });
+    mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
+    vi.mocked(fs.readFile).mockResolvedValue([
+      '# PDF Extraction Instructions',
+      'Run `scripts/build.sh` before processing.',
+    ].join('\n') as any);
+    vi.mocked((fs as any).stat).mockImplementation(async (targetPath: string) => {
+      if (String(targetPath).endsWith('/skills/pdf-extract/scripts/build.sh')) {
+        return { isFile: () => true, isDirectory: () => false };
+      }
+      throw new Error('ENOENT');
+    });
+
+    const tool = createLoadSkillToolDefinition();
+    const result = await tool.execute(
+      { skill_id: 'pdf-extract' },
+      undefined,
+      undefined,
+      {
+        world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+        chatId: 'chat-1',
+        workingDirectory: '/skills/pdf-extract',
+      },
+    );
+
+    expect(result).toContain('<active_resources>');
+    expect(result).toContain('<reference_files>');
+    expect(result).not.toContain('Skill preflight checks for script/data files are disabled in this mode.');
+    expect(mockedExecuteShellCommand).toHaveBeenCalledTimes(1);
+    expect(mockedValidateShellCommandScope).toHaveBeenCalledTimes(1);
+    expect(vi.mocked((fs as any).stat)).toHaveBeenCalled();
+    expect(mockedFormatResultForLLM).toHaveBeenCalledTimes(1);
     expect(vi.mocked((fs as any).readdir)).not.toHaveBeenCalled();
   });
 

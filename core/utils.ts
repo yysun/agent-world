@@ -228,8 +228,7 @@ export function buildToolUsagePromptSection(options: { toolNames: string[] }): s
   const lines = [
     'You have access to tools.',
     'Use tools when the user requests an action that requires tool execution.',
-    'Before any tool call, first send a short planning message to the user describing what you understood, what you will do next, and what outcome to expect.',
-    'This planning message must be assistant text only (no tool call in that same response).',
+    'When using tools, keep assistant text concise and focused on results.',
   ];
 
   if (hasHitlTool) {

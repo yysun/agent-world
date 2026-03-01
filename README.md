@@ -383,11 +383,7 @@ Agent World includes progressive skill loading through the `load_skill` built-in
   - User roots: `~/.agents/skills`, `~/.codex/skills`
 - The model receives compact skill summaries first, then calls `load_skill` only when full instructions are needed.
 - Skill activation in interactive runtimes is HITL-gated.
-- Optional minimal-check mode for faster skill activation:
-	- Env var: `AGENT_WORLD_LOAD_SKILL_MINIMAL_CHECK_MODE`
-	- Default: `false` (unset behaves as `false`)
-	- Enable with: `true`, `1`, `yes`, or `on`
-	- Effect when enabled: keeps core script safety checks, but skips reference-file discovery and returns compact script output to reduce token usage.
+- `load_skill` always performs the same preflight flow: script references are discovered from instructions, script execution is HITL-approved and scope-validated, and reference-file context is collected when active resources are present.
 
 Minimal `SKILL.md` example:
 

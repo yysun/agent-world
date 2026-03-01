@@ -18,7 +18,8 @@
  * - Keeps payload format deterministic for stable downstream parsing
  *
  * Recent Changes:
- * - 2026-03-01: Added `AGENT_WORLD_LOAD_SKILL_MINIMAL_CHECK_MODE` to reduce load-skill overhead by skipping reference-file discovery and using compact script output summaries while preserving core script safety checks.
+ * - 2026-03-01: Removed minimal-check mode branch so `load_skill` always runs script/reference preflight consistently and keeps script-root execution guidance available.
+ * - 2026-03-01: Relaxed execution-directive narration requirements to avoid mandatory pre-tool plan text and reduce token overhead.
  * - 2026-03-01: Added skill-description thread-through and acknowledgment-first execution directive requirements after successful `load_skill`, including unconditional pre-execution plan narration.
  * - 2026-02-28: Updated `<execution_directive>` to require concise tool-use intent text before tool calls and to allow mixed text + tool-call turns when supported by the provider.
  * - 2026-02-27: Run-scoped `load_skill` cache now stores only successful outcomes so declined/error/not-found paths remain retryable in the same run.
@@ -27,7 +28,7 @@
  * - 2026-02-27: Added same-turn `yes_once` approval reuse + in-flight approval dedupe so repeated/concurrent `load_skill` calls for the same skill do not spam duplicate HITL prompts.
  * - 2026-02-25: Added persisted synthetic HITL tool-call/response messages for `load_skill` approval so frontends can reconstruct prompts from memory without relying on transient event timing.
  * - 2026-02-24: Surface non-zero script exits as informational output instead of blocking errors (scripts may be CLI tools requiring args).
- * - 2026-02-24: Execute skill scripts with cwd set to the skill root directory, not the project working directory.
+ * - 2026-02-24: Execute skill scripts with cwd set to trusted working directory when provided, otherwise use the skill root.
  * - 2026-02-14: Strip SKILL.md YAML front matter from injected `<instructions>` content.
  * - 2026-02-14: Omit `<active_resources>` from `load_skill` payloads when no instruction-referenced scripts are present.
  * - 2026-02-14: Added skill-level HITL gating so `load_skill` requires approval even when no script references are present.
@@ -65,11 +66,6 @@ const inFlightSkillApprovals = new Map<string, Promise<boolean>>();
 const loadSkillRunResultCache = new Map<string, string>();
 const inFlightLoadSkillRunResults = new Map<string, Promise<string>>();
 const loggerLoadSkillHitl = createCategoryLogger('load_skill.hitl');
-
-function isLoadSkillMinimalCheckModeEnabled(): boolean {
-  const rawValue = String(process.env.AGENT_WORLD_LOAD_SKILL_MINIMAL_CHECK_MODE ?? 'false').trim().toLowerCase();
-  return rawValue === '1' || rawValue === 'true' || rawValue === 'yes' || rawValue === 'on';
-}
 
 type LoadSkillToolContext = {
   world?: { id?: string; currentChatId?: string | null; eventEmitter?: unknown };
@@ -180,10 +176,7 @@ function isPathWithinRoot(skillRoot: string, targetPath: string): boolean {
   return normalizedTarget === normalizedRoot || normalizedTarget.startsWith(`${normalizedRoot}/`);
 }
 
-function extractReferencedScriptPaths(
-  markdown: string,
-  options: { includeCommandReferences?: boolean } = {},
-): string[] {
+function extractReferencedScriptPaths(markdown: string): string[] {
   const scriptSet = new Set<string>();
   const knownScriptExtensions = '(?:sh|bash|zsh|py|js|mjs|cjs|ts)';
   const scriptPathPattern = new RegExp(
@@ -191,7 +184,6 @@ function extractReferencedScriptPaths(
     'gi',
   );
   const commandReferencePattern = /(?:bash|sh|python3?|node)\s+([^\s'"`]+)/gi;
-  const includeCommandReferences = options.includeCommandReferences !== false;
 
   for (const match of markdown.matchAll(scriptPathPattern)) {
     const scriptPath = normalizeScriptPath(match[0] || '');
@@ -200,18 +192,16 @@ function extractReferencedScriptPaths(
     }
   }
 
-  if (includeCommandReferences) {
-    for (const match of markdown.matchAll(commandReferencePattern)) {
-      const rawPath = normalizeScriptPath(match[1] || '');
-      if (!rawPath) {
-        continue;
-      }
-      if (!new RegExp(`\\.${knownScriptExtensions}$`, 'i').test(rawPath)) {
-        continue;
-      }
-      if (rawPath.startsWith('scripts/')) {
-        scriptSet.add(rawPath);
-      }
+  for (const match of markdown.matchAll(commandReferencePattern)) {
+    const rawPath = normalizeScriptPath(match[1] || '');
+    if (!rawPath) {
+      continue;
+    }
+    if (!new RegExp(`\\.${knownScriptExtensions}$`, 'i').test(rawPath)) {
+      continue;
+    }
+    if (rawPath.startsWith('scripts/')) {
+      scriptSet.add(rawPath);
     }
   }
 
@@ -773,7 +763,6 @@ async function requestSkillExecutionApproval(options: {
 async function executeSkillScripts(options: {
   scriptPaths: string[];
   skillRoot: string;
-  minimalCheckMode: boolean;
   context?: LoadSkillToolContext;
 }): Promise<Array<{ source: string; output: string }>> {
   const scriptPaths = options.scriptPaths;
@@ -861,13 +850,11 @@ async function executeSkillScripts(options: {
       const exitCode = executionResult.exitCode === null ? 'unknown' : String(executionResult.exitCode);
       const stderr = executionResult.stderr.trim();
       const stdoutPreview = executionResult.stdout.trim();
-      const detail = options.minimalCheckMode
-        ? `exit code ${exitCode}${stderr ? ` | stderr: ${stderr.slice(0, 200)}` : ''}`
-        : [
-          `exit code ${exitCode}`,
-          stderr ? `stderr: ${stderr}` : '',
-          stdoutPreview ? `stdout: ${stdoutPreview}` : '',
-        ].filter(Boolean).join(' | ');
+      const detail = [
+        `exit code ${exitCode}`,
+        stderr ? `stderr: ${stderr}` : '',
+        stdoutPreview ? `stdout: ${stdoutPreview}` : '',
+      ].filter(Boolean).join(' | ');
       scriptOutputs.push({
         source: relativeScriptPath,
         output: `Script exited with ${detail}`,
@@ -877,9 +864,7 @@ async function executeSkillScripts(options: {
 
     scriptOutputs.push({
       source: relativeScriptPath,
-      output: options.minimalCheckMode
-        ? 'Script completed successfully (exit code 0).'
-        : formatResultForLLM(executionResult),
+      output: formatResultForLLM(executionResult),
     });
   }
 
@@ -895,7 +880,6 @@ function buildSuccessResult(options: {
   scriptOutputs: Array<{ source: string; output: string }>;
   referenceFiles: string[];
   scriptPaths: string[];
-  minimalCheckMode: boolean;
 }): string {
   const {
     skillId,
@@ -906,7 +890,6 @@ function buildSuccessResult(options: {
     scriptOutputs,
     referenceFiles,
     scriptPaths,
-    minimalCheckMode,
   } = options;
   const escapedSkillId = escapeXmlText(skillId);
   const escapedSkillName = escapeXmlText(skillName);
@@ -923,14 +906,10 @@ function buildSuccessResult(options: {
     ? [
       '  <active_resources>',
       ...scriptBlocks,
-      ...(!minimalCheckMode
-        ? [
-          '',
-          '    <reference_files>',
-          referenceFilesBlock,
-          '    </reference_files>',
-        ]
-        : []),
+      '',
+      '    <reference_files>',
+      referenceFilesBlock,
+      '    </reference_files>',
       '  </active_resources>',
       '',
     ]
@@ -941,16 +920,15 @@ function buildSuccessResult(options: {
     '  <execution_directive>',
     `    You are now operating under the specialized ${escapedSkillName} protocol.`,
     `    Skill purpose: ${escapedSkillDescription}`,
-    '    1. REQUIRED: Begin your response by telling the user which skill was loaded, its purpose, and what you intend to do. Do this before any tool calls or execution.',
+    '    1. Acknowledge which skill was loaded and apply it directly to the user request.',
     '    2. Prioritize the logic in <instructions> over generic behavior.',
     hasActiveResources
       ? '    3. Use the data in <active_resources> to complete the user\'s specific request.'
       : '    3. Use the skill instructions to complete the user\'s specific request.',
-    '    4. Always state your intended approach before executing, whether the workflow is single-step or multi-step.',
-    '    5. When using tools, first provide a brief intent statement (what you will do and why), then call the tool. If provider behavior allows mixed output, include the intent text and tool call in the same response turn.',
-    '    6. After each significant step, briefly confirm what was completed and what comes next.',
+    '    4. Execute required steps directly; avoid unnecessary planning narration unless the user explicitly asks for a plan.',
+    '    5. Keep tool-related assistant text concise and result-focused.',
     ...(hasReferencedScripts
-      ? [`    7. Scripts referenced in <instructions> are located at skill root: ${escapeXmlText(skillRoot)}. When invoking them via shell commands, construct the absolute path (e.g., ${escapeXmlText(skillRoot)}/scripts/example.py) since they may not be accessible via relative paths from the project directory.`]
+      ? [`    6. Scripts referenced in <instructions> are located at skill root: ${escapeXmlText(skillRoot)}. When invoking them via shell commands, construct the absolute path (e.g., ${escapeXmlText(skillRoot)}/scripts/example.py) since they may not be accessible via relative paths from the project directory.`]
       : []),
     '  </execution_directive>',
   ];
@@ -970,7 +948,7 @@ function buildSuccessResult(options: {
 export function createLoadSkillToolDefinition() {
   return {
     description:
-      'Load full SKILL.md instructions by skill_id from the skill registry. Use this when a request matches a listed skill. After loading, announce the active skill and its purpose to the user before proceeding.',
+      'Load full SKILL.md instructions by skill_id from the skill registry. Use this when a request matches a listed skill. After loading, apply the skill instructions directly to the user request.',
     parameters: {
       type: 'object',
       properties: {
@@ -1027,10 +1005,7 @@ export function createLoadSkillToolDefinition() {
           const markdown = await fs.readFile(sourcePath, 'utf8');
           const instructionsMarkdown = stripYamlFrontMatter(markdown);
           const skillRoot = path.dirname(sourcePath);
-          const minimalCheckMode = isLoadSkillMinimalCheckModeEnabled();
-          const scriptPaths = extractReferencedScriptPaths(instructionsMarkdown, {
-            includeCommandReferences: !minimalCheckMode,
-          });
+          const scriptPaths = extractReferencedScriptPaths(instructionsMarkdown);
           const isApproved = await requestSkillExecutionApproval({
             skillId: requestedSkillId,
             scriptPaths,
@@ -1045,12 +1020,9 @@ export function createLoadSkillToolDefinition() {
           const scriptOutputs = await executeSkillScripts({
             scriptPaths,
             skillRoot,
-            minimalCheckMode,
             context,
           });
-          const referenceFiles = minimalCheckMode
-            ? []
-            : await collectReferenceFiles(skillRoot, instructionsMarkdown);
+          const referenceFiles = await collectReferenceFiles(skillRoot, instructionsMarkdown);
           return {
             result: buildSuccessResult({
               skillId: requestedSkillId,
@@ -1061,7 +1033,6 @@ export function createLoadSkillToolDefinition() {
               scriptOutputs,
               referenceFiles,
               scriptPaths,
-              minimalCheckMode,
             }),
             cacheableForRun: true,
           };

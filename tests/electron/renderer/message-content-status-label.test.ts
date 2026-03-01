@@ -100,4 +100,22 @@ describe('message content tool status label', () => {
     expect(content).toContain('Args:');
     expect(content).toContain('Result:');
   });
+
+  it('renders Args and Result from inline toolInput metadata on tool rows', () => {
+    const content = getToolBodyContent({
+      role: 'tool',
+      toolName: 'shell_cmd',
+      toolInput: {
+        command: 'ls -la',
+        explanation: 'List files',
+      },
+      content: '{"status":"failed","exit_code":2}',
+    });
+
+    expect(content).toContain('Args:');
+    expect(content).toContain('shell_cmd');
+    expect(content).toContain('"command": "ls -la"');
+    expect(content).toContain('Result:');
+    expect(content).toContain('"status":"failed"');
+  });
 });

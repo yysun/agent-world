@@ -156,6 +156,10 @@ function messageIncludesToolCallId(message, toolCallId) {
   return toolCallIds.includes(toolCallId);
 }
 
+function messageHasToolCalls(message) {
+  return Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
+}
+
 function extractToolNameFromToolCalls(message, preferredToolCallId = '') {
   const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
   if (toolCalls.length === 0) {
@@ -245,16 +249,46 @@ export function findToolRequestMessageForToolResult(message, messagesById, messa
   }
 
   const toolCallId = String(message?.tool_call_id || message?.toolCallId || '').trim();
-  if (!toolCallId) {
-    return null;
-  }
 
   const replyToMessageId = String(message?.replyToMessageId || '').trim();
   if (replyToMessageId) {
     const parent = messagesById?.get(replyToMessageId);
-    if (messageIncludesToolCallId(parent, toolCallId)) {
+    if (toolCallId && messageIncludesToolCallId(parent, toolCallId)) {
       return parent;
     }
+    if (!toolCallId && messageHasToolCalls(parent)) {
+      return parent;
+    }
+  }
+
+  if (!toolCallId) {
+    const resultToolName = String(message?.toolName || message?.tool_name || '').trim().toLowerCase();
+    if (resultToolName) {
+      const nameMatches: any[] = [];
+      for (let index = currentIndex - 1; index >= 0; index -= 1) {
+        const candidate = messages[index];
+        const candidateRole = String(candidate?.role || '').trim().toLowerCase();
+        if (candidateRole !== 'assistant') {
+          continue;
+        }
+        const toolCalls = Array.isArray(candidate?.tool_calls) ? candidate.tool_calls : [];
+        const nameMatch = toolCalls.some((toolCall) => {
+          const toolName = String(toolCall?.function?.name || toolCall?.name || '').trim().toLowerCase();
+          return toolName === resultToolName;
+        });
+        if (nameMatch) {
+          nameMatches.push(candidate);
+        }
+      }
+
+      // If we cannot uniquely determine the originating request, fail closed
+      // instead of linking a potentially wrong args payload.
+      if (nameMatches.length === 1) {
+        return nameMatches[0];
+      }
+    }
+
+    return null;
   }
 
   const directByToolCallId = messagesById?.get?.(toolCallId);
@@ -466,8 +500,9 @@ export function getMessageCardClassName(message, messagesById, messages, current
   const isTool = isToolRelatedMessage(message);
   const isSystem = role === 'system' || message?.type === 'log' || Boolean(message?.logEvent);
   const isCrossAgent = isCrossAgentAssistantMessage(message, messagesById, messages, currentIndex);
-  const isToolCallPending = typeof options?.isToolCallPending === 'boolean'
-    ? options.isToolCallPending
+  const normalizedOptions = (options || {}) as { isToolCallPending?: boolean };
+  const isToolCallPending = typeof normalizedOptions.isToolCallPending === 'boolean'
+    ? normalizedOptions.isToolCallPending
     : undefined;
 
   const roleClassName = isUser

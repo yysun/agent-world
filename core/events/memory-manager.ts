@@ -25,6 +25,8 @@
  * - 2026-02-27: Suppress repeated identical `load_skill` tool calls within the same continuation run once a prior same-run load succeeded.
  * - 2026-02-27: Added per-chat/agent continuation run lock in `continueLLMAfterToolExecution` to skip concurrent duplicate continuation runs while tools are pending/executing (prevents duplicate HITL approval prompts).
  * - 2026-03-01: Expanded script-like shell command detection to treat path-based interpreter executables (for example `.venv/bin/python`) as script hosts so continuation prefers smart shell result mode after skill-driven script calls.
+ * - 2026-03-01: Generalized script-host detection for smart shell continuation mode to include additional interpreter families (`bash`, `node`, `deno`, `bun`, `ruby`, `perl`, `php`, `pwsh`) and `env <interpreter> script` invocation patterns.
+ * - 2026-03-01: Updated duplicate `shell_cmd` matching to ignore `output_format`/`output_detail` differences and redact those fields from continuation tool telemetry payloads.
  * - 2026-02-26: Replaced `resumePendingToolCallsForChat` console traces with categorized structured logger events (`chat.restore.resume.tools`) for env-controlled restore diagnostics.
  * - 2026-02-24: Commented out hardcoded Infinite-Etude handoff safeguard to respect separation of concerns (logic moved to agent prompt).
  * - 2026-02-25: Added detailed resume tracing in `resumePendingToolCallsForChat` (start/skip/execute/error/continue) for cross-layer restore diagnostics.
@@ -191,16 +193,22 @@ function buildShellCommandSignature(toolArgs: Record<string, any>, trustedWorkin
   const requestedDirectory = typeof toolArgs?.directory === 'string' && toolArgs.directory.trim()
     ? toolArgs.directory.trim()
     : trustedWorkingDirectory;
-  const outputFormat = typeof toolArgs?.output_format === 'string' ? toolArgs.output_format : 'markdown';
-  const outputDetail = typeof toolArgs?.output_detail === 'string' ? toolArgs.output_detail : 'minimal';
 
   return JSON.stringify({
     command,
     parameters,
     directory: requestedDirectory,
-    outputFormat,
-    outputDetail,
   });
+}
+
+function sanitizeToolArgsForEventPayload(toolName: string, toolArgs: Record<string, any>): Record<string, any> {
+  if (toolName !== 'shell_cmd' || !toolArgs || typeof toolArgs !== 'object') {
+    return toolArgs;
+  }
+  const sanitized = { ...toolArgs };
+  delete sanitized.output_format;
+  delete sanitized.output_detail;
+  return sanitized;
 }
 
 function cleanupContinuationRunState(runId: string): void {
@@ -394,13 +402,41 @@ function isScriptLikeShellCommand(toolArgs: Record<string, any>): boolean {
     return false;
   }
 
-  const scriptHostCommands = new Set(['python', 'python3', 'node', 'bash', 'sh', 'zsh']);
+  const scriptHostCommands = new Set([
+    'python',
+    'python3',
+    'node',
+    'bash',
+    'sh',
+    'zsh',
+    'deno',
+    'bun',
+    'ruby',
+    'perl',
+    'php',
+    'pwsh',
+    'powershell',
+    'ts-node',
+    'tsx',
+  ]);
   const commandBasename = command.split(/[\\/]/).pop() || command;
   const normalizedCommandBasename = commandBasename.replace(/\.exe$/i, '');
-  const isPythonVariant = /^python\d+(\.\d+)?$/.test(normalizedCommandBasename);
   const scriptExtensionPattern = /\.(py|sh|bash|zsh|js|mjs|cjs|ts)$/i;
-  if (scriptHostCommands.has(command) || scriptHostCommands.has(normalizedCommandBasename) || isPythonVariant) {
-    return parameters.some((parameter) => parameter.startsWith('scripts/') || scriptExtensionPattern.test(parameter));
+
+  let effectiveHost = normalizedCommandBasename;
+  let scriptCandidateParameters = parameters;
+
+  // Handle wrappers like: env python scripts/convert.py
+  if ((normalizedCommandBasename === 'env' || normalizedCommandBasename === '/usr/bin/env') && parameters.length > 0) {
+    const wrappedHost = (parameters[0].split(/[\\/]/).pop() || parameters[0]).replace(/\.exe$/i, '');
+    effectiveHost = wrappedHost;
+    scriptCandidateParameters = parameters.slice(1);
+  }
+
+  const isVersionedInterpreterVariant = /^(python|node|deno|bun|ruby|perl|php|pwsh|powershell)\d+(\.\d+)?$/.test(effectiveHost);
+
+  if (scriptHostCommands.has(command) || scriptHostCommands.has(effectiveHost) || isVersionedInterpreterVariant) {
+    return scriptCandidateParameters.some((parameter) => parameter.startsWith('scripts/') || scriptExtensionPattern.test(parameter));
   }
 
   return command.startsWith('scripts/') || scriptExtensionPattern.test(command);
@@ -1617,6 +1653,7 @@ export async function continueLLMAfterToolExecution(
       }
 
       let shellCommandSignature: string | null = null;
+      const sanitizedToolArgsForEventPayload = sanitizeToolArgsForEventPayload(toolCall.function.name, toolArgs);
       if (toolCall.function.name === 'shell_cmd') {
         shellCommandSignature = buildShellCommandSignature(toolArgs, trustedWorkingDirectory);
         const reusedShellCommandResult = shellCommandResultsForRun.get(shellCommandSignature);
@@ -1657,7 +1694,7 @@ export async function continueLLMAfterToolExecution(
             toolExecution: {
               toolName: toolCall.function.name,
               toolCallId: toolCall.id,
-              input: toolArgs,
+              input: sanitizedToolArgsForEventPayload,
               result: reusedShellCommandResult.slice(0, 4000),
               resultType: 'string',
               resultSize: reusedShellCommandResult.length,
@@ -1686,7 +1723,7 @@ export async function continueLLMAfterToolExecution(
         toolExecution: {
           toolName: toolCall.function.name,
           toolCallId: toolCall.id,
-          input: toolArgs,
+          input: sanitizedToolArgsForEventPayload,
           metadata: {
             isStreaming: isStreamingEnabled(),
           },
@@ -1754,7 +1791,7 @@ export async function continueLLMAfterToolExecution(
           toolExecution: {
             toolName: toolCall.function.name,
             toolCallId: toolCall.id,
-            input: toolArgs,
+            input: sanitizedToolArgsForEventPayload,
             result: serializedToolResult.slice(0, 4000),
             resultType: typeof toolResult === 'string'
               ? 'string'
@@ -1796,7 +1833,7 @@ export async function continueLLMAfterToolExecution(
           toolExecution: {
             toolName: toolCall.function.name,
             toolCallId: toolCall.id,
-            input: toolArgs,
+            input: sanitizedToolArgsForEventPayload,
             error: toolError instanceof Error ? toolError.message : String(toolError),
           },
         });

@@ -656,6 +656,43 @@ describe('createChatSubscriptionEventHandler', () => {
     expect(msgs[0].toolName).toBe('shell_cmd');
   });
 
+  it('backfills tool-start metadata onto pre-existing tool-stream row without command', () => {
+    const harness = createMessageStateHarness([{
+      messageId: 'tool-2',
+      role: 'tool',
+      sender: 'read_file',
+      content: 'partial output',
+      isToolStreaming: true
+    }]);
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
+    });
+
+    handler({
+      type: 'tool',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      tool: {
+        eventType: 'tool-start',
+        toolUseId: 'tool-2',
+        toolName: 'read_file',
+        toolInput: { filePath: './README.md' }
+      }
+    });
+
+    const msgs = harness.getMessages() as Record<string, unknown>[];
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].toolName).toBe('read_file');
+    expect(msgs[0].toolInput).toEqual({ filePath: './README.md' });
+    expect(msgs[0].command).toBeUndefined();
+  });
+
   it('calls handleEnd for unscoped SSE end events', () => {
     const harness = createMessageStateHarness();
     const streamingStateRef = makeFullStreamingRef();
@@ -753,6 +790,19 @@ describe('createChatSubscriptionEventHandler', () => {
       worldId: 'world-1',
       chatId: 'chat-1',
       tool: {
+        eventType: 'tool-start',
+        toolUseId: 'tool-r1',
+        toolName: 'read_file',
+        toolInput: { command: 'cat README.md', filePath: './README.md' },
+      }
+    });
+
+    handler({
+      type: 'tool',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      tool: {
         eventType: 'tool-result',
         toolUseId: 'tool-r1',
         toolName: 'read_file',
@@ -768,6 +818,8 @@ describe('createChatSubscriptionEventHandler', () => {
     expect(messages[0].role).toBe('tool');
     expect(messages[0].toolName).toBe('read_file');
     expect(String(messages[0].content || '')).toContain('"ok": true');
+    expect(messages[0].command).toBe('cat README.md');
+    expect(messages[0].toolInput).toEqual({ command: 'cat README.md', filePath: './README.md' });
     expect(messages[0].chatId).toBe('chat-1');
     expect(messages[0].isToolStreaming).toBe(false);
   });
@@ -782,6 +834,19 @@ describe('createChatSubscriptionEventHandler', () => {
       selectedSessionId: 'chat-1',
       streamingStateRef,
       setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
+    });
+
+    handler({
+      type: 'tool',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      tool: {
+        eventType: 'tool-start',
+        toolUseId: 'tool-e1',
+        toolName: 'read_file',
+        toolInput: { command: 'cat missing.md' },
+      }
     });
 
     handler({
@@ -805,6 +870,8 @@ describe('createChatSubscriptionEventHandler', () => {
     expect(messages[0].role).toBe('tool');
     expect(messages[0].toolName).toBe('read_file');
     expect(messages[0].content).toBe('File not found');
+    expect(messages[0].command).toBe('cat missing.md');
+    expect(messages[0].toolInput).toEqual({ command: 'cat missing.md' });
     expect(messages[0].chatId).toBe('chat-1');
     expect(messages[0].streamType).toBe('stderr');
   });

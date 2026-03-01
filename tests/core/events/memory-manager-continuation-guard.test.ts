@@ -14,6 +14,10 @@
  * - Avoids any real provider/tool execution and filesystem-backed state.
  *
  * Recent Changes:
+ * - 2026-03-01: Added coverage that duplicate `shell_cmd` suppression ignores `output_format`/`output_detail` differences and omits those format fields from tool event payloads.
+ * - 2026-03-01: Added regression coverage for broader script hosts (`bash`, `node`, and `env <interpreter>`) using smart shell continuation mode when skill context is loaded.
+ * - 2026-03-01: Added regression coverage ensuring shell_cmd path-based interpreter commands (for example `.venv/bin/python`) use smart continuation result mode when skill context is already loaded.
+ * - 2026-03-01: Added coverage to suppress repeated identical `shell_cmd` calls within one continuation run by reusing prior command result.
  * - 2026-02-27: Added regression coverage ensuring continuation system events include explicit chatId scope.
  * - 2026-02-27: Added coverage to suppress repeated identical `load_skill` tool calls within one continuation run.
  * - 2026-02-27: Added initial concurrency guard coverage for continuation runs.
@@ -29,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   generateAgentResponse: vi.fn(),
   publishMessageWithId: vi.fn(),
   publishEvent: vi.fn(),
+  publishToolEvent: vi.fn(),
   getMCPToolsForWorld: vi.fn(),
   loadSkillExecute: vi.fn(),
 }));
@@ -64,7 +69,7 @@ vi.mock('../../../core/events/publishers.js', () => ({
   publishMessageWithId: mocks.publishMessageWithId,
   publishSSE: vi.fn(),
   publishEvent: mocks.publishEvent,
-  publishToolEvent: vi.fn(),
+  publishToolEvent: mocks.publishToolEvent,
   isStreamingEnabled: vi.fn().mockReturnValue(false),
 }));
 
@@ -164,6 +169,7 @@ describe('continueLLMAfterToolExecution guard', () => {
     mocks.prepareMessagesForLLM.mockResolvedValue([]);
     mocks.getMCPToolsForWorld.mockResolvedValue({});
     mocks.loadSkillExecute.mockReset();
+    mocks.publishToolEvent.mockReset();
   });
 
   it('skips duplicate concurrent continuation run for same scope', async () => {
@@ -297,6 +303,236 @@ describe('continueLLMAfterToolExecution guard', () => {
       && message.tool_calls.some((toolCall: any) => toolCall?.function?.name === 'load_skill')
     );
     expect(loadSkillAssistantCalls).toHaveLength(0);
+    expect(mocks.publishMessageWithId).toHaveBeenCalledTimes(1);
+  });
+
+  it('suppresses repeated identical shell_cmd calls in the same continuation run', async () => {
+    mocks.generateAgentResponse
+      .mockResolvedValueOnce(
+        buildToolCallResponse(
+          'assistant-tool-shell-1',
+          'call-shell-1',
+          'shell_cmd',
+          { command: 'python', parameters: ['scripts/convert.py', '-i', './score.musicxml'] },
+          'Calling tool: shell_cmd',
+        ),
+      )
+      .mockResolvedValueOnce(
+        buildToolCallResponse(
+          'assistant-tool-shell-2',
+          'call-shell-2',
+          'shell_cmd',
+          { command: 'python', parameters: ['scripts/convert.py', '-i', './score.musicxml'] },
+          'Calling tool: shell_cmd',
+        ),
+      )
+      .mockResolvedValueOnce(buildTextResponse('assistant-final-shell', 'done with shell output'));
+
+    const shellOutput = '![score](data:image/svg+xml;base64,AAA...)';
+    const shellExecute = vi.fn().mockResolvedValue(shellOutput);
+    mocks.getMCPToolsForWorld.mockResolvedValue({
+      shell_cmd: {
+        execute: shellExecute,
+      },
+    });
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    const world = createWorld();
+    const agent = createAgent();
+
+    await continueLLMAfterToolExecution(world, agent, 'chat-1');
+
+    expect(shellExecute).toHaveBeenCalledTimes(1);
+    expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(3);
+
+    const shellToolMessages = agent.memory.filter((message: any) =>
+      message.role === 'tool' && typeof message.tool_call_id === 'string' && message.tool_call_id.startsWith('call-shell-')
+    );
+    expect(shellToolMessages).toHaveLength(2);
+    expect(shellToolMessages[0]?.content).toBe(shellOutput);
+    expect(shellToolMessages[1]?.content).toBe(shellOutput);
+
+    expect(mocks.publishToolEvent).toHaveBeenCalledWith(
+      world,
+      expect.objectContaining({
+        type: 'tool-result',
+        messageId: 'call-shell-2',
+        toolExecution: expect.objectContaining({
+          metadata: expect.objectContaining({
+            reusedFromContinuationRun: true,
+          }),
+        }),
+      }),
+    );
+
+    expect(mocks.publishMessageWithId).toHaveBeenCalledTimes(1);
+  });
+
+  it('suppresses shell_cmd duplicates even when only output format/detail differ', async () => {
+    mocks.generateAgentResponse
+      .mockResolvedValueOnce(
+        buildToolCallResponse(
+          'assistant-tool-shell-format-1',
+          'call-shell-format-1',
+          'shell_cmd',
+          {
+            command: 'python3',
+            parameters: ['scripts/convert.py', 'score.musicxml'],
+            output_format: 'markdown',
+            output_detail: 'minimal',
+          },
+          'Calling tool: shell_cmd',
+        ),
+      )
+      .mockResolvedValueOnce(
+        buildToolCallResponse(
+          'assistant-tool-shell-format-2',
+          'call-shell-format-2',
+          'shell_cmd',
+          {
+            command: 'python3',
+            parameters: ['scripts/convert.py', 'score.musicxml'],
+            output_format: 'json',
+            output_detail: 'full',
+          },
+          'Calling tool: shell_cmd',
+        ),
+      )
+      .mockResolvedValueOnce(buildTextResponse('assistant-final-shell-format', 'done with format variants'));
+
+    const shellOutput = 'stdout omitted from LLM context (contains image data URI output; 1000 chars).';
+    const shellExecute = vi.fn().mockResolvedValue(shellOutput);
+    mocks.getMCPToolsForWorld.mockResolvedValue({
+      shell_cmd: {
+        execute: shellExecute,
+      },
+    });
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    const world = createWorld();
+    const agent = createAgent();
+
+    await continueLLMAfterToolExecution(world, agent, 'chat-1');
+
+    expect(shellExecute).toHaveBeenCalledTimes(1);
+    expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(3);
+
+    const dedupedResultCall = mocks.publishToolEvent.mock.calls.find(([, event]) =>
+      event?.type === 'tool-result'
+      && event?.messageId === 'call-shell-format-2'
+      && event?.toolExecution?.metadata?.reusedFromContinuationRun === true
+    );
+    expect(dedupedResultCall).toBeDefined();
+    const dedupedResultEvent = dedupedResultCall?.[1];
+    expect(dedupedResultEvent.toolExecution.input).not.toHaveProperty('output_format');
+    expect(dedupedResultEvent.toolExecution.input).not.toHaveProperty('output_detail');
+  });
+
+  it('uses smart shell result mode for path-based python script calls when skill context is loaded', async () => {
+    mocks.generateAgentResponse
+      .mockResolvedValueOnce(
+        buildToolCallResponse(
+          'assistant-tool-shell-smart-1',
+          'call-shell-smart-1',
+          'shell_cmd',
+          {
+            command: '.agents/skills/music-to-svg/.venv/bin/python',
+            parameters: ['.agents/skills/music-to-svg/scripts/convert.py', 'score.musicxml'],
+          },
+          'Calling tool: shell_cmd',
+        ),
+      )
+      .mockResolvedValueOnce(buildTextResponse('assistant-final-smart-shell', 'finished'));
+
+    const shellExecute = vi.fn().mockResolvedValue('status: success\nexit_code: 0');
+    mocks.getMCPToolsForWorld.mockResolvedValue({
+      shell_cmd: {
+        execute: shellExecute,
+      },
+    });
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    const world = createWorld();
+    const agent = createAgent();
+    agent.memory.push({
+      role: 'tool',
+      content: '<skill_context id="music-to-svg"><instructions># Music to SVG</instructions></skill_context>',
+      tool_call_id: 'call-load-skill-preloaded',
+      sender: agent.id,
+      createdAt: new Date(),
+      chatId: 'chat-1',
+      messageId: 'tool-preloaded-skill-context',
+      agentId: agent.id,
+    } as any);
+
+    await continueLLMAfterToolExecution(world, agent, 'chat-1');
+
+    expect(shellExecute).toHaveBeenCalledTimes(1);
+    const shellContext = shellExecute.mock.calls[0]?.[3];
+    expect(shellContext).toBeDefined();
+    expect(shellContext.llmResultMode).toBe('smart');
+    expect(mocks.publishMessageWithId).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      label: 'bash',
+      command: '/bin/bash',
+      parameters: ['scripts/render.sh'],
+    },
+    {
+      label: 'node',
+      command: '.tools/node/bin/node',
+      parameters: ['scripts/render.mjs'],
+    },
+    {
+      label: 'env-python',
+      command: 'env',
+      parameters: ['python3.11', 'scripts/convert.py'],
+    },
+  ])('uses smart shell result mode for generic script host: $label', async ({ command, parameters }) => {
+    mocks.generateAgentResponse
+      .mockResolvedValueOnce(
+        buildToolCallResponse(
+          'assistant-tool-shell-generic-1',
+          'call-shell-generic-1',
+          'shell_cmd',
+          {
+            command,
+            parameters,
+          },
+          'Calling tool: shell_cmd',
+        ),
+      )
+      .mockResolvedValueOnce(buildTextResponse('assistant-final-smart-generic', 'finished'));
+
+    const shellExecute = vi.fn().mockResolvedValue('ok');
+    mocks.getMCPToolsForWorld.mockResolvedValue({
+      shell_cmd: {
+        execute: shellExecute,
+      },
+    });
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    const world = createWorld();
+    const agent = createAgent();
+    agent.memory.push({
+      role: 'tool',
+      content: '<skill_context id="generic-script-skill"><instructions># Generic Script Skill</instructions></skill_context>',
+      tool_call_id: 'call-load-skill-preloaded-generic',
+      sender: agent.id,
+      createdAt: new Date(),
+      chatId: 'chat-1',
+      messageId: 'tool-preloaded-skill-context-generic',
+      agentId: agent.id,
+    } as any);
+
+    await continueLLMAfterToolExecution(world, agent, 'chat-1');
+
+    expect(shellExecute).toHaveBeenCalledTimes(1);
+    const shellContext = shellExecute.mock.calls[0]?.[3];
+    expect(shellContext).toBeDefined();
+    expect(shellContext.llmResultMode).toBe('smart');
     expect(mocks.publishMessageWithId).toHaveBeenCalledTimes(1);
   });
 

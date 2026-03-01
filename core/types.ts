@@ -563,6 +563,7 @@ export interface WorldToolEvent {
       serverName?: string;
       transport?: string;
       isStreaming?: boolean;
+      reusedFromContinuationRun?: boolean;
       // Opik integration: risk tags for high-risk tool tracing/filtering.
       riskLevel?: 'low' | 'medium' | 'high';
       riskTags?: string[];

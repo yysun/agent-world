@@ -13,6 +13,9 @@
  * Notes:
  * - Uses in-memory world/agent objects and mocked storage/LLM/tool layers only.
  * - No real filesystem, database, or external LLM/tool network calls.
+ *
+ * Recent changes:
+ * - 2026-03-01: Added regression coverage that continuation executes `shell_cmd` with `llmResultMode: minimal` by default and upgrades to `smart` for skill-script execution context.
  */
 
 import { EventEmitter } from 'events';
@@ -274,6 +277,85 @@ describe('memory-manager behavior', () => {
       'assistant-2',
       'chat-1',
       undefined
+    );
+  });
+
+  it('executes shell_cmd in continuation with minimal llm result mode by default', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    const execute = vi.fn(async () => 'stdout line one\nstdout line two');
+    mocks.getMCPToolsForWorld.mockResolvedValue({ shell_cmd: { execute } });
+
+    mocks.generateAgentResponse
+      .mockResolvedValueOnce(toolCallResult('assistant-shell-1', 'shell_cmd', '{"command":"echo","parameters":["ok"]}', 'tc-shell-1'))
+      .mockResolvedValueOnce(textResult('assistant-shell-2', 'Done'));
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    await continueLLMAfterToolExecution(world, agent, 'chat-1');
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: 'echo',
+        parameters: ['ok'],
+      }),
+      undefined,
+      undefined,
+      expect.objectContaining({
+        chatId: 'chat-1',
+        agentName: 'agent-a',
+        llmResultMode: 'minimal',
+      })
+    );
+    expect(mocks.publishMessageWithId).toHaveBeenCalledWith(
+      world,
+      'Done',
+      'agent-a',
+      'assistant-shell-2',
+      'chat-1',
+      undefined
+    );
+  });
+
+  it('executes shell_cmd in continuation with smart llm result mode for skill-script context', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    agent.memory.push({
+      role: 'tool',
+      content: '<skill_context id="music-to-svg"><instructions># Skill</instructions></skill_context>',
+      sender: 'agent-a',
+      createdAt: new Date('2026-03-01T12:00:00.000Z'),
+      chatId: 'chat-1',
+      messageId: 'skill-context-1',
+      tool_call_id: 'load-skill-1',
+      agentId: 'agent-a',
+    } as any);
+
+    const execute = vi.fn(async () => '![score](data:image/svg+xml;base64,AAA...)');
+    mocks.getMCPToolsForWorld.mockResolvedValue({ shell_cmd: { execute } });
+
+    mocks.generateAgentResponse
+      .mockResolvedValueOnce(toolCallResult('assistant-shell-skill-1', 'shell_cmd', '{"command":"python","parameters":["scripts/convert.py","-i","./score.musicxml"]}', 'tc-shell-skill-1'))
+      .mockResolvedValueOnce(textResult('assistant-shell-skill-2', 'Done with rendered score'));
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    await continueLLMAfterToolExecution(world, agent, 'chat-1');
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: 'python',
+        parameters: ['scripts/convert.py', '-i', './score.musicxml'],
+      }),
+      undefined,
+      undefined,
+      expect.objectContaining({
+        chatId: 'chat-1',
+        agentName: 'agent-a',
+        llmResultMode: 'smart',
+      })
     );
   });
 

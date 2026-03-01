@@ -180,6 +180,7 @@ interface OutputFormattingOptions {
 }
 
 const DEFAULT_MIN_OUTPUT_CHARS = 400;
+const SMART_LLM_MAX_OUTPUT_CHARS = 1200;
 
 function buildOutputSnippet(content: string, maxOutputChars: number): OutputSnippet {
   if (!content) {
@@ -1618,6 +1619,33 @@ export function formatMinimalShellResultForLLM(result: CommandExecutionResult): 
   return lines.join('\n');
 }
 
+function containsImageDataUri(text: string): boolean {
+  return /data:image\/[a-z0-9.+-]+;base64,/i.test(String(text || ''));
+}
+
+function formatSmartShellResultForLLM(result: CommandExecutionResult): string {
+  const isSuccess = result.exitCode === 0 && !result.timedOut && !result.canceled && !result.error;
+  if (!isSuccess) {
+    return result.stderr || result.error || `(exit code ${result.exitCode ?? 'null'}, no stderr)`;
+  }
+
+  const stdout = String(result.stdout || '');
+  if (!stdout) {
+    return '(exit code 0, no output)';
+  }
+
+  if (containsImageDataUri(stdout)) {
+    return `stdout omitted from LLM context (contains image data URI output; ${stdout.length} chars).`;
+  }
+
+  if (stdout.length > SMART_LLM_MAX_OUTPUT_CHARS) {
+    const preview = stdout.slice(0, SMART_LLM_MAX_OUTPUT_CHARS);
+    return `${preview}\n...(truncated ${stdout.length - SMART_LLM_MAX_OUTPUT_CHARS} chars)`;
+  }
+
+  return stdout;
+}
+
 /**
  * Format command execution result for LLM consumption
  * Provides a human-readable summary of the execution with improved markdown formatting
@@ -1998,10 +2026,7 @@ export function createShellCmdToolDefinition() {
       }
 
       if (llmResultMode === 'smart') {
-        const isSuccess = result.exitCode === 0 && !result.timedOut && !result.canceled && !result.error;
-        return isSuccess
-          ? (result.stdout || `(exit code 0, no output)`)
-          : (result.stderr || result.error || `(exit code ${result.exitCode ?? 'null'}, no stderr)`);
+        return formatSmartShellResultForLLM(result);
       }
 
       const validatedArtifactPaths = Array.isArray(artifactPaths)

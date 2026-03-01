@@ -239,6 +239,27 @@ function buildToolRequestContent(message) {
       .join('\n\n');
   }
 
+  const inlineToolInput = message?.toolInput && typeof message.toolInput === 'object'
+    ? message.toolInput
+    : null;
+  const inlineCommand = String(message?.command || '').trim();
+  if (inlineToolInput || inlineCommand) {
+    const toolName = String(extractToolNameFromMessage(message) || 'tool').trim() || 'tool';
+    const argsPayload = inlineToolInput
+      ? { ...inlineToolInput }
+      : {};
+    if (inlineCommand && typeof (argsPayload as Record<string, unknown>).command !== 'string') {
+      (argsPayload as Record<string, unknown>).command = inlineCommand;
+    }
+    let argsText = '{}';
+    try {
+      argsText = JSON.stringify(argsPayload, null, 2) || '{}';
+    } catch {
+      argsText = String(argsPayload);
+    }
+    return `${toolName}\nargs:\n${argsText}`;
+  }
+
   const fallbackContent = String(message?.content || '').trim();
   if (fallbackContent) {
     return fallbackContent;
@@ -265,7 +286,14 @@ export function getToolBodyContent(message) {
   const isToolCallRequest = isToolCallRequestMessage(message);
   const hasLinkedToolRequest = Array.isArray(message?.linkedToolRequest?.tool_calls)
     && message.linkedToolRequest.tool_calls.length > 0;
-  const shouldRenderRequestAndResult = hasCombinedResult || isToolCallRequest || hasLinkedToolRequest;
+  const hasInlineToolInput = Boolean(
+    (message?.toolInput && typeof message.toolInput === 'object')
+    || String(message?.command || '').trim()
+  );
+  const shouldRenderRequestAndResult = hasCombinedResult
+    || isToolCallRequest
+    || hasLinkedToolRequest
+    || hasInlineToolInput;
 
   if (shouldRenderRequestAndResult) {
     const resultRows = hasCombinedResult ? combinedToolResults : [message];
