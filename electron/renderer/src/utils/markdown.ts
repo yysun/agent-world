@@ -18,6 +18,8 @@
  * - Handles browser/window environment checks
  * 
  * Recent Changes:
+ * - 2026-02-28: Fixed DOMPurify attribute allowlist shape to preserve `img src`/`a href` and explicitly allowed data URIs for `img` tags.
+ * - 2026-02-28: Allowed safe base64 data image URIs (including SVG) so markdown image embeds render in Electron.
  * - 2026-02-28: Added DOMPurify import-shape normalization for consistent sanitize calls across runtime/test module formats.
  * - 2026-02-28: Added multiline-link normalization so wrapped markdown links render correctly in Electron chat cards.
  * - 2026-02-26: Replaced markdown-render fallback error console logging with categorized renderer logger output.
@@ -64,15 +66,13 @@ const ALLOWED_ATTRIBUTES: Record<string, string[]> = {
   'span': ['class']
 };
 
+const ALLOWED_ATTR = Array.from(new Set(Object.values(ALLOWED_ATTRIBUTES).flat()));
+
+// Keep protocol filtering strict while allowing common base64 image data URIs used in markdown.
+const ALLOWED_URI_REGEXP = /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$)|data:image\/(?:bmp|gif|jpe?g|png|tiff?|webp|svg\+xml);base64,[a-z0-9+/=\s]+)$/i;
+
 function sanitizeMarkdownHtml(rawHtml: string): string {
-  const sanitizeOptions = {
-    ALLOWED_TAGS: ALLOWED_TAGS,
-    ALLOWED_ATTR: ALLOWED_ATTRIBUTES as any, // DOMPurify types expect string[] but accept Record<string, string[]>
-    ALLOW_DATA_ATTR: false,
-    ALLOW_UNKNOWN_PROTOCOLS: false,
-    FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input', 'button'],
-    FORBID_ATTR: ['onload', 'onerror', 'onclick', 'onmouseover', 'onfocus', 'onblur'],
-  };
+  const sanitizeOptions = createMarkdownSanitizeOptions();
 
   if (dompurify && typeof (dompurify as any).sanitize === 'function') {
     return (dompurify as any).sanitize(rawHtml, sanitizeOptions);
@@ -86,6 +86,19 @@ function sanitizeMarkdownHtml(rawHtml: string): string {
   }
 
   return rawHtml;
+}
+
+export function createMarkdownSanitizeOptions() {
+  return {
+    ALLOWED_TAGS: ALLOWED_TAGS,
+    ALLOWED_ATTR,
+    ALLOW_DATA_ATTR: false,
+    ALLOW_UNKNOWN_PROTOCOLS: false,
+    ALLOWED_URI_REGEXP,
+    ADD_DATA_URI_TAGS: ['img'],
+    FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input', 'button'],
+    FORBID_ATTR: ['onload', 'onerror', 'onclick', 'onmouseover', 'onfocus', 'onblur'],
+  };
 }
 
 function normalizeMultilineMarkdownLinks(markdownText: string): string {
