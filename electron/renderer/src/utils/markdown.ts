@@ -18,6 +18,7 @@
  * - Handles browser/window environment checks
  * 
  * Recent Changes:
+ * - 2026-02-28: Added XML payload detection so raw XML content is rendered as escaped markdown code blocks instead of being interpreted as HTML.
  * - 2026-02-28: Fixed DOMPurify attribute allowlist shape to preserve `img src`/`a href` and explicitly allowed data URIs for `img` tags.
  * - 2026-02-28: Allowed safe base64 data image URIs (including SVG) so markdown image embeds render in Electron.
  * - 2026-02-28: Added DOMPurify import-shape normalization for consistent sanitize calls across runtime/test module formats.
@@ -115,6 +116,44 @@ function normalizeMultilineMarkdownLinks(markdownText: string): string {
   });
 }
 
+function isLikelyXmlPayload(markdownText: string): boolean {
+  const trimmed = markdownText.trim();
+  if (!trimmed || trimmed.startsWith('```')) {
+    return false;
+  }
+
+  // Allow command/mention prefixes (for example: "@engraver") before XML content.
+  if (/(^|\n)\s*<\?xml\b/i.test(trimmed)) {
+    return true;
+  }
+
+  if (/(^|\n)\s*<!DOCTYPE\s+[^>]*score-partwise/i.test(trimmed)) {
+    return true;
+  }
+
+  // Heuristic: treat angle-bracket payloads with matching open/close tags as XML-like content.
+  if (!trimmed.startsWith('<') || !trimmed.includes('</')) {
+    return false;
+  }
+
+  const openTagMatch = trimmed.match(/^<([A-Za-z_][\w:.-]*)(?:\s[^<>]*?)?>/);
+  if (!openTagMatch?.[1]) {
+    return false;
+  }
+
+  const rootTag = openTagMatch[1];
+  const closeTagPattern = new RegExp(`</${rootTag}\\s*>`, 'i');
+  return closeTagPattern.test(trimmed);
+}
+
+function normalizeXmlForMarkdownDisplay(markdownText: string): string {
+  if (!isLikelyXmlPayload(markdownText)) {
+    return markdownText;
+  }
+
+  return `\`\`\`xml\n${markdownText}\n\`\`\``;
+}
+
 /**
  * Renders markdown text to safe HTML
  * @param markdownText - The markdown text to render
@@ -126,7 +165,9 @@ export function renderMarkdown(markdownText: string | null | undefined): string 
   }
 
   try {
-    const normalizedMarkdown = normalizeMultilineMarkdownLinks(markdownText);
+    const normalizedMarkdown = normalizeXmlForMarkdownDisplay(
+      normalizeMultilineMarkdownLinks(markdownText)
+    );
 
     // Convert markdown to HTML
     const rawHtml = marked(normalizedMarkdown) as string;

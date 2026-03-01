@@ -13,6 +13,8 @@
  * - Tests parser/output behavior at the renderMarkdown unit boundary.
  *
  * Summary of Recent Changes:
+ * - 2026-02-28: Added regression coverage for XML payloads prefixed by command mentions (for example `@engraver`).
+ * - 2026-02-28: Added regression coverage for raw XML payload rendering as escaped code text.
  * - 2026-02-28: Added regression coverage that sanitizer URL policy allows base64 SVG data URIs for markdown images.
  * - 2026-02-28: Added regression coverage for multiline bracket-wrapped markdown links.
  */
@@ -67,5 +69,46 @@ Build an MCP App
     const html = renderMarkdown(input);
 
     expect(html).toContain('<a href="/extensions/apps/build">Build an MCP App</a>');
+  });
+
+  it('renders xml payloads as encoded code text', () => {
+    const input = `<root><item id="1">alpha</item></root>`;
+
+    const html = renderMarkdown(input);
+
+    expect(html).toContain('&lt;root&gt;');
+    expect(html).toContain('&lt;item id=&quot;1&quot;&gt;alpha&lt;/item&gt;');
+    expect(html).not.toContain('<root>');
+  });
+
+  it('renders xml declaration payloads as encoded code text', () => {
+    const input = `<?xml version="1.0" encoding="UTF-8"?>\n<note><to>you</to></note>`;
+
+    const html = renderMarkdown(input);
+
+    expect(html).toContain('&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;');
+    expect(html).toContain('&lt;note&gt;&lt;to&gt;you&lt;/to&gt;&lt;/note&gt;');
+    expect(html).not.toContain('<?xml version="1.0" encoding="UTF-8"?>');
+  });
+
+  it('renders prefixed engraver xml payloads as encoded code text', () => {
+    const input = `@engraver
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC
+  "-//Recordare//DTD MusicXML 3.1 Partwise//EN"
+  "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <work>
+    <work-title>Classical Piano Sketch in C minor (16 measures)</work-title>
+  </work>
+</score-partwise>`;
+
+    const html = renderMarkdown(input);
+
+    expect(html).toContain('&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;');
+    expect(html).toContain('&lt;!DOCTYPE score-partwise PUBLIC');
+    expect(html).toContain('&lt;score-partwise version=&quot;3.1&quot;&gt;');
+    expect(html).toContain('@engraver');
+    expect(html).not.toContain('<score-partwise version="3.1">');
   });
 });
