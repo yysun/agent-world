@@ -14,6 +14,7 @@
  * - Uses mocked fs and mocked shell scope helpers only (no real filesystem access).
  *
  * Recent changes:
+ * - 2026-03-01: Added regression coverage for `read_file` when mocked `fs.readFile` resolves `undefined` (should return empty content, not error).
  * - 2026-03-01: Added read_file regression coverage for missing cwd script paths that should resolve under loaded skill roots.
  * - 2026-03-01: Added regression coverage for `list_files` against symlinked `.agents/skills/*` paths that validate as out-of-scope after canonicalization.
  * - 2026-02-28: Added initial unit coverage for new built-in `write_file` tool.
@@ -296,6 +297,29 @@ describe('file-tools read_file', () => {
       .map((call) => normalizePath(String(call[0])));
     expect(normalizedReadPaths).toContain(normalizedCwdCandidate);
     expect(normalizedReadPaths).toContain(normalizedSkillCandidate);
+  });
+
+  it('returns empty content when fs.readFile resolves undefined', async () => {
+    (fs.promises as any).readFile = vi.fn().mockResolvedValue(undefined);
+
+    const readFileTool = createReadFileToolDefinition();
+    const result = await readFileTool.execute(
+      {
+        filePath: 'package.json',
+        offset: 1,
+        limit: 5,
+      },
+      undefined,
+      undefined,
+      { workingDirectory: '/workspace' },
+    );
+
+    expect(String(result)).not.toMatch(/^Error:/);
+
+    const parsed = JSON.parse(String(result));
+    expect(parsed).toHaveProperty('content', '');
+    expect(parsed).toHaveProperty('offset', 1);
+    expect(parsed).toHaveProperty('limit', 5);
   });
 });
 

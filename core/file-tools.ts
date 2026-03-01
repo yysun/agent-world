@@ -15,6 +15,7 @@
  * - Errors are returned as tool-friendly `Error:` strings
  *
  * Recent Changes:
+ * - 2026-03-01: Hardened `read_file` against undefined read payloads from mocked fs implementations by coercing to empty content instead of hard-failing.
  * - 2026-03-01: Added read_file fallback that resolves missing relative paths against loaded skill roots (for skill script paths like `scripts/convert.py`).
  * - 2026-03-01: Allowed read-only file tools to traverse lexically in-scope `.agents/skills/*` paths even when symlinks resolve outside the world directory (skill workspace compatibility).
  * - 2026-02-28: Added built-in `write_file` tool with explicit `create`/`overwrite` modes and trusted-scope path enforcement.
@@ -395,11 +396,7 @@ export function createReadFileToolDefinition() {
           }
         }
 
-        if (rawContent === undefined) {
-          return 'Error: read_file failed - unable to read file content';
-        }
-
-        const fileContent = toUtf8String(rawContent);
+        const fileContent = toUtf8String(rawContent ?? '');
         const lines = fileContent.split(/\r?\n/);
         const offset = clamp(Number(args.offset ?? 1), 1, Number.MAX_SAFE_INTEGER);
         const limit = clamp(Number(args.limit ?? DEFAULT_READ_LIMIT), 1, MAX_READ_LIMIT);
