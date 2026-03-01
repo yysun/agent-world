@@ -34,6 +34,8 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-03-01: Added global pre-tool planning guidance so all tool-enabled agents narrate next steps before calling tools.
+ * - 2026-03-01: Added `available_skills` prompt rule requiring explicit post-`load_skill` acknowledgment before taking action.
  * - 2026-02-21: Added `list_files` prompt guidance to prefer `includePattern` and bounded `maxEntries` for file-type searches to reduce oversized tool results and continuation churn.
  * - 2026-02-21: Excluded persisted shell stdout stream assistant messages (messageId suffix `-stdout`) from LLM-history relevance filtering to prevent tool-continuation token amplification loops.
  * - 2026-02-20: Updated HITL tool system-prompt guidance to enforce options-only HITL usage.
@@ -226,6 +228,8 @@ export function buildToolUsagePromptSection(options: { toolNames: string[] }): s
   const lines = [
     'You have access to tools.',
     'Use tools when the user requests an action that requires tool execution.',
+    'Before any tool call, first send a short planning message to the user describing what you understood, what you will do next, and what outcome to expect.',
+    'This planning message must be assistant text only (no tool call in that same response).',
   ];
 
   if (hasHitlTool) {
@@ -306,6 +310,7 @@ async function buildAgentSkillsPromptSection(): Promise<string> {
     '   to fetch the full instructions.',
     '3. IMPORTANT: Pass `skill_id` as the exact string from `<id>` (character-for-character).',
     '   Do not rewrite case, hyphens, or underscores (e.g., keep `skill-creator` exactly as shown).',
+    '4. After successfully loading a skill, ALWAYS acknowledge it to the user: state which skill was loaded and briefly describe what you will do before taking any action.',
     '',
     '<available_skills>',
   ];

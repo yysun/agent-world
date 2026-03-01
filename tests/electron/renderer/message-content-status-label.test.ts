@@ -14,6 +14,7 @@
  * - Uses deterministic in-memory message fixtures.
  *
  * Summary of Recent Changes:
+ * - 2026-03-01: Added regression coverage to preserve meaningful planning text in merged tool request/result body content.
  * - 2026-02-28: Added regression coverage for tool-body rendering with linked assistant request metadata (`Args` + `Result`).
  * - 2026-02-28: Added regression coverage for tool-name-inclusive status labels.
  */
@@ -74,5 +75,29 @@ describe('message content tool status label', () => {
     expect(content).toContain('"command":"ls -la"');
     expect(content).toContain('Result:');
     expect(content).toContain('status: failed');
+  });
+
+  it('preserves planning text when assistant tool request includes meaningful content', () => {
+    const content = getToolBodyContent({
+      role: 'assistant',
+      content: 'I will generate the score, write it to ./score.musicxml, then ask @engraver to render it.',
+      tool_calls: [{
+        id: 'call_write_1',
+        type: 'function',
+        function: {
+          name: 'write_file',
+          arguments: '{"filePath":"./score.musicxml","content":"<xml/>"}'
+        }
+      }],
+      combinedToolResults: [{
+        role: 'tool',
+        tool_call_id: 'call_write_1',
+        content: '{"ok":true,"status":"done"}'
+      }]
+    });
+
+    expect(content).toContain('write it to ./score.musicxml');
+    expect(content).toContain('Args:');
+    expect(content).toContain('Result:');
   });
 });

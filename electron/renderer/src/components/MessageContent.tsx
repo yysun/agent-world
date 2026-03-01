@@ -250,6 +250,12 @@ function buildToolRequestContent(message) {
 function buildCombinedRequestAndResultContent(message, combinedResults) {
   const requestText = buildToolRequestContent(message);
   const resultText = buildCombinedToolResultContent(combinedResults) || '(no output)';
+  const planningText = String(message?.content || '').trim();
+  const hasMeaningfulPlanningText = planningText.length > 0 && !/^calling tool\s*:/i.test(planningText);
+  if (hasMeaningfulPlanningText) {
+    return `${planningText}\n\nArgs:\n${requestText}\n\nResult:\n${resultText}`;
+  }
+
   return `Args:\n${requestText}\n\nResult:\n${resultText}`;
 }
 
@@ -277,7 +283,7 @@ export default function MessageContent({
   streamingDotsLabel = 'model',
   streamingInputPreview = '',
 }) {
-  const isToolMessage = isToolRelatedMessage(message);
+  const isToolMessage = message?.forceAssistantMessage === true ? false : isToolRelatedMessage(message);
   const MAX_TOOL_OUTPUT_LENGTH = 50000;
   const isAssistantStreaming = message?.isStreaming === true && !isToolMessage;
   const shouldHideStreamingPlaceholder = isAssistantStreaming && isStreamingPlaceholderContent(message?.content);

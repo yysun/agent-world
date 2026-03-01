@@ -15,6 +15,8 @@
  * - Errors are returned as tool-friendly `Error:` strings
  *
  * Recent Changes:
+ * - 2026-03-01: Added read_file fallback that resolves missing relative paths against loaded skill roots (for skill script paths like `scripts/convert.py`).
+ * - 2026-03-01: Allowed read-only file tools to traverse lexically in-scope `.agents/skills/*` paths even when symlinks resolve outside the world directory (skill workspace compatibility).
  * - 2026-02-28: Added built-in `write_file` tool with explicit `create`/`overwrite` modes and trusted-scope path enforcement.
  * - 2026-02-21: Added `list_files` output bounding (`maxEntries`) and optional `includePattern` filtering with truncation metadata to reduce continuation token spikes and tool-hop churn on large workspaces.
  * - 2026-02-19: Aligned file-tool path behavior with `shell_cmd`: `list_files` now defaults to trusted working directory when `path` is omitted, and `read_file` accepts `path` alias.
@@ -33,6 +35,7 @@ import {
   resolveTrustedShellWorkingDirectory,
   validateShellDirectoryRequest,
 } from './shell-cmd-tool.js';
+import { getSkillSourcePath, getSkills } from './skill-registry.js';
 
 type ToolContext = {
   workingDirectory?: string;
@@ -70,14 +73,92 @@ function resolveTargetPath(inputPath: string, trustedWorkingDirectory: string): 
   return path.resolve(baseDirectory, inputPath);
 }
 
+function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
+  const normalizeForComparison = (value: string): string =>
+    normalizePath(path.resolve(value)).replace(/\/+/g, '/');
+
+  const normalizedCandidate = normalizeForComparison(candidatePath);
+  const normalizedRoot = normalizeForComparison(rootPath);
+
+  return normalizedCandidate === normalizedRoot
+    || normalizedCandidate.startsWith(`${normalizedRoot}/`);
+}
+
+function isMissingFileError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const errno = (error as NodeJS.ErrnoException).code;
+  if (errno === 'ENOENT') {
+    return true;
+  }
+
+  const message = String((error as Error).message ?? '').toLowerCase();
+  return message.includes('enoent') || message.includes('no such file or directory');
+}
+
+function resolveSkillRelativeReadCandidates(requestedFilePath: string): string[] {
+  const normalizedRequestedPath = normalizePath(String(requestedFilePath || '').trim());
+  if (!normalizedRequestedPath || path.isAbsolute(normalizedRequestedPath)) {
+    return [];
+  }
+
+  const candidates: string[] = [];
+  const availableSkills = getSkills();
+  for (const skill of availableSkills) {
+    const sourcePath = getSkillSourcePath(skill.skill_id);
+    if (!sourcePath) {
+      continue;
+    }
+
+    const skillRoot = path.dirname(sourcePath);
+    const candidatePaths = new Set<string>([
+      path.resolve(skillRoot, normalizedRequestedPath),
+    ]);
+
+    const skillPrefix = `${skill.skill_id}/`;
+    if (normalizedRequestedPath.startsWith(skillPrefix)) {
+      const withoutSkillPrefix = normalizedRequestedPath.slice(skillPrefix.length);
+      if (withoutSkillPrefix) {
+        candidatePaths.add(path.resolve(skillRoot, withoutSkillPrefix));
+      }
+    }
+
+    for (const candidatePath of candidatePaths) {
+      if (isPathWithinRoot(candidatePath, skillRoot)) {
+        candidates.push(candidatePath);
+      }
+    }
+  }
+
+  return [...new Set(candidates)];
+}
+
 function ensurePathWithinTrustedDirectory(
   resolvedPath: string,
   trustedWorkingDirectory: string,
+  options?: { allowSkillPathAlias?: boolean },
 ): void {
   const validation = validateShellDirectoryRequest(resolvedPath, trustedWorkingDirectory);
+  if (!validation.valid && options?.allowSkillPathAlias && isWithinSkillAliasPath(resolvedPath, trustedWorkingDirectory)) {
+    return;
+  }
   if (!validation.valid) {
     throw new Error(validation.error);
   }
+}
+
+function isWithinSkillAliasPath(resolvedPath: string, trustedWorkingDirectory: string): boolean {
+  const candidate = path.resolve(String(resolvedPath || '').trim());
+  const trusted = path.resolve(String(trustedWorkingDirectory || '').trim());
+  const skillRoot = path.resolve(trusted, '.agents', 'skills');
+
+  const normalizedCandidate = normalizePath(candidate).replace(/\/+/g, '/');
+  const normalizedSkillRoot = normalizePath(skillRoot).replace(/\/+/g, '/');
+
+  return normalizedCandidate === normalizedSkillRoot
+    || normalizedCandidate.startsWith(`${normalizedSkillRoot}/`);
 }
 
 function escapeRegExp(value: string): string {
@@ -267,9 +348,57 @@ export function createReadFileToolDefinition() {
         if (!requestedFilePath) {
           return 'Error: read_file failed - filePath is required';
         }
-        const resolvedPath = resolveTargetPath(requestedFilePath, trustedWorkingDirectory);
-        ensurePathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory);
-        const rawContent = await fs.readFile(resolvedPath, 'utf8');
+        let resolvedPath = resolveTargetPath(requestedFilePath, trustedWorkingDirectory);
+        ensurePathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory, { allowSkillPathAlias: true });
+
+        let rawContent: string | Buffer | undefined;
+        try {
+          rawContent = await fs.readFile(resolvedPath, 'utf8');
+        } catch (readError) {
+          if (!isMissingFileError(readError)) {
+            throw readError;
+          }
+
+          const skillReadCandidates = new Set<string>(resolveSkillRelativeReadCandidates(requestedFilePath));
+          if (skillReadCandidates.size === 0) {
+            const relativeFromTrustedDirectory = normalizePath(path.relative(trustedWorkingDirectory, resolvedPath));
+            const isRelativeToTrusted = relativeFromTrustedDirectory
+              && relativeFromTrustedDirectory !== '.'
+              && !relativeFromTrustedDirectory.startsWith('..')
+              && !path.isAbsolute(relativeFromTrustedDirectory);
+
+            if (isRelativeToTrusted) {
+              for (const candidatePath of resolveSkillRelativeReadCandidates(relativeFromTrustedDirectory)) {
+                skillReadCandidates.add(candidatePath);
+              }
+            }
+          }
+
+          let fallbackReadError: unknown = null;
+          for (const candidatePath of skillReadCandidates) {
+            try {
+              ensurePathWithinTrustedDirectory(candidatePath, trustedWorkingDirectory, { allowSkillPathAlias: true });
+              rawContent = await fs.readFile(candidatePath, 'utf8');
+              resolvedPath = candidatePath;
+              fallbackReadError = null;
+              break;
+            } catch (candidateError) {
+              fallbackReadError = candidateError;
+              if (!isMissingFileError(candidateError)) {
+                throw candidateError;
+              }
+            }
+          }
+
+          if (fallbackReadError || rawContent === undefined) {
+            throw readError;
+          }
+        }
+
+        if (rawContent === undefined) {
+          return 'Error: read_file failed - unable to read file content';
+        }
+
         const fileContent = toUtf8String(rawContent);
         const lines = fileContent.split(/\r?\n/);
         const offset = clamp(Number(args.offset ?? 1), 1, Number.MAX_SAFE_INTEGER);
@@ -451,7 +580,7 @@ export function createListFilesToolDefinition() {
         const trustedWorkingDirectory = getTrustedWorkingDirectory(context);
         const requestedPath = String(args.path ?? '.');
         const resolvedPath = resolveTargetPath(requestedPath, trustedWorkingDirectory);
-        ensurePathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory);
+        ensurePathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory, { allowSkillPathAlias: true });
         const includeHidden = Boolean(args.includeHidden ?? true);
         const recursive = Boolean(args.recursive ?? false);
         const includePattern = String(args.includePattern ?? '').trim();
@@ -556,7 +685,7 @@ export function createGrepToolDefinition() {
         const directoryPath = args.directoryPath
           ? resolveTargetPath(String(args.directoryPath), trustedWorkingDirectory)
           : trustedWorkingDirectory;
-        ensurePathWithinTrustedDirectory(directoryPath, trustedWorkingDirectory);
+        ensurePathWithinTrustedDirectory(directoryPath, trustedWorkingDirectory, { allowSkillPathAlias: true });
         const includePattern = typeof args.includePattern === 'string' ? args.includePattern : undefined;
         const maxResults = clamp(Number(args.maxResults ?? DEFAULT_GREP_MAX_RESULTS), 1, MAX_GREP_MAX_RESULTS);
 

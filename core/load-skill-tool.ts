@@ -18,6 +18,8 @@
  * - Keeps payload format deterministic for stable downstream parsing
  *
  * Recent Changes:
+ * - 2026-03-01: Added `AGENT_WORLD_LOAD_SKILL_MINIMAL_CHECK_MODE` to reduce load-skill overhead by skipping reference-file discovery and using compact script output summaries while preserving core script safety checks.
+ * - 2026-03-01: Added skill-description thread-through and acknowledgment-first execution directive requirements after successful `load_skill`, including unconditional pre-execution plan narration.
  * - 2026-02-28: Updated `<execution_directive>` to require concise tool-use intent text before tool calls and to allow mixed text + tool-call turns when supported by the provider.
  * - 2026-02-27: Run-scoped `load_skill` cache now stores only successful outcomes so declined/error/not-found paths remain retryable in the same run.
  * - 2026-02-27: Added run-scoped `load_skill` result caching keyed by latest user-turn marker so repeated same-skill calls are auto-suppressed across assistant/tool hops.
@@ -63,6 +65,11 @@ const inFlightSkillApprovals = new Map<string, Promise<boolean>>();
 const loadSkillRunResultCache = new Map<string, string>();
 const inFlightLoadSkillRunResults = new Map<string, Promise<string>>();
 const loggerLoadSkillHitl = createCategoryLogger('load_skill.hitl');
+
+function isLoadSkillMinimalCheckModeEnabled(): boolean {
+  const rawValue = String(process.env.AGENT_WORLD_LOAD_SKILL_MINIMAL_CHECK_MODE ?? 'false').trim().toLowerCase();
+  return rawValue === '1' || rawValue === 'true' || rawValue === 'yes' || rawValue === 'on';
+}
 
 type LoadSkillToolContext = {
   world?: { id?: string; currentChatId?: string | null; eventEmitter?: unknown };
@@ -173,7 +180,10 @@ function isPathWithinRoot(skillRoot: string, targetPath: string): boolean {
   return normalizedTarget === normalizedRoot || normalizedTarget.startsWith(`${normalizedRoot}/`);
 }
 
-function extractReferencedScriptPaths(markdown: string): string[] {
+function extractReferencedScriptPaths(
+  markdown: string,
+  options: { includeCommandReferences?: boolean } = {},
+): string[] {
   const scriptSet = new Set<string>();
   const knownScriptExtensions = '(?:sh|bash|zsh|py|js|mjs|cjs|ts)';
   const scriptPathPattern = new RegExp(
@@ -181,6 +191,7 @@ function extractReferencedScriptPaths(markdown: string): string[] {
     'gi',
   );
   const commandReferencePattern = /(?:bash|sh|python3?|node)\s+([^\s'"`]+)/gi;
+  const includeCommandReferences = options.includeCommandReferences !== false;
 
   for (const match of markdown.matchAll(scriptPathPattern)) {
     const scriptPath = normalizeScriptPath(match[0] || '');
@@ -189,16 +200,18 @@ function extractReferencedScriptPaths(markdown: string): string[] {
     }
   }
 
-  for (const match of markdown.matchAll(commandReferencePattern)) {
-    const rawPath = normalizeScriptPath(match[1] || '');
-    if (!rawPath) {
-      continue;
-    }
-    if (!new RegExp(`\\.${knownScriptExtensions}$`, 'i').test(rawPath)) {
-      continue;
-    }
-    if (rawPath.startsWith('scripts/')) {
-      scriptSet.add(rawPath);
+  if (includeCommandReferences) {
+    for (const match of markdown.matchAll(commandReferencePattern)) {
+      const rawPath = normalizeScriptPath(match[1] || '');
+      if (!rawPath) {
+        continue;
+      }
+      if (!new RegExp(`\\.${knownScriptExtensions}$`, 'i').test(rawPath)) {
+        continue;
+      }
+      if (rawPath.startsWith('scripts/')) {
+        scriptSet.add(rawPath);
+      }
     }
   }
 
@@ -760,6 +773,7 @@ async function requestSkillExecutionApproval(options: {
 async function executeSkillScripts(options: {
   scriptPaths: string[];
   skillRoot: string;
+  minimalCheckMode: boolean;
   context?: LoadSkillToolContext;
 }): Promise<Array<{ source: string; output: string }>> {
   const scriptPaths = options.scriptPaths;
@@ -847,11 +861,13 @@ async function executeSkillScripts(options: {
       const exitCode = executionResult.exitCode === null ? 'unknown' : String(executionResult.exitCode);
       const stderr = executionResult.stderr.trim();
       const stdoutPreview = executionResult.stdout.trim();
-      const detail = [
-        `exit code ${exitCode}`,
-        stderr ? `stderr: ${stderr}` : '',
-        stdoutPreview ? `stdout: ${stdoutPreview}` : '',
-      ].filter(Boolean).join(' | ');
+      const detail = options.minimalCheckMode
+        ? `exit code ${exitCode}${stderr ? ` | stderr: ${stderr.slice(0, 200)}` : ''}`
+        : [
+          `exit code ${exitCode}`,
+          stderr ? `stderr: ${stderr}` : '',
+          stdoutPreview ? `stdout: ${stdoutPreview}` : '',
+        ].filter(Boolean).join(' | ');
       scriptOutputs.push({
         source: relativeScriptPath,
         output: `Script exited with ${detail}`,
@@ -861,7 +877,9 @@ async function executeSkillScripts(options: {
 
     scriptOutputs.push({
       source: relativeScriptPath,
-      output: formatResultForLLM(executionResult),
+      output: options.minimalCheckMode
+        ? 'Script completed successfully (exit code 0).'
+        : formatResultForLLM(executionResult),
     });
   }
 
@@ -871,15 +889,28 @@ async function executeSkillScripts(options: {
 function buildSuccessResult(options: {
   skillId: string;
   skillName: string;
+  skillDescription: string;
   skillRoot: string;
   markdown: string;
   scriptOutputs: Array<{ source: string; output: string }>;
   referenceFiles: string[];
   scriptPaths: string[];
+  minimalCheckMode: boolean;
 }): string {
-  const { skillId, skillName, skillRoot, markdown, scriptOutputs, referenceFiles, scriptPaths } = options;
+  const {
+    skillId,
+    skillName,
+    skillDescription,
+    skillRoot,
+    markdown,
+    scriptOutputs,
+    referenceFiles,
+    scriptPaths,
+    minimalCheckMode,
+  } = options;
   const escapedSkillId = escapeXmlText(skillId);
   const escapedSkillName = escapeXmlText(skillName);
+  const escapedSkillDescription = escapeXmlText(skillDescription);
   const hasActiveResources = scriptOutputs.length > 0;
   const scriptBlocks = scriptOutputs.flatMap((scriptOutput) => ([
     `    <script_output source="${escapeXmlText(scriptOutput.source)}">`,
@@ -892,10 +923,14 @@ function buildSuccessResult(options: {
     ? [
       '  <active_resources>',
       ...scriptBlocks,
-      '',
-      '    <reference_files>',
-      referenceFilesBlock,
-      '    </reference_files>',
+      ...(!minimalCheckMode
+        ? [
+          '',
+          '    <reference_files>',
+          referenceFilesBlock,
+          '    </reference_files>',
+        ]
+        : []),
       '  </active_resources>',
       '',
     ]
@@ -905,14 +940,17 @@ function buildSuccessResult(options: {
   const executionDirective = [
     '  <execution_directive>',
     `    You are now operating under the specialized ${escapedSkillName} protocol.`,
-    '    1. Prioritize the logic in <instructions> over generic behavior.',
+    `    Skill purpose: ${escapedSkillDescription}`,
+    '    1. REQUIRED: Begin your response by telling the user which skill was loaded, its purpose, and what you intend to do. Do this before any tool calls or execution.',
+    '    2. Prioritize the logic in <instructions> over generic behavior.',
     hasActiveResources
-      ? '    2. Use the data in <active_resources> to complete the user\'s specific request.'
-      : '    2. Use the skill instructions to complete the user\'s specific request.',
-    '    3. If the workflow is multi-step, explicitly state your plan before executing.',
-    '    4. When using tools, first provide a brief intent statement (what you will do and why), then call the tool. If provider behavior allows mixed output, include the intent text and tool call in the same response turn.',
+      ? '    3. Use the data in <active_resources> to complete the user\'s specific request.'
+      : '    3. Use the skill instructions to complete the user\'s specific request.',
+    '    4. Always state your intended approach before executing, whether the workflow is single-step or multi-step.',
+    '    5. When using tools, first provide a brief intent statement (what you will do and why), then call the tool. If provider behavior allows mixed output, include the intent text and tool call in the same response turn.',
+    '    6. After each significant step, briefly confirm what was completed and what comes next.',
     ...(hasReferencedScripts
-      ? [`    5. Scripts referenced in <instructions> are located at skill root: ${escapeXmlText(skillRoot)}. When invoking them via shell commands, construct the absolute path (e.g., ${escapeXmlText(skillRoot)}/scripts/example.py) since they may not be accessible via relative paths from the project directory.`]
+      ? [`    7. Scripts referenced in <instructions> are located at skill root: ${escapeXmlText(skillRoot)}. When invoking them via shell commands, construct the absolute path (e.g., ${escapeXmlText(skillRoot)}/scripts/example.py) since they may not be accessible via relative paths from the project directory.`]
       : []),
     '  </execution_directive>',
   ];
@@ -932,7 +970,7 @@ function buildSuccessResult(options: {
 export function createLoadSkillToolDefinition() {
   return {
     description:
-      'Load full SKILL.md instructions by skill_id from the skill registry. Use this when a request matches a listed skill.',
+      'Load full SKILL.md instructions by skill_id from the skill registry. Use this when a request matches a listed skill. After loading, announce the active skill and its purpose to the user before proceeding.',
     parameters: {
       type: 'object',
       properties: {
@@ -989,7 +1027,10 @@ export function createLoadSkillToolDefinition() {
           const markdown = await fs.readFile(sourcePath, 'utf8');
           const instructionsMarkdown = stripYamlFrontMatter(markdown);
           const skillRoot = path.dirname(sourcePath);
-          const scriptPaths = extractReferencedScriptPaths(instructionsMarkdown);
+          const minimalCheckMode = isLoadSkillMinimalCheckModeEnabled();
+          const scriptPaths = extractReferencedScriptPaths(instructionsMarkdown, {
+            includeCommandReferences: !minimalCheckMode,
+          });
           const isApproved = await requestSkillExecutionApproval({
             skillId: requestedSkillId,
             scriptPaths,
@@ -1004,18 +1045,23 @@ export function createLoadSkillToolDefinition() {
           const scriptOutputs = await executeSkillScripts({
             scriptPaths,
             skillRoot,
+            minimalCheckMode,
             context,
           });
-          const referenceFiles = await collectReferenceFiles(skillRoot, instructionsMarkdown);
+          const referenceFiles = minimalCheckMode
+            ? []
+            : await collectReferenceFiles(skillRoot, instructionsMarkdown);
           return {
             result: buildSuccessResult({
               skillId: requestedSkillId,
               skillName: entry.skill_id,
+              skillDescription: entry.description?.trim() || entry.skill_id,
               skillRoot,
               markdown: instructionsMarkdown,
               scriptOutputs,
               referenceFiles,
               scriptPaths,
+              minimalCheckMode,
             }),
             cacheableForRun: true,
           };

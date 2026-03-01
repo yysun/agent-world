@@ -13,6 +13,9 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-03-01: Changed collapsible message cards (assistant/tool) to default expanded state; per-message toggle overrides still apply.
+ * - 2026-03-01: Kept narrated assistant tool-call messages as assistant cards; only placeholder `Calling tool:` rows are merged into tool cards.
+ * - 2026-03-01: Fixed stale `tool: <name> - running` cards by treating reply-linked tool result rows as completion signals when `tool_call_id` metadata is absent.
  * - 2026-02-28: Switched tool-name resolution to shared message-utils helper so assistant tool-request rows prefer their own `tool_calls` metadata.
  * - 2026-02-28: Backfilled tool-result rows with matching assistant tool-request metadata so combined tool cards can show request args with results.
  * - 2026-02-28: Added tool-name backfill for persisted tool-result rows (via linked assistant `tool_calls`) so status labels render `tool - <name> - <status>`.
@@ -69,18 +72,84 @@ function collectToolCallIds(message) {
 }
 
 function isToolRequestMessage(message) {
+  if (isNarratedAssistantToolCallMessage(message)) {
+    return false;
+  }
+
   if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
     return true;
   }
   return /calling tool\s*:/i.test(String(message?.content || ''));
 }
 
-function hasPendingToolCalls(message, messages, currentIndex) {
+export function isNarratedAssistantToolCallMessage(message) {
+  const role = String(message?.role || '').trim().toLowerCase();
+  if (role !== 'assistant') {
+    return false;
+  }
+
+  const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+  if (toolCalls.length === 0) {
+    return false;
+  }
+
+  const content = String(message?.content || '').trim();
+  if (!content) {
+    return false;
+  }
+
+  return !/^calling tool\s*:/i.test(content);
+}
+
+function consumePendingToolCallFromResult(
+  pendingCallIds,
+  requestedToolCalls,
+  requestMessageId,
+  resultMessage,
+) {
+  const completionKey = String(resultMessage?.tool_call_id || resultMessage?.messageId || '').trim();
+  if (completionKey) {
+    if (pendingCallIds.has(completionKey)) {
+      pendingCallIds.delete(completionKey);
+      return;
+    }
+  }
+
+  const replyToMessageId = String(resultMessage?.replyToMessageId || '').trim();
+  if (!requestMessageId || !replyToMessageId || replyToMessageId !== requestMessageId) {
+    return;
+  }
+
+  const resultToolName = String(resultMessage?.toolName || '').trim().toLowerCase();
+  if (resultToolName) {
+    for (const requested of requestedToolCalls) {
+      const callId = String(requested?.id || '').trim();
+      const callName = String(requested?.function?.name || requested?.name || '').trim().toLowerCase();
+      if (!callId || !callName) {
+        continue;
+      }
+      if (callName === resultToolName) {
+        pendingCallIds.delete(callId);
+        return;
+      }
+    }
+  }
+
+  // If this request has exactly one pending tool call left, a reply-linked tool row
+  // is sufficient to mark it complete even when tool_call_id metadata is unavailable.
+  if (pendingCallIds.size === 1) {
+    pendingCallIds.clear();
+  }
+}
+
+export function hasPendingToolCallsForMessage(message, messages, currentIndex) {
   const requestedCallIds = collectToolCallIds(message);
   if (requestedCallIds.length === 0) {
     return false;
   }
 
+  const requestedToolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+  const requestMessageId = String(message?.messageId || '').trim();
   const pendingCallIds = new Set(requestedCallIds);
   const toolCallStatus = message?.toolCallStatus && typeof message.toolCallStatus === 'object'
     ? message.toolCallStatus
@@ -101,11 +170,7 @@ function hasPendingToolCalls(message, messages, currentIndex) {
 
   const combinedToolResults = Array.isArray(message?.combinedToolResults) ? message.combinedToolResults : [];
   for (const result of combinedToolResults) {
-    const completionKey = String(result?.tool_call_id || result?.messageId || '').trim();
-    if (!completionKey) {
-      continue;
-    }
-    pendingCallIds.delete(completionKey);
+    consumePendingToolCallFromResult(pendingCallIds, requestedToolCalls, requestMessageId, result);
   }
 
   if (pendingCallIds.size === 0) {
@@ -118,11 +183,7 @@ function hasPendingToolCalls(message, messages, currentIndex) {
     if (candidateRole !== 'tool') {
       continue;
     }
-    const completionKey = String(candidate?.tool_call_id || candidate?.messageId || '').trim();
-    if (!completionKey) {
-      continue;
-    }
-    pendingCallIds.delete(completionKey);
+    consumePendingToolCallFromResult(pendingCallIds, requestedToolCalls, requestMessageId, candidate);
     if (pendingCallIds.size === 0) {
       return false;
     }
@@ -131,7 +192,20 @@ function hasPendingToolCalls(message, messages, currentIndex) {
   return true;
 }
 
-function buildCombinedRenderableMessages(messages) {
+function hasPendingToolCalls(message, messages, currentIndex) {
+  return hasPendingToolCallsForMessage(message, messages, currentIndex);
+}
+
+export function getInitialMessageCollapsedState(_message: any, isCollapsible: boolean): boolean {
+  if (!isCollapsible) {
+    return false;
+  }
+
+  // Default to expanded; explicit user toggles are tracked in messageCollapseOverrides.
+  return false;
+}
+
+export function buildCombinedRenderableMessages(messages) {
   const toolResultsByKey = new Map<string, Array<any>>();
 
   for (const message of messages) {
@@ -162,14 +236,41 @@ function buildCombinedRenderableMessages(messages) {
       }
 
       const combinedToolResults: Array<any> = [];
+      const requestMessageId = String(message?.messageId || '').trim();
+      const combinedMessageIds = new Set<string>();
       for (const callId of requestedCallIds) {
         const matches = toolResultsByKey.get(callId) || [];
         for (const match of matches) {
           const matchMessageId = String(match?.messageId || '').trim();
           if (matchMessageId) {
             consumedToolResultIds.add(matchMessageId);
+            combinedMessageIds.add(matchMessageId);
           }
           combinedToolResults.push(match);
+        }
+      }
+
+      if (requestMessageId) {
+        for (const candidate of messages) {
+          const candidateRole = String(candidate?.role || '').trim().toLowerCase();
+          if (candidateRole !== 'tool') {
+            continue;
+          }
+          const replyToMessageId = String(candidate?.replyToMessageId || '').trim();
+          if (!replyToMessageId || replyToMessageId !== requestMessageId) {
+            continue;
+          }
+
+          const candidateMessageId = String(candidate?.messageId || '').trim();
+          if (candidateMessageId && combinedMessageIds.has(candidateMessageId)) {
+            continue;
+          }
+
+          if (candidateMessageId) {
+            consumedToolResultIds.add(candidateMessageId);
+            combinedMessageIds.add(candidateMessageId);
+          }
+          combinedToolResults.push(candidate);
         }
       }
 
@@ -280,7 +381,15 @@ export default function MessageListPanel({
   const renderableMessages = buildCombinedRenderableMessages(
     messages
       .filter(isRenderableMessageEntry)
-      .filter((message) => showToolMessages || !isToolRelatedMessage(message))
+      .filter((message) => {
+        if (showToolMessages) {
+          return true;
+        }
+        if (isNarratedAssistantToolCallMessage(message)) {
+          return true;
+        }
+        return !isToolRelatedMessage(message);
+      })
   );
   const shouldShowLoading = messagesLoading && renderableMessages.length === 0;
   const [messageCollapseOverrides, setMessageCollapseOverrides] = useState<Record<string, boolean>>({});
@@ -296,7 +405,7 @@ export default function MessageListPanel({
     if (Object.prototype.hasOwnProperty.call(messageCollapseOverrides, messageKey)) {
       return Boolean(messageCollapseOverrides[messageKey]);
     }
-    return isToolRelatedMessage(message);
+    return getInitialMessageCollapsedState(message, isCollapsible);
   };
   const shouldShowWelcome = !messagesLoading && !hasConversationMessages;
 
@@ -395,7 +504,8 @@ export default function MessageListPanel({
             const isHuman = isHumanMessage(message);
             const isPendingOptimisticUserMessage = isHuman && message?.optimisticUserPending === true;
             const messageRole = String(message?.role || '').toLowerCase();
-            const isToolMessage = isToolRelatedMessage(message);
+            const isNarratedAssistantToolCall = isNarratedAssistantToolCallMessage(message);
+            const isToolMessage = isToolRelatedMessage(message) && !isNarratedAssistantToolCall;
             const resolvedToolName = isToolMessage
               ? resolveToolNameForMessage(message, messagesById, renderableMessages, messageIndex)
               : '';
@@ -513,6 +623,9 @@ export default function MessageListPanel({
                         }
                         if (linkedToolRequestMessage && !(Array.isArray(message?.tool_calls) && message.tool_calls.length > 0)) {
                           nextMessage = { ...nextMessage, linkedToolRequest: linkedToolRequestMessage };
+                        }
+                        if (isNarratedAssistantToolCall) {
+                          nextMessage = { ...nextMessage, forceAssistantMessage: true };
                         }
                         return nextMessage;
                       })()}

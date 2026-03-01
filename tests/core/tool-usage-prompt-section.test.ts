@@ -13,6 +13,7 @@
  * - Pure unit tests; no storage, world setup, or external provider calls.
  *
  * Recent Changes:
+ * - 2026-03-01: Added coverage for global pre-tool planning narration guidance before tool calls.
  * - 2026-02-21: Added initial coverage for `list_files` prompt hinting to reduce oversized listing results.
  */
 
@@ -28,6 +29,8 @@ describe('buildToolUsagePromptSection', () => {
     const content = buildToolUsagePromptSection({ toolNames: ['shell_cmd'] });
     expect(content).toContain('You have access to tools.');
     expect(content).toContain('Use tools when the user requests an action that requires tool execution.');
+    expect(content).toContain('Before any tool call, first send a short planning message to the user describing what you understood, what you will do next, and what outcome to expect.');
+    expect(content).toContain('This planning message must be assistant text only (no tool call in that same response).');
   });
 
   test('includes HITL-only guidance when human_intervention_request is available', () => {
