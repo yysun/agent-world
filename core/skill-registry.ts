@@ -19,6 +19,7 @@
  * - Project roots are scanned after user roots, so later collisions always override earlier ones
  *
  * Recent Changes:
+ * - 2026-02-28: Added symlink-aware skill discovery so SKILL.md files inside symlinked directories are indexed.
  * - 2026-02-27: Made collision precedence explicit in candidate resolution so project-scope definitions always win over global-scope definitions even if discovery order changes.
  * - 2026-02-16: Default project-skill roots now resolve from active workspace env (`AGENT_WORLD_PROJECT_PATH`/`AGENT_WORLD_WORKSPACE_PATH`) before falling back to process cwd.
  * - 2026-02-16: Added source-scope filtering helper so callers can include/exclude global or project skills when building system prompts.
@@ -249,15 +250,34 @@ async function readDirectoryEntries(directoryPath: string): Promise<Dirent[]> {
   }
 }
 
+function isDirentSymbolicLink(entry: Dirent): boolean {
+  return typeof entry.isSymbolicLink === 'function' ? entry.isSymbolicLink() : false;
+}
+
+async function resolveDirectoryIdentity(directoryPath: string): Promise<string> {
+  try {
+    return await fs.realpath(directoryPath);
+  } catch {
+    return path.resolve(directoryPath);
+  }
+}
+
 async function findSkillMarkdownFiles(rootPath: string): Promise<string[]> {
   const output: string[] = [];
   const queue: string[] = [rootPath];
+  const visitedDirectories = new Set<string>();
 
   while (queue.length > 0) {
     const current = queue.shift();
     if (!current) {
       continue;
     }
+
+    const directoryIdentity = await resolveDirectoryIdentity(current);
+    if (visitedDirectories.has(directoryIdentity)) {
+      continue;
+    }
+    visitedDirectories.add(directoryIdentity);
 
     const entries = await readDirectoryEntries(current);
     for (const entry of entries) {
@@ -266,6 +286,19 @@ async function findSkillMarkdownFiles(rootPath: string): Promise<string[]> {
         queue.push(absolutePath);
         continue;
       }
+
+      if (isDirentSymbolicLink(entry)) {
+        const symlinkStats = await readSkillStats(absolutePath);
+        if (symlinkStats?.isDirectory()) {
+          queue.push(absolutePath);
+          continue;
+        }
+        if (symlinkStats?.isFile() && entry.name === 'SKILL.md') {
+          output.push(absolutePath);
+          continue;
+        }
+      }
+
       if (entry.isFile() && entry.name === 'SKILL.md') {
         output.push(absolutePath);
       }
