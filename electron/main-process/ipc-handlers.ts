@@ -156,6 +156,14 @@ interface MainIpcHandlerFactoryDependencies {
   updateWorld: (worldId: string, updates: Record<string, unknown>) => Promise<any>;
   editUserMessage: (worldId: string, messageId: string, newContent: string, chatId: string, targetWorld?: any) => Promise<any>;
   removeMessagesFrom: (worldId: string, messageId: string, chatId: string) => Promise<any>;
+  addToQueue: (worldId: string, chatId: string, content: string, sender?: string) => Promise<any>;
+  getQueueMessages: (worldId: string, chatId: string) => Promise<any[]>;
+  removeFromQueue: (worldId: string, messageId: string) => Promise<any>;
+  pauseChatQueue: (worldId: string, chatId: string) => Promise<any>;
+  resumeChatQueue: (worldId: string, chatId: string) => Promise<any>;
+  stopChatQueue: (worldId: string, chatId: string) => Promise<any>;
+  clearChatQueue: (worldId: string, chatId: string) => Promise<any>;
+  retryQueueMessage: (worldId: string, messageId: string, chatId: string) => Promise<any>;
   createStorage: (config: any) => Promise<any>;
   createStorageFromEnv: () => Promise<any>;
   loggerIpc?: LoggerLike;
@@ -216,6 +224,14 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     updateWorld,
     editUserMessage,
     removeMessagesFrom,
+    addToQueue,
+    getQueueMessages,
+    removeFromQueue,
+    pauseChatQueue,
+    resumeChatQueue,
+    stopChatQueue,
+    clearChatQueue,
+    retryQueueMessage,
     createStorage,
     createStorageFromEnv,
     loggerIpc = NOOP_LOGGER,
@@ -1307,6 +1323,83 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     return { canceled: false, filePath: result.filePaths[0] || null };
   }
 
+  async function addToQueueHandler(payload: any) {
+    await ensureCoreReady();
+    const worldId = String(payload?.worldId || '');
+    const chatId = String(payload?.chatId || '');
+    const content = String(payload?.content || '');
+    const sender = payload?.sender ? String(payload.sender) : undefined;
+    if (!worldId) throw new Error('World ID is required.');
+    if (!chatId) throw new Error('Chat ID is required.');
+    if (!content) throw new Error('Content is required.');
+    return addToQueue(worldId, chatId, content, sender);
+  }
+
+  async function getQueuedMessagesHandler(payload: any) {
+    await ensureCoreReady();
+    const worldId = String(payload?.worldId || '');
+    const chatId = String(payload?.chatId || '');
+    if (!worldId) throw new Error('World ID is required.');
+    if (!chatId) throw new Error('Chat ID is required.');
+    return getQueueMessages(worldId, chatId);
+  }
+
+  async function removeFromQueueHandler(payload: any) {
+    await ensureCoreReady();
+    const worldId = String(payload?.worldId || '');
+    const messageId = String(payload?.messageId || '');
+    if (!worldId) throw new Error('World ID is required.');
+    if (!messageId) throw new Error('Message ID is required.');
+    return removeFromQueue(worldId, messageId);
+  }
+
+  async function pauseChatQueueHandler(payload: any) {
+    await ensureCoreReady();
+    const worldId = String(payload?.worldId || '');
+    const chatId = String(payload?.chatId || '');
+    if (!worldId) throw new Error('World ID is required.');
+    if (!chatId) throw new Error('Chat ID is required.');
+    return pauseChatQueue(worldId, chatId);
+  }
+
+  async function resumeChatQueueHandler(payload: any) {
+    await ensureCoreReady();
+    const worldId = String(payload?.worldId || '');
+    const chatId = String(payload?.chatId || '');
+    if (!worldId) throw new Error('World ID is required.');
+    if (!chatId) throw new Error('Chat ID is required.');
+    return resumeChatQueue(worldId, chatId);
+  }
+
+  async function stopChatQueueHandler(payload: any) {
+    await ensureCoreReady();
+    const worldId = String(payload?.worldId || '');
+    const chatId = String(payload?.chatId || '');
+    if (!worldId) throw new Error('World ID is required.');
+    if (!chatId) throw new Error('Chat ID is required.');
+    return stopChatQueue(worldId, chatId);
+  }
+
+  async function clearChatQueueHandler(payload: any) {
+    await ensureCoreReady();
+    const worldId = String(payload?.worldId || '');
+    const chatId = String(payload?.chatId || '');
+    if (!worldId) throw new Error('World ID is required.');
+    if (!chatId) throw new Error('Chat ID is required.');
+    return clearChatQueue(worldId, chatId);
+  }
+
+  async function retryQueueMessageHandler(payload: any) {
+    await ensureCoreReady();
+    const worldId = String(payload?.worldId || '');
+    const messageId = String(payload?.messageId || '');
+    const chatId = String(payload?.chatId || '');
+    if (!worldId) throw new Error('World ID is required.');
+    if (!messageId) throw new Error('Message ID is required.');
+    if (!chatId) throw new Error('Chat ID is required.');
+    return retryQueueMessage(worldId, messageId, chatId);
+  }
+
   return {
     loadWorldsFromWorkspace,
     loadSpecificWorld,
@@ -1335,6 +1428,14 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     getLoggingConfig,
     stopChatMessage,
     deleteMessageFromChat,
-    getChatEvents
+    getChatEvents,
+    addToQueue: addToQueueHandler,
+    getQueuedMessages: getQueuedMessagesHandler,
+    removeFromQueue: removeFromQueueHandler,
+    pauseChatQueue: pauseChatQueueHandler,
+    resumeChatQueue: resumeChatQueueHandler,
+    stopChatQueue: stopChatQueueHandler,
+    clearChatQueue: clearChatQueueHandler,
+    retryQueueMessage: retryQueueMessageHandler
   };
 }

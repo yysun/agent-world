@@ -432,6 +432,31 @@ export interface StorageAPI {
   // Integrity operations
   validateIntegrity(worldId: string, agentId?: string): Promise<boolean>;
   repairData(worldId: string, agentId?: string): Promise<boolean>;
+
+  // Message queue operations (optional — only available on SQLite backend)
+  getQueuedMessages?(worldId: string, chatId: string): Promise<QueuedMessage[]>;
+  addQueuedMessage?(worldId: string, chatId: string, messageId: string, content: string, sender: string): Promise<void>;
+  updateMessageQueueStatus?(messageId: string, status: QueueMessageStatus): Promise<void>;
+  incrementQueueMessageRetry?(messageId: string): Promise<number>;
+  removeQueuedMessage?(messageId: string): Promise<void>;
+  resetQueueMessageForRetry?(messageId: string): Promise<void>;
+  cancelQueuedMessages?(worldId: string, chatId: string): Promise<number>;
+  recoverSendingMessages?(): Promise<number>;
+  deleteQueueForChat?(worldId: string, chatId: string): Promise<number>;
+}
+
+export type QueueMessageStatus = 'queued' | 'sending' | 'error' | 'cancelled';
+
+export interface QueuedMessage {
+  id: number;
+  worldId: string;
+  chatId: string;
+  messageId: string;
+  content: string;
+  sender: string;
+  status: QueueMessageStatus;
+  retryCount: number;
+  createdAt: string;
 }
 
 // Legacy alias for backward compatibility - will be removed in future versions

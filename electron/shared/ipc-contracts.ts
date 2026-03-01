@@ -66,7 +66,15 @@ export const DESKTOP_INVOKE_CHANNELS = {
   SETTINGS_GET: 'settings:get',
   SETTINGS_SAVE: 'settings:save',
   DIALOG_PICK_FILE: 'dialog:pickFile',
-  CHAT_GET_EVENTS: 'chat:getEvents'
+  CHAT_GET_EVENTS: 'chat:getEvents',
+  QUEUE_ADD: 'queue:add',
+  QUEUE_GET: 'queue:get',
+  QUEUE_REMOVE: 'queue:remove',
+  QUEUE_CLEAR: 'queue:clear',
+  QUEUE_PAUSE: 'queue:pause',
+  QUEUE_RESUME: 'queue:resume',
+  QUEUE_STOP: 'queue:stop',
+  QUEUE_RETRY: 'queue:retry'
 } as const;
 
 export type DesktopInvokeChannel =
@@ -144,6 +152,15 @@ export interface ChatEventPayload {
   [key: string]: unknown;
 }
 
+export interface QueueAddPayload extends WorldChatPayload {
+  content: string;
+  sender?: string;
+}
+
+export interface QueueMessagePayload extends WorldChatPayload {
+  messageId: string;
+}
+
 export interface SkillRegistrySummary {
   skill_id: string;
   description: string;
@@ -204,4 +221,12 @@ export interface DesktopApi {
   saveSettings: (settings: Record<string, unknown>) => Promise<unknown>;
   pickFile: () => Promise<unknown>;
   getChatEvents: (worldId: string, chatId: string) => Promise<unknown>;
+  addToQueue: (worldId: string, chatId: string, content: string, sender?: string) => Promise<unknown>;
+  getQueuedMessages: (worldId: string, chatId: string) => Promise<unknown>;
+  removeFromQueue: (worldId: string, messageId: string) => Promise<unknown>;
+  clearQueue: (worldId: string, chatId: string) => Promise<unknown>;
+  pauseChatQueue: (worldId: string, chatId: string) => Promise<unknown>;
+  resumeChatQueue: (worldId: string, chatId: string) => Promise<unknown>;
+  stopChatQueue: (worldId: string, chatId: string) => Promise<unknown>;
+  retryQueueMessage: (worldId: string, messageId: string, chatId: string) => Promise<unknown>;
 }

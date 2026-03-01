@@ -73,6 +73,7 @@ export function createMainContentComposerProps<T extends PropBag>(input: T) {
     isCurrentSessionStopping: input.isCurrentSessionStopping,
     isCurrentSessionSending: input.isCurrentSessionSending,
     hasActiveHitlPrompt: input.hasActiveHitlPrompt,
+    onAddToQueue: input.onAddToQueue,
   };
 }
 

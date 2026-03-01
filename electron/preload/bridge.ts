@@ -36,7 +36,8 @@ import {
   type ChatEventPayload,
   type DesktopApi,
   type RendererLoggingConfig,
-  type SkillRegistrySummary
+  type SkillRegistrySummary,
+  type QueueAddPayload
 } from '../shared/ipc-contracts.js';
 import { invokeDesktopChannel } from './invoke.js';
 import {
@@ -232,7 +233,23 @@ export function createDesktopApi(ipcRendererLike: IpcRendererLike = ipcRenderer)
     ),
     getSettings: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.SETTINGS_GET),
     saveSettings: (settings) => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.SETTINGS_SAVE, settings),
-    pickFile: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_FILE)
+    pickFile: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_FILE),
+    addToQueue: (worldId, chatId, content, sender) =>
+      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.QUEUE_ADD, { worldId, chatId, content, sender } as QueueAddPayload),
+    getQueuedMessages: (worldId, chatId) =>
+      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.QUEUE_GET, toWorldChatPayload(worldId, chatId)),
+    removeFromQueue: (worldId, messageId) =>
+      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.QUEUE_REMOVE, { worldId, messageId }),
+    clearQueue: (worldId, chatId) =>
+      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.QUEUE_CLEAR, toWorldChatPayload(worldId, chatId)),
+    pauseChatQueue: (worldId, chatId) =>
+      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.QUEUE_PAUSE, toWorldChatPayload(worldId, chatId)),
+    resumeChatQueue: (worldId, chatId) =>
+      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.QUEUE_RESUME, toWorldChatPayload(worldId, chatId)),
+    stopChatQueue: (worldId, chatId) =>
+      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.QUEUE_STOP, toWorldChatPayload(worldId, chatId)),
+    retryQueueMessage: (worldId, messageId, chatId) =>
+      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.QUEUE_RETRY, { worldId, messageId, chatId })
   };
 }
 

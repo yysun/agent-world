@@ -61,7 +61,7 @@ import { runMigrations } from './migration-runner.js';
 import * as path from 'path';
 import * as fs from 'fs';
 import { fileURLToPath } from 'url';
-import type { StorageAPI, World, Agent, AgentMessage, Chat, CreateChatParams, UpdateChatParams, WorldChat } from '../types.js';
+import type { StorageAPI, World, Agent, AgentMessage, Chat, CreateChatParams, UpdateChatParams, WorldChat, QueuedMessage, QueueMessageStatus } from '../types.js';
 import { toKebabCase } from '../utils.js';
 
 /**
@@ -874,6 +874,123 @@ export async function exportArchive(ctx: SQLiteStorageContext, archiveId: number
 
 export async function close(ctx: SQLiteStorageContext): Promise<void> {
   return closeSchema(ctx.schemaCtx);
+}
+
+// ─── MESSAGE QUEUE OPERATIONS ────────────────────────────────────────────────
+// Queue messages are stored in a dedicated message_queue table (not agent_memory)
+// to avoid the agent_id FK constraint on agent_memory.
+//
+// Status lifecycle:
+//   queued -> sending -> (row deleted on successful response)
+//   queued -> cancelled  (stop/clear)
+//   sending -> queued    (startup recovery)
+//   sending -> error     (after max retries)
+
+export async function getQueuedMessages(
+  ctx: SQLiteStorageContext,
+  worldId: string,
+  chatId: string
+): Promise<QueuedMessage[]> {
+  await ensureInitialized(ctx);
+  const rows = await all(ctx, `
+    SELECT id, world_id as worldId, chat_id as chatId, message_id as messageId,
+           content, sender, status, retry_count as retryCount, created_at as createdAt
+    FROM message_queue
+    WHERE world_id = ? AND chat_id = ? AND status NOT IN ('cancelled')
+    ORDER BY created_at ASC, id ASC
+  `, worldId, chatId);
+  return rows as QueuedMessage[];
+}
+
+export async function addQueuedMessage(
+  ctx: SQLiteStorageContext,
+  worldId: string,
+  chatId: string,
+  messageId: string,
+  content: string,
+  sender: string
+): Promise<void> {
+  await ensureInitialized(ctx);
+  await run(ctx, `
+    INSERT INTO message_queue (world_id, chat_id, message_id, content, sender, status)
+    VALUES (?, ?, ?, ?, ?, 'queued')
+  `, worldId, chatId, messageId, content, sender);
+}
+
+export async function updateMessageQueueStatus(
+  ctx: SQLiteStorageContext,
+  messageId: string,
+  status: QueueMessageStatus
+): Promise<void> {
+  await run(ctx, `
+    UPDATE message_queue
+    SET status = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE message_id = ?
+  `, status, messageId);
+}
+
+export async function incrementQueueMessageRetry(
+  ctx: SQLiteStorageContext,
+  messageId: string
+): Promise<number> {
+  await run(ctx, `
+    UPDATE message_queue
+    SET retry_count = retry_count + 1, updated_at = CURRENT_TIMESTAMP
+    WHERE message_id = ?
+  `, messageId);
+  const row = await get(ctx, `SELECT retry_count FROM message_queue WHERE message_id = ?`, messageId);
+  return row?.retry_count ?? 0;
+}
+
+export async function resetQueueMessageForRetry(
+  ctx: SQLiteStorageContext,
+  messageId: string
+): Promise<void> {
+  await run(ctx, `
+    UPDATE message_queue
+    SET status = 'queued', retry_count = 0, updated_at = CURRENT_TIMESTAMP
+    WHERE message_id = ?
+  `, messageId);
+}
+
+export async function removeQueuedMessage(
+  ctx: SQLiteStorageContext,
+  messageId: string
+): Promise<void> {
+  await run(ctx, `DELETE FROM message_queue WHERE message_id = ?`, messageId);
+}
+
+export async function cancelQueuedMessages(
+  ctx: SQLiteStorageContext,
+  worldId: string,
+  chatId: string
+): Promise<number> {
+  const result = await run(ctx, `
+    UPDATE message_queue
+    SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+    WHERE world_id = ? AND chat_id = ? AND status = 'queued'
+  `, worldId, chatId);
+  return result.changes || 0;
+}
+
+export async function recoverSendingMessages(ctx: SQLiteStorageContext): Promise<number> {
+  const result = await run(ctx, `
+    UPDATE message_queue
+    SET status = 'queued', updated_at = CURRENT_TIMESTAMP
+    WHERE status = 'sending'
+  `);
+  return result.changes || 0;
+}
+
+export async function deleteQueueForChat(
+  ctx: SQLiteStorageContext,
+  worldId: string,
+  chatId: string
+): Promise<number> {
+  const result = await run(ctx, `
+    DELETE FROM message_queue WHERE world_id = ? AND chat_id = ?
+  `, worldId, chatId);
+  return result.changes || 0;
 }
 
 export async function getDatabaseStats(ctx: SQLiteStorageContext) {

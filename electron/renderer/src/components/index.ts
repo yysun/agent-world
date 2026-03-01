@@ -35,3 +35,5 @@ export { default as MainContentArea } from './MainContentArea';
 export { default as AppFrameLayout } from './AppFrameLayout';
 export { default as MainWorkspaceLayout } from './MainWorkspaceLayout';
 export { default as AppOverlaysHost } from './AppOverlaysHost';
+export { default as MessageQueuePanel } from './MessageQueuePanel';
+export { default as QueueMessageItem } from './QueueMessageItem';

@@ -10,6 +10,7 @@
  * - Verifies chat restore replays unresolved HITL prompts for the loaded chat.
  * - Verifies chat restore triggers pending persisted tool-call resume for the loaded chat.
  * - Verifies chat restore auto-submits pending user-last message via existing messageId.
+ * - Verifies queue resume retry bookkeeping runs when queued message publish fails.
  *
  * Notes:
  * - Prevents cross-chat leakage via invalid/stale chat IDs during switch flows.
@@ -308,5 +309,89 @@ describe('restoreChat validation', () => {
     expect(snapshot?.hitlPrompts).toHaveLength(1);
     expect(listPendingHitlPromptEvents).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-1' }), 'chat-2');
     expect(listPendingHitlPromptEventsFromMessages).toHaveBeenCalledWith(memoryRows, 'chat-2');
+  });
+
+  it('retries queued chat message when restore-triggered publish fails', async () => {
+    vi.resetModules();
+
+    const persistedWorld = {
+      id: 'world-1',
+      name: 'World 1',
+      turnLimit: 5,
+      currentChatId: 'chat-1',
+      createdAt: new Date(),
+      lastUpdated: new Date()
+    };
+
+    const queueMessage = {
+      messageId: 'q-1',
+      chatId: 'chat-2',
+      content: 'Queued hello',
+      sender: 'human',
+      status: 'queued' as const,
+      retryCount: 0,
+      createdAt: new Date('2026-03-01T10:00:00Z'),
+      updatedAt: new Date('2026-03-01T10:00:00Z')
+    };
+
+    const storageWrappers = {
+      loadWorld: vi.fn().mockResolvedValue(persistedWorld),
+      listAgents: vi.fn().mockResolvedValue([]),
+      listChats: vi.fn().mockResolvedValue([
+        { id: 'chat-1', name: 'Chat 1', messageCount: 0 },
+        { id: 'chat-2', name: 'Chat 2', messageCount: 0 },
+      ]),
+      loadChatData: vi.fn().mockResolvedValue({ id: 'chat-2', name: 'Chat 2', messageCount: 0 }),
+      getMemory: vi.fn().mockResolvedValue([]),
+      saveWorld: vi.fn().mockResolvedValue(undefined),
+      getQueuedMessages: vi.fn().mockResolvedValue([queueMessage]),
+      updateMessageQueueStatus: vi.fn().mockResolvedValue(undefined),
+      incrementQueueMessageRetry: vi.fn().mockResolvedValue(1),
+    };
+
+    vi.doMock('../../core/storage/storage-factory.js', () => ({
+      createStorageWithWrappers: vi.fn().mockResolvedValue(storageWrappers),
+      getDefaultRootPath: vi.fn().mockReturnValue('/test/data')
+    }));
+
+    const replayPendingHitlRequests = vi.fn().mockReturnValue(0);
+    vi.doMock('../../core/hitl.js', async () => {
+      const actual = await vi.importActual<typeof import('../../core/hitl.js')>('../../core/hitl.js');
+      return {
+        ...actual,
+        replayPendingHitlRequests,
+      };
+    });
+
+    const resumePendingToolCallsForChat = vi.fn().mockResolvedValue(0);
+    vi.doMock('../../core/events/memory-manager.js', async () => {
+      const actual = await vi.importActual<typeof import('../../core/events/memory-manager.js')>('../../core/events/memory-manager.js');
+      return {
+        ...actual,
+        resumePendingToolCallsForChat,
+      };
+    });
+
+    const publishMessageWithId = vi.fn(() => {
+      throw new Error('publish failure');
+    });
+
+    vi.doMock('../../core/events/index.js', async () => {
+      const actual = await vi.importActual<typeof import('../../core/events/index.js')>('../../core/events/index.js');
+      return {
+        ...actual,
+        publishMessageWithId,
+      };
+    });
+
+    const managers = await import('../../core/managers.js');
+    const restored = await managers.restoreChat('world-1', 'chat-2');
+    expect(restored).not.toBeNull();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith('q-1', 'sending');
+    expect(storageWrappers.incrementQueueMessageRetry).toHaveBeenCalledWith('q-1');
+    expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith('q-1', 'queued');
   });
 });

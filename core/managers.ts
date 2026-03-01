@@ -95,7 +95,8 @@ import { resumePendingToolCallsForChat } from './events/memory-manager.js';
 // Type imports
 import type {
   World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams,
-  AgentMessage, Chat, CreateChatParams, UpdateChatParams, WorldChat, LLMProvider, RemovalResult, EditErrorLog
+  AgentMessage, Chat, CreateChatParams, UpdateChatParams, WorldChat, LLMProvider, RemovalResult, EditErrorLog,
+  QueuedMessage
 } from './types.js';
 
 // Initialize logger and storage
@@ -112,6 +113,11 @@ async function initializeModules() {
   try {
     initializeLogger();
     storageWrappers = await createStorageWithWrappers();
+    // Startup recovery: reset any 'sending' queue rows interrupted by an app crash/restart
+    const recovered = await storageWrappers.recoverSendingMessages?.();
+    if (recovered) {
+      logger.info('Queue startup recovery: reset interrupted messages to queued', { count: recovered });
+    }
   } catch (error) {
     // Log error but don't throw - allows tests to proceed with mocked storage
     logger.error('Failed to initialize storage', { error: error instanceof Error ? error.message : error });
@@ -129,6 +135,12 @@ const NEW_CHAT_CONFIG = { REUSABLE_CHAT_TITLE: NEW_CHAT_TITLE } as const;
 const inFlightToolResumeKeys = new Set<string>();
 const inFlightUserResumeKeys = new Set<string>();
 
+// ─── Queue management state ──────────────────────────────────────────────────
+// keyed by `${worldId}:${chatId}`
+const inFlightQueueResumeKeys = new Set<string>();
+const pausedQueues = new Set<string>();
+const queueListenerActive = new Set<string>();
+
 type CreateAgentOptions = {
   allowWhileWorldProcessing?: boolean;
   /** Set to true when the creation slot was already claimed via claimAgentCreationSlot(). */
@@ -141,6 +153,141 @@ export type ChatActivationSnapshot = {
   memory: AgentMessage[];
   hitlPrompts: Array<{ chatId: string | null; prompt: Record<string, unknown> }>;
 };
+
+/**
+ * Attach a one-time 'world' event listener that fires when a specific chat's
+ * processing completes (chat is no longer in activeChatIds). When fired, marks
+ * the in-flight queued message as complete and triggers the next queue item.
+ *
+ * Only one listener is registered per (worldId, chatId) at a time.
+ */
+function attachQueueAdvanceListener(world: World, chatId: string): void {
+  const listenerKey = `${world.id}:${chatId}`;
+  if (queueListenerActive.has(listenerKey)) return;
+  queueListenerActive.add(listenerKey);
+
+  function onWorldActivity(payload: any): void {
+    if (payload.chatId !== chatId) return;
+    if (payload.type !== 'idle' && payload.type !== 'response-end') return;
+    const activeChatIds: string[] = payload.activeChatIds || [];
+    if (activeChatIds.includes(chatId)) return; // this chat is still processing
+
+    // Chat processing just completed — clean up listener
+    world.eventEmitter.removeListener('world', onWorldActivity);
+    queueListenerActive.delete(listenerKey);
+
+    void (async () => {
+      try {
+        if (!storageWrappers?.getQueuedMessages) return;
+        const messages = await storageWrappers.getQueuedMessages(world.id, chatId);
+        const sendingMsg = messages?.find((m: QueuedMessage) => m.status === 'sending');
+        if (sendingMsg) {
+          // Successful completion — remove from queue (message now lives in agent_memory)
+          await storageWrappers.removeQueuedMessage?.(sendingMsg.messageId);
+        }
+      } catch (err) {
+        loggerRestoreResume.warn('Failed to mark queued message complete', {
+          worldId: world.id,
+          chatId,
+          error: String(err),
+        });
+      }
+      // Chain: trigger the next queued message
+      triggerPendingQueueResume(world, chatId);
+    })();
+  }
+
+  world.eventEmitter.on('world', onWorldActivity);
+}
+
+/**
+ * Core queue processing trigger. Finds the next 'queued' message for the chat,
+ * marks it 'sending', and publishes it. Registers a world-activity listener to
+ * chain to the next message after response completion.
+ *
+ * Guards: pause flag, active-processing check, per-chat dedup.
+ */
+function triggerPendingQueueResume(world: World, chatId: string): void {
+  if (!chatId || !storageWrappers?.getQueuedMessages) return;
+
+  const queueKey = `${world.id}:${chatId}`;
+
+  if (pausedQueues.has(queueKey)) {
+    loggerRestoreResume.debug('Queue processing skipped: paused', { worldId: world.id, chatId });
+    return;
+  }
+
+  if (hasActiveChatMessageProcessing(world.id, chatId)) {
+    // An agent is actively processing — the advance listener will pick up when done
+    return;
+  }
+
+  if (inFlightQueueResumeKeys.has(queueKey)) {
+    return;
+  }
+
+  inFlightQueueResumeKeys.add(queueKey);
+
+  void (async () => {
+    let nextMessage: QueuedMessage | undefined;
+    try {
+      const messages = await storageWrappers!.getQueuedMessages!(world.id, chatId);
+      nextMessage = messages?.find((m: QueuedMessage) => m.status === 'queued');
+
+      if (!nextMessage) {
+        loggerRestoreResume.debug('No queued messages remaining', { worldId: world.id, chatId });
+        return;
+      }
+
+      await storageWrappers!.updateMessageQueueStatus!(nextMessage.messageId, 'sending');
+
+      const { publishMessageWithId } = await import('./events/index.js');
+
+      // Register listener BEFORE publishing so the idle event is never missed
+      attachQueueAdvanceListener(world, chatId);
+
+      loggerRestoreResume.debug('Publishing queued message', {
+        worldId: world.id,
+        chatId,
+        messageId: nextMessage.messageId,
+      });
+
+      publishMessageWithId(world, nextMessage.content, nextMessage.sender, nextMessage.messageId, chatId);
+    } catch (error) {
+      loggerRestoreResume.warn('Failed to publish queued message', {
+        worldId: world.id,
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Retry with exponential backoff (max 3 attempts)
+      if (nextMessage && storageWrappers?.incrementQueueMessageRetry && storageWrappers?.updateMessageQueueStatus) {
+        try {
+          const newRetryCount = await storageWrappers.incrementQueueMessageRetry(nextMessage.messageId);
+          if (newRetryCount < 3) {
+            await storageWrappers.updateMessageQueueStatus(nextMessage.messageId, 'queued');
+            const delayMs = Math.pow(2, newRetryCount - 1) * 1000;
+            setTimeout(() => triggerPendingQueueResume(world, chatId), delayMs);
+          } else {
+            await storageWrappers.updateMessageQueueStatus(nextMessage.messageId, 'error');
+            loggerRestoreResume.warn('Queue message reached max retries, marked error', {
+              worldId: world.id,
+              chatId,
+              messageId: nextMessage.messageId,
+            });
+          }
+        } catch (retryErr) {
+          loggerRestoreResume.error('Failed to handle queue message retry', {
+            worldId: world.id,
+            chatId,
+            error: String(retryErr),
+          });
+        }
+      }
+    } finally {
+      inFlightQueueResumeKeys.delete(queueKey);
+    }
+  })();
+}
 
 function triggerPendingToolCallResume(world: World, chatId: string, targetAssistantMessageId?: string): void {
   if (!chatId) {
@@ -1392,6 +1539,9 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
       chatId,
     });
     triggerPendingLastMessageResume(world, chatId);
+    // Resume queue if it was paused (e.g., after returning to this chat)
+    pausedQueues.delete(`${world.id}:${chatId}`);
+    triggerPendingQueueResume(world, chatId);
     loggerRestore.debug('Restore chat resume inspection triggered', {
       worldId: world.id,
       chatId,
@@ -1412,6 +1562,17 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
       runtimeChatExists,
     });
     return null;
+  }
+
+  // Auto-pause the old chat's queue when switching away (FR-8 safety)
+  const previousChatId = world.currentChatId;
+  if (previousChatId && previousChatId !== chatId) {
+    pausedQueues.add(`${resolvedWorldId}:${previousChatId}`);
+    loggerRestore.debug('Auto-paused queue for previous chat on switch', {
+      worldId: resolvedWorldId,
+      previousChatId,
+      newChatId: chatId,
+    });
   }
 
   loggerRestore.debug('Restore chat switching current chat', {
@@ -1437,6 +1598,9 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
       chatId,
     });
     triggerPendingLastMessageResume(world, chatId);
+    // Clear any auto-pause on the new chat and trigger queue processing
+    pausedQueues.delete(`${world.id}:${chatId}`);
+    triggerPendingQueueResume(world, chatId);
     loggerRestore.debug('Restore chat resume inspection triggered', {
       worldId: world.id,
       chatId,
@@ -1912,4 +2076,112 @@ export async function getEditErrors(worldId: string): Promise<EditErrorLog[]> {
     logger.error(`Failed to read edit errors for world '${resolvedWorldId}': ${error instanceof Error ? error.message : error}`);
     return [];
   }
+}
+
+// ─── Queue Management Public API ─────────────────────────────────────────────
+
+/**
+ * Add a message to the queue for a chat. Returns the created QueuedMessage or null.
+ */
+export async function addToQueue(
+  worldId: string,
+  chatId: string,
+  content: string,
+  sender: string
+): Promise<QueuedMessage | null> {
+  await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  if (!storageWrappers?.addQueuedMessage) return null;
+
+  const messageId = `msg-${Date.now()}-${nanoid(6)}`;
+  await storageWrappers.addQueuedMessage(resolvedWorldId, chatId, messageId, content.trim(), sender || 'human');
+
+  const messages = await storageWrappers.getQueuedMessages!(resolvedWorldId, chatId);
+  return messages?.find((m: QueuedMessage) => m.messageId === messageId) ?? null;
+}
+
+/**
+ * Return all queue messages (queued, sending, error) for a chat.
+ */
+export async function getQueueMessages(worldId: string, chatId: string): Promise<QueuedMessage[]> {
+  await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  if (!storageWrappers?.getQueuedMessages) return [];
+  return storageWrappers.getQueuedMessages(resolvedWorldId, chatId);
+}
+
+/**
+ * Remove a specific message from the queue by messageId.
+ */
+export async function removeFromQueue(worldId: string, messageId: string): Promise<void> {
+  await ensureInitialization();
+  await storageWrappers?.removeQueuedMessage?.(messageId);
+}
+
+/**
+ * Pause queue processing for a chat. Current in-flight message completes normally.
+ */
+export async function pauseChatQueue(worldId: string, chatId: string): Promise<void> {
+  await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  pausedQueues.add(`${resolvedWorldId}:${chatId}`);
+  loggerRestoreResume.debug('Queue paused by user', { worldId: resolvedWorldId, chatId });
+}
+
+/**
+ * Resume queue processing for a chat. Clears the pause flag and triggers the next item.
+ */
+export async function resumeChatQueue(worldId: string, chatId: string): Promise<void> {
+  await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  pausedQueues.delete(`${resolvedWorldId}:${chatId}`);
+
+  const world = await getWorld(resolvedWorldId);
+  if (world) {
+    triggerPendingQueueResume(world, chatId);
+  }
+  loggerRestoreResume.debug('Queue resumed by user', { worldId: resolvedWorldId, chatId });
+}
+
+/**
+ * Stop queue processing: cancel remaining queued messages and set pause flag.
+ * The current in-flight message completes normally.
+ */
+export async function stopChatQueue(worldId: string, chatId: string): Promise<void> {
+  await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+
+  // Cancel all remaining 'queued' rows
+  await storageWrappers?.cancelQueuedMessages?.(resolvedWorldId, chatId);
+
+  // Prevent any follow-up trigger
+  pausedQueues.add(`${resolvedWorldId}:${chatId}`);
+
+  loggerRestoreResume.debug('Queue stopped by user', { worldId: resolvedWorldId, chatId });
+}
+
+/**
+ * Clear the entire queue for a chat (removes all queue rows including cancelled/error).
+ */
+export async function clearChatQueue(worldId: string, chatId: string): Promise<void> {
+  await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  await storageWrappers?.deleteQueueForChat?.(resolvedWorldId, chatId);
+  pausedQueues.delete(`${resolvedWorldId}:${chatId}`);
+}
+
+/**
+ * Reset a failed queue message (status='error') back to 'queued' with retry_count=0,
+ * then trigger queue processing. Allows the user to manually retry after automatic
+ * retries have been exhausted.
+ */
+export async function retryQueueMessage(worldId: string, messageId: string, chatId: string): Promise<void> {
+  await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  if (!storageWrappers?.resetQueueMessageForRetry) return;
+  // Reset status to 'queued' and retry_count to 0 so automatic retry logic applies fresh
+  await storageWrappers.resetQueueMessageForRetry(messageId);
+  const world = await getWorld(resolvedWorldId);
+  if (!world) return;
+  triggerPendingQueueResume(world, chatId);
 }

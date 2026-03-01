@@ -326,6 +326,52 @@ export function createStorageWrappers(storageInstance: StorageAPI | null): Stora
           return false;
         }
       }
+    },
+
+    // Message queue operations — delegated to backend if supported
+    async getQueuedMessages(worldId: string, chatId: string) {
+      if (!storageInstance || !('getQueuedMessages' in storageInstance)) return [];
+      return (storageInstance as any).getQueuedMessages(worldId, chatId);
+    },
+
+    async addQueuedMessage(worldId: string, chatId: string, messageId: string, content: string, sender: string) {
+      if (!storageInstance || !('addQueuedMessage' in storageInstance)) return;
+      return (storageInstance as any).addQueuedMessage(worldId, chatId, messageId, content, sender);
+    },
+
+    async updateMessageQueueStatus(messageId: string, status: any) {
+      if (!storageInstance || !('updateMessageQueueStatus' in storageInstance)) return;
+      return (storageInstance as any).updateMessageQueueStatus(messageId, status);
+    },
+
+    async incrementQueueMessageRetry(messageId: string) {
+      if (!storageInstance || !('incrementQueueMessageRetry' in storageInstance)) return 0;
+      return (storageInstance as any).incrementQueueMessageRetry(messageId);
+    },
+
+    async removeQueuedMessage(messageId: string) {
+      if (!storageInstance || !('removeQueuedMessage' in storageInstance)) return;
+      return (storageInstance as any).removeQueuedMessage(messageId);
+    },
+
+    async resetQueueMessageForRetry(messageId: string) {
+      if (!storageInstance || !('resetQueueMessageForRetry' in storageInstance)) return;
+      return (storageInstance as any).resetQueueMessageForRetry(messageId);
+    },
+
+    async cancelQueuedMessages(worldId: string, chatId: string) {
+      if (!storageInstance || !('cancelQueuedMessages' in storageInstance)) return 0;
+      return (storageInstance as any).cancelQueuedMessages(worldId, chatId);
+    },
+
+    async recoverSendingMessages() {
+      if (!storageInstance || !('recoverSendingMessages' in storageInstance)) return 0;
+      return (storageInstance as any).recoverSendingMessages();
+    },
+
+    async deleteQueueForChat(worldId: string, chatId: string) {
+      if (!storageInstance || !('deleteQueueForChat' in storageInstance)) return 0;
+      return (storageInstance as any).deleteQueueForChat(worldId, chatId);
     }
   };
 
@@ -705,7 +751,16 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
       archiveAgentMemory,
       deleteMemoryByChatId,
       getMemory,
-      saveAgentMemory
+      saveAgentMemory,
+      getQueuedMessages,
+      addQueuedMessage,
+      updateMessageQueueStatus,
+      incrementQueueMessageRetry,
+      removeQueuedMessage,
+      resetQueueMessageForRetry,
+      cancelQueuedMessages,
+      recoverSendingMessages,
+      deleteQueueForChat
     } = await import('./sqlite-storage.js');
     const ctx = await createSQLiteStorageContext(sqliteConfig);
     // Note: ensureInitialized is called within sqlite-storage functions, no need to call here
@@ -792,6 +847,18 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
       },
 
       getMemory: (worldId: string, chatId: string) => getMemory(ctx, worldId, chatId),
+
+      // Message queue operations
+      getQueuedMessages: (worldId: string, chatId: string) => getQueuedMessages(ctx, worldId, chatId),
+      addQueuedMessage: (worldId: string, chatId: string, messageId: string, content: string, sender: string) =>
+        addQueuedMessage(ctx, worldId, chatId, messageId, content, sender),
+      updateMessageQueueStatus: (messageId: string, status: any) => updateMessageQueueStatus(ctx, messageId, status),
+      incrementQueueMessageRetry: (messageId: string) => incrementQueueMessageRetry(ctx, messageId),
+      removeQueuedMessage: (messageId: string) => removeQueuedMessage(ctx, messageId),
+      resetQueueMessageForRetry: (messageId: string) => resetQueueMessageForRetry(ctx, messageId),
+      cancelQueuedMessages: (worldId: string, chatId: string) => cancelQueuedMessages(ctx, worldId, chatId),
+      recoverSendingMessages: () => recoverSendingMessages(ctx),
+      deleteQueueForChat: (worldId: string, chatId: string) => deleteQueueForChat(ctx, worldId, chatId),
 
       close: () => close(ctx),
       getDatabaseStats: () => getDatabaseStats(ctx)

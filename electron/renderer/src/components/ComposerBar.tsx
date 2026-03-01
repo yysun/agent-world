@@ -28,7 +28,8 @@ export default function ComposerBar({
   canStopCurrentSession,
   isCurrentSessionStopping,
   isCurrentSessionSending,
-  hasActiveHitlPrompt
+  hasActiveHitlPrompt,
+  onAddToQueue,
 }) {
   const composerDisabled = Boolean(hasActiveHitlPrompt) && !canStopCurrentSession;
   const showStopButton = canStopCurrentSession || isCurrentSessionSending;
@@ -88,6 +89,31 @@ export default function ComposerBar({
               <span>Project</span>
             </button>
           </div>
+          {onAddToQueue && !showStopButton && (
+            <button
+              type="button"
+              onClick={() => onAddToQueue(composer)}
+              disabled={!composer.trim() || composerDisabled}
+              className="flex h-8 items-center gap-1 rounded-full border border-border px-3 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Add to queue"
+              title="Add to queue (send later)"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-3.5 w-3.5"
+                aria-hidden="true"
+              >
+                <path d="M3 12h18M3 6h18M3 18h12" />
+              </svg>
+              Queue
+            </button>
+          )}
           <button
             type="submit"
             disabled={showStopButton ? (isCurrentSessionStopping || isCurrentSessionSending) : (!composer.trim() || composerDisabled)}

@@ -49,6 +49,7 @@ import {
   MainWorkspaceLayout,
   AppOverlaysHost,
   WorkingStatusBar,
+  MessageQueuePanel,
 } from './components/index';
 import { useWorkingStatus } from './hooks/useWorkingStatus';
 import { getDesktopApi, safeMessage } from './domain/desktop-api';
@@ -87,6 +88,7 @@ import {
   parseOptionalInteger,
 } from './utils/app-helpers';
 import { useChatEventSubscriptions } from './hooks/useChatEventSubscriptions';
+import { useMessageQueue } from './hooks/useMessageQueue';
 import type { MainProcessLogEntry } from './domain/chat-event-handlers';
 import { computeCanStopCurrentSession } from './domain/chat-stop-state';
 import { clearChatAgents, finalizeReplayedChat, getChatStatus, syncWorldRoster, updateRegistry } from './domain/status-registry';
@@ -823,6 +825,28 @@ export default function App() {
     onMainLogEvent: onMainProcessLogEvent,
   });
 
+  const {
+    queuedMessages,
+    addToQueue: addMessageToQueue,
+    removeFromQueue: removeMessageFromQueue,
+    pauseQueue,
+    resumeQueue,
+    stopQueue,
+    clearQueue,
+    retryQueueMessage: retryMessageFromQueue,
+  } = useMessageQueue({
+    api,
+    loadedWorldId: loadedWorld?.id,
+    selectedSessionId,
+    messagesVersion: messages.length,
+  });
+
+  const onAddToQueue = useCallback(async (content: string) => {
+    if (!content.trim()) return;
+    await addMessageToQueue(content);
+    setComposer('');
+  }, [addMessageToQueue, setComposer]);
+
   const hasUnsavedWorldChanges = useCallback(() => {
     if (panelMode === 'create-world') {
       const defaultForm = getDefaultWorldForm();
@@ -1102,6 +1126,7 @@ export default function App() {
     isCurrentSessionStopping,
     isCurrentSessionSending,
     hasActiveHitlPrompt,
+    onAddToQueue: selectedSessionId ? onAddToQueue : undefined,
   });
 
   const mainContentRightPanelShellProps = createMainContentRightPanelShellProps({
@@ -1223,7 +1248,22 @@ export default function App() {
             rightPanelShellProps: mainContentRightPanelShellProps,
             rightPanelContentProps: mainContentRightPanelContentProps,
           }}
-          statusBar={<WorkingStatusBar chatStatus={chatStatus} agentStatuses={agentStatuses} notification={notification} />}
+          statusBar={(
+            <>
+              {queuedMessages.length > 0 && (
+                <MessageQueuePanel
+                  queuedMessages={queuedMessages}
+                  onRemove={removeMessageFromQueue}
+                  onRetry={retryMessageFromQueue}
+                  onPause={pauseQueue}
+                  onResume={resumeQueue}
+                  onStop={stopQueue}
+                  onClear={clearQueue}
+                />
+              )}
+              <WorkingStatusBar chatStatus={chatStatus} agentStatuses={agentStatuses} notification={notification} />
+            </>
+          )}
         />
       )}
       overlays={(

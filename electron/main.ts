@@ -146,6 +146,14 @@ const {
   subscribeWorld,
   updateWorld,
   removeMessagesFrom,
+  addToQueue,
+  getQueueMessages,
+  removeFromQueue,
+  pauseChatQueue,
+  resumeChatQueue,
+  stopChatQueue,
+  clearChatQueue,
+  retryQueueMessage,
   LLMProvider,
   configureLLMProvider,
   addLogStreamCallback,
@@ -245,6 +253,14 @@ const ipcHandlers = createMainIpcHandlers({
   updateWorld,
   editUserMessage,
   removeMessagesFrom,
+  addToQueue,
+  getQueueMessages,
+  removeFromQueue,
+  pauseChatQueue,
+  resumeChatQueue,
+  stopChatQueue,
+  clearChatQueue,
+  retryQueueMessage,
   createStorage,
   createStorageFromEnv,
   GitHubWorldImportError,
@@ -304,7 +320,15 @@ function registerIpcHandlers() {
       }
       return true;
     },
-    openFileDialog: ipcHandlers.openFileDialog
+    openFileDialog: ipcHandlers.openFileDialog,
+    addToQueue: ipcHandlers.addToQueue,
+    getQueuedMessages: ipcHandlers.getQueuedMessages,
+    removeFromQueue: ipcHandlers.removeFromQueue,
+    clearChatQueue: ipcHandlers.clearChatQueue,
+    pauseChatQueue: ipcHandlers.pauseChatQueue,
+    resumeChatQueue: ipcHandlers.resumeChatQueue,
+    stopChatQueue: ipcHandlers.stopChatQueue,
+    retryQueueMessage: ipcHandlers.retryQueueMessage
   });
   registerIpcRoutes(ipcMain, routes);
 }

@@ -73,6 +73,14 @@ export interface MainIpcHandlers {
   getSystemSettings: () => Promise<unknown> | unknown;
   saveSystemSettings: (payload: unknown) => Promise<unknown> | unknown;
   openFileDialog: () => Promise<unknown> | unknown;
+  addToQueue: (payload: unknown) => Promise<unknown> | unknown;
+  getQueuedMessages: (payload: unknown) => Promise<unknown> | unknown;
+  removeFromQueue: (payload: unknown) => Promise<unknown> | unknown;
+  clearChatQueue: (payload: unknown) => Promise<unknown> | unknown;
+  pauseChatQueue: (payload: unknown) => Promise<unknown> | unknown;
+  resumeChatQueue: (payload: unknown) => Promise<unknown> | unknown;
+  stopChatQueue: (payload: unknown) => Promise<unknown> | unknown;
+  retryQueueMessage: (payload: unknown) => Promise<unknown> | unknown;
 }
 
 export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
@@ -172,6 +180,14 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
     { channel: DESKTOP_INVOKE_CHANNELS.LOGGING_GET_CONFIG, handler: async () => handlers.getLoggingConfig() },
     { channel: DESKTOP_INVOKE_CHANNELS.SETTINGS_GET, handler: async () => handlers.getSystemSettings() },
     { channel: DESKTOP_INVOKE_CHANNELS.SETTINGS_SAVE, handler: async (_event, payload) => handlers.saveSystemSettings(payload) },
-    { channel: DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_FILE, handler: async () => handlers.openFileDialog() }
+    { channel: DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_FILE, handler: async () => handlers.openFileDialog() },
+    { channel: DESKTOP_INVOKE_CHANNELS.QUEUE_ADD, handler: async (_event, payload) => handlers.addToQueue(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.QUEUE_GET, handler: async (_event, payload) => handlers.getQueuedMessages(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.QUEUE_REMOVE, handler: async (_event, payload) => handlers.removeFromQueue(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.QUEUE_CLEAR, handler: async (_event, payload) => handlers.clearChatQueue(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.QUEUE_PAUSE, handler: async (_event, payload) => handlers.pauseChatQueue(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.QUEUE_RESUME, handler: async (_event, payload) => handlers.resumeChatQueue(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.QUEUE_STOP, handler: async (_event, payload) => handlers.stopChatQueue(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.QUEUE_RETRY, handler: async (_event, payload) => handlers.retryQueueMessage(payload) }
   ];
 }

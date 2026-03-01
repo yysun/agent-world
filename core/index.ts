@@ -56,7 +56,15 @@ export {
   removeMessagesFrom,
   editUserMessage,
   logEditError,
-  getEditErrors
+  getEditErrors,
+  addToQueue,
+  getQueueMessages,
+  removeFromQueue,
+  pauseChatQueue,
+  resumeChatQueue,
+  stopChatQueue,
+  clearChatQueue,
+  retryQueueMessage
 } from './managers.js';
 
 export {
@@ -166,7 +174,7 @@ export {
 } from './activity-tracker.js';
 
 // LLM Provider enum (needed for agent configuration)
-export { type World, type Agent, type Chat, type AgentMessage, type RemovalResult, type EditErrorLog, LLMProvider, EventType, type LLMResponse } from './types.js';
+export { type World, type Agent, type Chat, type AgentMessage, type RemovalResult, type EditErrorLog, type QueuedMessage, type QueueMessageStatus, LLMProvider, EventType, type LLMResponse } from './types.js';
 
 // === LLM PROVIDER CONFIGURATION ===
 export {
