@@ -18,6 +18,7 @@
  * - toKebabCase: String conversion for consistent naming conventions
  * - getWorldTurnLimit: World-specific turn limit retrieval with fallback defaults
  * - extractMentions: Case-insensitive mention extraction with first-mention-only logic
+ * - 2026-03-01: Fixed parseParagraphBeginningMention to only extend with next TitleCase word when mention starts uppercase (prevents @a2 Hi → a2-hi)
  * - determineSenderType: Sender classification for message filtering and processing
  * - prepareMessagesForLLM: Message formatting for LLM calls with history and system prompts
  * - wouldAgentHaveRespondedToHistoricalMessage: Filters irrelevant messages from LLM context
@@ -382,8 +383,10 @@ function parseParagraphBeginningMention(line: string): string | null {
   let mention = directMatch[1];
 
   // For display-name mentions like "@Madame Pedagogue", allow additional TitleCase words.
+  // Only extend when the mention starts with an uppercase letter (display name pattern).
+  // Lowercase id mentions like @a2 must not pick up following words (e.g. "@a2 Hi" → "a2", not "a2-hi").
   // Keep existing behavior for id-like mentions (contains '-' or '_').
-  if (!mention.includes('-') && !mention.includes('_')) {
+  if (!mention.includes('-') && !mention.includes('_') && /^[A-Z]/.test(mention)) {
     const remainder = withoutGreetingPrefix.slice(directMatch[0].length);
     const nextWordMatch = /^\s+([A-Z][A-Za-z0-9_-]*)\b/.exec(remainder);
     if (nextWordMatch?.[1]) {

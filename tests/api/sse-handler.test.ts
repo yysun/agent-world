@@ -8,6 +8,7 @@
  * - Chat-scoped forwarding for message/tool/log events.
  * - Stream lifecycle completion on response-start -> idle transition.
  * - Listener and log-stream callback cleanup on client disconnect.
+ * - Edit context skips synthesis to prevent duplicate user messages.
  *
  * Implementation notes:
  * - Uses an in-memory EventEmitter world and mocked core interfaces only.
@@ -213,5 +214,33 @@ describe('sse-handler behavior', () => {
     expect(world.eventEmitter.listenerCount('sse')).toBe(0);
     expect(world.eventEmitter.listenerCount('system')).toBe(0);
     expect(unsubscribeLogStream).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips synthesis for edit context to prevent duplicate user messages', async () => {
+    // Regression: editing a message would emit the old user message from synthesis
+    // AND the new user message from publishMessage, resulting in two "From human" messages.
+    const oldUserMessage = {
+      role: 'user',
+      sender: 'human',
+      content: '@a1, say hi to @a2.',
+      messageId: 'msg-original',
+      chatId: 'chat-a',
+      createdAt: new Date().toISOString(),
+    };
+    getMemory.mockResolvedValue([oldUserMessage]);
+
+    const { createSSEHandler } = await import('../../server/sse-handler.js');
+    const req = createMockReq();
+    const res = createMockRes();
+    const world = { id: 'world-1', eventEmitter: new EventEmitter() } as any;
+
+    createSSEHandler(req as any, res as any, world, 'edit', 'chat-a');
+    // Let async synthesis resolve
+    await new Promise((r) => setTimeout(r, 0));
+
+    const payloads = extractPayloads(res);
+    const messagePayloads = payloads.filter((p) => p.type === 'message');
+    // Synthesis must not emit the stale user message for edit context
+    expect(messagePayloads).toHaveLength(0);
   });
 });

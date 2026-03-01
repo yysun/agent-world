@@ -30,4 +30,11 @@ describe('extractParagraphBeginningMentions', () => {
   it('ignores non-leading mentions', () => {
     expect(extractParagraphBeginningMentions('The handoff goes to @Madame Pedagogue next.')).toEqual([]);
   });
+
+  it('does not extend lowercase id mentions with following words', () => {
+    // Regression: "@a2 Hi — @a1 says hello!" was incorrectly parsed as "a2-hi"
+    expect(extractParagraphBeginningMentions('@a2 Hi — @a1 says hello!')).toEqual(['a2']);
+    expect(extractParagraphBeginningMentions('@a1 Hello there')).toEqual(['a1']);
+    expect(extractParagraphBeginningMentions('@bot1 Please respond')).toEqual(['bot1']);
+  });
 });
