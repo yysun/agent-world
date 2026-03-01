@@ -540,6 +540,56 @@ describe('resolveSkillScriptParameters', () => {
     expect(skillRoots).toEqual([]);
   });
 
+  test('should not treat dot-prefixed relative paths as skill-id paths', () => {
+    mockedGetSkills.mockReturnValue([
+      { skill_id: 'music-to-svg', description: 'Convert music', hash: 'abc', lastUpdated: '2026-01-01' },
+    ]);
+    mockedGetSkillSourcePath.mockImplementation((skillId) =>
+      skillId === 'music-to-svg'
+        ? '/Users/tester/.agents/skills/music-to-svg/SKILL.md'
+        : undefined
+    );
+    mockedExistsSync.mockReturnValue(true);
+
+    const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
+      './../../etc',
+      './this-directory-does-not-exist-xyz',
+      '../outside'
+    ]);
+
+    expect(resolvedParameters).toEqual([
+      './../../etc',
+      './this-directory-does-not-exist-xyz',
+      '../outside'
+    ]);
+    expect(skillRoots).toEqual([]);
+  });
+
+  test('should not treat option-like tokens with slashes as skill-id paths', () => {
+    mockedGetSkills.mockReturnValue([
+      { skill_id: 'music-to-svg', description: 'Convert music', hash: 'abc', lastUpdated: '2026-01-01' },
+    ]);
+    mockedGetSkillSourcePath.mockImplementation((skillId) =>
+      skillId === 'music-to-svg'
+        ? '/Users/tester/.agents/skills/music-to-svg/SKILL.md'
+        : undefined
+    );
+    mockedExistsSync.mockReturnValue(true);
+
+    const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
+      '--output=/tmp/outside',
+      '-I/tmp/include',
+      '-L/opt/lib'
+    ]);
+
+    expect(resolvedParameters).toEqual([
+      '--output=/tmp/outside',
+      '-I/tmp/include',
+      '-L/opt/lib'
+    ]);
+    expect(skillRoots).toEqual([]);
+  });
+
   test('should resolve non-scripts folder path with generic prefix fallback', () => {
     mockedGetSkills.mockReturnValue([]);
     mockedReaddirSync.mockReturnValue([

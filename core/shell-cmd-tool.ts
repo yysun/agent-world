@@ -27,6 +27,7 @@
  * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - 2026-03-01: Prevented `./` and `../` parameter tokens from being misclassified as `<skill-id>/<path>` so non-skill shell paths remain unchanged.
  * - 2026-02-28: Generalized skill-relative path fallback to work with any folder prefix, removing `scripts/`-specific behavior.
  * - 2026-02-28: Added skill-aware script path resolution so `<skill-id>/scripts/<file>` parameters are auto-resolved to absolute paths under the skill root directory.
  * - 2026-02-28: Added deterministic shell risk tiering (`allow`/`hitl_required`/`block`) with per-call HITL approve/deny gating via shared `requestToolApproval` helper for high-risk in-scope commands.
@@ -849,6 +850,9 @@ function extractSkillIdAndRemainder(param: string): { skillId: string; remainder
   const slashIndex = param.indexOf('/');
   if (slashIndex <= 0) return null;
   const skillId = param.slice(0, slashIndex);
+  if (skillId === '.' || skillId === '..' || skillId.startsWith('.') || skillId.startsWith('-')) {
+    return null;
+  }
   const remainder = param.slice(slashIndex + 1);
   if (!remainder) return null;
   return { skillId, remainder };
