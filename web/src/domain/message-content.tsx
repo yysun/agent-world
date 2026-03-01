@@ -17,6 +17,7 @@
  * - Keeps helper logic local to this domain module for focused maintenance
  *
  * Recent Changes:
+ * - 2026-03-01: Unified tool card headers to single-line summaries (`tool: <name> - <status>`) for web/electron parity.
  * - 2026-03-01: Added renderMergedToolCard for unified tool request+result display with status pill.
  * - 2026-02-21: Switched tool output toggle to an SVG icon button and aligned label typography with regular message text sizing.
  * - 2026-02-21: Updated tool output header layout to show `Tool Output` label with right-aligned Open/Collapse control.
@@ -30,6 +31,75 @@ import { getCustomRenderer } from './custom-renderers';
 
 export function isToolResultMessage(message: Message): boolean {
   return message.type === 'tool';
+}
+
+function isToolResultFailureText(text: string): boolean {
+  const normalized = String(text || '').trim();
+  if (!normalized) {
+    return false;
+  }
+
+  return /^\[error\]/i.test(normalized)
+    || /^error:/i.test(normalized)
+    || /status\s*[:=]\s*(failed|error)/i.test(normalized)
+    || /exit[_\s-]?code\s*[:=]\s*-?[1-9]\d*/i.test(normalized)
+    || /timed[_\s-]?out\s*[:=]\s*true/i.test(normalized)
+    || /cancel(?:ed|led)\s*[:=]\s*true/i.test(normalized)
+    || /reason\s*[:=]\s*(non_zero_exit|execution_error|timeout|timed_out|canceled|cancelled)/i.test(normalized);
+}
+
+function resolveToolDisplayName(message: Message): string {
+  const explicitToolName = String((message as any)?.toolName || (message as any)?.tool_name || '').trim();
+  if (explicitToolName) {
+    return explicitToolName;
+  }
+
+  const executionToolName = String((message as any)?.toolExecution?.toolName || '').trim();
+  if (executionToolName) {
+    return executionToolName;
+  }
+
+  const toolCalls: any[] = Array.isArray((message as any)?.tool_calls) ? (message as any).tool_calls : [];
+  if (toolCalls.length > 0) {
+    const primaryName = String(toolCalls[0]?.function?.name || toolCalls[0]?.name || '').trim() || 'unknown';
+    if (toolCalls.length === 1) {
+      return primaryName;
+    }
+    return `${primaryName} +${toolCalls.length - 1} more`;
+  }
+
+  return 'unknown';
+}
+
+function resolveToolSummaryStatus(message: Message): 'running' | 'done' | 'failed' {
+  const combinedToolResults: Message[] = Array.isArray((message as any)?.combinedToolResults)
+    ? (message as any).combinedToolResults
+    : [];
+
+  if (Array.isArray((message as any)?.combinedToolResults)) {
+    return getToolMergedStatus(combinedToolResults);
+  }
+
+  if (Boolean((message as any)?.isToolStreaming)) {
+    return 'running';
+  }
+
+  if (String((message as any)?.streamType || '').trim().toLowerCase() === 'stderr') {
+    return 'failed';
+  }
+
+  const messageText = String((message as any)?.text || (message as any)?.content || '');
+  if (Boolean((message as any)?.isError) || isToolResultFailureText(messageText)) {
+    return 'failed';
+  }
+
+  return 'done';
+}
+
+export function getToolOneLineSummary(message: Message): string {
+  const name = resolveToolDisplayName(message);
+  const status = resolveToolSummaryStatus(message);
+  return `tool: ${name} - ${status}`;
 }
 
 function truncateToolOutput(text: string): { content: string; wasTruncated: boolean } {
@@ -62,24 +132,19 @@ function getToolMergedStatus(combinedToolResults: Message[]): 'running' | 'done'
 function renderMergedToolCard(message: Message) {
   const combinedToolResults: Message[] = (message as any).combinedToolResults || [];
   const toolCalls: any[] = Array.isArray((message as any).tool_calls) ? (message as any).tool_calls : [];
-  const toolNames = toolCalls.map((tc: any) => String(tc?.function?.name || tc?.name || 'tool')).filter(Boolean);
-  const displayName = toolNames.length > 0 ? toolNames.join(', ') : 'Tool';
   const status = getToolMergedStatus(combinedToolResults);
   const isExpanded = (message as any).isToolOutputExpanded || false;
+  const summaryLine = getToolOneLineSummary(message);
 
   const statusClass = status === 'done' ? 'tool-status-done'
     : status === 'failed' ? 'tool-status-failed'
-    : 'tool-status-running';
-  const statusLabel = status === 'done' ? '✓ done'
-    : status === 'failed' ? '✗ failed'
-    : '● running';
+      : 'tool-status-running';
   const toggleTitle = isExpanded ? 'Collapse' : 'Expand';
 
   return (
     <div className="merged-tool-card">
       <div className="tool-output-header">
-        <span className="tool-label">{displayName}</span>
-        <span className={`tool-status ${statusClass}`}>{statusLabel}</span>
+        <span className={`tool-summary-line ${statusClass}`}>{summaryLine}</span>
         <button
           className="tool-output-toggle"
           $onclick={['toggle-tool-output', message.id]}
@@ -178,12 +243,18 @@ export function renderMessageContent(message: Message) {
     const { content, wasTruncated } = truncateToolOutput(message.text);
     const isExpanded = message.isToolOutputExpanded || false;
     const outputClass = isStderrOutput(message) ? 'tool-output-stderr' : 'tool-output-stdout';
+    const status = resolveToolSummaryStatus(message);
+    const statusClass = status === 'failed' ? 'tool-status-failed'
+      : status === 'running' ? 'tool-status-running'
+        : 'tool-status-done';
     const toggleTitle = isExpanded ? 'Collapse output' : 'Open output';
 
     return (
       <div className="tool-output-container">
         <div className="tool-output-header">
-          <span className="tool-label">Tool Output</span>
+          <span className={`tool-summary-line ${statusClass}`}>
+            {getToolOneLineSummary(message)}
+          </span>
           <button
             className="tool-output-toggle"
             $onclick={['toggle-tool-output', message.id]}

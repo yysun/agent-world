@@ -16,6 +16,7 @@
  *
  * Recent Changes:
  * - 2026-03-01: Initial test file created.
+ * - 2026-03-01: Updated expectations so tool request rows always include `combinedToolResults` (empty while running).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -82,11 +83,12 @@ describe('buildCombinedRenderableMessages', () => {
     expect(merged.combinedToolResults[0].id).toBe('res-1');
   });
 
-  it('leaves request row unchanged when no matching result exists', () => {
+  it('returns request row with empty combined results when no matching result exists', () => {
     const req = makeRequest();
     const result = buildCombinedRenderableMessages([req]);
     expect(result).toHaveLength(1);
-    expect((result[0] as any).combinedToolResults).toBeUndefined();
+    expect(Array.isArray((result[0] as any).combinedToolResults)).toBe(true);
+    expect((result[0] as any).combinedToolResults).toHaveLength(0);
   });
 
   it('does not merge streaming tool rows', () => {
@@ -94,9 +96,10 @@ describe('buildCombinedRenderableMessages', () => {
     const streamingRes = makeResult({ isToolStreaming: true, messageId: 'msgid-stream-1' });
     const result = buildCombinedRenderableMessages([req, streamingRes]);
 
-    // Streaming result stays standalone; request has no combinedToolResults
+    // Streaming result stays standalone; request remains in running-card mode.
     expect(result).toHaveLength(2);
-    expect((result[0] as any).combinedToolResults).toBeUndefined();
+    expect(Array.isArray((result[0] as any).combinedToolResults)).toBe(true);
+    expect((result[0] as any).combinedToolResults).toHaveLength(0);
   });
 
   it('passes non-tool human messages through unchanged', () => {

@@ -1170,6 +1170,10 @@ legend {
   padding-top: 2rem;
 }
 
+.message-avatar-container.waiting-avatar-spacer {
+  padding-top: 0;
+}
+
 .message-avatar {
   width: var(--chat-message-avatar-size);
   height: var(--chat-message-avatar-size);
@@ -1320,6 +1324,18 @@ legend {
   font-weight: bold;
   font-size: 1.2rem;
   opacity: 0.9;
+}
+
+.message-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.message-meta .message-sender {
+  min-width: 0;
+  flex: 1;
 }
 
 .message-content {
@@ -1479,6 +1495,12 @@ legend {
   font-size: 0.8rem;
   opacity: 0.6;
   text-align: right;
+}
+
+.message-timestamp-top {
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding-top: 0.15rem;
 }
 
 /* Message Delivery Status */
@@ -3683,6 +3705,17 @@ legend {
   font-size: 1rem;
   font-weight: 400;
   line-height: 1.48;
+}
+
+.tool-summary-line {
+  min-width: 0;
+  flex: 1;
+  font-size: 0.9rem;
+  font-weight: 500;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tool-toggle-icon {

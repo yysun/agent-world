@@ -17,6 +17,7 @@
  *
  * Recent Changes:
  * - 2026-03-01: Initial implementation for web app tool call merging
+ * - 2026-03-01: Emit empty `combinedToolResults` for tool request rows so running cards render immediately before result rows arrive.
  */
 
 import type { Message } from '../types';
@@ -101,11 +102,9 @@ export function buildCombinedRenderableMessages(messages: Message[]): Message[] 
           combinedToolResults.push(match);
         }
       }
-
-      if (combinedToolResults.length === 0) {
-        return message;
-      }
-
+      // Keep request rows in tool-card mode even before completion rows exist.
+      // This matches Electron behavior where tool execution appears as `running`
+      // immediately instead of waiting for final tool results.
       return { ...message, combinedToolResults } as Message;
     })
     .filter((message) => {

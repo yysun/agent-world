@@ -44,6 +44,7 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2026-03-01: Cleared pending HITL prompt UI during optimistic message-edit application so stale pre-edit prompts do not remain visible.
  * - 2026-02-27: Enforced active-chat scoping for system-event ingestion (drop unscoped/mismatched system events when a chat is selected).
  * - 2026-02-26: Preserved transient realtime log/system/error messages across same-chat refreshes (`chat-title-updated`, `agent-created`, HITL refresh) so SSE errors remain visible after metadata reload.
  * - 2026-02-25: Added frontend resume/load trace logging in `initWorld` for chat switch ordering, persisted-memory hydration counts, and HITL replay source verification.
@@ -1467,6 +1468,8 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
       messages: updatedMessages,
       editingMessageId: null,
       editingText: '',
+      hitlPromptQueue: [],
+      submittingHitlRequestId: null,
       isSending: true,
       needScroll: false, // Don't scroll when editing - user is likely viewing that area
       lastUserMessageText: editedText
