@@ -18,6 +18,8 @@
  * - 2026-02-28: Initial implementation of fetch-only web retrieval with Turndown conversion and SPA JSON heuristics.
  */
 
+/// <reference path="./globals.d.ts" />
+
 import { lookup as dnsLookup } from 'dns/promises';
 import { isIP } from 'net';
 import TurndownService from 'turndown';
@@ -297,7 +299,7 @@ function createTurndown(options: { includeLinks: boolean; includeImages: boolean
   if (!options.includeLinks) {
     service.addRule('stripLinks', {
       filter: 'a',
-      replacement: (_content, node) => (node.textContent || '').trim(),
+      replacement: (_content: string, node: { textContent?: string | null }) => (node.textContent || '').trim(),
     });
   }
 

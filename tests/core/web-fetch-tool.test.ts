@@ -12,6 +12,7 @@
  *
  * Recent Changes:
  * - 2026-02-28: Added initial unit coverage for built-in web_fetch tool.
+ * - 2026-03-01: Added coverage for includeLinks=false behavior to ensure anchor text is preserved without markdown links.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -94,6 +95,28 @@ describe('web_fetch tool', () => {
     expect(parsed.markdown).toContain('Hello [Docs](https://example.com/docs)');
     expect(parsed.markdown).toContain('## SPA Bootstrap Data');
     expect(parsed.markdown).toContain('__NEXT_DATA__');
+  });
+
+  it('strips link markup when includeLinks is false while keeping text content', async () => {
+    const html = '<html><body><p>Read <a href="https://example.com/docs">the docs</a> now.</p></body></html>';
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(html, {
+          status: 200,
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        })
+      )
+    );
+
+    const tool = createWebFetchToolDefinition();
+    const raw = await tool.execute({ url: 'https://example.com', includeLinks: false });
+    const parsed = JSON.parse(String(raw));
+
+    expect(parsed.ok).toBe(true);
+    expect(parsed.markdown).toContain('Read the docs now.');
+    expect(parsed.markdown).not.toContain('[the docs](');
   });
 
   it('blocks private network targets resolved from DNS', async () => {
