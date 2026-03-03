@@ -323,6 +323,17 @@ export interface EditErrorLog {
 // World Management Types - Simplified Parameter Interfaces
 
 /**
+ * Dashboard zone configuration for worlds using dashboard UI mode.
+ * Each zone maps to an agent and defines its display properties.
+ */
+export interface DashboardZone {
+  id: string;
+  agent: string;
+  label: string;
+  size: 'small' | 'medium' | 'large';
+}
+
+/**
  * World creation parameters
  */
 export interface CreateWorldParams {
@@ -334,6 +345,8 @@ export interface CreateWorldParams {
   chatLLMModel?: string; // For chat summarization
   mcpConfig?: string | null; // MCP configuration JSON string
   variables?: string; // .env-style world variables text
+  uiMode?: 'chat' | 'dashboard'; // UI layout mode (default: 'chat')
+  dashboardZones?: DashboardZone[]; // Zone config for dashboard mode
 }
 
 /**
@@ -357,6 +370,8 @@ export interface World {
   currentChatId?: string | null; // Track active chat session
   mcpConfig?: string | null; // MCP configuration JSON string
   variables?: string; // .env-style world variables text
+  uiMode?: 'chat' | 'dashboard'; // UI layout mode (default: 'chat')
+  dashboardZones?: DashboardZone[]; // Zone config for dashboard mode
   isProcessing?: boolean; // Flag to prevent edits during agent processing
   createdAt: Date;
   lastUpdated: Date;

@@ -149,6 +149,9 @@ export type WorldEvents =
   /** Toggle agent filter on/off */
   | { name: 'toggle-agent-filter'; payload: string }
 
+  /** Toggle dashboard/history view */
+  | { name: 'toggle-dashboard-history'; payload: void }
+
   /** Open agent creation modal */
   | { name: 'open-agent-create'; payload: void }
 

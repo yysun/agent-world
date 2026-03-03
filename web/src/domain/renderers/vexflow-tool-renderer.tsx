@@ -124,10 +124,23 @@ function normalizeNotes(value: unknown): Array<{ keys: string[]; duration: strin
 }
 
 function normalizeSheetMusicData(data: Record<string, unknown>): SheetMusicData {
+  const clefRaw = typeof data.clef === 'string' ? data.clef.trim().toLowerCase() : '';
+  const clef = clefRaw === 'treble' || clefRaw === 'bass' || clefRaw === 'alto' || clefRaw === 'tenor'
+    ? clefRaw
+    : 'treble';
+
+  const keySignatureRaw = typeof data.keySignature === 'string'
+    ? data.keySignature.replace(/^\\+/, '').trim()
+    : '';
+
+  const timeSignatureRaw = typeof data.timeSignature === 'string'
+    ? data.timeSignature.replace(/^\\+/, '').trim()
+    : '';
+
   return {
-    clef: typeof data.clef === 'string' ? data.clef : 'treble',
-    keySignature: typeof data.keySignature === 'string' ? data.keySignature : 'C',
-    timeSignature: typeof data.timeSignature === 'string' ? data.timeSignature : '4/4',
+    clef,
+    keySignature: keySignatureRaw || 'C',
+    timeSignature: timeSignatureRaw || '4/4',
     notes: normalizeNotes(data.notes),
   };
 }
@@ -150,11 +163,31 @@ function parseRenderSheetMusicText(text: string): SheetMusicData {
   }
 
   const objectLiteral = match[1].replace(/```(?:json)?\n?/g, '').replace(/```/g, '');
-  const normalizedJson = objectLiteral
+  const preNormalized = objectLiteral
     .replace(/\/\/.*$/gm, '')
+    .replace(/\\(?=[A-Za-z0-9#\/])/g, '')
     .replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3')
     .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, '"$1"')
-    .replace(/,\s*([}\]])/g, '$1')
+    .replace(/,\s*([}\]])/g, '$1');
+
+  const normalizedJson = preNormalized
+    .replace(/:\s*([^\s\[\{",][^,\}\]]*)\s*(?=[,\}\]])/g, (_match, rawValue: string) => {
+      const value = String(rawValue || '').trim();
+      if (!value) {
+        return ': ""';
+      }
+
+      const lower = value.toLowerCase();
+      if (lower === 'true' || lower === 'false' || lower === 'null') {
+        return `: ${lower}`;
+      }
+
+      if (/^-?\d+(?:\.\d+)?$/.test(value)) {
+        return `: ${value}`;
+      }
+
+      return `: "${value.replace(/"/g, '\\"')}"`;
+    })
     .trim();
 
   try {

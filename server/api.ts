@@ -161,6 +161,8 @@ function serializeWorld(world: World) {
     currentChatId: world.currentChatId || null,
     mcpConfig: world.mcpConfig || null,
     variables: typeof world.variables === 'string' ? world.variables : '',
+    uiMode: world.uiMode || 'chat',
+    dashboardZones: world.dashboardZones || [],
     agents: Array.from(world.agents.values()).map(serializeAgent),
     chats: Array.from(world.chats.values()).map(serializeChat)
   };
