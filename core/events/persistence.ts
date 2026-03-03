@@ -1,30 +1,33 @@
 /**
  * Events Persistence Module
- * 
+ *
  * Handles automatic event persistence to storage with metadata enrichment.
- * Provides setupEventPersistence function for World initialization.
- * 
+ * Also owns the single world-level listener per event channel (message, sse, world, system),
+ * combining persistence with title-scheduling and activity-title logic in one handler each.
+ *
  * Features:
- * - Message event persistence with enhanced metadata
- * - SSE event persistence (start/end only, skips chunks)
- * - Tool event persistence with validation
- * - System event persistence
- * - Activity tracking event persistence
- * - Automatic metadata calculation (agent context, threading, tool calls)
- * - Error handling with graceful degradation
- * - Environment-based disable flag
- * - Uses world.eventStorage directly (no separate storage instance)
- * 
+ * - One combined `message` handler: persistence + no-activity title scheduling.
+ * - One combined `world` handler: persistence + idle title generation.
+ * - SSE event persistence (start/end only, skips chunks).
+ * - System event persistence.
+ * - Sets world._worldMessagesUnsubscriber and world._activityListenerCleanup so downstream
+ *   idempotent wrappers (subscribeWorldToMessages, setupWorldActivityListener) don't add
+ *   duplicate listeners.
+ *
  * Dependencies (Layer 4):
  * - types.ts (Layer 1)
- * - utils.ts
+ * - chat-constants.ts
+ * - events-metadata.ts
+ * - title-scheduler.ts (Layer 4)
  * - logger.ts
- * - storage (runtime)
- * 
+ *
  * Changes:
- * - 2026-02-26: Removed legacy replay-only HITL system-event filter after migration to tool-progress HITL transport.
- * - 2025-11-09: Fixed event persistence - use world.eventStorage directly instead of creating separate instance
- * - 2025-01-09: Extracted from events.ts for modular architecture
+ * - 2026-03-03: Combined world-level listeners to eliminate MaxListenersExceededWarning;
+ *   title-scheduling and idle-activity logic moved here from subscribers.ts (Layer 6) via
+ *   title-scheduler.ts (Layer 4) to respect module layering.
+ * - 2026-02-26: Removed legacy replay-only HITL system-event filter.
+ * - 2025-11-09: Fixed event persistence - use world.eventStorage directly.
+ * - 2025-01-09: Extracted from events.ts for modular architecture.
  */
 
 import type {
@@ -41,6 +44,13 @@ import {
   calculateIsMemoryOnly,
   calculateIsCrossAgentMessage
 } from '../events-metadata.js';
+import { isDefaultChatTitle } from '../chat-constants.js';
+import {
+  isHumanSender,
+  scheduleNoActivityTitleUpdate,
+  runIdleTitleUpdate,
+  clearWorldTitleTimers
+} from './title-scheduler.js';
 
 const loggerPublish = createCategoryLogger('publish');
 
@@ -82,8 +92,8 @@ export function setupEventPersistence(world: World): () => void {
     }
   };
 
-  // Message event persistence
-  const messageHandler = (event: WorldMessageEvent): void | Promise<void> => {
+  // Combined message handler: persistence + no-activity title scheduling
+  const messageHandler = async (event: WorldMessageEvent): Promise<void> => {
     loggerPublish.debug('Message event received for persistence', {
       worldId: world.id,
       messageId: event.messageId,
@@ -162,7 +172,16 @@ export function setupEventPersistence(world: World): () => void {
       createdAt: event.timestamp
     };
 
-    return persistEvent(eventData);
+    await persistEvent(eventData);
+
+    // Title scheduling: debounce on human messages while chat title is still default
+    const msgChatId = event.chatId ?? world.currentChatId ?? null;
+    if (msgChatId && isHumanSender(event.sender)) {
+      const chat = world.chats.get(msgChatId);
+      if (chat && isDefaultChatTitle(chat.name)) {
+        scheduleNoActivityTitleUpdate(world, msgChatId, event.content || '');
+      }
+    }
   };
 
   // SSE event handler - persist only start and end events, skip chunk events
@@ -199,9 +218,9 @@ export function setupEventPersistence(world: World): () => void {
     return persistEvent(eventData);
   };
 
-  // Tool event persistence (world channel)
+  // Combined world-channel handler: persistence + idle title generation
   // Handles WorldToolEvent (tool execution) and WorldActivityEventPayload (activity tracking)
-  const toolHandler = (event: any): void | Promise<void> => {
+  const toolHandler = async (event: any): Promise<void> => {
     // Check event type category
     const isActivityEvent = event.type && ['response-start', 'response-end', 'idle'].includes(event.type);
     const isToolEvent = event.type && ['tool-start', 'tool-result', 'tool-error', 'tool-progress'].includes(event.type);
@@ -273,7 +292,12 @@ export function setupEventPersistence(world: World): () => void {
       createdAt: isActivityEvent ? new Date(event.timestamp) : new Date()
     };
 
-    return persistEvent(eventData);
+    await persistEvent(eventData);
+
+    // Idle title generation runs after persisting the activity event
+    if (isActivityEvent) {
+      await runIdleTitleUpdate(world, event);
+    }
   };
 
   // System event persistence
@@ -291,22 +315,33 @@ export function setupEventPersistence(world: World): () => void {
     return persistEvent(eventData);
   };
 
-  // Attach listeners
+  // Attach listeners — one per channel; this is the sole world-level infrastructure subscriber
   world.eventEmitter.on('message', messageHandler);
   world.eventEmitter.on('sse', sseHandler);
   world.eventEmitter.on('world', toolHandler);
   world.eventEmitter.on('system', systemHandler);
 
-  loggerPublish.debug('Event persistence setup complete', {
-    worldId: world.id
-  });
-
-  // Return cleanup function
-  return () => {
+  const cleanup = () => {
     world.eventEmitter.off('message', messageHandler);
     world.eventEmitter.off('sse', sseHandler);
     world.eventEmitter.off('world', toolHandler);
     world.eventEmitter.off('system', systemHandler);
+    clearWorldTitleTimers(world.id);
+    // Clear idempotent handles so downstream wrappers can re-register if needed after cleanup
+    world._worldMessagesUnsubscriber = undefined;
+    world._activityListenerCleanup = undefined;
     loggerPublish.debug('Event persistence listeners cleaned up', { worldId: world.id });
   };
+
+  // Store cleanup ref in all three slots so the idempotent wrappers
+  // (subscribeWorldToMessages, setupWorldActivityListener) short-circuit instead of
+  // adding duplicate listeners on the same world.
+  world._worldMessagesUnsubscriber = cleanup;
+  world._activityListenerCleanup = cleanup;
+
+  loggerPublish.debug('Event persistence setup complete', {
+    worldId: world.id
+  });
+
+  return cleanup;
 }
