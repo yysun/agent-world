@@ -14,6 +14,7 @@
  * - Uses mocked fs and mocked shell scope helpers only (no real filesystem access).
  *
  * Recent changes:
+ * - 2026-03-03: Added tests for tightened tool limits: read_file 200-line cap, list_files maxDepth/maxEntries caps, grep maxResults cap and contextLines support.
  * - 2026-03-01: Added regression coverage for `read_file` when mocked `fs.readFile` resolves `undefined` (should return empty content, not error).
  * - 2026-03-01: Added read_file regression coverage for missing cwd script paths that should resolve under loaded skill roots.
  * - 2026-03-01: Added regression coverage for `list_files` against symlinked `.agents/skills/*` paths that validate as out-of-scope after canonicalization.
@@ -57,7 +58,7 @@ vi.mock('../../core/skill-registry.js', () => ({
   getSkillSourcePath: vi.fn(() => undefined),
 }));
 
-import { createListFilesToolDefinition, createReadFileToolDefinition, createWriteFileToolDefinition } from '../../core/file-tools.js';
+import { createGrepToolDefinition, createListFilesToolDefinition, createReadFileToolDefinition, createWriteFileToolDefinition } from '../../core/file-tools.js';
 import { getSkillSourcePath, getSkills } from '../../core/skill-registry.js';
 
 const mockedGetSkills = vi.mocked(getSkills);
@@ -348,5 +349,137 @@ describe('file-tools list_files', () => {
     expect(String(parsed.path).replace(/\\/g, '/').replace(/\/+/g, '/')).toBe('/workspace/.agents/skills/music-to-svg');
     expect(parsed.found).toBe(true);
     expect(parsed.entries).toEqual(['scripts/', 'scripts/convert.py']);
+  });
+
+  it('caps maxDepth at 2 even when larger value requested', async () => {
+    vi.mocked(fg).mockResolvedValue(['a/', 'a/b/']);
+
+    const listFilesTool = createListFilesToolDefinition();
+    await listFilesTool.execute(
+      { path: '.', recursive: true, maxDepth: 99 },
+      undefined,
+      undefined,
+      { workingDirectory: '/workspace' }
+    );
+
+    const fgCall = vi.mocked(fg).mock.calls[0];
+    expect(fgCall[1]).toHaveProperty('deep', 2);
+  });
+
+  it('caps maxEntries at 200 even when larger value requested', async () => {
+    const entries = Array.from({ length: 300 }, (_, i) => `file${i}.txt`);
+    vi.mocked(fg).mockResolvedValue(entries);
+
+    const listFilesTool = createListFilesToolDefinition();
+    const result = await listFilesTool.execute(
+      { path: '.', maxEntries: 500 },
+      undefined,
+      undefined,
+      { workingDirectory: '/workspace' }
+    );
+
+    const parsed = JSON.parse(String(result));
+    expect(parsed.returned).toBe(200);
+    expect(parsed.truncated).toBe(true);
+  });
+});
+
+describe('file-tools read_file limits', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('caps limit at 200 lines even when larger value requested', async () => {
+    const lines = Array.from({ length: 500 }, (_, i) => `line ${i + 1}`);
+    (fs.promises as any).readFile = vi.fn().mockResolvedValue(lines.join('\n'));
+
+    const readFileTool = createReadFileToolDefinition();
+    const result = await readFileTool.execute(
+      { filePath: 'big.txt', limit: 2000 },
+      undefined,
+      undefined,
+      { workingDirectory: '/workspace' }
+    );
+
+    const parsed = JSON.parse(String(result));
+    expect(parsed.limit).toBe(200);
+    expect(parsed.content.split('\n').length).toBe(200);
+  });
+});
+
+describe('file-tools grep limits', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('caps maxResults at 50 even when larger value requested', async () => {
+    const lines = Array.from({ length: 100 }, (_, i) => `match ${i}`).join('\n');
+    (fs.promises as any).readdir = vi.fn().mockResolvedValue([
+      { name: 'data.txt', isDirectory: () => false, isFile: () => true },
+    ]);
+    (fs.promises as any).stat = vi.fn().mockResolvedValue({ size: 1000 });
+    (fs.promises as any).readFile = vi.fn().mockResolvedValue(lines);
+
+    const grepTool = createGrepToolDefinition();
+    const result = await grepTool.execute(
+      { query: 'match', maxResults: 999 },
+      undefined,
+      undefined,
+      { workingDirectory: '/workspace' }
+    );
+
+    const parsed = JSON.parse(String(result));
+    expect(parsed.totalMatches).toBe(50);
+    expect(parsed.truncated).toBe(true);
+  });
+
+  it('includes context lines around matches', async () => {
+    const lines = ['aaa', 'bbb', 'TARGET', 'ddd', 'eee', 'fff'].join('\n');
+    (fs.promises as any).readdir = vi.fn().mockResolvedValue([
+      { name: 'ctx.txt', isDirectory: () => false, isFile: () => true },
+    ]);
+    (fs.promises as any).stat = vi.fn().mockResolvedValue({ size: 100 });
+    (fs.promises as any).readFile = vi.fn().mockResolvedValue(lines);
+
+    const grepTool = createGrepToolDefinition();
+    const result = await grepTool.execute(
+      { query: 'TARGET', contextLines: 2 },
+      undefined,
+      undefined,
+      { workingDirectory: '/workspace' }
+    );
+
+    const parsed = JSON.parse(String(result));
+    expect(parsed.matches).toHaveLength(1);
+    expect(parsed.matches[0].content).toBe('TARGET');
+    expect(parsed.matches[0].context).toEqual([
+      '1: aaa',
+      '2: bbb',
+      '4: ddd',
+      '5: eee',
+    ]);
+  });
+
+  it('caps contextLines at 5 even when larger value requested', async () => {
+    const lines = Array.from({ length: 20 }, (_, i) => `line${i}`).join('\n');
+    (fs.promises as any).readdir = vi.fn().mockResolvedValue([
+      { name: 'a.txt', isDirectory: () => false, isFile: () => true },
+    ]);
+    (fs.promises as any).stat = vi.fn().mockResolvedValue({ size: 100 });
+    (fs.promises as any).readFile = vi.fn().mockResolvedValue(lines);
+
+    const grepTool = createGrepToolDefinition();
+    const result = await grepTool.execute(
+      { query: 'line10', contextLines: 99 },
+      undefined,
+      undefined,
+      { workingDirectory: '/workspace' }
+    );
+
+    const parsed = JSON.parse(String(result));
+    const match = parsed.matches[0];
+    // 5 lines before + 5 lines after = 10 context lines max
+    expect(match.context.length).toBeLessThanOrEqual(10);
+    expect(match.context.length).toBeGreaterThan(5);
   });
 });

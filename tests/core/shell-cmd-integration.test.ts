@@ -227,10 +227,10 @@ describe('shell_cmd integration with worlds', () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), 'agent-world-list-files-recursive-'));
 
     try {
-      await mkdir(path.join(tempRoot, 'nested', 'child'), { recursive: true });
+      await mkdir(path.join(tempRoot, 'nested'), { recursive: true });
       await mkdir(path.join(tempRoot, 'flat'));
       await writeFile(path.join(tempRoot, 'top.txt'), 'top');
-      await writeFile(path.join(tempRoot, 'nested', 'child', 'deep.txt'), 'deep');
+      await writeFile(path.join(tempRoot, 'nested', 'deep.txt'), 'deep');
 
       const nonRecursiveRaw = await tools.list_files.execute(
         { path: '.', recursive: false },
@@ -247,8 +247,7 @@ describe('shell_cmd integration with worlds', () => {
       expect(nonRecursive).toHaveProperty('recursive', false);
       expect(nonRecursive.entries).toContain('nested/');
       expect(nonRecursive.entries).toContain('top.txt');
-      expect(nonRecursive.entries).not.toContain('nested/child/');
-      expect(nonRecursive.entries).not.toContain('nested/child/deep.txt');
+      expect(nonRecursive.entries).not.toContain('nested/deep.txt');
 
       const recursiveRaw = await tools.list_files.execute(
         { path: '.', recursive: true },
@@ -263,8 +262,7 @@ describe('shell_cmd integration with worlds', () => {
 
       const recursiveResult = JSON.parse(recursiveRaw);
       expect(recursiveResult).toHaveProperty('recursive', true);
-      expect(recursiveResult.entries).toContain('nested/child/');
-      expect(recursiveResult.entries).toContain('nested/child/deep.txt');
+      expect(recursiveResult.entries).toContain('nested/deep.txt');
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }

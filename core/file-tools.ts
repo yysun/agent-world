@@ -15,6 +15,7 @@
  * - Errors are returned as tool-friendly `Error:` strings
  *
  * Recent Changes:
+ * - 2026-03-03: Tightened tool output limits: read_file hard-capped at 200 lines, list_files capped at depth 2 and 200 entries, grep capped at 50 hits with configurable context_lines (2–5).
  * - 2026-03-01: Hardened `read_file` against undefined read payloads from mocked fs implementations by coercing to empty content instead of hard-failing.
  * - 2026-03-01: Added read_file fallback that resolves missing relative paths against loaded skill roots (for skill script paths like `scripts/convert.py`).
  * - 2026-03-01: Allowed read-only file tools to traverse lexically in-scope `.agents/skills/*` paths even when symlinks resolve outside the world directory (skill workspace compatibility).
@@ -46,11 +47,15 @@ type ToolContext = {
 };
 
 const DEFAULT_READ_LIMIT = 200;
-const MAX_READ_LIMIT = 2000;
+const MAX_READ_LIMIT = 200;
 const DEFAULT_LIST_MAX_ENTRIES = 200;
-const MAX_LIST_MAX_ENTRIES = 2000;
-const DEFAULT_GREP_MAX_RESULTS = 200;
-const MAX_GREP_MAX_RESULTS = 2000;
+const MAX_LIST_MAX_ENTRIES = 200;
+const DEFAULT_LIST_MAX_DEPTH = 2;
+const MAX_LIST_MAX_DEPTH = 2;
+const DEFAULT_GREP_MAX_RESULTS = 50;
+const MAX_GREP_MAX_RESULTS = 50;
+const DEFAULT_GREP_CONTEXT_LINES = 2;
+const MAX_GREP_CONTEXT_LINES = 5;
 const MAX_GREP_FILE_BYTES = 1024 * 1024;
 
 type WriteMode = 'create' | 'overwrite';
@@ -280,10 +285,11 @@ async function searchInFile(options: {
   filePath: string;
   relativePath: string;
   matcher: RegExp;
-  matches: Array<{ path: string; line: number; content: string }>;
+  matches: Array<{ path: string; line: number; content: string; context?: string[] }>;
   maxResults: number;
+  contextLines: number;
 }): Promise<void> {
-  const { filePath, relativePath, matcher, matches, maxResults } = options;
+  const { filePath, relativePath, matcher, matches, maxResults, contextLines } = options;
   const stat = await fs.stat(filePath);
   if (stat.size > MAX_GREP_FILE_BYTES) {
     return;
@@ -303,11 +309,25 @@ async function searchInFile(options: {
       continue;
     }
 
-    matches.push({
+    const entry: { path: string; line: number; content: string; context?: string[] } = {
       path: normalizePath(relativePath),
       line: index + 1,
       content: lineContent,
-    });
+    };
+
+    if (contextLines > 0) {
+      const start = Math.max(0, index - contextLines);
+      const end = Math.min(lines.length - 1, index + contextLines);
+      const surrounding: string[] = [];
+      for (let ci = start; ci <= end; ci += 1) {
+        if (ci !== index) {
+          surrounding.push(`${ci + 1}: ${lines[ci] ?? ''}`);
+        }
+      }
+      entry.context = surrounding;
+    }
+
+    matches.push(entry);
 
     if (matches.length >= maxResults) {
       return;
@@ -336,7 +356,7 @@ export function createReadFileToolDefinition() {
         },
         limit: {
           type: 'number',
-          description: `Maximum number of lines to return (default: ${DEFAULT_READ_LIMIT}, max: ${MAX_READ_LIMIT}).`,
+          description: `Maximum number of lines to return (default and cap: ${MAX_READ_LIMIT}).`,
         },
       },
       required: [],
@@ -544,7 +564,7 @@ export function createWriteFileToolDefinition() {
 export function createListFilesToolDefinition() {
   return {
     description:
-      'List files and directories available in a directory path for quick workspace exploration. Defaults to trusted working directory when path is omitted. Use recursive=true for nested entries and includePattern/maxEntries to keep results bounded.',
+      'List file and directory names in a directory path for quick workspace exploration. Defaults to trusted working directory when path is omitted. Returns names only. Use maxDepth/includePattern/maxEntries to keep results bounded.',
     parameters: {
       type: 'object',
       properties: {
@@ -558,7 +578,11 @@ export function createListFilesToolDefinition() {
         },
         recursive: {
           type: 'boolean',
-          description: 'When true, include nested entries recursively (default: false).',
+          description: 'When true, include nested entries up to maxDepth (default: false, depth 1).',
+        },
+        maxDepth: {
+          type: 'number',
+          description: `Maximum directory depth when recursive (default and cap: ${MAX_LIST_MAX_DEPTH}).`,
         },
         includePattern: {
           type: 'string',
@@ -566,7 +590,7 @@ export function createListFilesToolDefinition() {
         },
         maxEntries: {
           type: 'number',
-          description: `Maximum number of returned entries (default: ${DEFAULT_LIST_MAX_ENTRIES}, max: ${MAX_LIST_MAX_ENTRIES}).`,
+          description: `Maximum number of returned entries (default and cap: ${MAX_LIST_MAX_ENTRIES}).`,
         },
       },
       required: [],
@@ -581,6 +605,11 @@ export function createListFilesToolDefinition() {
         const includeHidden = Boolean(args.includeHidden ?? true);
         const recursive = Boolean(args.recursive ?? false);
         const includePattern = String(args.includePattern ?? '').trim();
+        const maxDepth = clamp(
+          Number(args.maxDepth ?? (recursive ? DEFAULT_LIST_MAX_DEPTH : 1)),
+          1,
+          MAX_LIST_MAX_DEPTH,
+        );
         const maxEntries = clamp(
           Number(args.maxEntries ?? DEFAULT_LIST_MAX_ENTRIES),
           1,
@@ -589,7 +618,7 @@ export function createListFilesToolDefinition() {
 
         const items = await fg(['**/*'], {
           cwd: resolvedPath,
-          deep: recursive ? Infinity : 1,
+          deep: maxDepth,
           ignore: ['**/node_modules/**', '**/.git/**', '**/dist/**'],
           onlyFiles: false,
           markDirectories: true,
@@ -642,7 +671,7 @@ export function createListFilesToolDefinition() {
 export function createGrepToolDefinition() {
   return {
     description:
-      'Search text across files to find destinations. Supports plain text or regex queries with optional include filtering.',
+      'Search text across files to find destinations. Supports plain text or regex queries with optional include filtering and surrounding context lines.',
     parameters: {
       type: 'object',
       properties: {
@@ -664,7 +693,11 @@ export function createGrepToolDefinition() {
         },
         maxResults: {
           type: 'number',
-          description: `Maximum matches to return (default: ${DEFAULT_GREP_MAX_RESULTS}, max: ${MAX_GREP_MAX_RESULTS}).`,
+          description: `Maximum matches to return (default and cap: ${MAX_GREP_MAX_RESULTS}).`,
+        },
+        contextLines: {
+          type: 'number',
+          description: `Number of surrounding context lines per match (default: ${DEFAULT_GREP_CONTEXT_LINES}, range: 0\u2013${MAX_GREP_CONTEXT_LINES}).`,
         },
       },
       required: ['query'],
@@ -685,10 +718,11 @@ export function createGrepToolDefinition() {
         ensurePathWithinTrustedDirectory(directoryPath, trustedWorkingDirectory, { allowSkillPathAlias: true });
         const includePattern = typeof args.includePattern === 'string' ? args.includePattern : undefined;
         const maxResults = clamp(Number(args.maxResults ?? DEFAULT_GREP_MAX_RESULTS), 1, MAX_GREP_MAX_RESULTS);
+        const contextLines = clamp(Number(args.contextLines ?? DEFAULT_GREP_CONTEXT_LINES), 0, MAX_GREP_CONTEXT_LINES);
 
         const matcher = isRegexp ? new RegExp(query, 'i') : new RegExp(escapeRegExp(query), 'i');
         const allFiles = await collectFilesRecursively(directoryPath);
-        const matches: Array<{ path: string; line: number; content: string }> = [];
+        const matches: Array<{ path: string; line: number; content: string; context?: string[] }> = [];
 
         for (const filePath of allFiles) {
           const relativePath = path.relative(directoryPath, filePath);
@@ -702,6 +736,7 @@ export function createGrepToolDefinition() {
             matcher,
             matches,
             maxResults,
+            contextLines,
           });
 
           if (matches.length >= maxResults) {
