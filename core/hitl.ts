@@ -219,6 +219,20 @@ function getSortedPendingRequestsForScope(worldId: string, chatId?: string | nul
   return scoped;
 }
 
+/**
+ * Remove all pending HITL requests scoped to a specific chat.
+ * Called during edit+resubmit so orphaned requests from aborted processing
+ * do not block the activity tracker or leak into subscription replays.
+ */
+export function clearPendingHitlRequestsForChat(worldId: string, chatId: string | null): void {
+  const normalizedChatId = normalizeChatId(chatId);
+  for (const [key, pending] of pendingHitlRequests) {
+    if (pending.worldId !== worldId) continue;
+    if (normalizedChatId !== null && pending.chatId !== normalizedChatId) continue;
+    pendingHitlRequests.delete(key);
+  }
+}
+
 function validateResponseScope(
   pending: PendingHitlOptionRequest,
   chatId?: string | null,

@@ -94,6 +94,7 @@
  * - Queue-based serialization prevents API rate limits and resource conflicts
  *
  * Recent Changes:
+ * - 2026-02-28: Added canonical feature-path diagnostics (`llm.prep`, `llm.request.*`, `llm.response.*`) with opt-in raw payload logging and correlation metadata.
  * - 2026-02-24: Required explicit chatId for streaming SSE emission and propagated chatId through start/chunk/end/error events for strict chat-scoped frontend filtering.
  * - 2026-02-20: Switched injected tool-usage guidance to shared `buildToolUsagePromptSection()` so HITL and other tool rules are centralized in one utility.
  * - 2026-02-20: Updated injected tool-usage guidance to direct LLMs to use `human_intervention_request` for human clarifications and confirmations.
@@ -136,6 +137,12 @@ import {
 
 import { buildToolUsagePromptSection, generateId } from './utils.js';
 import { createCategoryLogger } from './logger.js';
+import {
+  buildFeaturePathCorrelation,
+  mergeFeaturePathData,
+  sanitizeRawPayloadForLog,
+  shouldEmitRawLog
+} from './feature-path-logging.js';
 import { createStorageWithWrappers } from './storage/storage-factory.js';
 import type { StorageAPI } from './storage/storage-factory.js';
 // Granular function-specific loggers for detailed debugging control
@@ -145,6 +152,11 @@ const loggerGeneration = createCategoryLogger('llm.generation');
 const loggerProvider = createCategoryLogger('llm.provider');
 const loggerMCP = createCategoryLogger('llm.mcp');
 const loggerUtil = createCategoryLogger('llm.util');
+const loggerPrep = createCategoryLogger('llm.prep');
+const loggerRequestMeta = createCategoryLogger('llm.request.meta');
+const loggerRequestRaw = createCategoryLogger('llm.request.raw');
+const loggerResponseMeta = createCategoryLogger('llm.response.meta');
+const loggerResponseRaw = createCategoryLogger('llm.response.raw');
 import { getLLMProviderConfig } from './llm-config.js';
 
 // LLM Integration Utilities
@@ -165,6 +177,107 @@ function stripCustomFieldsFromMessages(messages: AgentMessage[]): ChatMessage[] 
 
   // Then strip custom fields
   return filteredMessages.map(stripCustomFields);
+}
+
+function summarizeMessagesForLLM(messages: ChatMessage[]): Record<string, unknown> {
+  return {
+    messageCount: messages.length,
+    systemMessages: messages.filter(m => m.role === 'system').length,
+    userMessages: messages.filter(m => m.role === 'user').length,
+    assistantMessages: messages.filter(m => m.role === 'assistant').length,
+    toolMessages: messages.filter(m => m.role === 'tool').length,
+  };
+}
+
+function emitLLMRequestDiagnostics(params: {
+  world: World;
+  agent: Agent;
+  chatId: string | null;
+  messageId: string;
+  preparedMessages: ChatMessage[];
+  mcpTools: Record<string, any>;
+}): void {
+  const correlation = buildFeaturePathCorrelation({
+    worldId: params.world.id,
+    chatId: params.chatId,
+    agentId: params.agent.id,
+    messageId: params.messageId,
+    turnId: params.messageId,
+  });
+
+  const messageSummary = summarizeMessagesForLLM(params.preparedMessages);
+  const toolNames = Object.keys(params.mcpTools);
+
+  loggerPrep.debug(
+    'Prepared messages for LLM request',
+    mergeFeaturePathData(correlation, {
+      ...messageSummary,
+      toolCount: toolNames.length,
+    })
+  );
+
+  loggerRequestMeta.debug(
+    'LLM request ready',
+    mergeFeaturePathData(correlation, {
+      provider: params.agent.provider,
+      model: params.agent.model,
+      ...messageSummary,
+      toolCount: toolNames.length,
+      toolNames,
+    })
+  );
+
+  if (shouldEmitRawLog('llm.request.raw')) {
+    loggerRequestRaw.debug(
+      'LLM request payload',
+      mergeFeaturePathData(correlation, {
+        provider: params.agent.provider,
+        model: params.agent.model,
+        payload: sanitizeRawPayloadForLog({
+          messages: params.preparedMessages,
+          tools: params.mcpTools,
+        }),
+      })
+    );
+  }
+}
+
+function emitLLMResponseDiagnostics(params: {
+  world: World;
+  agent: Agent;
+  chatId: string | null;
+  messageId: string;
+  response: LLMResponse;
+}): void {
+  const correlation = buildFeaturePathCorrelation({
+    worldId: params.world.id,
+    chatId: params.chatId,
+    agentId: params.agent.id,
+    messageId: params.messageId,
+    turnId: params.messageId,
+  });
+
+  loggerResponseMeta.debug(
+    'LLM response received',
+    mergeFeaturePathData(correlation, {
+      provider: params.agent.provider,
+      model: params.agent.model,
+      responseType: params.response.type,
+      contentLength: params.response.content?.length || 0,
+      toolCallCount: params.response.tool_calls?.length || 0,
+    })
+  );
+
+  if (shouldEmitRawLog('llm.response.raw')) {
+    loggerResponseRaw.debug(
+      'LLM response payload',
+      mergeFeaturePathData(correlation, {
+        provider: params.agent.provider,
+        model: params.agent.model,
+        payload: sanitizeRawPayloadForLog(params.response),
+      })
+    );
+  }
 }
 
 /**
@@ -569,6 +682,15 @@ async function executeStreamAgentResponse(
       }
     }
 
+    emitLLMRequestDiagnostics({
+      world,
+      agent,
+      chatId,
+      messageId,
+      preparedMessages,
+      mcpTools,
+    });
+
     // Use direct OpenAI integration for OpenAI providers
     if (isOpenAIProvider(agent.provider)) {
       const client = createOpenAIClientForAgent(agent);
@@ -583,6 +705,14 @@ async function executeStreamAgentResponse(
         messageId,
         abortSignal
       );
+
+      emitLLMResponseDiagnostics({
+        world,
+        agent,
+        chatId,
+        messageId,
+        response,
+      });
 
       // Emit end event after streaming completes
       publishSSE(world, { agentName: agent.id, type: 'end', messageId, chatId });
@@ -605,6 +735,14 @@ async function executeStreamAgentResponse(
         abortSignal
       );
 
+      emitLLMResponseDiagnostics({
+        world,
+        agent,
+        chatId,
+        messageId,
+        response,
+      });
+
       // Emit end event after streaming completes
       publishSSE(world, { agentName: agent.id, type: 'end', messageId, chatId });
 
@@ -625,6 +763,14 @@ async function executeStreamAgentResponse(
         messageId,
         abortSignal
       );
+
+      emitLLMResponseDiagnostics({
+        world,
+        agent,
+        chatId,
+        messageId,
+        response,
+      });
 
       // Emit end event after streaming completes
       publishSSE(world, { agentName: agent.id, type: 'end', messageId, chatId });
@@ -688,7 +834,7 @@ export async function generateAgentResponse(
       if (mergedAbortSignal?.aborted) {
         throw new DOMException(`LLM call aborted before execution for agent ${agent.id}`, 'AbortError');
       }
-      return await executeGenerateAgentResponse(world, agent, messages, skipTools, mergedAbortSignal);
+      return await executeGenerateAgentResponse(world, agent, messages, skipTools, chatId, mergedAbortSignal);
     } finally {
       dispose();
     }
@@ -703,6 +849,7 @@ async function executeGenerateAgentResponse(
   agent: Agent,
   messages: AgentMessage[],
   skipTools?: boolean,
+  chatId: string | null = null,
   abortSignal?: AbortSignal
 ): Promise<{ response: LLMResponse; messageId: string }> {
   if (abortSignal?.aborted) {
@@ -720,6 +867,15 @@ async function executeGenerateAgentResponse(
 
   // Add tool usage instructions to system message when tools are available
   preparedMessages = appendToolRulesToSystemMessage(preparedMessages, mcpToolNames);
+
+  emitLLMRequestDiagnostics({
+    world,
+    agent,
+    chatId,
+    messageId,
+    preparedMessages,
+    mcpTools,
+  });
 
   if (hasMCPTools) {
     loggerMCP.debug(`LLM: Including ${Object.keys(mcpTools).length} MCP tools for agent=${agent.id}, world=${world.id}`);
@@ -767,6 +923,14 @@ async function executeGenerateAgentResponse(
       agent.llmCallCount++;
       agent.lastLLMCall = new Date();
 
+      emitLLMResponseDiagnostics({
+        world,
+        agent,
+        chatId,
+        messageId,
+        response,
+      });
+
       loggerGeneration.debug(`LLM: Finished non-streaming OpenAI response for agent=${agent.id}, world=${world.id}`, {
         responseType: response.type,
         contentLength: response.content?.length || 0,
@@ -795,6 +959,14 @@ async function executeGenerateAgentResponse(
       agent.llmCallCount++;
       agent.lastLLMCall = new Date();
 
+      emitLLMResponseDiagnostics({
+        world,
+        agent,
+        chatId,
+        messageId,
+        response,
+      });
+
       loggerGeneration.debug(`LLM: Finished non-streaming Anthropic response for agent=${agent.id}, world=${world.id}`, {
         responseType: response.type,
         contentLength: response.content?.length || 0,
@@ -822,6 +994,14 @@ async function executeGenerateAgentResponse(
       agent.lastActive = new Date();
       agent.llmCallCount++;
       agent.lastLLMCall = new Date();
+
+      emitLLMResponseDiagnostics({
+        world,
+        agent,
+        chatId,
+        messageId,
+        response,
+      });
 
       loggerGeneration.debug(`LLM: Finished non-streaming Google response for agent=${agent.id}, world=${world.id}`, {
         responseType: response.type,

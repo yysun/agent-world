@@ -12,6 +12,7 @@
  * - Exercises syncSkills through exported singleton helpers
  *
  * Recent Changes:
+ * - 2026-02-28: Added regression coverage for discovering SKILL.md files under symlinked skill directories.
  * - 2026-02-27: Added regression coverage ensuring project-scope collisions override global scope even when file content hashes are identical.
  * - 2026-02-16: Added coverage ensuring default project-skill roots follow `AGENT_WORLD_PROJECT_PATH` when set.
  * - 2026-02-16: Added coverage for `getSkillsForSystemPrompt` source-scope filtering (global vs project).
@@ -36,7 +37,7 @@ import {
 
 type DirectoryEntry = {
   name: string;
-  type: 'directory' | 'file';
+  type: 'directory' | 'file' | 'symlink-directory' | 'symlink-file';
 };
 
 type FileFixture = {
@@ -51,6 +52,7 @@ function toDirent(entry: DirectoryEntry): fsModule.Dirent {
     name: entry.name,
     isDirectory: () => entry.type === 'directory',
     isFile: () => entry.type === 'file',
+    isSymbolicLink: () => entry.type === 'symlink-directory' || entry.type === 'symlink-file',
   } as fsModule.Dirent;
 }
 
@@ -96,11 +98,24 @@ function setupFsScenario(
 
   vi.mocked(fsAny.stat).mockImplementation(async (targetPath: any) => {
     const key = String(targetPath);
+    const directory = getRecordValue(directories, key);
+    if (directory) {
+      return {
+        mtime: new Date(0),
+        isDirectory: () => true,
+        isFile: () => false,
+      } as fsModule.Stats;
+    }
+
     const file = getRecordValue(files, key);
     if (!file) {
       throw new Error(`ENOENT: ${key}`);
     }
-    return { mtime: file.mtime } as fsModule.Stats;
+    return {
+      mtime: file.mtime,
+      isDirectory: () => false,
+      isFile: () => true,
+    } as fsModule.Stats;
   });
 
   vi.mocked(fsAny.readFile).mockImplementation(async (targetPath: any) => {
@@ -442,6 +457,41 @@ describe('core/skill-registry', () => {
     expect(afterBodyChange?.description).toBe('v2 instructions');
     expect(afterBodyChange?.hash).not.toBe(updated?.hash);
     expect(afterBodyChange?.lastUpdated).toBe('2026-02-14T11:00:00.000Z');
+  });
+
+  it('discovers skills inside symlinked skill directories', async () => {
+    setupFsScenario(
+      {
+        'project-root': [{ name: 'music-to-svg', type: 'symlink-directory' }],
+        'project-root/music-to-svg': [{ name: 'SKILL.md', type: 'file' }],
+      },
+      {
+        'project-root/music-to-svg/SKILL.md': {
+          content: [
+            '---',
+            'name: music-to-svg',
+            'description: Convert music prompts into SVG visuals',
+            '---',
+          ].join('\n'),
+          mtime: new Date('2026-02-28T19:21:00.000Z'),
+        },
+      },
+    );
+
+    const result = await syncSkills({
+      userSkillRoots: [],
+      projectSkillRoots: ['project-root'],
+    });
+
+    expect(result).toEqual({
+      added: 1,
+      updated: 0,
+      removed: 0,
+      unchanged: 0,
+      total: 1,
+    });
+    expect(getSkill('music-to-svg')?.description).toBe('Convert music prompts into SVG visuals');
+    expect(getSkillSourcePath('music-to-svg')).toContain('project-root/music-to-svg/SKILL.md');
   });
 
   it('skips skills missing front-matter name', async () => {

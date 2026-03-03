@@ -29,6 +29,7 @@
  * ```
  *
  * Created: 2025-11-10 - Extracted from api.ts for reusability
+ * Updated: 2026-03-01 - Skip synthesis for 'edit' context to prevent duplicate "From human" messages after message edits.
  * Updated: 2026-02-27 - Scoped realtime log forwarding by world/chat to prevent cross-chat log leakage in chat-scoped streams.
  * Updated: 2026-02-26 - Added realtime log-stream forwarding (`type: 'log'`) to SSE clients to align web error visibility with Electron.
  * Updated: 2026-02-20 - Removed stale legacy event-channel SSE forwarding from this handler.
@@ -389,6 +390,13 @@ export function createSSEHandler(
   // Synthesis: use persisted memory as the source of truth to restore UI state
   (async () => {
     try {
+      // Skip synthesis for edit operations: the edit flow removes old messages and immediately
+      // publishes a fresh user message via publishMessage, so synthesizing the pre-edit last
+      // user message would cause a duplicate "From human" message in the UI.
+      if (context === 'edit') {
+        return;
+      }
+
       // Try to read canonical chat memory using public core helper
       const memory = await getMemory(world.id, normalizedScopedChatId as any || undefined);
       if (Array.isArray(memory) && memory.length > 0) {

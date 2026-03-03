@@ -2,7 +2,7 @@
  * File Tools Module - Built-in workspace inspection tools for LLM workflows.
  *
  * Features:
- * - Exposes built-in `read_file`, `list_files`, and `grep` tool definitions
+ * - Exposes built-in `read_file`, `write_file`, `list_files`, and `grep` tool definitions
  * - Supports bounded line-based file reads with offset and limit
  * - Provides deterministic directory listing with optional hidden-file support
  * - Performs recursive text search with plain-text or regex matching
@@ -15,6 +15,10 @@
  * - Errors are returned as tool-friendly `Error:` strings
  *
  * Recent Changes:
+ * - 2026-03-01: Hardened `read_file` against undefined read payloads from mocked fs implementations by coercing to empty content instead of hard-failing.
+ * - 2026-03-01: Added read_file fallback that resolves missing relative paths against loaded skill roots (for skill script paths like `scripts/convert.py`).
+ * - 2026-03-01: Allowed read-only file tools to traverse lexically in-scope `.agents/skills/*` paths even when symlinks resolve outside the world directory (skill workspace compatibility).
+ * - 2026-02-28: Added built-in `write_file` tool with explicit `create`/`overwrite` modes and trusted-scope path enforcement.
  * - 2026-02-21: Added `list_files` output bounding (`maxEntries`) and optional `includePattern` filtering with truncation metadata to reduce continuation token spikes and tool-hop churn on large workspaces.
  * - 2026-02-19: Aligned file-tool path behavior with `shell_cmd`: `list_files` now defaults to trusted working directory when `path` is omitted, and `read_file` accepts `path` alias.
  * - 2026-02-16: Switched `list_files` scanning to `fast-glob` with depth control and default ignore rules.
@@ -32,6 +36,7 @@ import {
   resolveTrustedShellWorkingDirectory,
   validateShellDirectoryRequest,
 } from './shell-cmd-tool.js';
+import { getSkillSourcePath, getSkills } from './skill-registry.js';
 
 type ToolContext = {
   workingDirectory?: string;
@@ -47,6 +52,8 @@ const MAX_LIST_MAX_ENTRIES = 2000;
 const DEFAULT_GREP_MAX_RESULTS = 200;
 const MAX_GREP_MAX_RESULTS = 2000;
 const MAX_GREP_FILE_BYTES = 1024 * 1024;
+
+type WriteMode = 'create' | 'overwrite';
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -67,14 +74,92 @@ function resolveTargetPath(inputPath: string, trustedWorkingDirectory: string): 
   return path.resolve(baseDirectory, inputPath);
 }
 
+function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
+  const normalizeForComparison = (value: string): string =>
+    normalizePath(path.resolve(value)).replace(/\/+/g, '/');
+
+  const normalizedCandidate = normalizeForComparison(candidatePath);
+  const normalizedRoot = normalizeForComparison(rootPath);
+
+  return normalizedCandidate === normalizedRoot
+    || normalizedCandidate.startsWith(`${normalizedRoot}/`);
+}
+
+function isMissingFileError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const errno = (error as NodeJS.ErrnoException).code;
+  if (errno === 'ENOENT') {
+    return true;
+  }
+
+  const message = String((error as Error).message ?? '').toLowerCase();
+  return message.includes('enoent') || message.includes('no such file or directory');
+}
+
+function resolveSkillRelativeReadCandidates(requestedFilePath: string): string[] {
+  const normalizedRequestedPath = normalizePath(String(requestedFilePath || '').trim());
+  if (!normalizedRequestedPath || path.isAbsolute(normalizedRequestedPath)) {
+    return [];
+  }
+
+  const candidates: string[] = [];
+  const availableSkills = getSkills();
+  for (const skill of availableSkills) {
+    const sourcePath = getSkillSourcePath(skill.skill_id);
+    if (!sourcePath) {
+      continue;
+    }
+
+    const skillRoot = path.dirname(sourcePath);
+    const candidatePaths = new Set<string>([
+      path.resolve(skillRoot, normalizedRequestedPath),
+    ]);
+
+    const skillPrefix = `${skill.skill_id}/`;
+    if (normalizedRequestedPath.startsWith(skillPrefix)) {
+      const withoutSkillPrefix = normalizedRequestedPath.slice(skillPrefix.length);
+      if (withoutSkillPrefix) {
+        candidatePaths.add(path.resolve(skillRoot, withoutSkillPrefix));
+      }
+    }
+
+    for (const candidatePath of candidatePaths) {
+      if (isPathWithinRoot(candidatePath, skillRoot)) {
+        candidates.push(candidatePath);
+      }
+    }
+  }
+
+  return [...new Set(candidates)];
+}
+
 function ensurePathWithinTrustedDirectory(
   resolvedPath: string,
   trustedWorkingDirectory: string,
+  options?: { allowSkillPathAlias?: boolean },
 ): void {
   const validation = validateShellDirectoryRequest(resolvedPath, trustedWorkingDirectory);
+  if (!validation.valid && options?.allowSkillPathAlias && isWithinSkillAliasPath(resolvedPath, trustedWorkingDirectory)) {
+    return;
+  }
   if (!validation.valid) {
     throw new Error(validation.error);
   }
+}
+
+function isWithinSkillAliasPath(resolvedPath: string, trustedWorkingDirectory: string): boolean {
+  const candidate = path.resolve(String(resolvedPath || '').trim());
+  const trusted = path.resolve(String(trustedWorkingDirectory || '').trim());
+  const skillRoot = path.resolve(trusted, '.agents', 'skills');
+
+  const normalizedCandidate = normalizePath(candidate).replace(/\/+/g, '/');
+  const normalizedSkillRoot = normalizePath(skillRoot).replace(/\/+/g, '/');
+
+  return normalizedCandidate === normalizedSkillRoot
+    || normalizedCandidate.startsWith(`${normalizedSkillRoot}/`);
 }
 
 function escapeRegExp(value: string): string {
@@ -264,10 +349,54 @@ export function createReadFileToolDefinition() {
         if (!requestedFilePath) {
           return 'Error: read_file failed - filePath is required';
         }
-        const resolvedPath = resolveTargetPath(requestedFilePath, trustedWorkingDirectory);
-        ensurePathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory);
-        const rawContent = await fs.readFile(resolvedPath, 'utf8');
-        const fileContent = toUtf8String(rawContent);
+        let resolvedPath = resolveTargetPath(requestedFilePath, trustedWorkingDirectory);
+        ensurePathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory, { allowSkillPathAlias: true });
+
+        let rawContent: string | Buffer | undefined;
+        try {
+          rawContent = await fs.readFile(resolvedPath, 'utf8');
+        } catch (readError) {
+          if (!isMissingFileError(readError)) {
+            throw readError;
+          }
+
+          const skillReadCandidates = new Set<string>(resolveSkillRelativeReadCandidates(requestedFilePath));
+          if (skillReadCandidates.size === 0) {
+            const relativeFromTrustedDirectory = normalizePath(path.relative(trustedWorkingDirectory, resolvedPath));
+            const isRelativeToTrusted = relativeFromTrustedDirectory
+              && relativeFromTrustedDirectory !== '.'
+              && !relativeFromTrustedDirectory.startsWith('..')
+              && !path.isAbsolute(relativeFromTrustedDirectory);
+
+            if (isRelativeToTrusted) {
+              for (const candidatePath of resolveSkillRelativeReadCandidates(relativeFromTrustedDirectory)) {
+                skillReadCandidates.add(candidatePath);
+              }
+            }
+          }
+
+          let fallbackReadError: unknown = null;
+          for (const candidatePath of skillReadCandidates) {
+            try {
+              ensurePathWithinTrustedDirectory(candidatePath, trustedWorkingDirectory, { allowSkillPathAlias: true });
+              rawContent = await fs.readFile(candidatePath, 'utf8');
+              resolvedPath = candidatePath;
+              fallbackReadError = null;
+              break;
+            } catch (candidateError) {
+              fallbackReadError = candidateError;
+              if (!isMissingFileError(candidateError)) {
+                throw candidateError;
+              }
+            }
+          }
+
+          if (fallbackReadError || rawContent === undefined) {
+            throw readError;
+          }
+        }
+
+        const fileContent = toUtf8String(rawContent ?? '');
         const lines = fileContent.split(/\r?\n/);
         const offset = clamp(Number(args.offset ?? 1), 1, Number.MAX_SAFE_INTEGER);
         const limit = clamp(Number(args.limit ?? DEFAULT_READ_LIMIT), 1, MAX_READ_LIMIT);
@@ -289,6 +418,124 @@ export function createReadFileToolDefinition() {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return `Error: read_file failed - ${message}`;
+      }
+    },
+  };
+}
+
+function normalizeWriteMode(mode: unknown): WriteMode {
+  if (mode === undefined || mode === null || mode === '') {
+    return 'overwrite';
+  }
+
+  const normalizedMode = String(mode).trim().toLowerCase();
+  if (normalizedMode === 'create' || normalizedMode === 'overwrite') {
+    return normalizedMode;
+  }
+
+  throw new Error(`Invalid mode '${String(mode)}'. Expected 'create' or 'overwrite'.`);
+}
+
+export function createWriteFileToolDefinition() {
+  return {
+    description:
+      'Write text content to a file inside the trusted working-directory scope. Supports explicit create-only and overwrite modes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        filePath: {
+          type: 'string',
+          description: 'Target file path. Relative paths resolve from runtime working directory.',
+        },
+        path: {
+          type: 'string',
+          description: 'Alias for filePath.',
+        },
+        content: {
+          type: 'string',
+          description: 'UTF-8 text content to write.',
+        },
+        mode: {
+          type: 'string',
+          enum: ['create', 'overwrite'],
+          description: "Write mode. 'create' fails if the file exists. 'overwrite' replaces existing content (default).",
+        },
+      },
+      required: ['content'],
+      additionalProperties: false,
+    },
+    execute: async (args: any, _sequenceId?: string, _parentToolCall?: string, context?: ToolContext) => {
+      try {
+        const trustedWorkingDirectory = getTrustedWorkingDirectory(context);
+        const requestedFilePath = String(args.filePath ?? args.path ?? '').trim();
+        if (!requestedFilePath) {
+          return 'Error: write_file failed - filePath is required';
+        }
+
+        if (typeof args.content !== 'string') {
+          return 'Error: write_file failed - content must be a string';
+        }
+
+        const mode = normalizeWriteMode(args.mode);
+        const resolvedPath = resolveTargetPath(requestedFilePath, trustedWorkingDirectory);
+        ensurePathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory);
+
+        let fileExists = false;
+        try {
+          const stat = await fs.stat(resolvedPath);
+          if (stat.isDirectory()) {
+            return 'Error: write_file failed - target path is a directory';
+          }
+          fileExists = true;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException | undefined)?.code;
+          if (code !== 'ENOENT') {
+            throw error;
+          }
+        }
+
+        if (mode === 'create' && fileExists) {
+          return `Error: write_file failed - file already exists: ${resolvedPath}`;
+        }
+
+        const parentDirectory = path.dirname(resolvedPath);
+        ensurePathWithinTrustedDirectory(parentDirectory, trustedWorkingDirectory);
+        await fs.mkdir(parentDirectory, { recursive: true });
+        try {
+          await fs.writeFile(
+            resolvedPath,
+            args.content,
+            mode === 'create'
+              ? { encoding: 'utf8', flag: 'wx' }
+              : { encoding: 'utf8', flag: 'w' },
+          );
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException | undefined)?.code;
+          if (code === 'EEXIST' && mode === 'create') {
+            return `Error: write_file failed - file already exists: ${resolvedPath}`;
+          }
+          throw error;
+        }
+
+        const created = !fileExists;
+        const bytesWritten = Buffer.byteLength(args.content, 'utf8');
+        return JSON.stringify(
+          {
+            ok: true,
+            status: 'success',
+            filePath: resolvedPath,
+            mode,
+            operation: created ? 'created' : 'updated',
+            created,
+            updated: !created,
+            bytesWritten,
+          },
+          null,
+          2,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return `Error: write_file failed - ${message}`;
       }
     },
   };
@@ -330,7 +577,7 @@ export function createListFilesToolDefinition() {
         const trustedWorkingDirectory = getTrustedWorkingDirectory(context);
         const requestedPath = String(args.path ?? '.');
         const resolvedPath = resolveTargetPath(requestedPath, trustedWorkingDirectory);
-        ensurePathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory);
+        ensurePathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory, { allowSkillPathAlias: true });
         const includeHidden = Boolean(args.includeHidden ?? true);
         const recursive = Boolean(args.recursive ?? false);
         const includePattern = String(args.includePattern ?? '').trim();
@@ -435,7 +682,7 @@ export function createGrepToolDefinition() {
         const directoryPath = args.directoryPath
           ? resolveTargetPath(String(args.directoryPath), trustedWorkingDirectory)
           : trustedWorkingDirectory;
-        ensurePathWithinTrustedDirectory(directoryPath, trustedWorkingDirectory);
+        ensurePathWithinTrustedDirectory(directoryPath, trustedWorkingDirectory, { allowSkillPathAlias: true });
         const includePattern = typeof args.includePattern === 'string' ? args.includePattern : undefined;
         const maxResults = clamp(Number(args.maxResults ?? DEFAULT_GREP_MAX_RESULTS), 1, MAX_GREP_MAX_RESULTS);
 

@@ -16,6 +16,7 @@
  * - Filters verbose metadata, keeps only essential debugging fields
  *
  * Changes:
+ * - 2026-02-28: Added canonical feature-path category emission (`tool.call.*`, `tool.continuation`) while preserving legacy bridge logging behavior.
  * - 2026-02-27: Replaced ad-hoc `[LLM↔TOOLS]` console logging with structured category logger events.
  * - 2026-02-16: Extracted shared tool-bridge logging utilities from orchestrator
  *   and memory-manager into a dedicated module.
@@ -25,10 +26,59 @@
  */
 
 import { createCategoryLogger, initializeLogger, type LogLevel } from '../logger.js';
+import {
+  buildFeaturePathCorrelation,
+  mergeFeaturePathData,
+  sanitizeRawPayloadForLog,
+} from '../feature-path-logging.js';
 
 const TOOL_DEBUG_RESULT_PREVIEW_LIMIT = 200;
 const TOOL_BRIDGE_LOG_CATEGORY = 'llm.tool.bridge';
 let configuredToolBridgeLevel: LogLevel | null = null;
+
+function resolveCanonicalToolCategory(direction: string): string {
+  const compact = String(direction || '')
+    .toUpperCase()
+    .replace(/\s+/g, '');
+  if (/^LLM->TOOLS?/.test(compact)) {
+    return 'tool.call.request';
+  }
+  if (/^TOOLS?->LLM/.test(compact)) {
+    return 'tool.call.response';
+  }
+  if (/^TOOLS?ERROR->LLM/.test(compact)) {
+    return 'tool.call.error';
+  }
+  if (compact.includes('CONTINUE')) {
+    return 'tool.continuation';
+  }
+  return 'tool.continuation';
+}
+
+function emitCanonicalToolPathLog(direction: string, payload: unknown): void {
+  const category = resolveCanonicalToolCategory(direction);
+  const logger = createCategoryLogger(category);
+  const obj = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : undefined;
+  const correlation = buildFeaturePathCorrelation({
+    worldId: typeof obj?.worldId === 'string' ? obj.worldId : undefined,
+    chatId: typeof obj?.chatId === 'string' || obj?.chatId === null ? obj.chatId as string | null : undefined,
+    agentId: typeof obj?.agentId === 'string' ? obj.agentId : undefined,
+    messageId: typeof obj?.messageId === 'string' ? obj.messageId : undefined,
+    turnId: typeof obj?.turnId === 'string' ? obj.turnId : undefined,
+    runId: typeof obj?.runId === 'string' ? obj.runId : undefined,
+    toolCallId: typeof obj?.toolCallId === 'string' ? obj.toolCallId : undefined,
+    toolName: typeof obj?.toolName === 'string' ? obj.toolName : undefined,
+  });
+  logger.debug(
+    'Tool path event',
+    mergeFeaturePathData(correlation, {
+      direction,
+      payload: sanitizeRawPayloadForLog(payload, { maxStringLength: 800 }),
+    })
+  );
+}
 
 function resolveToolBridgeLogLevel(): LogLevel | null {
   const rawValue = typeof process !== 'undefined' && process.env
@@ -113,6 +163,8 @@ function truncateContent(value: unknown, maxLength = TOOL_DEBUG_RESULT_PREVIEW_L
 }
 
 export function logToolBridge(direction: string, payload: unknown): void {
+  emitCanonicalToolPathLog(direction, payload);
+
   const logLevel = resolveToolBridgeLogLevel();
   if (!logLevel) {
     return;

@@ -1,80 +1,57 @@
 /**
  * Subscribers Module
- * 
+ *
  * Provides event subscription handlers for agents and world.
  * Handles message routing, tool result processing, and world activity tracking.
- * 
+ *
  * Features:
  * - Agent message subscription with automatic response processing
  * - Tool message subscription with security checks
- * - World message subscription for title generation (idle and no-activity user-message fallback)
- * - World activity listener for chat title updates on idle
- * - In-flight title generation guard to avoid duplicate concurrent updates per chat
- * 
+ * - World message subscription: idempotent wrapper — no-op when setupEventPersistence has run;
+ *   standalone fallback path delegates title-scheduling to title-scheduler.ts.
+ * - World activity listener: idempotent wrapper — no-op when setupEventPersistence has run;
+ *   standalone fallback path delegates idle-title logic to title-scheduler.ts.
+ *
  * Dependencies (Layer 6):
  * - types.ts (Layer 1)
  * - publishers.ts (Layer 3)
- * - persistence.ts, memory-manager.ts (Layer 4)
+ * - persistence.ts, memory-manager.ts, title-scheduler.ts (Layer 4)
  * - orchestrator.ts (Layer 5)
  * - utils.ts, logger.ts
- * - storage (runtime)
- * 
+ *
  * Changes:
- * - 2026-02-27: Switched idle title generation targeting to event-scoped `chatId` and ignored unscoped idle events to prevent cross-chat renames after chat switches.
- * - 2026-02-22: Persist incoming human messages to agent memory even when agents do not respond (e.g., invalid @mention), preventing UI-only unsaved messages.
- * - 2026-02-20: Publish chat-title update notifications as structured `system` events (`chat-title-updated`).
- * - 2026-02-13: Added no-activity user-message fallback title scheduling to cover edited chats with no agent response.
- * - 2026-02-13: Switched title commit path to compare-and-set storage update to avoid concurrent overwrite races.
- * - 2026-02-13: Added conditional commit checks and in-flight dedupe for idle title updates.
- * - 2026-02-13: Made idle title updates chat-scoped with captured `targetChatId` to prevent cross-session renames.
- * - 2026-02-08: Removed legacy manual tool-intervention request handling from message subscription
- * - 2025-11-09: Extracted from events.ts for modular architecture
+ * - 2026-03-03: Removed private title-scheduling logic (moved to title-scheduler.ts Layer 4).
+ *   subscribeWorldToMessages and setupWorldActivityListener are now idempotent wrappers that
+ *   short-circuit when setupEventPersistence has already registered a combined handler.
+ * - 2026-02-28: Made world message subscription idempotent.
+ * - 2026-02-22: Persist incoming human messages to agent memory even when agents do not respond.
+ * - 2026-02-20: Publish chat-title update notifications as structured `system` events.
+ * - 2025-11-09: Extracted from events.ts for modular architecture.
  */
 
 import type {
   World,
   Agent,
-  WorldMessageEvent,
-  StorageAPI
+  WorldMessageEvent
 } from '../types.js';
 import { parseMessageContent } from '../message-prep.js';
 import { extractParagraphBeginningMentions } from '../utils.js';
 import { createCategoryLogger } from '../logger.js';
-import { createStorageWithWrappers } from '../storage/storage-factory.js';
-import {
-  publishEvent,
-  subscribeToMessages
-} from './publishers.js';
+import { subscribeToMessages } from './publishers.js';
 import {
   saveIncomingMessageToMemory,
-  resetLLMCallCountIfNeeded,
-  generateChatTitleFromMessages
+  resetLLMCallCountIfNeeded
 } from './memory-manager.js';
 import { processAgentMessage, shouldAgentRespond } from './orchestrator.js';
-import { isDefaultChatTitle, NEW_CHAT_TITLE } from '../chat-constants.js';
+import { isDefaultChatTitle } from '../chat-constants.js';
+import {
+  isHumanSender,
+  scheduleNoActivityTitleUpdate,
+  runIdleTitleUpdate,
+  clearWorldTitleTimers
+} from './title-scheduler.js';
 
 const loggerAgent = createCategoryLogger('agent');
-const loggerChatTitle = createCategoryLogger('chattitle');
-const titleGenerationInFlight = new Set<string>();
-const titleGenerationTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-// Storage wrapper instance - initialized lazily
-let storageWrappers: StorageAPI | null = null;
-async function getStorageWrappers(): Promise<StorageAPI> {
-  if (!storageWrappers) {
-    storageWrappers = await createStorageWithWrappers();
-  }
-  return storageWrappers!;
-}
-
-function getTitleGenerationKey(worldId: string, chatId: string): string {
-  return `${worldId}:${chatId}`;
-}
-
-function isHumanSender(sender?: string): boolean {
-  const normalized = String(sender ?? '').trim().toLowerCase();
-  return normalized === 'human' || normalized.startsWith('user');
-}
 
 function toMentionToken(value: string): string {
   return String(value || '')
@@ -122,109 +99,6 @@ function applyMainAgentMentionRouting(world: World, messageEvent: WorldMessageEv
     ...messageEvent,
     content: `@${mainAgent} ${messageEvent.content || ''}`.trim()
   };
-}
-
-function scheduleNoActivityTitleUpdate(world: World, chatId: string, content: string): void {
-  const key = getTitleGenerationKey(world.id, chatId);
-  const existingTimer = titleGenerationTimers.get(key);
-  if (existingTimer) {
-    clearTimeout(existingTimer);
-  }
-
-  const timer = setTimeout(async () => {
-    titleGenerationTimers.delete(key);
-    if (world.isProcessing) {
-      return;
-    }
-    await tryGenerateAndApplyTitle(world, chatId, content, 'message-no-activity');
-  }, 120);
-
-  titleGenerationTimers.set(key, timer);
-}
-
-async function commitChatTitleIfDefault(
-  world: World,
-  chatId: string,
-  nextTitle: string
-): Promise<boolean> {
-  const storage = await getStorageWrappers();
-
-  if (typeof storage.updateChatNameIfCurrent === 'function') {
-    return storage.updateChatNameIfCurrent(world.id, chatId, NEW_CHAT_TITLE, nextTitle);
-  }
-
-  // Legacy fallback when storage backend does not provide compare-and-set helper.
-  const persistedChat = await storage.loadChatData(world.id, chatId);
-  if (!persistedChat || !isDefaultChatTitle(persistedChat.name)) {
-    return false;
-  }
-
-  const updated = await storage.updateChatData(world.id, chatId, { name: nextTitle });
-  return !!updated;
-}
-
-async function tryGenerateAndApplyTitle(
-  world: World,
-  targetChatId: string,
-  content: string,
-  source: 'idle' | 'message-no-activity'
-): Promise<void> {
-  const inFlightKey = getTitleGenerationKey(world.id, targetChatId);
-  if (titleGenerationInFlight.has(inFlightKey)) {
-    loggerChatTitle.debug('Skipping title update because generation is already in flight', {
-      worldId: world.id,
-      chatId: targetChatId,
-      source
-    });
-    return;
-  }
-
-  const chat = world.chats.get(targetChatId);
-  if (!chat || !isDefaultChatTitle(chat.name)) {
-    return;
-  }
-
-  titleGenerationInFlight.add(inFlightKey);
-
-  try {
-    const title = await generateChatTitleFromMessages(world, content, targetChatId);
-    if (!title) {
-      return;
-    }
-
-    // Re-check in-memory state before commit.
-    const currentChat = world.chats.get(targetChatId);
-    if (!currentChat || !isDefaultChatTitle(currentChat.name)) {
-      loggerChatTitle.debug('Skipping title commit because in-memory chat title is no longer default', {
-        worldId: world.id,
-        chatId: targetChatId,
-        source,
-        currentName: currentChat?.name
-      });
-      return;
-    }
-
-    const committed = await commitChatTitleIfDefault(world, targetChatId, title);
-    if (!committed) {
-      loggerChatTitle.debug('Skipping title commit because persisted chat title no longer matches default', {
-        worldId: world.id,
-        chatId: targetChatId,
-        source
-      });
-      return;
-    }
-
-    currentChat.name = title;
-    publishEvent(world, 'system', {
-      eventType: 'chat-title-updated',
-      chatId: targetChatId,
-      title,
-      source,
-      message: `Chat title updated: ${title}`,
-    }, targetChatId);
-  } finally {
-    titleGenerationInFlight.delete(inFlightKey);
-  }
 }
 
 /**
@@ -319,7 +193,11 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
  * Subscribe world to messages with cleanup function
  */
 export function subscribeWorldToMessages(world: World): () => void {
-  return subscribeToMessages(world, async (event: WorldMessageEvent) => {
+  if (typeof world._worldMessagesUnsubscriber === 'function') {
+    return world._worldMessagesUnsubscriber;
+  }
+
+  const unsubscribe = subscribeToMessages(world, async (event: WorldMessageEvent) => {
     const targetChatId = event.chatId ?? world.currentChatId ?? null;
     if (!targetChatId) return;
     if (!isHumanSender(event.sender)) return;
@@ -329,43 +207,44 @@ export function subscribeWorldToMessages(world: World): () => void {
 
     scheduleNoActivityTitleUpdate(world, targetChatId, event.content || '');
   });
+
+  const trackedUnsubscribe = () => {
+    unsubscribe();
+    clearWorldTitleTimers(world.id);
+    if (world._worldMessagesUnsubscriber === trackedUnsubscribe) {
+      world._worldMessagesUnsubscriber = undefined;
+    }
+  };
+
+  world._worldMessagesUnsubscriber = trackedUnsubscribe;
+  return trackedUnsubscribe;
 }
 
 /**
- * Setup world activity listener for chat title updates
- * Triggers title generation when world becomes idle (pendingOperations === 0)
+ * Setup world activity listener for idle-triggered chat title updates.
+ * Idempotent — returns existing cleanup handle if setupEventPersistence already registered
+ * a combined 'world' handler for this world.
  */
 export function setupWorldActivityListener(world: World): () => void {
+  if (typeof world._activityListenerCleanup === 'function') {
+    return world._activityListenerCleanup;
+  }
+
+  // Standalone fallback: persistence is disabled, attach a lightweight idle handler.
   const handler = async (event: any) => {
-    // Only update title when world becomes idle (all agents done)
-    if (event.type === 'idle' && event.pendingOperations === 0) {
-      const targetChatIdRaw = typeof event?.chatId === 'string' ? event.chatId.trim() : '';
-      const targetChatId = targetChatIdRaw || null;
-      if (!targetChatId) {
-        loggerChatTitle.debug('Skipping idle title update due to missing chatId on activity event', {
-          worldId: world.id,
-          eventType: event?.type,
-          pendingOperations: event?.pendingOperations
-        });
-        return;
-      }
-      try {
-        await tryGenerateAndApplyTitle(world, targetChatId, '', 'idle');
-      } catch (err) {
-        loggerChatTitle.warn('Activity-based title update failed', { error: err instanceof Error ? err.message : err });
-      }
-    }
+    await runIdleTitleUpdate(world, event);
   };
 
   world.eventEmitter.on('world', handler);
-  return () => {
+
+  const cleanup = () => {
     world.eventEmitter.off('world', handler);
-    for (const [key, timer] of titleGenerationTimers.entries()) {
-      if (!key.startsWith(`${world.id}:`)) {
-        continue;
-      }
-      clearTimeout(timer);
-      titleGenerationTimers.delete(key);
+    clearWorldTitleTimers(world.id);
+    if (world._activityListenerCleanup === cleanup) {
+      world._activityListenerCleanup = undefined;
     }
   };
+
+  world._activityListenerCleanup = cleanup;
+  return cleanup;
 }

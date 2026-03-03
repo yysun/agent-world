@@ -98,12 +98,6 @@ export function useMessageManagement({
 
     const content = composer.trim();
     if (!content) return;
-    const optimisticMessage = createOptimisticUserMessage({
-      chatId: activeSessionId,
-      content,
-      sender: 'human',
-    });
-    const optimisticMessageId = String(optimisticMessage.messageId || '').trim();
 
     setPendingResponseSessionIds((prev) => {
       const next = new Set(prev);
@@ -111,13 +105,13 @@ export function useMessageManagement({
       return next;
     });
     setSendingSessionIds((prev) => new Set([...prev, activeSessionId]));
-    setMessages((existing) => upsertMessageList(existing, optimisticMessage));
+    setComposer('');
     try {
       if (!activeSessionId || !String(activeSessionId).trim()) {
         throw new Error('Chat ID is required before sending a message.');
       }
 
-      const sendResult = await api.sendMessage({
+      await api.sendMessage({
         worldId: loadedWorldId,
         chatId: activeSessionId,
         content,
@@ -128,29 +122,9 @@ export function useMessageManagement({
           disabledGlobalSkillIds: normalizeStringList(systemSettings.disabledGlobalSkillIds),
           disabledProjectSkillIds: normalizeStringList(systemSettings.disabledProjectSkillIds),
         }
-      }) as Record<string, unknown>;
-      const confirmedMessageId = String(sendResult?.messageId || '').trim();
-      const confirmedCreatedAt = String(sendResult?.createdAt || '').trim() || new Date().toISOString();
-      if (optimisticMessageId && confirmedMessageId) {
-        setMessages((existing) => reconcileOptimisticUserMessage(existing, {
-          tempMessageId: optimisticMessageId,
-          confirmedMessage: {
-            messageId: confirmedMessageId,
-            id: confirmedMessageId,
-            role: 'user',
-            sender: String(sendResult?.sender || 'human'),
-            content,
-            chatId: activeSessionId,
-            createdAt: confirmedCreatedAt,
-          },
-        }));
-      }
+      });
 
-      setComposer('');
     } catch (error) {
-      if (optimisticMessageId) {
-        setMessages((existing) => removeOptimisticUserMessage(existing, optimisticMessageId));
-      }
       setPendingResponseSessionIds((prev) => {
         const next = new Set(prev);
         next.delete(activeSessionId);

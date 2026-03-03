@@ -23,6 +23,7 @@ import type { CommandExecutionResult } from '../../core/shell-cmd-tool.js';
 describe('formatResultForLLM', () => {
   test('should quote parameters with spaces', () => {
     const result: CommandExecutionResult = {
+      executionId: 'fmt-quote-spaces',
       command: 'codex',
       parameters: ['exec', 'review the last commit'],
       stdout: '',
@@ -39,6 +40,7 @@ describe('formatResultForLLM', () => {
 
   test('should not quote parameters without spaces', () => {
     const result: CommandExecutionResult = {
+      executionId: 'fmt-no-quote',
       command: 'ls',
       parameters: ['-la', '/tmp'],
       stdout: '',
@@ -56,6 +58,7 @@ describe('formatResultForLLM', () => {
 
   test('should escape quotes within parameters', () => {
     const result: CommandExecutionResult = {
+      executionId: 'fmt-escape-quotes',
       command: 'echo',
       parameters: ['Hello "world"'],
       stdout: '',
@@ -72,6 +75,7 @@ describe('formatResultForLLM', () => {
 
   test('should quote parameters with tabs', () => {
     const result: CommandExecutionResult = {
+      executionId: 'fmt-tabs',
       command: 'echo',
       parameters: ['hello\tworld'],
       stdout: '',
@@ -88,6 +92,7 @@ describe('formatResultForLLM', () => {
 
   test('should handle mixed parameters (some quoted, some not)', () => {
     const result: CommandExecutionResult = {
+      executionId: 'fmt-mixed',
       command: 'git',
       parameters: ['commit', '-m', 'Initial commit with changes'],
       stdout: '',
@@ -104,6 +109,7 @@ describe('formatResultForLLM', () => {
 
   test('should handle empty parameters array', () => {
     const result: CommandExecutionResult = {
+      executionId: 'fmt-empty-params',
       command: 'pwd',
       parameters: [],
       stdout: '/home/user',
@@ -121,6 +127,7 @@ describe('formatResultForLLM', () => {
 
   test('should return bounded preview output by default (minimal mode)', () => {
     const result: CommandExecutionResult = {
+      executionId: 'fmt-preview-default',
       command: 'echo',
       parameters: ['x'],
       stdout: 'a'.repeat(1000),
@@ -139,6 +146,7 @@ describe('formatResultForLLM', () => {
 
   test('should include full output and timestamp in full detail mode', () => {
     const result: CommandExecutionResult = {
+      executionId: 'fmt-full-detail',
       command: 'echo',
       parameters: ['full'],
       stdout: 'full-output',

@@ -16,6 +16,7 @@
  * - Focuses on prompt formatting only (no tool execution).
  *
  * Recent changes:
+ * - 2026-03-01: Added coverage for the `available_skills` post-load acknowledgment requirement text.
  * - 2026-02-20: Shortened mention-format prompt assertions to compact handoff-focused wording.
  * - 2026-02-20: Added explicit assertion that normal user-facing replies should not include @mentions unless addressing another agent.
  * - 2026-02-20: Relaxed mention-format prompt assertions to conditional paragraph-beginning multi-agent guidance.
@@ -112,6 +113,7 @@ describe('prepareMessagesForLLM', () => {
     expect(messages[0]?.content).toContain('<id>pdf-extract</id>');
     expect(messages[0]?.content).toContain('<description>Extract PDF content</description>');
     expect(messages[0]?.content).toContain('use the load_skill with skill id tool');
+    expect(messages[0]?.content).toContain('After successfully loading a skill, ALWAYS acknowledge it to the user');
     expect(messages[0]?.content).toContain('Only use @mentions when handing off to another agent; for normal user replies, do not mention agents.');
     expect(messages[0]?.content).toContain('Place each @<agent> at the start of a paragraph.');
     expect(messages[0]?.content).toContain('For multiple agents, use one paragraph-beginning mention per target.');

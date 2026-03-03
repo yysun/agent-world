@@ -18,13 +18,17 @@
  * - Keeps payload format deterministic for stable downstream parsing
  *
  * Recent Changes:
+ * - 2026-03-01: Removed minimal-check mode branch so `load_skill` always runs script/reference preflight consistently and keeps script-root execution guidance available.
+ * - 2026-03-01: Relaxed execution-directive narration requirements to avoid mandatory pre-tool plan text and reduce token overhead.
+ * - 2026-03-01: Added skill-description thread-through and acknowledgment-first execution directive requirements after successful `load_skill`, including unconditional pre-execution plan narration.
+ * - 2026-02-28: Updated `<execution_directive>` to require concise tool-use intent text before tool calls and to allow mixed text + tool-call turns when supported by the provider.
  * - 2026-02-27: Run-scoped `load_skill` cache now stores only successful outcomes so declined/error/not-found paths remain retryable in the same run.
  * - 2026-02-27: Added run-scoped `load_skill` result caching keyed by latest user-turn marker so repeated same-skill calls are auto-suppressed across assistant/tool hops.
  * - 2026-02-27: Replaced `[load_skill:hitl]` console logs with structured category logger events (`load_skill.hitl`).
  * - 2026-02-27: Added same-turn `yes_once` approval reuse + in-flight approval dedupe so repeated/concurrent `load_skill` calls for the same skill do not spam duplicate HITL prompts.
  * - 2026-02-25: Added persisted synthetic HITL tool-call/response messages for `load_skill` approval so frontends can reconstruct prompts from memory without relying on transient event timing.
  * - 2026-02-24: Surface non-zero script exits as informational output instead of blocking errors (scripts may be CLI tools requiring args).
- * - 2026-02-24: Execute skill scripts with cwd set to the skill root directory, not the project working directory.
+ * - 2026-02-24: Execute skill scripts with cwd set to trusted working directory when provided, otherwise use the skill root.
  * - 2026-02-14: Strip SKILL.md YAML front matter from injected `<instructions>` content.
  * - 2026-02-14: Omit `<active_resources>` from `load_skill` payloads when no instruction-referenced scripts are present.
  * - 2026-02-14: Added skill-level HITL gating so `load_skill` requires approval even when no script references are present.
@@ -49,6 +53,7 @@ import { createCategoryLogger } from './logger.js';
 import { parseSkillIdListFromEnv } from './skill-settings.js';
 import { requestWorldOption, type HitlOptionResolution } from './hitl.js';
 import { generateId } from './utils.js';
+import { requestToolApproval } from './tool-approval.js';
 
 const APPROVAL_OPTION_YES_ONCE = 'yes_once';
 const APPROVAL_OPTION_YES_IN_SESSION = 'yes_in_session';
@@ -339,6 +344,137 @@ function createRunResultKey(worldId: string, chatId: string | null, skillId: str
   return `${worldId}::${chatId ?? 'global'}::${skillId}::run::${turnMarker}`;
 }
 
+/**
+ * Reconstruct skill approval caches from persisted message history.
+ * Called during chat restore so that `yes_in_session` and `yes_once` grants
+ * survive app restarts without re-prompting the user.
+ *
+ * Scans `role: 'tool'` messages whose JSON content contains `skillId` and
+ * `optionId` fields (written by `persistLoadSkillApprovalResolutionMessage`).
+ *
+ * - `yes_in_session` grants are restored unconditionally (session-scoped).
+ * - `yes_once` grants are restored only when they belong to the current turn
+ *   (i.e. appear after the last `role: 'user'` message in the history).
+ */
+export function reconstructSkillApprovalsFromMessages(
+  worldId: string,
+  chatId: string | null,
+  messages: Array<Record<string, any>>,
+): number {
+  if (!worldId || !Array.isArray(messages) || messages.length === 0) {
+    return 0;
+  }
+
+  // Find the index of the last user message for this chat (turn boundary).
+  let lastUserMessageIndex = -1;
+  let turnMarker: string | null = null;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg?.role !== 'user') continue;
+    const msgChatId = msg?.chatId ? String(msg.chatId).trim() : null;
+    if (msgChatId && msgChatId !== (chatId ?? 'global')) continue;
+    lastUserMessageIndex = i;
+
+    // Derive turn marker using same precedence as getCurrentTurnMarker.
+    const messageId = String(msg?.messageId || '').trim();
+    if (messageId) {
+      turnMarker = `msg:${messageId}`;
+    } else {
+      const createdAt = msg?.createdAt ? new Date(msg.createdAt) : null;
+      if (createdAt && Number.isFinite(createdAt.valueOf())) {
+        turnMarker = `ts:${createdAt.toISOString()}`;
+      } else {
+        const content = String(msg?.content || '').trim();
+        if (content) {
+          turnMarker = `content:${content.slice(0, 80)}`;
+        } else {
+          turnMarker = `idx:${i}`;
+        }
+      }
+    }
+    break;
+  }
+
+  let restored = 0;
+  for (let i = 0; i < messages.length; i += 1) {
+    const msg = messages[i];
+    if (msg?.role !== 'tool') continue;
+
+    let payload: { requestId?: string; skillId?: string; optionId?: string } | null = null;
+    try {
+      const content = typeof msg.content === 'string' ? msg.content : null;
+      if (content) payload = JSON.parse(content);
+    } catch {
+      continue;
+    }
+    if (
+      !payload
+      || typeof payload.requestId !== 'string'
+      || !payload.requestId.includes('load_skill_approval')
+      || typeof payload.skillId !== 'string'
+      || typeof payload.optionId !== 'string'
+    ) {
+      continue;
+    }
+
+    const { skillId, optionId } = payload;
+
+    if (optionId === APPROVAL_OPTION_YES_IN_SESSION) {
+      skillSessionApprovals.add(createSessionApprovalKey(worldId, chatId, skillId));
+      restored += 1;
+    } else if (optionId === APPROVAL_OPTION_YES_ONCE && turnMarker && i > lastUserMessageIndex) {
+      skillTurnApprovals.add(createTurnApprovalKey(worldId, chatId, skillId, turnMarker));
+      restored += 1;
+    }
+  }
+
+  if (restored > 0) {
+    loggerLoadSkillHitl.debug('Reconstructed skill approvals from message history', {
+      worldId,
+      chatId: chatId || null,
+      restored,
+    });
+  }
+
+  return restored;
+}
+
+/**
+ * Clear cached skill approvals and run results scoped to a specific chat.
+ * Must be called when messages are removed (e.g. edit+resubmit) so that
+ * HITL approval prompts fire again for the reprocessed message.
+ */
+export function clearChatSkillApprovals(worldId: string, chatId: string | null): void {
+  const chatToken = chatId ?? 'global';
+  const prefix = `${worldId}::${chatToken}::`;
+
+  for (const key of skillSessionApprovals) {
+    if (key.startsWith(prefix)) {
+      skillSessionApprovals.delete(key);
+    }
+  }
+  for (const key of skillTurnApprovals) {
+    if (key.startsWith(prefix)) {
+      skillTurnApprovals.delete(key);
+    }
+  }
+  for (const key of inFlightSkillApprovals.keys()) {
+    if (key.includes(prefix)) {
+      inFlightSkillApprovals.delete(key);
+    }
+  }
+  for (const key of loadSkillRunResultCache.keys()) {
+    if (key.startsWith(prefix)) {
+      loadSkillRunResultCache.delete(key);
+    }
+  }
+  for (const key of inFlightLoadSkillRunResults.keys()) {
+    if (key.startsWith(prefix)) {
+      inFlightLoadSkillRunResults.delete(key);
+    }
+  }
+}
+
 function getRunScopedLoadSkillResultKey(skillId: string, context: LoadSkillToolContext | undefined): string | null {
   const worldId = String(context?.world?.id || '').trim();
   if (!worldId) {
@@ -551,7 +687,8 @@ async function requestSkillExecutionApproval(options: {
       scriptPaths: options.scriptPaths,
     });
 
-    const approval = await requestWorldOption(worldContext as any, {
+    const approvalResult = await requestToolApproval({
+      world: worldContext as any,
       requestId,
       title: `Run skill ${options.skillId}?`,
       message: [
@@ -570,6 +707,7 @@ async function requestSkillExecutionApproval(options: {
         },
         { id: APPROVAL_OPTION_NO, label: 'No', description: 'Do not apply this skill now.' },
       ],
+      approvedOptionIds: [APPROVAL_OPTION_YES_ONCE, APPROVAL_OPTION_YES_IN_SESSION],
       metadata: {
         tool: 'human_intervention_request',
         toolCallId: requestId,
@@ -580,6 +718,14 @@ async function requestSkillExecutionApproval(options: {
       agentName: options.context?.agentName ?? null,
     });
 
+    const approval: HitlOptionResolution = {
+      requestId,
+      worldId,
+      chatId,
+      optionId: approvalResult.optionId,
+      source: approvalResult.source,
+    };
+
     await persistLoadSkillApprovalResolutionMessage({
       context: options.context,
       requestId,
@@ -587,7 +733,7 @@ async function requestSkillExecutionApproval(options: {
       skillId: options.skillId,
     });
 
-    if (approval.optionId === APPROVAL_OPTION_NO) {
+    if (!approvalResult.approved) {
       return false;
     }
 
@@ -728,15 +874,26 @@ async function executeSkillScripts(options: {
 function buildSuccessResult(options: {
   skillId: string;
   skillName: string;
+  skillDescription: string;
   skillRoot: string;
   markdown: string;
   scriptOutputs: Array<{ source: string; output: string }>;
   referenceFiles: string[];
   scriptPaths: string[];
 }): string {
-  const { skillId, skillName, skillRoot, markdown, scriptOutputs, referenceFiles, scriptPaths } = options;
+  const {
+    skillId,
+    skillName,
+    skillDescription,
+    skillRoot,
+    markdown,
+    scriptOutputs,
+    referenceFiles,
+    scriptPaths,
+  } = options;
   const escapedSkillId = escapeXmlText(skillId);
   const escapedSkillName = escapeXmlText(skillName);
+  const escapedSkillDescription = escapeXmlText(skillDescription);
   const hasActiveResources = scriptOutputs.length > 0;
   const scriptBlocks = scriptOutputs.flatMap((scriptOutput) => ([
     `    <script_output source="${escapeXmlText(scriptOutput.source)}">`,
@@ -762,13 +919,16 @@ function buildSuccessResult(options: {
   const executionDirective = [
     '  <execution_directive>',
     `    You are now operating under the specialized ${escapedSkillName} protocol.`,
-    '    1. Prioritize the logic in <instructions> over generic behavior.',
+    `    Skill purpose: ${escapedSkillDescription}`,
+    '    1. Acknowledge which skill was loaded and apply it directly to the user request.',
+    '    2. Prioritize the logic in <instructions> over generic behavior.',
     hasActiveResources
-      ? '    2. Use the data in <active_resources> to complete the user\'s specific request.'
-      : '    2. Use the skill instructions to complete the user\'s specific request.',
-    '    3. If the workflow is multi-step, explicitly state your plan before executing.',
+      ? '    3. Use the data in <active_resources> to complete the user\'s specific request.'
+      : '    3. Use the skill instructions to complete the user\'s specific request.',
+    '    4. Execute required steps directly; avoid unnecessary planning narration unless the user explicitly asks for a plan.',
+    '    5. Keep tool-related assistant text concise and result-focused.',
     ...(hasReferencedScripts
-      ? [`    4. Scripts referenced in <instructions> are located at skill root: ${escapeXmlText(skillRoot)}. When invoking them via shell commands, construct the absolute path (e.g., ${escapeXmlText(skillRoot)}/scripts/example.py) since they may not be accessible via relative paths from the project directory.`]
+      ? [`    6. Scripts referenced in <instructions> are located at skill root: ${escapeXmlText(skillRoot)}. When invoking them via shell commands, construct the absolute path (e.g., ${escapeXmlText(skillRoot)}/scripts/example.py) since they may not be accessible via relative paths from the project directory.`]
       : []),
     '  </execution_directive>',
   ];
@@ -788,7 +948,7 @@ function buildSuccessResult(options: {
 export function createLoadSkillToolDefinition() {
   return {
     description:
-      'Load full SKILL.md instructions by skill_id from the skill registry. Use this when a request matches a listed skill.',
+      'Load full SKILL.md instructions by skill_id from the skill registry. Use this when a request matches a listed skill. After loading, apply the skill instructions directly to the user request.',
     parameters: {
       type: 'object',
       properties: {
@@ -867,6 +1027,7 @@ export function createLoadSkillToolDefinition() {
             result: buildSuccessResult({
               skillId: requestedSkillId,
               skillName: entry.skill_id,
+              skillDescription: entry.description?.trim() || entry.skill_id,
               skillRoot,
               markdown: instructionsMarkdown,
               scriptOutputs,

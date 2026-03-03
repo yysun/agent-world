@@ -34,16 +34,9 @@ export function useStreamingActivity({ setMessages }) {
 
   useEffect(() => {
     streamingStateRef.current = createStreamingState({
-      onStreamStart: (entry) => {
-        setMessages((existing) => upsertMessageList(existing, {
-          id: entry.messageId,
-          messageId: entry.messageId,
-          role: 'assistant',
-          sender: entry.agentName,
-          content: '...',
-          createdAt: entry.createdAt,
-          isStreaming: true
-        }));
+      onStreamStart: () => {
+        // No-op: the message card is created on the first chunk (onStreamUpdate)
+        // so no empty placeholder appears while waiting for content.
       },
       onStreamUpdate: (entry) => {
         setMessages((existing) => {

@@ -30,6 +30,9 @@
  * Implementation: Pino-based structured logging with performance optimizations
  * - Development: Pretty-printed colored output via pino-pretty
  * - Production: JSON structured logs for log aggregation systems
+ *
+ * Recent Changes:
+ * - 2026-02-28: Added pre-created canonical feature-path categories (`turn.trace`, `llm.prep`, `llm.request.*`, `llm.response.*`, `tool.call.*`, `tool.continuation`, `message.publish`).
  */
 
 // Load environment variables from .env file
@@ -378,6 +381,11 @@ export const loggers = {
 
   // LLM operations
   llm: createCategoryLogger('llm'),
+  'llm.prep': createCategoryLogger('llm.prep'),
+  'llm.request.meta': createCategoryLogger('llm.request.meta'),
+  'llm.request.raw': createCategoryLogger('llm.request.raw'),
+  'llm.response.meta': createCategoryLogger('llm.response.meta'),
+  'llm.response.raw': createCategoryLogger('llm.response.raw'),
   'llm.openai': createCategoryLogger('llm.openai'),
   'llm.anthropic': createCategoryLogger('llm.anthropic'),
   'llm.google': createCategoryLogger('llm.google'),
@@ -400,6 +408,14 @@ export const loggers = {
   'events.agent': createCategoryLogger('events.agent'),
   'events.response': createCategoryLogger('events.response'),
   'events.memory': createCategoryLogger('events.memory'),
+
+  // Feature-path operations
+  'turn.trace': createCategoryLogger('turn.trace'),
+  'tool.call.request': createCategoryLogger('tool.call.request'),
+  'tool.call.response': createCategoryLogger('tool.call.response'),
+  'tool.call.error': createCategoryLogger('tool.call.error'),
+  'tool.continuation': createCategoryLogger('tool.continuation'),
+  'message.publish': createCategoryLogger('message.publish'),
 
   // Infrastructure
   api: createCategoryLogger('api'),

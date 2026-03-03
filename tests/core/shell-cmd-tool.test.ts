@@ -10,6 +10,8 @@
  * - Output accumulation
  * 
  * Changes:
+ * - 2026-02-28: Added skill-aware script path resolution tests for `resolveSkillScriptParameters`.
+ * - 2026-02-28: Added deterministic risk-tier tests for `allow`, `hitl_required`, and `block` shell command classification outcomes.
  * - 2026-02-15: Added coverage for core execute-time cwd boundary enforcement via `trustedWorkingDirectory`.
  * - 2026-02-15: Added single-command contract tests and shell control-syntax blocking (`&&`, pipes, redirects, substitution, backgrounding).
  * - 2026-02-14: Added inline-script guard coverage (`sh -c`) and short-option path-prefix checks (`-I/path`).
@@ -18,11 +20,13 @@
  * - 2026-02-08: Initial test suite for streaming callback functionality
  */
 
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, vi, beforeEach } from 'vitest';
 import {
   executeShellCommand,
   validateShellDirectoryRequest,
-  validateShellCommandScope
+  validateShellCommandScope,
+  classifyShellCommandRisk,
+  resolveSkillScriptParameters
 } from '../../core/shell-cmd-tool.js';
 
 describe('shell command execution', () => {
@@ -305,5 +309,331 @@ describe('shell command argument scope validation', () => {
     if (!result.valid) {
       expect(result.error).toContain('inline script execution');
     }
+  });
+});
+
+describe('shell command risk classification', () => {
+  test('should classify safe read commands as allow', () => {
+    const result = classifyShellCommandRisk('ls', ['-la', './src']);
+
+    expect(result.tier).toBe('allow');
+    expect(result.reason).toBe('low_risk_command');
+  });
+
+  test('should classify destructive in-scope delete commands as hitl_required', () => {
+    const result = classifyShellCommandRisk('rm', ['-rf', './build']);
+
+    expect(result.tier).toBe('hitl_required');
+    expect(result.reason).toContain('destructive_delete');
+  });
+
+  test('should classify catastrophic delete targets as block', () => {
+    const result = classifyShellCommandRisk('rm', ['-rf', '/']);
+
+    expect(result.tier).toBe('block');
+    expect(result.reason).toBe('catastrophic_delete_target');
+  });
+});
+
+vi.mock('../../core/skill-registry.js', () => ({
+  getSkillSourcePath: vi.fn(),
+  getSkills: vi.fn(() => []),
+  syncSkills: vi.fn(),
+  getSkill: vi.fn(),
+  getSkillSourceScope: vi.fn(),
+  getSkillsForSystemPrompt: vi.fn(() => []),
+  clearSkillsForTests: vi.fn(),
+  waitForInitialSkillSync: vi.fn(() => Promise.resolve()),
+  skillRegistry: {},
+}));
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return {
+    ...actual,
+    existsSync: vi.fn(() => false),
+    readdirSync: vi.fn(() => []),
+  };
+});
+
+import { getSkillSourcePath, getSkills } from '../../core/skill-registry.js';
+import { existsSync, readdirSync } from 'fs';
+const mockedGetSkillSourcePath = vi.mocked(getSkillSourcePath);
+const mockedGetSkills = vi.mocked(getSkills);
+const mockedExistsSync = vi.mocked(existsSync);
+const mockedReaddirSync = vi.mocked(readdirSync);
+
+describe('resolveSkillScriptParameters', () => {
+  beforeEach(() => {
+    mockedGetSkillSourcePath.mockReset();
+    mockedGetSkills.mockReset();
+    mockedExistsSync.mockReset();
+    mockedReaddirSync.mockReset();
+    mockedGetSkills.mockReturnValue([]);
+    mockedExistsSync.mockReturnValue(false);
+    mockedReaddirSync.mockReturnValue([] as any);
+  });
+
+  test('should resolve skill-id/scripts/file.py to absolute path when skill exists', () => {
+    mockedGetSkillSourcePath.mockReturnValue('/Users/tester/.agents/skills/music-to-svg/SKILL.md');
+    const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
+      'music-to-svg/scripts/convert.py', '--file', 'input.musicxml'
+    ]);
+    expect(resolvedParameters[0]).toBe('/Users/tester/.agents/skills/music-to-svg/scripts/convert.py');
+    expect(resolvedParameters[1]).toBe('--file');
+    expect(resolvedParameters[2]).toBe('input.musicxml');
+    expect(skillRoots).toEqual(['/Users/tester/.agents/skills/music-to-svg']);
+  });
+
+  test('should leave parameters unchanged when skill is not found', () => {
+    mockedGetSkillSourcePath.mockReturnValue(undefined);
+    const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
+      'unknown-skill/scripts/run.sh'
+    ]);
+    expect(resolvedParameters[0]).toBe('unknown-skill/scripts/run.sh');
+    expect(skillRoots).toEqual([]);
+  });
+
+  test('should resolve non-scripts paths under explicit skill-id prefix', () => {
+    mockedGetSkillSourcePath.mockReturnValue('/home/user/.agents/skills/my-skill/SKILL.md');
+    const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
+      'my-skill/data/file.txt'
+    ]);
+    expect(resolvedParameters[0]).toBe('/home/user/.agents/skills/my-skill/data/file.txt');
+    expect(skillRoots).toEqual(['/home/user/.agents/skills/my-skill']);
+  });
+
+  test('should resolve .agents/skills/<skill-id>/scripts/file.py prefix', () => {
+    mockedGetSkillSourcePath.mockReturnValue('/Users/tester/.agents/skills/music-to-svg/SKILL.md');
+    const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
+      '.agents/skills/music-to-svg/scripts/convert.py', '--file', 'tmp_input.musicxml'
+    ]);
+    expect(resolvedParameters[0]).toBe('/Users/tester/.agents/skills/music-to-svg/scripts/convert.py');
+    expect(resolvedParameters[1]).toBe('--file');
+    expect(resolvedParameters[2]).toBe('tmp_input.musicxml');
+    expect(skillRoots).toEqual(['/Users/tester/.agents/skills/music-to-svg']);
+  });
+
+  test('should resolve skills/<skill-id>/scripts/file.py prefix', () => {
+    mockedGetSkillSourcePath.mockReturnValue('/Users/tester/.agents/skills/pdf-extract/SKILL.md');
+    const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
+      'skills/pdf-extract/scripts/run.sh'
+    ]);
+    expect(resolvedParameters[0]).toBe('/Users/tester/.agents/skills/pdf-extract/scripts/run.sh');
+    expect(skillRoots).toEqual(['/Users/tester/.agents/skills/pdf-extract']);
+  });
+
+  test('should resolve .agents/skills/<skill-id>/non-scripts paths', () => {
+    mockedGetSkillSourcePath.mockReturnValue('/Users/tester/.agents/skills/my-tool/SKILL.md');
+    const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
+      '.agents/skills/my-tool/data/input.json'
+    ]);
+    expect(resolvedParameters[0]).toBe('/Users/tester/.agents/skills/my-tool/data/input.json');
+    expect(skillRoots).toEqual(['/Users/tester/.agents/skills/my-tool']);
+  });
+
+  test('should resolve bare relative path by scanning registered skills', () => {
+    mockedGetSkills.mockReturnValue([
+      { skill_id: 'music-to-svg', description: 'Convert music', hash: 'abc', lastUpdated: '2026-01-01' },
+    ]);
+    mockedGetSkillSourcePath.mockImplementation((skillId) =>
+      skillId === 'music-to-svg'
+        ? '/Users/tester/.agents/skills/music-to-svg/SKILL.md'
+        : undefined
+    );
+    mockedExistsSync.mockImplementation((p) =>
+      String(p) === '/Users/tester/.agents/skills/music-to-svg/scripts/convert.py'
+    );
+    const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
+      'scripts/convert.py', '--file', 'input.musicxml'
+    ], undefined, { allowBareScriptsResolution: true });
+    expect(resolvedParameters[0]).toBe('/Users/tester/.agents/skills/music-to-svg/scripts/convert.py');
+    expect(resolvedParameters[1]).toBe('--file');
+    expect(resolvedParameters[2]).toBe('input.musicxml');
+    expect(skillRoots).toEqual(['/Users/tester/.agents/skills/music-to-svg']);
+  });
+
+  test('should leave bare relative path unchanged when no skill has that file', () => {
+    mockedGetSkills.mockReturnValue([
+      { skill_id: 'other-skill', description: 'Other', hash: 'def', lastUpdated: '2026-01-01' },
+    ]);
+    mockedGetSkillSourcePath.mockImplementation((skillId) =>
+      skillId === 'other-skill'
+        ? '/Users/tester/.agents/skills/other-skill/SKILL.md'
+        : undefined
+    );
+    mockedExistsSync.mockReturnValue(false);
+    const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
+      'scripts/convert.py'
+    ], undefined, { allowBareScriptsResolution: true });
+    expect(resolvedParameters[0]).toBe('scripts/convert.py');
+    expect(skillRoots).toEqual([]);
+  });
+
+  test('should resolve bare relative path from runtime directory skillsRoot', () => {
+    mockedGetSkills.mockReturnValue([]);
+    mockedReaddirSync.mockReturnValue([
+      {
+        name: 'music-to-svg',
+        isDirectory: () => true,
+      },
+    ] as any);
+    mockedExistsSync.mockImplementation((p) =>
+      String(p) === '/Users/esun/Documents/Projects/test-agent-world/.agents/skills'
+      || String(p) === '/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg/convert.py'
+    );
+
+    const { resolvedParameters, skillRoots } = resolveSkillScriptParameters(
+      ['scripts/convert.py', '--file', 'input_music.xml'],
+      '/Users/esun/Documents/Projects/test-agent-world/.agents/skills',
+      { allowBareScriptsResolution: true },
+    );
+
+    expect(resolvedParameters[0]).toBe('/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg/convert.py');
+    expect(resolvedParameters[1]).toBe('--file');
+    expect(resolvedParameters[2]).toBe('input_music.xml');
+    expect(skillRoots).toEqual(['/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg']);
+  });
+
+  test('should resolve bare relative path when skill folder is a symlink', () => {
+    mockedGetSkills.mockReturnValue([]);
+    mockedReaddirSync.mockReturnValue([
+      {
+        name: 'music-to-svg',
+        isDirectory: () => false,
+        isSymbolicLink: () => true,
+      },
+    ] as any);
+    mockedExistsSync.mockImplementation((p) =>
+      String(p) === '/Users/esun/Documents/Projects/test-agent-world/.agents/skills'
+      || String(p) === '/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg/convert.py'
+    );
+
+    const { resolvedParameters, skillRoots } = resolveSkillScriptParameters(
+      ['scripts/convert.py'],
+      '/Users/esun/Documents/Projects/test-agent-world/.agents/skills',
+      { allowBareScriptsResolution: true },
+    );
+
+    expect(resolvedParameters[0]).toBe('/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg/convert.py');
+    expect(skillRoots).toEqual(['/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg']);
+  });
+
+  test('should keep bare relative path unchanged when request is not skill-originated', () => {
+    mockedGetSkills.mockReturnValue([
+      { skill_id: 'music-to-svg', description: 'Convert music', hash: 'abc', lastUpdated: '2026-01-01' },
+    ]);
+    mockedGetSkillSourcePath.mockImplementation((skillId) =>
+      skillId === 'music-to-svg'
+        ? '/Users/tester/.agents/skills/music-to-svg/SKILL.md'
+        : undefined
+    );
+    mockedExistsSync.mockReturnValue(true);
+
+    const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
+      'scripts/convert.py', '--file', 'input.musicxml'
+    ]);
+
+    expect(resolvedParameters[0]).toBe('scripts/convert.py');
+    expect(resolvedParameters[1]).toBe('--file');
+    expect(resolvedParameters[2]).toBe('input.musicxml');
+    expect(skillRoots).toEqual([]);
+  });
+
+  test('should not treat dot-prefixed relative paths as skill-id paths', () => {
+    mockedGetSkills.mockReturnValue([
+      { skill_id: 'music-to-svg', description: 'Convert music', hash: 'abc', lastUpdated: '2026-01-01' },
+    ]);
+    mockedGetSkillSourcePath.mockImplementation((skillId) =>
+      skillId === 'music-to-svg'
+        ? '/Users/tester/.agents/skills/music-to-svg/SKILL.md'
+        : undefined
+    );
+    mockedExistsSync.mockReturnValue(true);
+
+    const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
+      './../../etc',
+      './this-directory-does-not-exist-xyz',
+      '../outside'
+    ]);
+
+    expect(resolvedParameters).toEqual([
+      './../../etc',
+      './this-directory-does-not-exist-xyz',
+      '../outside'
+    ]);
+    expect(skillRoots).toEqual([]);
+  });
+
+  test('should not treat option-like tokens with slashes as skill-id paths', () => {
+    mockedGetSkills.mockReturnValue([
+      { skill_id: 'music-to-svg', description: 'Convert music', hash: 'abc', lastUpdated: '2026-01-01' },
+    ]);
+    mockedGetSkillSourcePath.mockImplementation((skillId) =>
+      skillId === 'music-to-svg'
+        ? '/Users/tester/.agents/skills/music-to-svg/SKILL.md'
+        : undefined
+    );
+    mockedExistsSync.mockReturnValue(true);
+
+    const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
+      '--output=/tmp/outside',
+      '-I/tmp/include',
+      '-L/opt/lib'
+    ]);
+
+    expect(resolvedParameters).toEqual([
+      '--output=/tmp/outside',
+      '-I/tmp/include',
+      '-L/opt/lib'
+    ]);
+    expect(skillRoots).toEqual([]);
+  });
+
+  test('should resolve non-scripts folder path with generic prefix fallback', () => {
+    mockedGetSkills.mockReturnValue([]);
+    mockedReaddirSync.mockReturnValue([
+      {
+        name: 'music-to-svg',
+        isDirectory: () => true,
+      },
+    ] as any);
+    mockedExistsSync.mockImplementation((p) =>
+      String(p) === '/Users/esun/Documents/Projects/test-agent-world/.agents/skills'
+      || String(p) === '/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg/convert.py'
+    );
+
+    const { resolvedParameters, skillRoots } = resolveSkillScriptParameters(
+      ['tools/convert.py', '--file', 'input_music.xml'],
+      '/Users/esun/Documents/Projects/test-agent-world/.agents/skills',
+      { allowBareScriptsResolution: true },
+    );
+
+    expect(resolvedParameters[0]).toBe('/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg/convert.py');
+    expect(resolvedParameters[1]).toBe('--file');
+    expect(resolvedParameters[2]).toBe('input_music.xml');
+    expect(skillRoots).toEqual(['/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg']);
+  });
+});
+
+describe('validateShellCommandScope with additional trusted roots', () => {
+  test('should accept skill root paths via additionalTrustedRoots', () => {
+    const result = validateShellCommandScope(
+      'python3',
+      ['/home/user/.agents/skills/music-to-svg/scripts/convert.py'],
+      '/projects/myapp',
+      ['/home/user/.agents/skills/music-to-svg']
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  test('should reject unknown paths not in trusted roots or working dir', () => {
+    const result = validateShellCommandScope(
+      'python3',
+      ['/etc/secret/file.py'],
+      '/projects/myapp',
+      ['/home/user/.agents/skills/music-to-svg']
+    );
+    expect(result.valid).toBe(false);
   });
 });

@@ -6,6 +6,7 @@
  * - shell_cmd tool availability in all worlds
  * - load_skill built-in tool availability in all worlds
  * - create_agent built-in tool availability in all worlds
+ * - web_fetch built-in tool availability in all worlds
  * - read_file/list_files/grep built-in tool availability in all worlds
  * - Tool schema and parameter validation
  * - Command execution through tool interface
@@ -17,6 +18,7 @@
  * - Executes real local shell commands and validates formatted tool output.
  * 
  * Changes:
+ * - 2026-02-28: Added risk-gating integration coverage for blocked catastrophic operations and approval-required high-risk commands without HITL context.
  * - 2026-02-21: Added `list_files` bounding/filtering coverage (`maxEntries`, `includePattern`) to prevent oversized tool results from inflating continuation tokens.
  * - 2026-02-21: Added LLM minimal-result mode coverage for `shell_cmd` (status-only result contract).
  * - 2026-02-20: Added assertion that built-in `create_agent` is registered alongside other always-on tools.
@@ -74,6 +76,11 @@ describe('shell_cmd integration with worlds', () => {
     expect(tools.create_agent.parameters).toBeDefined();
     expect(tools.create_agent.execute).toBeInstanceOf(Function);
 
+    expect(tools).toHaveProperty('web_fetch');
+    expect(tools.web_fetch).toBeDefined();
+    expect(tools.web_fetch.parameters).toBeDefined();
+    expect(tools.web_fetch.execute).toBeInstanceOf(Function);
+
     expect(tools).toHaveProperty('read_file');
     expect(tools.read_file).toBeDefined();
     expect(tools.read_file.parameters).toBeDefined();
@@ -89,9 +96,7 @@ describe('shell_cmd integration with worlds', () => {
     expect(tools.grep.parameters).toBeDefined();
     expect(tools.grep.execute).toBeInstanceOf(Function);
 
-    // Backward compatibility alias
-    expect(tools).toHaveProperty('grep_search');
-    expect(tools.grep_search).toBeDefined();
+    expect(tools).not.toHaveProperty('grep_search');
   });
 
   test('should execute read_file, list_files, and grep tools through tool interface', async () => {
@@ -480,6 +485,40 @@ describe('shell_cmd integration with worlds', () => {
     expect(result).not.toContain('### Standard Output');
   });
 
+  test('should redact image data-uri stdout in llm smart mode', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    const tempRoot = await mkdtemp(path.join(tmpdir(), 'shell-smart-redact-'));
+    const payloadFile = path.join(tempRoot, 'payload.txt');
+    await writeFile(payloadFile, '![score](data:image/svg+xml;base64,AAAABBBBCCCCDDDDEEEE)', 'utf8');
+
+    let result = '';
+    try {
+      result = await shellCmdTool.execute(
+        {
+          command: 'cat',
+          parameters: ['payload.txt']
+        },
+        undefined,
+        undefined,
+        {
+          llmResultMode: 'smart',
+          world: {
+            id: worldId(),
+            variables: `working_directory=${tempRoot}`
+          },
+          workingDirectory: tempRoot,
+        }
+      );
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+
+    expect(result).toContain('stdout omitted from LLM context');
+    expect(result).not.toContain('data:image/svg+xml;base64,AAAABBBBCCCCDDDDEEEE');
+  });
+
   test('should stream stdout as assistant message, stream stderr as tool-stream, and persist only finalized stdout', async () => {
     const tools = await getMCPToolsForWorld(worldId());
     const shellCmdTool = tools.shell_cmd;
@@ -691,6 +730,47 @@ describe('shell_cmd integration with worlds', () => {
         }
       )
     ).rejects.toThrow('inline script execution');
+  });
+
+  test('should block catastrophic destructive shell operations', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    await expect(
+      shellCmdTool.execute(
+        {
+          command: 'rm',
+          parameters: ['--no-preserve-root', '-rf', './build']
+        },
+        undefined,
+        undefined,
+        {
+          world: {
+            id: worldId(),
+            variables: 'working_directory=/tmp'
+          }
+        }
+      )
+    ).rejects.toThrow('Blocked dangerous operation');
+  });
+
+  test('should reject high-risk commands when HITL context is unavailable', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    await expect(
+      shellCmdTool.execute(
+        {
+          command: 'rm',
+          parameters: ['-rf', './build']
+        },
+        undefined,
+        undefined,
+        {
+          workingDirectory: '/tmp/project'
+        }
+      )
+    ).rejects.toThrow('Approval required');
   });
 
   test('should use core default working directory when directory is unresolved', async () => {

@@ -37,6 +37,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-28: Added canonical `turn.trace` diagnostics around per-message processing lifecycle.
  * - 2026-02-27: Passed explicit `chatId` when publishing `tool-execution` system events so event routing never falls back to `world.currentChatId`.
  * - 2026-02-27: Seeded continuation runs with already-loaded `load_skill` IDs from initial tool execution so immediate duplicate `load_skill` calls are suppressed in continuation.
  * - 2026-02-21: Passed `agentName` + minimal shell `llmResultMode` in initial tool-execution context so `shell_cmd` tool results stay status-only for LLM continuation and stdout assistant attribution remains consistent.
@@ -110,6 +111,7 @@ import { logToolBridge, getToolResultPreview } from './tool-bridge-logging.js';
 const loggerAgent = createCategoryLogger('agent');
 const loggerResponse = createCategoryLogger('response');
 const loggerTurnLimit = createCategoryLogger('turnlimit');
+const loggerTurnTrace = createCategoryLogger('turn.trace');
 
 type DisplayToolCall = {
   id: string;
@@ -422,6 +424,19 @@ export async function processAgentMessage(
 ): Promise<void> {
   // Derive target chatId before activity begins so it is captured in per-chat tracking
   const targetChatId = messageEvent.chatId ?? world.currentChatId ?? null;
+  const turnId = messageEvent.messageId || generateId();
+  const turnStartMs = Date.now();
+  let turnStatus: 'completed' | 'canceled' | 'failed' = 'completed';
+
+  loggerTurnTrace.debug('Turn processing started', {
+    worldId: world.id,
+    chatId: targetChatId,
+    agentId: agent.id,
+    messageId: messageEvent.messageId,
+    turnId,
+    sender: messageEvent.sender,
+  });
+
   const completeActivity = beginWorldActivity(world, `agent:${agent.id}`, targetChatId ?? undefined);
   let processingHandle: ReturnType<typeof beginChatMessageProcessing> | null = null;
   try {
@@ -1042,6 +1057,7 @@ export async function processAgentMessage(
     }
   } catch (error) {
     if (isMessageProcessingCanceledError(error) || processingHandle?.isStopped()) {
+      turnStatus = 'canceled';
       loggerAgent.info('Agent message processing canceled', {
         agentId: agent.id,
         chatId: messageEvent.chatId ?? world.currentChatId ?? null,
@@ -1050,6 +1066,7 @@ export async function processAgentMessage(
       return;
     }
 
+    turnStatus = 'failed';
     loggerAgent.error('Error processing agent message', {
       agentId: agent.id,
       error: error instanceof Error ? error.message : String(error),
@@ -1057,6 +1074,15 @@ export async function processAgentMessage(
     });
     throw error;
   } finally {
+    loggerTurnTrace.debug('Turn processing completed', {
+      worldId: world.id,
+      chatId: targetChatId,
+      agentId: agent.id,
+      messageId: messageEvent.messageId,
+      turnId,
+      status: turnStatus,
+      durationMs: Date.now() - turnStartMs,
+    });
     processingHandle?.complete();
     completeActivity();
   }

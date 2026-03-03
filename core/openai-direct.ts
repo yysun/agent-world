@@ -27,6 +27,7 @@
  * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
+ * - 2026-02-28: Added canonical `llm.openai` category emission while preserving legacy `openai` logs during migration.
  * - 2026-02-27: Normalized overlong tool-call IDs to OpenAI's 40-char limit and preserved assistant/tool ID linkage in outbound message conversion.
  * - 2026-02-16: Fixed streaming tool-call chunk merge to preserve delayed tool `id`/`name` fields across deltas.
  * - 2026-02-13: Added abort-signal support for streaming and non-streaming calls to enable chat stop cancellation.
@@ -47,7 +48,30 @@ import { getLLMProviderConfig, OpenAIConfig, AzureConfig, OpenAICompatibleConfig
 import { createCategoryLogger } from './logger.js';
 import { generateFallbackId } from './tool-utils.js';
 
-const logger = createCategoryLogger('openai');
+const loggerCanonical = createCategoryLogger('llm.openai');
+const loggerLegacy = createCategoryLogger('openai');
+const logger = {
+  trace: (msg: any, ...args: any[]) => {
+    loggerCanonical.trace(msg, ...args);
+    loggerLegacy.trace(msg, ...args);
+  },
+  debug: (msg: any, ...args: any[]) => {
+    loggerCanonical.debug(msg, ...args);
+    loggerLegacy.debug(msg, ...args);
+  },
+  info: (msg: any, ...args: any[]) => {
+    loggerCanonical.info(msg, ...args);
+    loggerLegacy.info(msg, ...args);
+  },
+  warn: (msg: any, ...args: any[]) => {
+    loggerCanonical.warn(msg, ...args);
+    loggerLegacy.warn(msg, ...args);
+  },
+  error: (msg: any, ...args: any[]) => {
+    loggerCanonical.error(msg, ...args);
+    loggerLegacy.error(msg, ...args);
+  },
+};
 const mcpLogger = createCategoryLogger('mcp.execution');
 const OPENAI_TOOL_CALL_ID_MAX_LENGTH = 40;
 

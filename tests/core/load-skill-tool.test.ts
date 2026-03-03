@@ -16,6 +16,8 @@
  * - Uses mocked in-memory fs APIs only (no filesystem access)
  *
  * Recent changes:
+ * - 2026-03-01: Removed minimal-check mode assertions and updated coverage so load_skill always performs script/reference preflight.
+ * - 2026-03-01: Added assertions for acknowledgment-first execution directive steps and regression coverage for empty-description fallback to skill ID.
  * - 2026-02-24: Updated coverage: non-zero exits surface as informational output (not blocking errors).
  * - 2026-02-24: Updated coverage to verify skill scripts execute with cwd = skill root directory (not project cwd).
  * - 2026-02-14: Added coverage ensuring SKILL.md YAML front matter is stripped from injected `<instructions>`.
@@ -27,7 +29,11 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fsModule from 'fs';
-import { createLoadSkillToolDefinition } from '../../core/load-skill-tool.js';
+import {
+  clearChatSkillApprovals,
+  createLoadSkillToolDefinition,
+  reconstructSkillApprovalsFromMessages,
+} from '../../core/load-skill-tool.js';
 import { requestWorldOption } from '../../core/hitl.js';
 import {
   executeShellCommand,
@@ -136,6 +142,7 @@ describe('core/load-skill-tool', () => {
     delete process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS;
     delete process.env.AGENT_WORLD_DISABLED_GLOBAL_SKILLS;
     delete process.env.AGENT_WORLD_DISABLED_PROJECT_SKILLS;
+    delete process.env.AGENT_WORLD_LOAD_SKILL_MINIMAL_CHECK_MODE;
   });
 
   it('returns skill context with full SKILL.md content when skill exists', async () => {
@@ -158,6 +165,29 @@ describe('core/load-skill-tool', () => {
     expect(result).toContain('# PDF Extraction Instructions');
     expect(result).toContain('<execution_directive>');
     expect(result).toContain('specialized pdf-extract protocol');
+    expect(result).toContain('Skill purpose: Extract PDF content');
+    expect(result).toContain('1. Acknowledge which skill was loaded and apply it directly to the user request.');
+    expect(result).toContain('4. Execute required steps directly; avoid unnecessary planning narration unless the user explicitly asks for a plan.');
+    expect(result).toContain('5. Keep tool-related assistant text concise and result-focused.');
+    expect(result).not.toContain('first provide a brief intent statement');
+    expect(result).not.toContain('If the workflow is multi-step');
+    expect(result).not.toContain('After each significant step, briefly confirm what was completed and what comes next.');
+  });
+
+  it('falls back to skill id when skill description is empty in execution directive', async () => {
+    mockedGetSkill.mockReturnValue({
+      skill_id: 'pdf-extract',
+      description: '   ',
+      hash: 'e99a18ad',
+      lastUpdated: '2026-02-14T12:00:00.000Z',
+    });
+    mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
+    vi.mocked(fs.readFile).mockResolvedValue('# PDF Extraction Instructions\n1. Use tool X...\n' as any);
+
+    const tool = createLoadSkillToolDefinition();
+    const result = await tool.execute({ skill_id: 'pdf-extract' });
+
+    expect(result).toContain('Skill purpose: pdf-extract');
   });
 
   it('returns structured not-found output when skill id does not exist', async () => {
@@ -277,6 +307,94 @@ describe('core/load-skill-tool', () => {
     expect(result).toContain('<active_resources>');
     expect(result).toContain('<script_output source="scripts/build.sh">');
     expect(result).toContain('formatted script output');
+    expect(result).toContain('<reference_files>');
+    expect(mockedFormatResultForLLM).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs preflight checks when env var is unset', async () => {
+    delete process.env.AGENT_WORLD_LOAD_SKILL_MINIMAL_CHECK_MODE;
+    mockedGetSkill.mockReturnValue({
+      skill_id: 'pdf-extract',
+      description: 'Extract PDF content',
+      hash: 'e99a18ad',
+      lastUpdated: '2026-02-14T12:00:00.000Z',
+    });
+    mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
+    vi.mocked(fs.readFile).mockResolvedValue([
+      '# PDF Extraction Instructions',
+      'Run this command before processing: bash scripts/build.sh',
+    ].join('\n') as any);
+    vi.mocked((fs as any).stat).mockImplementation(async (targetPath: string) => {
+      if (String(targetPath).endsWith('/skills/pdf-extract/scripts/build.sh')) {
+        return { isFile: () => true, isDirectory: () => false };
+      }
+      throw new Error('ENOENT');
+    });
+
+    const tool = createLoadSkillToolDefinition();
+    const result = await tool.execute(
+      { skill_id: 'pdf-extract' },
+      undefined,
+      undefined,
+      {
+        world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+        chatId: 'chat-1',
+        workingDirectory: '/skills/pdf-extract',
+      },
+    );
+
+    expect(result).toContain('<active_resources>');
+    expect(result).toContain('<reference_files>');
+    expect(result).toContain('formatted script output');
+    expect(result).not.toContain('Skill preflight checks for script/data files are disabled in this mode.');
+    expect(result).toContain('skill root: /skills/pdf-extract');
+    expect(mockedExecuteShellCommand).toHaveBeenCalledTimes(1);
+    expect(mockedValidateShellCommandScope).toHaveBeenCalledTimes(1);
+    expect(vi.mocked((fs as any).stat)).toHaveBeenCalled();
+    expect(mockedFormatResultForLLM).toHaveBeenCalledTimes(1);
+    expect(vi.mocked((fs as any).readdir)).not.toHaveBeenCalled();
+  });
+
+  it('ignores deprecated minimal-mode env flag and still runs preflight checks', async () => {
+    process.env.AGENT_WORLD_LOAD_SKILL_MINIMAL_CHECK_MODE = 'true';
+    mockedGetSkill.mockReturnValue({
+      skill_id: 'pdf-extract',
+      description: 'Extract PDF content',
+      hash: 'e99a18ad',
+      lastUpdated: '2026-02-14T12:00:00.000Z',
+    });
+    mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
+    vi.mocked(fs.readFile).mockResolvedValue([
+      '# PDF Extraction Instructions',
+      'Run `scripts/build.sh` before processing.',
+    ].join('\n') as any);
+    vi.mocked((fs as any).stat).mockImplementation(async (targetPath: string) => {
+      if (String(targetPath).endsWith('/skills/pdf-extract/scripts/build.sh')) {
+        return { isFile: () => true, isDirectory: () => false };
+      }
+      throw new Error('ENOENT');
+    });
+
+    const tool = createLoadSkillToolDefinition();
+    const result = await tool.execute(
+      { skill_id: 'pdf-extract' },
+      undefined,
+      undefined,
+      {
+        world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+        chatId: 'chat-1',
+        workingDirectory: '/skills/pdf-extract',
+      },
+    );
+
+    expect(result).toContain('<active_resources>');
+    expect(result).toContain('<reference_files>');
+    expect(result).not.toContain('Skill preflight checks for script/data files are disabled in this mode.');
+    expect(mockedExecuteShellCommand).toHaveBeenCalledTimes(1);
+    expect(mockedValidateShellCommandScope).toHaveBeenCalledTimes(1);
+    expect(vi.mocked((fs as any).stat)).toHaveBeenCalled();
+    expect(mockedFormatResultForLLM).toHaveBeenCalledTimes(1);
+    expect(vi.mocked((fs as any).readdir)).not.toHaveBeenCalled();
   });
 
   it('surfaces non-zero script exits as informational output without blocking skill load', async () => {
@@ -714,6 +832,63 @@ describe('core/load-skill-tool', () => {
     expect(secondResult).toContain('<skill_context id="skill-installer">');
     expect(secondResult).toContain('<instructions>');
     expect(mockedRequestWorldOption).toHaveBeenCalledTimes(2);
+  });
+
+  it('reuses reconstructed yes_in_session approval after cache reset (restart simulation)', async () => {
+    mockedGetSkill.mockReturnValue({
+      skill_id: 'skill-installer',
+      description: 'Install skills',
+      hash: 'abc123',
+      lastUpdated: '2026-02-28T12:00:00.000Z',
+    });
+    mockedGetSkillSourcePath.mockReturnValue('/skills/skill-installer/SKILL.md');
+    vi.mocked(fs.readFile).mockResolvedValue('# Skill Installer\nUse installer flow.' as any);
+    mockedRequestWorldOption.mockResolvedValue({
+      worldId: 'world-1',
+      requestId: 'load_skill_approval::req-session-approve',
+      chatId: 'chat-1',
+      optionId: 'yes_in_session',
+      source: 'user',
+    });
+
+    const messages: Array<Record<string, unknown>> = [{
+      role: 'user',
+      content: 'install it',
+      chatId: 'chat-1',
+      messageId: 'user-turn-session-1',
+      createdAt: new Date('2026-02-28T12:00:00.000Z'),
+    }];
+
+    const context = {
+      world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+      chatId: 'chat-1',
+      messages,
+      agentName: 'a1',
+      toolCallId: 'load-skill-call-session',
+    };
+
+    const tool = createLoadSkillToolDefinition();
+    const firstResult = await tool.execute({ skill_id: 'skill-installer' }, undefined, undefined, context);
+    expect(firstResult).toContain('<skill_context id="skill-installer">');
+    expect(mockedRequestWorldOption).toHaveBeenCalledTimes(1);
+
+    // Simulate app restart by clearing process-local caches, then rebuilding from persisted messages.
+    clearChatSkillApprovals('world-1', 'chat-1');
+    const restored = reconstructSkillApprovalsFromMessages('world-1', 'chat-1', messages as Array<Record<string, any>>);
+    expect(restored).toBeGreaterThan(0);
+
+    // Move to a new user turn so run-scoped result caching cannot suppress the second request.
+    messages.push({
+      role: 'user',
+      content: 'run it again in this chat',
+      chatId: 'chat-1',
+      messageId: 'user-turn-session-2',
+      createdAt: new Date('2026-02-28T12:01:00.000Z'),
+    });
+
+    const secondResult = await tool.execute({ skill_id: 'skill-installer' }, undefined, undefined, context);
+    expect(secondResult).toContain('<skill_context id="skill-installer">');
+    expect(mockedRequestWorldOption).toHaveBeenCalledTimes(1);
   });
 
 });

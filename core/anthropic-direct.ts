@@ -19,6 +19,7 @@
  * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
+ * - 2026-02-28: Added canonical `llm.anthropic` category emission while preserving legacy `anthropic` logs during migration.
  * - 2026-02-13: Added abort-signal support for streaming and non-streaming calls to enable chat stop cancellation.
  * - 2025-11-09: Phase 3 - Removed ALL tool execution logic (~200 lines)
  * - Provider is now a pure client - only API calls and data transformation
@@ -34,7 +35,30 @@ import { World, Agent, ChatMessage, LLMResponse } from './types.js';
 import { getLLMProviderConfig, AnthropicConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
 
-const logger = createCategoryLogger('anthropic');
+const loggerCanonical = createCategoryLogger('llm.anthropic');
+const loggerLegacy = createCategoryLogger('anthropic');
+const logger = {
+  trace: (msg: any, ...args: any[]) => {
+    loggerCanonical.trace(msg, ...args);
+    loggerLegacy.trace(msg, ...args);
+  },
+  debug: (msg: any, ...args: any[]) => {
+    loggerCanonical.debug(msg, ...args);
+    loggerLegacy.debug(msg, ...args);
+  },
+  info: (msg: any, ...args: any[]) => {
+    loggerCanonical.info(msg, ...args);
+    loggerLegacy.info(msg, ...args);
+  },
+  warn: (msg: any, ...args: any[]) => {
+    loggerCanonical.warn(msg, ...args);
+    loggerLegacy.warn(msg, ...args);
+  },
+  error: (msg: any, ...args: any[]) => {
+    loggerCanonical.error(msg, ...args);
+    loggerLegacy.error(msg, ...args);
+  },
+};
 const mcpLogger = createCategoryLogger('mcp.execution');
 
 /**

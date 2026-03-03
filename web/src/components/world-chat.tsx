@@ -12,6 +12,8 @@
  * - Message body rendering is delegated to domain helpers to keep this file focused on view composition.
  *
  * Summary of Recent Changes:
+ * - 2026-03-01: Moved message timestamps to top metadata row (sender + time) to match Electron layout.
+ * - 2026-03-01: Suppressed `...` streaming placeholder transcript rows so waiting state only shows inline working status until real stream content arrives.
  * - 2026-02-28: Switched chat-row suppression to shared domain visibility rules and hide assistant HITL tool-call placeholder rows.
  * - 2026-02-21: Wired `Project` button to web project-folder selection flow and dynamic folder tooltip text.
  * - 2026-02-21: Matched web composer toolbar structure to Electron (plus icon + project pill + round arrow action).
@@ -25,6 +27,7 @@ import toKebabCase from '../utils/toKebabCase';
 import { SenderType, getSenderType } from '../utils/sender-type.js';
 import { shouldHideWorldChatMessage } from '../domain/message-visibility';
 import { isToolResultMessage, renderMessageContent } from '../domain/message-content';
+import { buildCombinedRenderableMessages } from '../domain/tool-merge';
 import { ActivityPulse, ElapsedTimeCounter } from './activity-indicators';
 import { AgentQueueDisplay } from './agent-queue-display';
 
@@ -37,6 +40,49 @@ export interface ComposerActionState {
   actionButtonDisabled: boolean;
   actionButtonClass: string;
   actionButtonLabel: string;
+}
+
+export interface WaitingMessageUiConfig {
+  showWaitingAvatar: boolean;
+  reserveWaitingAvatarSpace: boolean;
+  hideStreamingPlaceholderMessage: boolean;
+  showStreamingRespondingIndicator: boolean;
+}
+
+export interface MessageMetaUiConfig {
+  timestampPlacement: 'top';
+}
+
+export function getWaitingMessageUiConfig(): WaitingMessageUiConfig {
+  return {
+    showWaitingAvatar: false,
+    reserveWaitingAvatarSpace: true,
+    hideStreamingPlaceholderMessage: true,
+    showStreamingRespondingIndicator: false,
+  };
+}
+
+export function getMessageMetaUiConfig(): MessageMetaUiConfig {
+  return {
+    timestampPlacement: 'top',
+  };
+}
+
+export function formatMessageTimestamp(createdAt: Message['createdAt'] | undefined): string {
+  if (!createdAt) {
+    return 'Now';
+  }
+
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) {
+    return 'Now';
+  }
+
+  return date.toLocaleTimeString();
+}
+
+export function isStreamingPlaceholderMessage(message: Message): boolean {
+  return Boolean(message?.isStreaming) && String(message?.text || '').trim() === '...';
 }
 
 export function isBranchableAgentMessage(message: Message): boolean {
@@ -137,6 +183,8 @@ export default function WorldChat(props: WorldChatProps) {
     ? `Project folder: ${selectedProjectPath}`
     : 'Select project folder for context';
   const waitingAgentName = activeAgent?.name?.trim() || agents[0]?.name?.trim() || 'Agent';
+  const waitingMessageUiConfig = getWaitingMessageUiConfig();
+  const messageMetaUiConfig = getMessageMetaUiConfig();
   const agentSpriteByName = new Map<string, number>();
   const agentSpriteById = new Map<string, number>();
 
@@ -233,6 +281,8 @@ export default function WorldChat(props: WorldChatProps) {
     })()
     : messages;  // No filters = use pre-deduplicated messages
 
+  const renderableMessages = buildCombinedRenderableMessages(filteredMessages);
+
   const getMessageRowAlignmentClass = (senderType: SenderType, isCrossAgentMessage: boolean): string => {
     if (senderType === SenderType.HUMAN || isCrossAgentMessage) {
       return 'message-row-left';
@@ -303,47 +353,14 @@ export default function WorldChat(props: WorldChatProps) {
           ) : filteredMessages.length === 0 ? (
             <div className="no-messages">No messages yet. Start a conversation!</div>
           ) : (
-            filteredMessages.map((message, index) => {
-              // Skip messages that should be hidden (internal tool result messages)
-              if (shouldHideWorldChatMessage(message)) {
+            renderableMessages.map((message, index) => {
+              if (waitingMessageUiConfig.hideStreamingPlaceholderMessage && isStreamingPlaceholderMessage(message)) {
                 return null;
               }
 
-              // Render log events (server logs)
-              if (message.logEvent) {
-                const isExpanded = !!message.isLogExpanded;
-                const logSummaryText = String(message.text || message.logEvent.message || '').trim() || 'Log event';
-                let formattedArgs: string | null = null;
-                if (message.logEvent.data !== undefined) {
-                  try {
-                    formattedArgs = JSON.stringify(message.logEvent.data, null, 2);
-                  } catch (error) {
-                    formattedArgs = String(message.logEvent.data);
-                  }
-                }
-
-                return (
-                  <div key={message.id || 'log-' + index} className="log-message">
-                    <button
-                      type="button"
-                      className="log-header"
-                      aria-expanded={isExpanded}
-                      $onclick={['toggle-log-details', message.id || `log-${index}`]}
-                    >
-                      <span className={`log-dot ${message.logEvent.level}`}></span>
-                      <span className="log-category">{message.logEvent.category}</span>
-                      <span className="log-content">{logSummaryText}</span>
-                      <span className="log-toggle-icon" aria-hidden="true">
-                        {isExpanded ? '▲' : '▼'}
-                      </span>
-                    </button>
-                    {isExpanded && (
-                      <pre className="log-details">
-                        {formattedArgs ?? 'No additional details'}
-                      </pre>
-                    )}
-                  </div>
-                );
+              // Skip messages that should be hidden (internal tool result messages)
+              if (shouldHideWorldChatMessage(message)) {
+                return null;
               }
 
               // Render world events (system and world)
@@ -404,6 +421,7 @@ export default function WorldChat(props: WorldChatProps) {
               const isHumanAvatar = senderType === SenderType.HUMAN;
               const avatarSpriteIndex = getMessageAvatarSpriteIndex(message);
               const avatarTitle = senderType === SenderType.HUMAN ? 'HUMAN' : message.sender || 'Agent';
+              const hideAvatarForStreamingRow = Boolean(message.isStreaming) && !waitingMessageUiConfig.showWaitingAvatar;
 
               const isUserMessage = senderType === SenderType.HUMAN;
               const isEditing = editingMessageId === message.id;
@@ -456,12 +474,21 @@ export default function WorldChat(props: WorldChatProps) {
 
               return (
                 <div key={message.id || 'msg-' + index} className={`message-row ${rowAlignmentClass}`}>
-                  <div className="message-avatar-container" title={avatarTitle}>
-                    <div className={isHumanAvatar ? 'message-avatar message-avatar-empty' : `message-avatar agent-sprite sprite-${avatarSpriteIndex}`}></div>
-                  </div>
+                  {!hideAvatarForStreamingRow && (
+                    <div className="message-avatar-container" title={avatarTitle}>
+                      <div className={isHumanAvatar ? 'message-avatar message-avatar-empty' : `message-avatar agent-sprite sprite-${avatarSpriteIndex}`}></div>
+                    </div>
+                  )}
                   <div className={messageClasses}>
-                    <div className="message-sender" style={{ whiteSpace: 'pre-line' }}>
-                      {displayLabel}
+                    <div className="message-meta">
+                      <div className="message-sender" style={{ whiteSpace: 'pre-line' }}>
+                        {displayLabel}
+                      </div>
+                      {messageMetaUiConfig.timestampPlacement === 'top' && (
+                        <div className="message-timestamp message-timestamp-top">
+                          {formatMessageTimestamp(message.createdAt)}
+                        </div>
+                      )}
                     </div>
                     {isEditing ? (
                       <div className="message-edit-container">
@@ -522,10 +549,7 @@ export default function WorldChat(props: WorldChatProps) {
                         )}
                       </>
                     )}
-                    <div className="message-timestamp">
-                      {message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : 'Now'}
-                    </div>
-                    {message.isStreaming && (
+                    {message.isStreaming && waitingMessageUiConfig.showStreamingRespondingIndicator && (
                       <div className="streaming-indicator">
                         <div className="streaming-content">
                           <div className={`agent-sprite sprite-${activeAgent?.spriteIndex ?? 0}`}></div>
@@ -551,9 +575,14 @@ export default function WorldChat(props: WorldChatProps) {
           {/* Show waiting dots when processing */}
           {isWaiting && (
             <div className="message-row message-row-left">
-              <div className="message-avatar-container" title="HUMAN">
-                <div className="message-avatar message-avatar-empty"></div>
-              </div>
+              {waitingMessageUiConfig.showWaitingAvatar && (
+                <div className="message-avatar-container" title="HUMAN">
+                  <div className="message-avatar message-avatar-empty"></div>
+                </div>
+              )}
+              {!waitingMessageUiConfig.showWaitingAvatar && waitingMessageUiConfig.reserveWaitingAvatarSpace && (
+                <div className="message-avatar-container waiting-avatar-spacer" aria-hidden="true"></div>
+              )}
               <div className="message user-message waiting-message">
                 <div className="message-content">
                   <div className="waiting-inline-status">

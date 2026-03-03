@@ -11,6 +11,7 @@
  * - Uses in-memory event storage to emulate persisted system/CRUD events.
  *
  * Recent Changes:
+ * - 2026-02-28: Added regression coverage for title-reset rollback when edit resubmission publish fails after auto-title reset.
  * - 2026-02-19: Updated title-reset coverage to use persisted chat CRUD update events.
  * - 2026-02-14: Updated edit-message expectations for core-managed clear+resend behavior that no longer gates resubmission on `world.currentChatId`.
  * - 2026-02-13: Added coverage for core-managed edit resubmission title reset based on persisted `chat-title-updated` events.
@@ -388,6 +389,60 @@ describe('Message Edit Feature', () => {
       expect(result.resubmissionStatus).toBe('success');
       const updatedChat = await getMemoryStorage().loadChatData('test-world', 'chat-1');
       expect(updatedChat?.name).toBe('Manual title');
+    });
+
+    test('should rollback title reset when edit resubmission publish fails', async () => {
+      const world = createTestWorld({
+        id: 'test-world-title-rollback',
+        name: 'Test World Title Rollback',
+        isProcessing: false,
+        currentChatId: 'chat-1'
+      });
+      const agent = createTestAgent({
+        memory: [
+          { role: 'user', content: 'hi', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date(), agentId: 'agent-1' }
+        ]
+      });
+      const chat = { id: 'chat-1', name: 'Generated title', worldId: world.id, messageCount: 1, createdAt: new Date(), updatedAt: new Date() };
+
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent(world.id, agent);
+      await getMemoryStorage().saveChatData(world.id, chat);
+
+      const runtimeWorld = await getWorld(world.id);
+      await runtimeWorld!.eventStorage!.saveEvent({
+        id: 'evt-title-3',
+        worldId: world.id,
+        chatId: 'chat-1',
+        type: 'system',
+        payload: {
+          eventType: 'chat-title-updated',
+          chatId: 'chat-1',
+          title: 'Generated title',
+          source: 'idle'
+        },
+        createdAt: new Date()
+      });
+
+      const originalEmit = runtimeWorld!.eventEmitter.emit.bind(runtimeWorld!.eventEmitter);
+      const emitSpy = vi
+        .spyOn(runtimeWorld!.eventEmitter, 'emit')
+        .mockImplementation((eventType: string, ...args: any[]) => {
+          if (eventType === 'message') {
+            throw new Error('simulated resubmit failure');
+          }
+          return originalEmit(eventType, ...args);
+        });
+
+      const result = await editUserMessage(world.id, 'msg-1', 'list files', 'chat-1', runtimeWorld!);
+
+      expect(result.resubmissionStatus).toBe('failed');
+      expect(String(result.resubmissionError || '')).toContain('simulated resubmit failure');
+
+      const updatedChat = await getMemoryStorage().loadChatData(world.id, 'chat-1');
+      expect(updatedChat?.name).toBe('Generated title');
+
+      emitSpy.mockRestore();
     });
   });
 });

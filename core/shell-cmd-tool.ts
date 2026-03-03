@@ -27,6 +27,10 @@
  * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - 2026-03-01: Prevented `./` and `../` parameter tokens from being misclassified as `<skill-id>/<path>` so non-skill shell paths remain unchanged.
+ * - 2026-02-28: Generalized skill-relative path fallback to work with any folder prefix, removing `scripts/`-specific behavior.
+ * - 2026-02-28: Added skill-aware script path resolution so `<skill-id>/scripts/<file>` parameters are auto-resolved to absolute paths under the skill root directory.
+ * - 2026-02-28: Added deterministic shell risk tiering (`allow`/`hitl_required`/`block`) with per-call HITL approve/deny gating via shared `requestToolApproval` helper for high-risk in-scope commands.
  * - 2026-02-24: Required explicit chatId context for stdout/stderr streaming event emission to preserve chat isolation under strict frontend filtering.
  * - 2026-02-21: Streamed stderr via legacy `tool-stream` events while streaming stdout as assistant SSE; persisted only finalized stdout assistant message after execution completes.
  * - 2026-02-21: Added assistant-style SSE start/chunk/end streaming for shell runtime output so command chunks are delivered as assistant stream events instead of `tool-stream` messages.
@@ -68,14 +72,16 @@
  */
 
 import { spawn, type ChildProcess } from 'child_process';
-import { resolve, join, relative } from 'path';
+import { resolve, join, relative, dirname } from 'path';
 import { createHash } from 'crypto';
 import { homedir } from 'os';
-import { realpathSync, promises as fsPromises } from 'fs';
+import { existsSync, readdirSync, realpathSync, promises as fsPromises } from 'fs';
 import { createCategoryLogger } from './logger.js';
 import { validateToolParameters } from './tool-utils.js';
+import { requestToolApproval } from './tool-approval.js';
 import { publishMessageWithId, publishSSE } from './events/publishers.js';
 import { getDefaultWorkingDirectory, getEnvValueFromText } from './utils.js';
+import { getSkillSourcePath, getSkills } from './skill-registry.js';
 import {
   createShellProcessExecution,
   transitionShellProcessExecution,
@@ -96,6 +102,8 @@ import {
 } from './shell-process-registry.js';
 
 const logger = createCategoryLogger('shell-cmd');
+const SHELL_RISK_APPROVE_OPTION = 'approve';
+const SHELL_RISK_DENY_OPTION = 'deny';
 
 /**
  * Resolve directory path, handling tilde expansion and relative paths
@@ -153,6 +161,14 @@ export interface MinimalShellLLMResult {
   reason?: 'timeout' | 'canceled' | 'non_zero_exit' | 'execution_error';
 }
 
+export type ShellCommandRiskTier = 'allow' | 'hitl_required' | 'block';
+
+export interface ShellCommandRiskAssessment {
+  tier: ShellCommandRiskTier;
+  reason: string;
+  tags: string[];
+}
+
 interface OutputSnippet {
   text: string;
   truncated: boolean;
@@ -164,6 +180,7 @@ interface OutputFormattingOptions {
 }
 
 const DEFAULT_MIN_OUTPUT_CHARS = 400;
+const SMART_LLM_MAX_OUTPUT_CHARS = 1200;
 
 function buildOutputSnippet(content: string, maxOutputChars: number): OutputSnippet {
   if (!content) {
@@ -416,6 +433,212 @@ function tokenizeCommand(command: string): string[] {
   return command.match(/"([^"\\]|\\.)*"|'([^'\\]|\\.)*'|[^\s]+/g) ?? [];
 }
 
+function normalizeExecutable(command: string): string {
+  const executable = getExecutableName(command).toLowerCase();
+  return executable.endsWith('.exe') ? executable.slice(0, -4) : executable;
+}
+
+function normalizeParameterTokens(parameters: unknown): string[] {
+  if (!Array.isArray(parameters)) {
+    return [];
+  }
+  return parameters
+    .filter((parameter): parameter is string => typeof parameter === 'string')
+    .map((parameter) => stripWrappingQuotes(parameter).trim())
+    .filter(Boolean);
+}
+
+function hasFlag(parameters: string[], aliases: string[]): boolean {
+  const aliasSet = new Set(aliases.map((alias) => alias.toLowerCase()));
+  return parameters.some((parameter) => {
+    const lowered = parameter.toLowerCase();
+    if (aliasSet.has(lowered)) return true;
+    if (lowered.startsWith('--')) {
+      return false;
+    }
+    if (lowered.startsWith('-') && lowered.length > 2) {
+      const shortFlags = lowered.slice(1).split('');
+      for (const shortFlag of shortFlags) {
+        if (aliasSet.has(`-${shortFlag}`)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  });
+}
+
+function isSystemCriticalPath(token: string): boolean {
+  const normalized = token.trim().replace(/\\/g, '/').toLowerCase();
+  if (!normalized) return false;
+
+  if (normalized === '/' || normalized === '~' || normalized === '/root') {
+    return true;
+  }
+
+  if (/^[a-z]:\/$/.test(normalized)) {
+    return true;
+  }
+
+  const criticalPrefixes = [
+    '/etc',
+    '/usr',
+    '/bin',
+    '/sbin',
+    '/lib',
+    '/opt',
+    '/var',
+    '/system',
+    '/library',
+    '/private',
+    '/proc',
+    '/sys',
+    '/dev'
+  ];
+
+  return criticalPrefixes.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`));
+}
+
+function hasWildcardTarget(parameters: string[]): boolean {
+  return parameters.some((token) => token.includes('*') || token.includes('?'));
+}
+
+function assessRmRisk(parameters: string[]): ShellCommandRiskAssessment {
+  const hasRecursive = hasFlag(parameters, ['-r', '-R', '--recursive']);
+  const hasForce = hasFlag(parameters, ['-f', '--force']);
+  const hasNoPreserveRoot = hasFlag(parameters, ['--no-preserve-root']);
+  const pathTargets = parameters
+    .map((token) => extractPathToken(token) ?? token)
+    .map((token) => stripWrappingQuotes(token));
+  const hasCriticalTarget = pathTargets.some((token) => isSystemCriticalPath(token));
+
+  if (hasNoPreserveRoot || (hasRecursive && hasForce && hasCriticalTarget)) {
+    return {
+      tier: 'block',
+      reason: 'catastrophic_delete_target',
+      tags: ['risk:destructive', 'risk:delete', 'risk:critical-target']
+    };
+  }
+
+  return {
+    tier: 'hitl_required',
+    reason: hasWildcardTarget(parameters) ? 'destructive_delete_wildcard' : 'destructive_delete',
+    tags: ['risk:destructive', 'risk:delete']
+  };
+}
+
+export function classifyShellCommandRisk(
+  command: unknown,
+  parameters: unknown
+): ShellCommandRiskAssessment {
+  if (typeof command !== 'string' || !command.trim()) {
+    return {
+      tier: 'allow',
+      reason: 'invalid_or_empty_command',
+      tags: ['risk:none']
+    };
+  }
+
+  const executable = normalizeExecutable(command);
+  const parameterTokens = normalizeParameterTokens(parameters);
+  const hasUrl = parameterTokens.some((token) => /^https?:\/\//i.test(token));
+
+  if (['rm', 'rmdir', 'unlink', 'del', 'erase'].includes(executable)) {
+    return assessRmRisk(parameterTokens);
+  }
+
+  if (['mkfs', 'mkfs.ext4', 'mkfs.xfs', 'mkfs.btrfs', 'fdisk', 'sfdisk', 'parted'].includes(executable)) {
+    return {
+      tier: 'block',
+      reason: 'catastrophic_disk_operation',
+      tags: ['risk:destructive', 'risk:disk']
+    };
+  }
+
+  if (executable === 'dd' && parameterTokens.some((token) => token.toLowerCase().startsWith('of=/dev/'))) {
+    return {
+      tier: 'block',
+      reason: 'catastrophic_disk_write',
+      tags: ['risk:destructive', 'risk:disk']
+    };
+  }
+
+  if (['chmod', 'chown', 'chgrp'].includes(executable) && hasFlag(parameterTokens, ['-r', '-R', '--recursive'])) {
+    return {
+      tier: 'hitl_required',
+      reason: 'recursive_permission_change',
+      tags: ['risk:permissions', 'risk:recursive']
+    };
+  }
+
+  if (executable === 'git' && parameterTokens[0]?.toLowerCase() === 'clean' && hasFlag(parameterTokens, ['-f', '-d', '-x'])) {
+    return {
+      tier: 'hitl_required',
+      reason: 'destructive_git_clean',
+      tags: ['risk:destructive', 'risk:git']
+    };
+  }
+
+  if (['curl', 'wget'].includes(executable) && hasUrl && hasFlag(parameterTokens, ['-o', '-O', '--output-document'])) {
+    return {
+      tier: 'hitl_required',
+      reason: 'remote_download',
+      tags: ['risk:network', 'risk:download']
+    };
+  }
+
+  return {
+    tier: 'allow',
+    reason: 'low_risk_command',
+    tags: ['risk:none']
+  };
+}
+
+async function requestShellCommandRiskApproval(options: {
+  world: any;
+  chatId: string | null;
+  command: string;
+  parameters: string[];
+  resolvedDirectory: string;
+  risk: ShellCommandRiskAssessment;
+  toolCallId?: string;
+  agentName?: string | null;
+}): Promise<{ approved: boolean; reason: 'approved' | 'user_denied' | 'timeout' }> {
+  const approval = await requestToolApproval({
+    world: options.world,
+    chatId: options.chatId,
+    title: 'Approve risky shell command?',
+    message: [
+      `Command: ${options.command} ${options.parameters.join(' ')}`.trim(),
+      `Risk: ${options.risk.reason}`,
+      `Trusted directory: ${options.resolvedDirectory}`,
+      'Proceed with this command?',
+    ].join('\n'),
+    defaultOptionId: SHELL_RISK_DENY_OPTION,
+    options: [
+      { id: SHELL_RISK_APPROVE_OPTION, label: 'Approve', description: 'Run this command once.' },
+      { id: SHELL_RISK_DENY_OPTION, label: 'Deny', description: 'Do not run this command.' },
+    ],
+    approvedOptionIds: [SHELL_RISK_APPROVE_OPTION],
+    metadata: {
+      tool: 'shell_cmd',
+      riskTier: options.risk.tier,
+      riskReason: options.risk.reason,
+      riskTags: options.risk.tags,
+      command: options.command,
+      parameters: options.parameters,
+      cwd: options.resolvedDirectory,
+      ...(options.toolCallId ? { toolCallId: options.toolCallId } : {}),
+    },
+    agentName: options.agentName || null,
+  });
+
+  return {
+    approved: approval.approved,
+    reason: approval.reason,
+  };
+}
+
 function hasDisallowedShellSyntax(value: string): boolean {
   if (!value) return false;
 
@@ -545,7 +768,8 @@ function findInlineScriptExecutionFlag(
 export function validateShellCommandScope(
   command: unknown,
   parameters: unknown,
-  trustedWorkingDirectory: string
+  trustedWorkingDirectory: string,
+  additionalTrustedRoots?: string[]
 ): { valid: true } | { valid: false; error: string } {
   const singleCommandValidation = validateSingleCommandContract(command);
   if (!singleCommandValidation.valid) {
@@ -595,14 +819,214 @@ export function validateShellCommandScope(
 
     const resolvedPath = resolveTokenPath(token, trustedWorkingDirectory);
     if (!isPathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory)) {
-      return {
-        valid: false,
-        error: `Working directory mismatch: path "${token}" is outside world working directory "${trustedWorkingDirectory}".`
-      };
+      const withinAdditionalRoot = (additionalTrustedRoots || []).some(
+        (root) => isPathWithinTrustedDirectory(resolvedPath, root)
+      );
+      if (!withinAdditionalRoot) {
+        return {
+          valid: false,
+          error: `Working directory mismatch: path "${token}" is outside world working directory "${trustedWorkingDirectory}".`
+        };
+      }
     }
   }
 
   return { valid: true };
+}
+
+const SKILL_DIR_PREFIXES = ['.agents/skills/', 'skills/'];
+
+function extractSkillIdAndRemainder(param: string): { skillId: string; remainder: string } | null {
+  for (const prefix of SKILL_DIR_PREFIXES) {
+    if (param.startsWith(prefix)) {
+      const afterPrefix = param.slice(prefix.length);
+      const slashIndex = afterPrefix.indexOf('/');
+      if (slashIndex <= 0) continue;
+      const skillId = afterPrefix.slice(0, slashIndex);
+      const remainder = afterPrefix.slice(slashIndex + 1);
+      if (skillId && remainder) return { skillId, remainder };
+    }
+  }
+
+  const slashIndex = param.indexOf('/');
+  if (slashIndex <= 0) return null;
+  const skillId = param.slice(0, slashIndex);
+  if (skillId === '.' || skillId === '..' || skillId.startsWith('.') || skillId.startsWith('-')) {
+    return null;
+  }
+  const remainder = param.slice(slashIndex + 1);
+  if (!remainder) return null;
+  return { skillId, remainder };
+}
+
+function resolveWithPrefixFallback(
+  skillRoot: string,
+  relativePath: string,
+  requireExisting: boolean = true,
+): string | null {
+  const directCandidate = join(skillRoot, relativePath);
+  if (!requireExisting || existsSync(directCandidate)) {
+    return directCandidate;
+  }
+
+  const slashIndex = relativePath.indexOf('/');
+  if (slashIndex <= 0) {
+    return null;
+  }
+
+  const withoutFirstSegment = relativePath.slice(slashIndex + 1);
+  if (!withoutFirstSegment) {
+    return null;
+  }
+
+  const fallbackCandidate = join(skillRoot, withoutFirstSegment);
+  if (!requireExisting || existsSync(fallbackCandidate)) {
+    return fallbackCandidate;
+  }
+
+  return null;
+}
+
+function resolveFromRuntimeSkillsRoot(
+  param: string,
+  runtimeSkillsRoot: string | undefined,
+): { absolutePath: string; skillRoot: string } | null {
+  if (!runtimeSkillsRoot) return null;
+  if (!param.includes('/')) return null;
+  if (!existsSync(runtimeSkillsRoot)) return null;
+
+  let entries: Array<{
+    name: string;
+    isDirectory: () => boolean;
+    isSymbolicLink?: () => boolean;
+  }> = [];
+  try {
+    entries = readdirSync(runtimeSkillsRoot, { withFileTypes: true, encoding: 'utf8' });
+  } catch {
+    return null;
+  }
+
+  for (const entry of entries) {
+    const isDirectory = entry.isDirectory();
+    const isSymlink = typeof entry.isSymbolicLink === 'function' && entry.isSymbolicLink();
+    if (!isDirectory && !isSymlink) continue;
+    const skillRoot = join(runtimeSkillsRoot, entry.name);
+    const candidatePath = resolveWithPrefixFallback(skillRoot, param);
+    if (candidatePath) {
+      return { absolutePath: candidatePath, skillRoot };
+    }
+  }
+
+  return null;
+}
+
+function resolveBareSkillPath(
+  param: string,
+  runtimeSkillsRoot: string | undefined,
+): { absolutePath: string; skillRoot: string } | null {
+  if (!param.includes('/')) return null;
+
+  const runtimeMatch = resolveFromRuntimeSkillsRoot(param, runtimeSkillsRoot);
+  if (runtimeMatch) {
+    return runtimeMatch;
+  }
+
+  const skills = getSkills();
+  for (const skill of skills) {
+    const sourcePath = getSkillSourcePath(skill.skill_id);
+    if (!sourcePath) continue;
+    const skillRoot = dirname(sourcePath);
+    const candidatePath = resolveWithPrefixFallback(skillRoot, param);
+    if (candidatePath) {
+      return { absolutePath: candidatePath, skillRoot };
+    }
+  }
+  return null;
+}
+
+function hasActiveSkillContext(messages: unknown, chatId: string | undefined): boolean {
+  if (!Array.isArray(messages)) {
+    return false;
+  }
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index] as any;
+    if (!message || typeof message !== 'object') {
+      continue;
+    }
+
+    const messageChatId = typeof message.chatId === 'string' ? message.chatId.trim() : '';
+    if (chatId && messageChatId && messageChatId !== chatId) {
+      continue;
+    }
+
+    if (message.role !== 'tool') {
+      continue;
+    }
+
+    const content = typeof message.content === 'string' ? message.content : '';
+    if (content.includes('<skill_context id="')) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function resolveSkillScriptParameters(
+  parameters: string[],
+  runtimeSkillsRoot?: string,
+  options?: {
+    allowBareScriptsResolution?: boolean;
+  },
+): { resolvedParameters: string[]; skillRoots: string[] } {
+  const skillRootsSet = new Set<string>();
+  const allowBareScriptsResolution = options?.allowBareScriptsResolution === true;
+  const resolvedParameters = parameters.map((param) => {
+    const parsed = extractSkillIdAndRemainder(param);
+    if (parsed) {
+      const hasExplicitSkillPrefix = SKILL_DIR_PREFIXES.some((prefix) => param.startsWith(prefix));
+      const sourcePath = getSkillSourcePath(parsed.skillId);
+      const hasRuntimeSkillDir = Boolean(runtimeSkillsRoot)
+        && existsSync(join(runtimeSkillsRoot!, parsed.skillId));
+      const shouldAttemptExplicitResolution = hasExplicitSkillPrefix || Boolean(sourcePath) || hasRuntimeSkillDir;
+
+      if (shouldAttemptExplicitResolution) {
+        if (sourcePath) {
+          const skillRoot = dirname(sourcePath);
+          const absolutePath = resolveWithPrefixFallback(skillRoot, parsed.remainder, false);
+          if (absolutePath && isPathWithinTrustedDirectory(absolutePath, skillRoot)) {
+            skillRootsSet.add(skillRoot);
+            return absolutePath;
+          }
+        }
+
+        if (runtimeSkillsRoot) {
+          const candidateSkillRoot = join(runtimeSkillsRoot, parsed.skillId);
+          const candidatePath = resolveWithPrefixFallback(candidateSkillRoot, parsed.remainder);
+          if (candidatePath) {
+            skillRootsSet.add(candidateSkillRoot);
+            return candidatePath;
+          }
+        }
+
+        if (hasExplicitSkillPrefix) {
+          return param;
+        }
+      }
+    }
+    if (!allowBareScriptsResolution) {
+      return param;
+    }
+
+    const bareMatch = resolveBareSkillPath(param, runtimeSkillsRoot);
+    if (bareMatch) {
+      skillRootsSet.add(bareMatch.skillRoot);
+      return bareMatch.absolutePath;
+    }
+    return param;
+  });
+  return { resolvedParameters, skillRoots: [...skillRootsSet] };
 }
 
 export function stopShellCommandsForChat(worldId: string, chatId: string): { killed: number } {
@@ -1195,6 +1619,33 @@ export function formatMinimalShellResultForLLM(result: CommandExecutionResult): 
   return lines.join('\n');
 }
 
+function containsImageDataUri(text: string): boolean {
+  return /data:image\/[a-z0-9.+-]+;base64,/i.test(String(text || ''));
+}
+
+function formatSmartShellResultForLLM(result: CommandExecutionResult): string {
+  const isSuccess = result.exitCode === 0 && !result.timedOut && !result.canceled && !result.error;
+  if (!isSuccess) {
+    return result.stderr || result.error || `(exit code ${result.exitCode ?? 'null'}, no stderr)`;
+  }
+
+  const stdout = String(result.stdout || '');
+  if (!stdout) {
+    return '(exit code 0, no output)';
+  }
+
+  if (containsImageDataUri(stdout)) {
+    return `stdout omitted from LLM context (contains image data URI output; ${stdout.length} chars).`;
+  }
+
+  if (stdout.length > SMART_LLM_MAX_OUTPUT_CHARS) {
+    const preview = stdout.slice(0, SMART_LLM_MAX_OUTPUT_CHARS);
+    return `${preview}\n...(truncated ${stdout.length - SMART_LLM_MAX_OUTPUT_CHARS} chars)`;
+  }
+
+  return stdout;
+}
+
 /**
  * Format command execution result for LLM consumption
  * Provides a human-readable summary of the execution with improved markdown formatting
@@ -1404,15 +1855,26 @@ export function createShellCmdToolDefinition() {
       } = validation.correctedArgs;
 
       // Ensure parameters is always an array
-      const validParameters = Array.isArray(parameters) ?
+      const rawParameters = Array.isArray(parameters) ?
         parameters.filter((p: any) => typeof p === 'string') :
         [];
+
+      const chatIdRaw = typeof context?.chatId === 'string' ? context.chatId.trim() : '';
+      const chatId = chatIdRaw || undefined;
+
+      // Resolve skill-relative script paths (e.g. <skill-id>/scripts/foo.py) to absolute paths
+      const resolvedDirectory = resolveTrustedShellWorkingDirectory(context);
+      const runtimeSkillsRoot = join(resolveDirectory(resolvedDirectory), '.agents', 'skills');
+      const skillOriginatedRequest = hasActiveSkillContext(context?.messages, chatId);
+      const { resolvedParameters: validParameters, skillRoots } = resolveSkillScriptParameters(
+        rawParameters,
+        runtimeSkillsRoot,
+        { allowBareScriptsResolution: skillOriginatedRequest },
+      );
 
       // Extract world and messageId from context for streaming
       const world = context?.world;
       const currentMessageId = context?.toolCallId;
-      const chatIdRaw = typeof context?.chatId === 'string' ? context.chatId.trim() : '';
-      const chatId = chatIdRaw || undefined;
       const abortSignal = context?.abortSignal as AbortSignal | undefined;
       const streamAgentName = typeof context?.agentName === 'string' && context.agentName.trim()
         ? context.agentName.trim()
@@ -1425,7 +1887,6 @@ export function createShellCmdToolDefinition() {
       );
       const streamBaseMessageId = hasToolStreamContext ? String(currentMessageId).trim() : '';
       const stdoutMessageId = streamBaseMessageId ? `${streamBaseMessageId}-stdout` : '';
-      const resolvedDirectory = resolveTrustedShellWorkingDirectory(context);
       const directoryValidation = validateShellDirectoryRequest(
         validation.correctedArgs.directory,
         resolvedDirectory
@@ -1436,10 +1897,43 @@ export function createShellCmdToolDefinition() {
       const scopeValidation = validateShellCommandScope(
         command,
         validParameters,
-        resolvedDirectory
+        resolvedDirectory,
+        skillRoots
       );
       if (!scopeValidation.valid) {
         throw new Error(scopeValidation.error);
+      }
+
+      const riskAssessment = classifyShellCommandRisk(command, validParameters);
+      if (riskAssessment.tier === 'block') {
+        throw new Error(
+          `Blocked dangerous operation: ${riskAssessment.reason}. This shell command cannot be executed.`
+        );
+      }
+
+      if (riskAssessment.tier === 'hitl_required') {
+        if (!world) {
+          throw new Error(
+            `Approval required: command classified as ${riskAssessment.reason}. HITL approval context is unavailable.`
+          );
+        }
+
+        const approval = await requestShellCommandRiskApproval({
+          world,
+          chatId: chatId ?? null,
+          command,
+          parameters: validParameters,
+          resolvedDirectory,
+          risk: riskAssessment,
+          toolCallId: typeof currentMessageId === 'string' ? currentMessageId : undefined,
+          agentName: streamAgentName,
+        });
+
+        if (!approval.approved) {
+          throw new Error(
+            `Command not executed: approval required for ${riskAssessment.reason} and request was not approved (${approval.reason}).`
+          );
+        }
       }
 
       let stdoutStartEmitted = false;
@@ -1532,10 +2026,7 @@ export function createShellCmdToolDefinition() {
       }
 
       if (llmResultMode === 'smart') {
-        const isSuccess = result.exitCode === 0 && !result.timedOut && !result.canceled && !result.error;
-        return isSuccess
-          ? (result.stdout || `(exit code 0, no output)`)
-          : (result.stderr || result.error || `(exit code ${result.exitCode ?? 'null'}, no stderr)`);
+        return formatSmartShellResultForLLM(result);
       }
 
       const validatedArtifactPaths = Array.isArray(artifactPaths)

@@ -9,12 +9,14 @@
  * - mention-logic.ts: Auto-mention processing (Layer 2)
  * - persistence.ts: Event persistence (Layer 4)
  * - memory-manager.ts: Memory & LLM resumption (Layer 4)
+ * - title-scheduler.ts: Chat-title scheduling & idle logic (Layer 4)
  * - orchestrator.ts: Agent message processing (Layer 5)
  * - subscribers.ts: Event subscriptions (Layer 6)
- * 
+ *
  * Changes:
- * - 2026-02-08: Removed outdated manual tool-intervention checker module reference
- * - 2025-11-09: Completed extraction of all layers (2-6) from monolithic events.ts
+ * - 2026-03-03: Added title-scheduler.ts (Layer 4) export.
+ * - 2026-02-08: Removed outdated manual tool-intervention checker module reference.
+ * - 2025-11-09: Completed extraction of all layers (2-6) from monolithic events.ts.
  */
 
 // Layer 2: Pure utilities (no dependencies)
@@ -26,6 +28,7 @@ export * from './publishers.js';
 // Layer 4: Persistence & Memory
 export * from './persistence.js';
 export * from './memory-manager.js';
+export * from './title-scheduler.js';
 
 // Layer 5: Orchestration
 export * from './orchestrator.js';

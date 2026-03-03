@@ -51,6 +51,43 @@ These rules override all other testing instructions unless the user explicitly o
 
 ---
 
+## Event and Message Rules (Strict)
+
+These rules apply to any change touching `core/events.ts`, `core/managers.ts`, `server/api.ts`, chat/session flows, or SSE client handling in `web/src/utils/sse-client.ts`.
+
+1. **Preserve world-level event isolation.**
+   - Keep event emitters scoped per world instance.
+   - Never introduce cross-world event leakage or shared mutable event state.
+
+2. **Use canonical event contracts.**
+   - Message events must follow `WorldMessageEvent` semantics (`content`, `sender`, `timestamp`, `messageId`).
+   - SSE events must follow `WorldSSEEvent` semantics (`agentName`, `type`, `content`, `error`, `messageId`, `usage`).
+   - System events should continue through `publishEvent(world, type, content)`.
+
+3. **Maintain strict streaming lifecycle ordering.**
+   - Preserve `start -> chunk -> end` sequencing.
+   - Emit `error` events explicitly for failures.
+   - Do not collapse or reorder stream events in ways that break client state updates.
+
+4. **Keep API and SSE behavior consistent.**
+   - `server/api.ts` must keep schema validation and stable serialization.
+   - Changes to streaming payload shape require matching updates in SSE client handlers.
+   - Support both streaming (SSE) and non-streaming paths without behavior drift.
+
+5. **Prevent agent-loop regressions.**
+   - Preserve safeguards in agent subscription/auto-mention flows to avoid self-trigger loops.
+   - Keep reply/message routing deterministic across chat session updates.
+
+6. **Preserve chat/session integrity side effects.**
+   - Do not break message ID/timestamp generation, chat title updates, or autosave behavior tied to message publication.
+   - Keep event emission aligned with persisted chat/session state transitions.
+
+7. **Test event-path changes at boundaries.**
+   - Add targeted unit tests for event sequencing/shape changes.
+   - For API transport/runtime path updates, run `npm run integration` per project policy.
+
+---
+
 ## Code Style Rules (Strict)
 
 These rules apply to every file you create or modify:

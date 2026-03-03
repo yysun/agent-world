@@ -139,9 +139,22 @@ vi.mock('../../core/hitl-tool.js', () => ({
   })),
 }));
 
+vi.mock('../../core/web-fetch-tool.js', () => ({
+  createWebFetchToolDefinition: vi.fn(() => ({
+    description: 'web-fetch',
+    parameters: { type: 'object', properties: {} },
+    execute: vi.fn(),
+  })),
+}));
+
 vi.mock('../../core/file-tools.js', () => ({
   createReadFileToolDefinition: vi.fn(() => ({
     description: 'read-file',
+    parameters: { type: 'object', properties: {} },
+    execute: vi.fn(),
+  })),
+  createWriteFileToolDefinition: vi.fn(() => ({
+    description: 'write-file',
     parameters: { type: 'object', properties: {} },
     execute: vi.fn(),
   })),
@@ -353,6 +366,8 @@ describe('mcp-server-registry behavior', () => {
 
     const toolsFirst = await getMCPToolsForWorld('world-1');
     expect(toolsFirst).toHaveProperty('shell_cmd');
+    expect(toolsFirst).toHaveProperty('web_fetch');
+    expect(toolsFirst).toHaveProperty('write_file');
     expect(toolsFirst).toHaveProperty('demo_lookup');
     expect(mockClientListTools).toHaveBeenCalledTimes(1);
 

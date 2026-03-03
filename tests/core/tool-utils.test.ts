@@ -14,6 +14,7 @@
  * - Verifies tool_call_id handling with fallback
  *
  * Recent changes:
+ * - 2026-03-01: Added `.includePattern` alias normalization coverage for `list_files` and `grep`.
  * - 2026-02-27: Added removed HITL confirmation-arg coverage to verify silent stripping for backward compatibility.
  * - 2026-02-20: Added alias normalization coverage for `create_agent` (`auto-reply` and `next agent` variants).
  */
@@ -365,6 +366,48 @@ describe('Tool Utils - validateToolParameters', () => {
     expect(validation.correctedArgs).toEqual({ query: 'foo', directoryPath: './core' });
   });
 
+  test('normalizes list_files .includePattern alias to includePattern', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+        includePattern: { type: 'string' },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    };
+
+    const validation = validateToolParameters(
+      { path: '.', '.includePattern': '**/*.ts' },
+      schema,
+      'list_files',
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(validation.correctedArgs).toEqual({ path: '.', includePattern: '**/*.ts' });
+  });
+
+  test('normalizes grep .includePattern alias to includePattern', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        includePattern: { type: 'string' },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    };
+
+    const validation = validateToolParameters(
+      { query: 'foo', '.includePattern': '**/*.ts' },
+      schema,
+      'grep',
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(validation.correctedArgs).toEqual({ query: 'foo', includePattern: '**/*.ts' });
+  });
+
   test('still fails when required path is absent and no alias is provided', () => {
     const schema = {
       type: 'object',
@@ -436,6 +479,28 @@ describe('Tool Utils - validateToolParameters', () => {
       name: 'Router',
       autoReply: true,
       nextAgent: 'human',
+    });
+  });
+
+  test('normalizes web_fetch aliases for url', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        url: { type: 'string' },
+      },
+      required: ['url'],
+      additionalProperties: false,
+    };
+
+    const validation = validateToolParameters(
+      { uri: 'https://example.com' },
+      schema,
+      'web_fetch',
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(validation.correctedArgs).toEqual({
+      url: 'https://example.com',
     });
   });
 

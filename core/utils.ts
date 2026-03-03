@@ -18,6 +18,7 @@
  * - toKebabCase: String conversion for consistent naming conventions
  * - getWorldTurnLimit: World-specific turn limit retrieval with fallback defaults
  * - extractMentions: Case-insensitive mention extraction with first-mention-only logic
+ * - 2026-03-01: Fixed parseParagraphBeginningMention to only extend with next TitleCase word when mention starts uppercase (prevents @a2 Hi → a2-hi)
  * - determineSenderType: Sender classification for message filtering and processing
  * - prepareMessagesForLLM: Message formatting for LLM calls with history and system prompts
  * - wouldAgentHaveRespondedToHistoricalMessage: Filters irrelevant messages from LLM context
@@ -33,6 +34,9 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-03-01: Added explicit `grep` prompt guidance to require `includePattern` (no leading dot) and reduce tool-parameter validation failures.
+ * - 2026-03-01: Added global pre-tool planning guidance so all tool-enabled agents narrate next steps before calling tools.
+ * - 2026-03-01: Added `available_skills` prompt rule requiring explicit post-`load_skill` acknowledgment before taking action.
  * - 2026-02-21: Added `list_files` prompt guidance to prefer `includePattern` and bounded `maxEntries` for file-type searches to reduce oversized tool results and continuation churn.
  * - 2026-02-21: Excluded persisted shell stdout stream assistant messages (messageId suffix `-stdout`) from LLM-history relevance filtering to prevent tool-continuation token amplification loops.
  * - 2026-02-20: Updated HITL tool system-prompt guidance to enforce options-only HITL usage.
@@ -221,10 +225,12 @@ export function buildToolUsagePromptSection(options: { toolNames: string[] }): s
   const normalizedToolNames = new Set(toolNames.map((toolName) => toolName.toLowerCase()));
   const hasHitlTool = normalizedToolNames.has('human_intervention_request');
   const hasListFilesTool = normalizedToolNames.has('list_files');
+  const hasGrepTool = normalizedToolNames.has('grep');
 
   const lines = [
     'You have access to tools.',
     'Use tools when the user requests an action that requires tool execution.',
+    'When using tools, keep assistant text concise and focused on results.',
   ];
 
   if (hasHitlTool) {
@@ -239,6 +245,12 @@ export function buildToolUsagePromptSection(options: { toolNames: string[] }): s
   if (hasListFilesTool) {
     lines.push(
       'When using list_files for file-type searches, always narrow with includePattern (for example, **/*.md) and keep maxEntries small to avoid oversized results.'
+    );
+  }
+
+  if (hasGrepTool) {
+    lines.push(
+      'For grep, pass filters as includePattern (exact key, no leading dot). Do not send .includePattern.'
     );
   }
 
@@ -305,6 +317,7 @@ async function buildAgentSkillsPromptSection(): Promise<string> {
     '   to fetch the full instructions.',
     '3. IMPORTANT: Pass `skill_id` as the exact string from `<id>` (character-for-character).',
     '   Do not rewrite case, hyphens, or underscores (e.g., keep `skill-creator` exactly as shown).',
+    '4. After successfully loading a skill, ALWAYS acknowledge it to the user: state which skill was loaded and briefly describe what you will do before taking any action.',
     '',
     '<available_skills>',
   ];
@@ -382,8 +395,10 @@ function parseParagraphBeginningMention(line: string): string | null {
   let mention = directMatch[1];
 
   // For display-name mentions like "@Madame Pedagogue", allow additional TitleCase words.
+  // Only extend when the mention starts with an uppercase letter (display name pattern).
+  // Lowercase id mentions like @a2 must not pick up following words (e.g. "@a2 Hi" → "a2", not "a2-hi").
   // Keep existing behavior for id-like mentions (contains '-' or '_').
-  if (!mention.includes('-') && !mention.includes('_')) {
+  if (!mention.includes('-') && !mention.includes('_') && /^[A-Z]/.test(mention)) {
     const remainder = withoutGreetingPrefix.slice(directMatch[0].length);
     const nextWordMatch = /^\s+([A-Z][A-Za-z0-9_-]*)\b/.exec(remainder);
     if (nextWordMatch?.[1]) {

@@ -2,6 +2,10 @@
 
 This document provides an updated review of the event and message system architecture used in Agent World. It covers the flow and implementation logic across core modules, API integration, and client-side streaming handlers.
 
+Last reviewed: 2026-03-03
+
+Implementation note: This document describes architecture and behavior. For strict coding and enforcement rules (event isolation, canonical contracts, stream ordering, and required test coverage), follow `AGENTS.md`.
+
 ---
 
 ## 1. Overview

@@ -48,7 +48,7 @@
  * Time: 2025-10-25T21:24:57.105Z
  * [2 tool calls:
  *  1. read_file (filePath: /path/to/file.txt, limit: 100)
- *  2. grep_search (query: pattern, isRegexp: true, ...)]
+ *  2. grep (query: pattern, isRegexp: true, ...)]
  *
  * Agent: a1 (tool result)
  * Time: 2025-10-25T21:24:58.395Z

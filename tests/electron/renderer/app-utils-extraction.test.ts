@@ -12,6 +12,8 @@
  * - No filesystem or network dependencies.
  *
  * Recent Changes:
+ * - 2026-02-28: Added regression coverage for tool-name resolution so assistant `shell_cmd` rows do not inherit earlier `list_files`/`grep` labels.
+ * - 2026-02-28: Added regression coverage for locating assistant tool-request metadata from tool-result rows by `tool_call_id`.
  * - 2026-02-28: Added regression ensuring assistant `Calling tool: human_intervention_request` placeholder rows are hidden from renderable transcript entries.
  * - 2026-02-27: Added normalization assertions for persisted `showToolMessages` desktop setting.
  * - 2026-02-27: Updated tool-classification expectations so assistant tool-call request messages remain assistant cards.
@@ -47,10 +49,12 @@ import {
   getMessageCardClassName,
   getMessageIdentity,
   getMessageSenderLabel,
+  findToolRequestMessageForToolResult,
   isHumanMessage,
   isRenderableMessageEntry,
   isToolRelatedMessage,
   isTrueAgentResponseMessage,
+  resolveToolNameForMessage,
   resolveMessageAvatar,
 } from '../../../electron/renderer/src/utils/message-utils';
 
@@ -168,7 +172,8 @@ describe('extracted message utils', () => {
     expect(isToolRelatedMessage({
       role: 'assistant',
       tool_calls: [{ type: 'function', function: { name: 'shell_cmd', arguments: '{}' } }]
-    })).toBe(false);
+    })).toBe(true);
+    expect(isToolRelatedMessage({ role: 'assistant', content: 'Hello world' })).toBe(false);
     expect(isTrueAgentResponseMessage({ role: 'assistant', sender: 'agent-a', content: 'hello' })).toBe(true);
     expect(isTrueAgentResponseMessage({ role: 'assistant', content: 'Calling tool: shell_cmd' })).toBe(false);
   });
@@ -219,5 +224,79 @@ describe('extracted message utils', () => {
     const message = { role: 'assistant', sender: 'Planner', fromAgentId: 'a1', messageId: 'm1' };
     expect(getMessageSenderLabel(message, new Map(), [message], 0, agentById, agentByName)).toBe('Planner');
     expect(resolveMessageAvatar(message, agentById, agentByName)).toEqual({ name: 'Planner', initials: 'PL' });
+  });
+
+  it('finds matching assistant tool request for tool result rows', () => {
+    const messages = [
+      {
+        messageId: 'assistant-tool-request-1',
+        role: 'assistant',
+        sender: 'a1',
+        tool_calls: [{
+          id: 'call_shell_1',
+          type: 'function',
+          function: { name: 'shell_cmd', arguments: '{"command":"ls -la"}' }
+        }]
+      },
+      {
+        messageId: 'tool-result-1',
+        role: 'tool',
+        sender: 'shell_cmd',
+        tool_call_id: 'call_shell_1',
+        content: '{"status":"failed","exit_code":1}'
+      }
+    ];
+    const messagesById = new Map(messages.map((message) => [message.messageId, message]));
+
+    const linkedRequest = findToolRequestMessageForToolResult(
+      messages[1],
+      messagesById,
+      messages,
+      1
+    );
+
+    expect(linkedRequest?.messageId).toBe('assistant-tool-request-1');
+  });
+
+  it('prefers current assistant tool_calls name over previous assistant rows', () => {
+    const messages = [
+      {
+        messageId: 'assistant-tool-request-list-1',
+        role: 'assistant',
+        sender: 'a1',
+        tool_calls: [{
+          id: 'call_list_1',
+          type: 'function',
+          function: { name: 'list_files', arguments: '{"path":"./"}' }
+        }]
+      },
+      {
+        messageId: 'assistant-tool-request-shell-1',
+        role: 'assistant',
+        sender: 'a1',
+        tool_calls: [{
+          id: 'call_shell_1',
+          type: 'function',
+          function: { name: 'shell_cmd', arguments: '{"command":"npx"}' }
+        }]
+      },
+      {
+        messageId: 'tool-result-shell-1',
+        role: 'tool',
+        sender: 'a1',
+        tool_call_id: 'call_shell_1',
+        replyToMessageId: 'assistant-tool-request-shell-1',
+        content: 'status: failed\nexit_code: 1\nreason: non_zero_exit'
+      }
+    ];
+    const messagesById = new Map(messages.map((message) => [message.messageId, message]));
+
+    expect(
+      resolveToolNameForMessage(messages[1], messagesById, messages, 1)
+    ).toBe('shell_cmd');
+
+    expect(
+      resolveToolNameForMessage(messages[2], messagesById, messages, 2)
+    ).toBe('shell_cmd');
   });
 });

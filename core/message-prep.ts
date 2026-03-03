@@ -15,6 +15,7 @@
  * - NOT used directly by llm-manager.ts (receives pre-filtered messages from utils.ts)
  *
  * Changes:
+ * - 2026-02-28: Added canonical `llm.prep` category emission while preserving legacy `llm.message-prep` logs for migration compatibility.
  * - 2026-02-11: Added unresolved-tool-call cleanup.
  * - Assistant `tool_calls` are pruned to only IDs that have matching tool-result messages.
  * - Prevents OpenAI 400 errors from legacy/incomplete tool-call history.
@@ -30,7 +31,28 @@
 import { createCategoryLogger } from './logger.js';
 import type { ChatMessage } from './types.js';
 
-const logger = createCategoryLogger('llm.message-prep');
+const loggerLegacy = createCategoryLogger('llm.message-prep');
+const loggerCanonical = createCategoryLogger('llm.prep');
+
+function logPrep(level: 'debug' | 'info' | 'warn' | 'error', message: string, data?: Record<string, unknown>): void {
+  if (level === 'debug') {
+    loggerCanonical.debug(message, data);
+    loggerLegacy.debug(message, data);
+    return;
+  }
+  if (level === 'info') {
+    loggerCanonical.info(message, data);
+    loggerLegacy.info(message, data);
+    return;
+  }
+  if (level === 'warn') {
+    loggerCanonical.warn(message, data);
+    loggerLegacy.warn(message, data);
+    return;
+  }
+  loggerCanonical.error(message, data);
+  loggerLegacy.error(message, data);
+}
 
 /**
  * Parse message content to detect enhanced string format and convert to OpenAI ChatMessage.
@@ -74,7 +96,7 @@ export function parseMessageContent(
     // Enhanced format: tool_result
     if (parsed.__type === 'tool_result') {
       if (!parsed.tool_call_id) {
-        logger.warn('Enhanced format missing tool_call_id, falling back to default role', {
+        logPrep('warn', 'Enhanced format missing tool_call_id, falling back to default role', {
           parsed
         });
         return {
@@ -86,7 +108,7 @@ export function parseMessageContent(
         };
       }
 
-      logger.debug('Parsed enhanced tool_result format', {
+      logPrep('debug', 'Parsed enhanced tool_result format', {
         toolCallId: parsed.tool_call_id,
         agentId: parsed.agentId,
         contentLength: parsed.content?.length || 0
@@ -104,10 +126,10 @@ export function parseMessageContent(
     }
 
     // JSON without __type marker - treat as regular text
-    logger.debug('JSON without __type marker, treating as regular content');
+    logPrep('debug', 'JSON without __type marker, treating as regular content');
   } catch {
     // Not JSON - regular text
-    logger.debug('Non-JSON content, using default role', { role: defaultRole });
+    logPrep('debug', 'Non-JSON content, using default role', { role: defaultRole });
   }
 
   // Default: regular text message
@@ -169,7 +191,7 @@ export function filterClientSideMessages(messages: ChatMessage[]): ChatMessage[]
 
       // If all tool calls were client.* and no content, skip this message
       if (filteredToolCalls.length === 0 && !clonedMessage.content) {
-        logger.debug('Dropping assistant message with only client.* tool calls', {
+        logPrep('debug', 'Dropping assistant message with only client.* tool calls', {
           droppedToolCalls: clonedMessage.tool_calls.map(tc => tc.function.name),
           droppedToolCallIds: Array.from(removedToolCallIds)
         });
@@ -183,13 +205,13 @@ export function filterClientSideMessages(messages: ChatMessage[]): ChatMessage[]
     if (clonedMessage.role === 'tool') {
       // Drop tool messages without tool_call_id (invalid data)
       if (!clonedMessage.tool_call_id) {
-        logger.debug('Dropping tool message without tool_call_id (invalid data)');
+        logPrep('debug', 'Dropping tool message without tool_call_id (invalid data)');
         continue;
       }
 
       // Drop tool messages referencing removed client.* tool calls
       if (removedToolCallIds.has(clonedMessage.tool_call_id)) {
-        logger.debug('Dropping orphaned tool message for removed client.* tool call', {
+        logPrep('debug', 'Dropping orphaned tool message for removed client.* tool call', {
           toolCallId: clonedMessage.tool_call_id
         });
         continue;
@@ -198,7 +220,7 @@ export function filterClientSideMessages(messages: ChatMessage[]): ChatMessage[]
       // Drop tool messages that don't have a valid preceding tool_call
       // This handles legacy data where tool_calls weren't properly saved
       if (!validToolCallIds.has(clonedMessage.tool_call_id)) {
-        logger.debug('Dropping tool message with no matching tool_call (legacy data)', {
+        logPrep('debug', 'Dropping tool message with no matching tool_call (legacy data)', {
           toolCallId: clonedMessage.tool_call_id
         });
         continue;
@@ -231,7 +253,7 @@ export function filterClientSideMessages(messages: ChatMessage[]): ChatMessage[]
       continue;
     }
 
-    logger.debug('Pruning unresolved assistant tool_calls from message history', {
+    logPrep('debug', 'Pruning unresolved assistant tool_calls from message history', {
       removedCount: message.tool_calls.length - resolvedToolCalls.length,
       removedToolCallIds: message.tool_calls
         .filter((toolCall) => !answeredToolCallIds.has(toolCall.id))
@@ -239,7 +261,7 @@ export function filterClientSideMessages(messages: ChatMessage[]): ChatMessage[]
     });
 
     if (resolvedToolCalls.length === 0 && !message.content) {
-      logger.debug('Dropping assistant message with only unresolved tool_calls');
+      logPrep('debug', 'Dropping assistant message with only unresolved tool_calls');
       continue;
     }
 
@@ -249,7 +271,7 @@ export function filterClientSideMessages(messages: ChatMessage[]): ChatMessage[]
     });
   }
 
-  logger.debug(`Prepared ${finalized.length}/${messages.length} messages for LLM consumption`, {
+  logPrep('debug', `Prepared ${finalized.length}/${messages.length} messages for LLM consumption`, {
     removedToolCallIds: Array.from(removedToolCallIds),
     validToolCallIds: Array.from(validToolCallIds),
     answeredToolCallIds: Array.from(answeredToolCallIds)
