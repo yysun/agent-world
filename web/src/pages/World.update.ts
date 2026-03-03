@@ -96,6 +96,7 @@ import * as AgentManagementDomain from '../domain/agent-management';
 import * as WorldExportDomain from '../domain/world-export';
 import * as MessageDisplayDomain from '../domain/message-display';
 import * as HitlDomain from '../domain/hitl';
+import { resolveZoneContent } from '../domain/dashboard-zones';
 import { resolveActiveChatId } from '../domain/chat-selection';
 import { getEnvValueFromText, upsertEnvVariable } from '../domain/world-variables';
 import { pickProjectFolderPath } from '../domain/project-folder-picker';
@@ -671,6 +672,11 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
     console.log(`[web:initWorld] memory-hydrated world=${worldName} chat=${chatId || world.currentChatId || 'n/a'} rawMessages=${rawMessages.length} dedupMessages=${messages.length} elapsedMs=${Date.now() - initStartedAt}`);
     const selectedProjectPath = getEnvValueFromText(world.variables, 'working_directory');
 
+    // Resolve dashboard zone content from loaded messages
+    const dashboardZoneContent = world.dashboardZones?.length
+      ? resolveZoneContent(world.dashboardZones, messages)
+      : new Map();
+
     yield {
       ...state,
       world,
@@ -679,6 +685,8 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       messages,
       rawMessages,
       hitlPromptQueue: replayedHitlQueue,
+      dashboardZoneContent,
+      dashboardShowHistory: false,
       loading: false,
       needScroll: true,
       lastUserMessageText: null,
@@ -940,9 +948,13 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
   );
   state.messages.push(newMessage);
 
-  return {
-    ...state
-  };
+  // Update dashboard zone content from the full message list for the current chat
+  const updatedState = { ...state };
+  if (state.world?.uiMode === 'dashboard' && state.world.dashboardZones?.length) {
+    updatedState.dashboardZoneContent = resolveZoneContent(state.world.dashboardZones, state.messages);
+  }
+
+  return updatedState as T;
 };
 
 const handleError = <T extends WorldComponentState>(state: T, error: any): T => {
@@ -1257,9 +1269,17 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
       return pending ? { ...msg, text: pending } : msg;
     });
 
+    // Re-resolve dashboard zone content from the full (now-updated) message list.
+    // This ensures zones always reflect the current chat's messages, even if
+    // streaming events from a previous chat arrive after a chat switch.
+    const dashboardZoneContent = state.world?.uiMode === 'dashboard' && state.world.dashboardZones?.length
+      ? resolveZoneContent(state.world.dashboardZones, messages)
+      : state.dashboardZoneContent;
+
     return {
       ...state,
       messages,
+      dashboardZoneContent,
       pendingStreamUpdates: new Map(),
       debounceFrameId: null,
       needScroll: true
@@ -1284,6 +1304,25 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
 
   'toggle-log-details': (state: WorldComponentState, messageId: WorldEventPayload<'toggle-log-details'>): WorldComponentState =>
     MessageDisplayDomain.toggleLogDetails(state, messageId),
+
+  // ========================================
+  // DASHBOARD
+  // ========================================
+
+  'toggle-dashboard-history': (state: WorldComponentState): WorldComponentState => {
+    const showHistory = !state.dashboardShowHistory;
+    // When switching back to dashboard, re-resolve zone content from current messages
+    let dashboardZoneContent = state.dashboardZoneContent;
+    if (!showHistory && state.world?.dashboardZones?.length) {
+      dashboardZoneContent = resolveZoneContent(state.world.dashboardZones, state.messages || []);
+    }
+    return {
+      ...state,
+      dashboardShowHistory: showHistory,
+      dashboardZoneContent,
+      needScroll: showHistory, // Scroll to bottom when switching to history
+    };
+  },
 
   // ========================================
   // MESSAGE EDITING

@@ -42,3 +42,11 @@ docs/ideas/
 docs/done/
 public/
 awesome-agent-world
+
+# Local AI agent/skills artifacts
+.agent/
+.agents/
+.skill/
+.skills/
+skills/
+skills-lock.json

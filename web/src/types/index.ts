@@ -182,9 +182,25 @@ export interface World {
   currentChatId: string | null;
   mcpConfig?: string | null;
   variables?: string;
+  uiMode?: 'chat' | 'dashboard';
+  dashboardZones?: DashboardZone[];
   agents: Agent[];
   chats: Chat[];
   llmCallLimit?: number;  // For UI display
+}
+
+// Dashboard zone configuration
+export interface DashboardZone {
+  id: string;
+  agent: string;
+  label: string;
+  size: 'small' | 'medium' | 'large';
+}
+
+// Dashboard zone content state - tracks latest message per zone
+export interface DashboardZoneState {
+  message: Message | null;
+  isStreaming: boolean;
 }
 
 // Chat Interface - from core types
@@ -386,6 +402,10 @@ export interface WorldComponentState extends SSEComponentState {
   // HITL option prompts
   hitlPromptQueue: HitlPromptRequest[];
   submittingHitlRequestId: string | null;
+
+  // Dashboard state
+  dashboardZoneContent: Map<string, DashboardZoneState>;
+  dashboardShowHistory: boolean;
 
   // Responsive right-panel state
   rightPanelTab: RightPanelTab;

@@ -37,6 +37,7 @@ import { app, Component, safeHTML } from 'apprun';
 import type { WorldComponentState, Agent, RightPanelTab, WorldViewportMode } from '../types';
 import type { WorldEventName } from '../types/events';
 import WorldChat from '../components/world-chat';
+import WorldDashboard from '../components/world-dashboard';
 import WorldChatHistory from '../components/world-chat-history';
 import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
@@ -121,6 +122,10 @@ export default class WorldComponent extends Component<WorldComponentState, World
     // HITL approval prompt state
     hitlPromptQueue: [],
     submittingHitlRequestId: null,
+
+    // Dashboard state
+    dashboardZoneContent: new Map(),
+    dashboardShowHistory: false,
 
     // Responsive right-panel state
     rightPanelTab: 'chats' as RightPanelTab,
@@ -260,31 +265,49 @@ export default class WorldComponent extends Component<WorldComponentState, World
               </div>
             </div>
 
-            <WorldChat
-              worldName={state.worldName}
-              messages={state.messages}
-              rawMessages={state.rawMessages}
-              userInput={state.userInput}
-              messagesLoading={state.messagesLoading}
-              isSending={state.isSending}
-              isWaiting={state.isWaiting}
-              needScroll={state.needScroll}
-              activeAgent={state.activeAgent}
-              agents={state.world?.agents || []}
-              selectedAgent={state.selectedSettingsTarget === 'agent' ? state.selectedAgent : null}
-              currentChat={state.currentChat?.name}
-              currentChatId={state.currentChat?.id || null}
-              selectedProjectPath={state.selectedProjectPath}
-              editingMessageId={state.editingMessageId}
-              editingText={state.editingText}
-              agentFilters={state.activeAgentFilters}
-              isBusy={state.isBusy || state.isWaiting}
-              elapsedMs={state.elapsedMs}
-              activeTools={state.activeTools}
-              isStopping={state.isStopping}
-              activeHitlPrompt={activeHitlPrompt}
-              submittingHitlRequestId={state.submittingHitlRequestId}
-            />
+            {state.world?.uiMode === 'dashboard' && !state.dashboardShowHistory ? (
+              <WorldDashboard
+                worldName={state.worldName}
+                currentChatId={state.currentChat?.id || null}
+                messages={state.messages}
+                userInput={state.userInput}
+                isSending={state.isSending}
+                isWaiting={state.isWaiting}
+                isStopping={state.isStopping}
+                isBusy={state.isBusy || state.isWaiting}
+                dashboardZones={state.world?.dashboardZones || []}
+                dashboardZoneContent={state.dashboardZoneContent}
+                dashboardShowHistory={state.dashboardShowHistory}
+                activeHitlPrompt={activeHitlPrompt}
+                submittingHitlRequestId={state.submittingHitlRequestId}
+              />
+            ) : (
+              <WorldChat
+                worldName={state.worldName}
+                messages={state.messages}
+                rawMessages={state.rawMessages}
+                userInput={state.userInput}
+                messagesLoading={state.messagesLoading}
+                isSending={state.isSending}
+                isWaiting={state.isWaiting}
+                needScroll={state.needScroll}
+                activeAgent={state.activeAgent}
+                agents={state.world?.agents || []}
+                selectedAgent={state.selectedSettingsTarget === 'agent' ? state.selectedAgent : null}
+                currentChat={state.currentChat?.name}
+                currentChatId={state.currentChat?.id || null}
+                selectedProjectPath={state.selectedProjectPath}
+                editingMessageId={state.editingMessageId}
+                editingText={state.editingText}
+                agentFilters={state.activeAgentFilters}
+                isBusy={state.isBusy || state.isWaiting}
+                elapsedMs={state.elapsedMs}
+                activeTools={state.activeTools}
+                isStopping={state.isStopping}
+                activeHitlPrompt={activeHitlPrompt}
+                submittingHitlRequestId={state.submittingHitlRequestId}
+              />
+            )}
           </div>
 
           <div className={`settings-column world-right-panel ${isRightPanelOpen ? 'is-open' : 'is-closed'} ${state.viewportMode}-panel`}>

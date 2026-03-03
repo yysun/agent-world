@@ -3800,6 +3800,164 @@ legend {
   text-align: center;
 }
 
+/* ================================================
+   DASHBOARD UI MODE
+   Fixed-state generative dashboard layout for worlds
+   with uiMode: 'dashboard'.
+   ================================================ */
+
+.world-dashboard-fieldset {
+  border: none;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.world-dashboard-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 0;
+}
+
+/* Dashboard header with toggle button */
+.dashboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 8px 12px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #fafafa;
+  flex-shrink: 0;
+}
+
+.dashboard-toggle-btn {
+  padding: 4px 12px;
+  font-size: 0.8125rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  color: #374151;
+  transition: background 0.15s;
+}
+
+.dashboard-toggle-btn:hover {
+  background: #f3f4f6;
+}
+
+/* Zone grid layout */
+.dashboard-zone-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 12px;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Zone size classes */
+.dashboard-zone-small {
+  grid-column: span 1;
+}
+
+.dashboard-zone-medium {
+  grid-column: span 1;
+}
+
+.dashboard-zone-large {
+  grid-column: span 2;
+}
+
+/* Zone panel */
+.dashboard-zone {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Zone header */
+.dashboard-zone-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+
+.dashboard-zone-label {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: #111827;
+}
+
+.zone-status-indicator {
+  font-size: 0.625rem;
+}
+
+.zone-status-indicator.streaming {
+  color: #f59e0b;
+  animation: zone-pulse 1.2s ease-in-out infinite;
+}
+
+.zone-status-indicator.idle {
+  color: #10b981;
+}
+
+@keyframes zone-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* Zone content area */
+.dashboard-zone-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  min-height: 0;
+}
+
+.dashboard-zone-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 0.875rem;
+}
+
+/* Zone footer */
+.dashboard-zone-footer {
+  padding: 4px 12px;
+  border-top: 1px solid #f3f4f6;
+  flex-shrink: 0;
+}
+
+.dashboard-zone-timestamp {
+  font-size: 0.75rem;
+  color: #9ca3af;
+}
+
+/* Responsive: stack vertically on narrow viewports */
+@media (max-width: 768px) {
+  .dashboard-zone-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-zone-large {
+    grid-column: span 1;
+  }
+}
+
 /* Merged Tool Card */
 .merged-tool-card {
   margin: 8px 0;
