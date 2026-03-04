@@ -5,6 +5,7 @@
  * Supports world/agent/chat management with optimized serialization and error handling.
  *
  * Changes:
+ * - 2026-03-04: Added queue metadata fields to non-streaming `/messages` success responses (`queueMessageId`, `queueStatus`, `queueRetryCount`) to expose queue terminal/error state.
  * - 2026-02-27: Hardened non-streaming `/messages` event collection with chat-scoped filtering to prevent cross-chat response contamination.
  * - 2026-02-24: Added `hitlPrompts` payload to `POST /worlds/:worldName/setChat/:chatId` responses so web chat switches can render replayed pending HITL prompts.
  * - 2026-02-21: Removed temporary server-side folder-picker endpoint in favor of web File API based selection.
@@ -662,6 +663,9 @@ async function handleNonStreamingChat(
 
   try {
     let responseContent = '';
+    let queuedMessageId: string | null = null;
+    let queuedStatus: string | null = null;
+    let queuedRetryCount: number | null = null;
     let isComplete = false;
     let hasError = false;
     let errorMessage = '';
@@ -756,7 +760,10 @@ async function handleNonStreamingChat(
         listeners.set(EventType.SSE, sseListener);
 
         // Queue-backed user ingress: enqueue then trigger event-driven processing.
-        await enqueueAndProcessUserMessage(world.id, chatId || world.currentChatId || '', message, sender, world);
+        const queued = await enqueueAndProcessUserMessage(world.id, chatId || world.currentChatId || '', message, sender, world);
+        queuedMessageId = queued?.messageId || null;
+        queuedStatus = queued?.status || null;
+        queuedRetryCount = typeof queued?.retryCount === 'number' ? queued.retryCount : null;
       }).catch(error => {
         hasError = true;
         errorMessage = `Failed to connect to world: ${error instanceof Error ? error.message : error}`;
@@ -776,7 +783,10 @@ async function handleNonStreamingChat(
       message: 'Message processed successfully',
       data: {
         content: responseContent || 'No response received',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        queueMessageId: queuedMessageId,
+        queueStatus: queuedStatus,
+        queueRetryCount: queuedRetryCount
       }
     });
   } catch (error) {

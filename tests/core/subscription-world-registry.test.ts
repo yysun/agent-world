@@ -13,13 +13,11 @@ import { stopAllWorldRuntimes } from '../../core/world-registry.js';
 const managerMocks = vi.hoisted(() => ({
   getWorld: vi.fn(),
   recoverQueueSendingMessages: vi.fn(async () => 0),
-  resumeChatQueue: vi.fn(async () => undefined),
 }));
 
 vi.mock('../../core/managers.js', () => ({
   getWorld: managerMocks.getWorld,
   recoverQueueSendingMessages: managerMocks.recoverQueueSendingMessages,
-  resumeChatQueue: managerMocks.resumeChatQueue,
 }));
 
 import { subscribeWorld } from '../../core/subscription.js';
@@ -55,7 +53,6 @@ describe('subscribeWorld runtime reuse via registry', () => {
     expect(second).toBeTruthy();
     expect(managerMocks.getWorld).toHaveBeenCalledTimes(1);
     expect(managerMocks.recoverQueueSendingMessages).toHaveBeenCalledTimes(1);
-    expect(managerMocks.resumeChatQueue).toHaveBeenCalledTimes(1);
     expect(world.eventEmitter.listenerCount('message')).toBe(1);
 
     await first!.unsubscribe();
@@ -63,5 +60,22 @@ describe('subscribeWorld runtime reuse via registry', () => {
 
     await second!.unsubscribe();
     expect(world.eventEmitter.listenerCount('message')).toBe(0);
+  });
+
+  it('swaps to refreshed runtime world after subscription refresh', async () => {
+    const initialWorld = makeWorld('refresh-world');
+    const refreshedWorld = makeWorld('refresh-world');
+    managerMocks.getWorld.mockResolvedValueOnce(initialWorld).mockResolvedValueOnce(refreshedWorld);
+
+    const subscription = await subscribeWorld('refresh-world', { isOpen: true });
+    expect(subscription).toBeTruthy();
+    expect(subscription!.world).toBe(initialWorld);
+
+    await subscription!.refresh();
+
+    expect(subscription!.world).toBe(refreshedWorld);
+    expect(managerMocks.getWorld).toHaveBeenCalledTimes(2);
+
+    await subscription!.unsubscribe();
   });
 });

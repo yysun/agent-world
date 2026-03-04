@@ -52,6 +52,15 @@ const sqliteStorageMocks = vi.hoisted(() => ({
   deleteMemoryByChatId: vi.fn(async () => 0),
   getMemory: vi.fn(async () => []),
   saveAgentMemory: vi.fn(async () => undefined),
+  getQueuedMessages: vi.fn(async () => []),
+  addQueuedMessage: vi.fn(async () => ({ id: 'queued-1' })),
+  updateMessageQueueStatus: vi.fn(async () => true),
+  incrementQueueMessageRetry: vi.fn(async () => true),
+  removeQueuedMessage: vi.fn(async () => true),
+  resetQueueMessageForRetry: vi.fn(async () => true),
+  cancelQueuedMessages: vi.fn(async () => 0),
+  recoverSendingMessages: vi.fn(async () => 0),
+  deleteQueueForChat: vi.fn(async () => 0),
 }));
 
 const eventStorageMocks = vi.hoisted(() => ({

@@ -18,7 +18,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getWorld = vi.fn();
 const listChatsMock = vi.fn();
-const publishMessage = vi.fn();
+const enqueueAndProcessUserMessage = vi.fn();
 const subscribeWorld = vi.fn();
 const enableStreaming = vi.fn();
 const disableStreaming = vi.fn();
@@ -36,7 +36,7 @@ vi.mock('../../core/index.js', () => {
     createWorld: vi.fn(),
     listWorlds: vi.fn(async () => []),
     createCategoryLogger: vi.fn(() => logger),
-    publishMessage,
+    enqueueAndProcessUserMessage,
     enableStreaming,
     disableStreaming,
     getWorld,
@@ -174,7 +174,13 @@ describe('api non-streaming message collection', () => {
   });
 
   it('collects only in-scope chat messages for non-streaming requests', async () => {
-    publishMessage.mockImplementation((world: any) => {
+    enqueueAndProcessUserMessage.mockImplementation((
+      _worldId: string,
+      _chatId: string,
+      _message: string,
+      _sender: string,
+      world: any,
+    ) => {
       world.eventEmitter.emit('world', { type: 'response-start', chatId: 'chat-a', activityId: 1 });
       world.eventEmitter.emit('message', {
         sender: 'agent',
@@ -219,7 +225,13 @@ describe('api non-streaming message collection', () => {
   });
 
   it('waits for in-scope idle event before completing response', async () => {
-    publishMessage.mockImplementation((world: any) => {
+    enqueueAndProcessUserMessage.mockImplementation((
+      _worldId: string,
+      _chatId: string,
+      _message: string,
+      _sender: string,
+      world: any,
+    ) => {
       world.eventEmitter.emit('world', { type: 'response-start', chatId: 'chat-a', activityId: 2 });
       world.eventEmitter.emit('message', {
         sender: 'agent',

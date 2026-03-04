@@ -43,6 +43,9 @@
  * - Creates target directory if it doesn't exist
  * - Supports migration between storage types
  * - Event history preserved across different storage backends
+ *
+ * Recent Changes:
+ * - 2026-03-04: Added queue metadata (`messageId`, `queueStatus`, `queueRetryCount`) to successful message-send CLI results for queue error visibility.
  */
 
 import {
@@ -2219,12 +2222,18 @@ export async function processCLIInput(
       };
     }
 
-    await enqueueAndProcessUserMessage(world.id, currentChatId, input, sender, world as any);
+    const queuedMessage = await enqueueAndProcessUserMessage(world.id, currentChatId, input, sender, world as any);
     return {
       success: true,
       message: '',
-      data: { sender, chatId: currentChatId },
-      technicalDetails: `Message published to world '${world.name}' (chat '${currentChatId}')`
+      data: {
+        sender,
+        chatId: currentChatId,
+        messageId: queuedMessage?.messageId || null,
+        queueStatus: queuedMessage?.status || null,
+        queueRetryCount: typeof queuedMessage?.retryCount === 'number' ? queuedMessage.retryCount : null,
+      },
+      technicalDetails: `Message enqueued for world '${world.name}' (chat '${currentChatId}')`
     };
   } catch (error) {
     return {

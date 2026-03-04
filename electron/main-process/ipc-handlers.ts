@@ -12,6 +12,7 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-03-04: Extended `sendChatMessage` IPC response with queue metadata (`queueStatus`, `queueRetryCount`) for queue-failure visibility.
  * - 2026-02-28: `message:edit` now resolves and passes the active subscribed world into core edit resubmission so edited turns publish on the same realtime emitter the renderer listens to.
  * - 2026-02-26: Added env-derived renderer logging config endpoint and replaced session/message console traces with categorized injected logger calls.
  * - 2026-02-25: Added optional `world:import` source support for GitHub shorthand (`@awesome-agent-world/<world-name>`) via secure temp staging.
@@ -358,6 +359,14 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
           error: 'Failed to load world',
           message: `Failed to load world '${worldId}'. The world data may be corrupted.`
         };
+      }
+
+      // Ensure runtime is subscribed and active chat queue processing is resumed
+      // when loading a world that already contains queued messages.
+      const subscribedWorld = await ensureWorldSubscribed(world.id) as { currentChatId?: string } | null;
+      const activeChatId = String(subscribedWorld?.currentChatId || world.currentChatId || '').trim();
+      if (activeChatId) {
+        await resumeChatQueue(world.id, activeChatId);
       }
 
       const chats = await listChats(world.id);
@@ -1112,6 +1121,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       requestedChatId: sessionId
     });
 
+    await ensureWorldSubscribed(id);
     const activated = await activateChatWithSnapshot(id, sessionId);
     if (!activated) throw new Error(`World or session not found: ${id}/${sessionId}`);
     const refreshWarning = await refreshWorldSubscription(id);
@@ -1209,6 +1219,8 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!chatId) throw new Error('Chat ID is required.');
     if (!content) throw new Error('Message content is required.');
 
+    const world = await ensureWorldSubscribed(worldId);
+
     {
       const restoredWorld = await restoreChat(worldId, chatId);
       if (!restoredWorld || restoredWorld.currentChatId !== chatId) {
@@ -1216,7 +1228,6 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       }
     }
 
-    const world = await ensureWorldSubscribed(worldId);
     if (!world) throw new Error(`World not found: ${worldId}`);
 
     const queued = await enqueueAndProcessUserMessage(worldId, chatId, content, sender, world);
@@ -1224,7 +1235,9 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       messageId: queued?.messageId || null,
       sender,
       content,
-      createdAt: toIsoTimestamp(queued?.createdAt)
+      createdAt: toIsoTimestamp(queued?.createdAt),
+      queueStatus: queued?.status || null,
+      queueRetryCount: typeof queued?.retryCount === 'number' ? queued.retryCount : null
     };
   }
 

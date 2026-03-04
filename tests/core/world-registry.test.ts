@@ -8,6 +8,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createWorldRuntimeKey,
+  getWorldRuntimeByKey,
   listWorldRuntimeSnapshots,
   startWorldRuntime,
   stopAllWorldRuntimes,
@@ -112,5 +113,31 @@ describe('world runtime registry', () => {
     const keyA = createWorldRuntimeKey('alpha', { storageType: 'sqlite', storagePath: '/tmp/a' });
     const keyB = createWorldRuntimeKey('alpha', { storageType: 'sqlite', storagePath: '/tmp/b' });
     expect(keyA).not.toBe(keyB);
+  });
+
+  it('updates runtime world reference when refresh returns a replacement world', async () => {
+    const initialWorld = { id: 'alpha', revision: 1 };
+    const refreshedWorld = { id: 'alpha', revision: 2 };
+    const refresh = vi.fn(async () => refreshedWorld);
+    const stop = vi.fn(async () => undefined);
+
+    const started = await startWorldRuntime({
+      worldId: 'alpha',
+      consumerId: 'consumer-a',
+      storageType: 'sqlite',
+      storagePath: '/tmp/a',
+      createRuntime: async () => ({
+        world: initialWorld,
+        stop,
+        refresh,
+      }),
+    });
+
+    await started.refresh();
+
+    const refreshed = getWorldRuntimeByKey<{ id: string; revision: number }>(started.runtimeKey);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refreshed?.world).toBe(refreshedWorld);
+    expect(refreshed?.world.revision).toBe(2);
   });
 });
