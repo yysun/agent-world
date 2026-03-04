@@ -15,6 +15,7 @@
  * - Uses mocked manager dispatch API; no real storage/LLM runtime access.
  *
  * Recent Changes:
+ * - 2026-03-04: Added regression coverage ensuring runtime routing does not fall back to `world.currentChatId`.
  * - 2026-03-04: Initial unit coverage for built-in send_message tool.
  */
 
@@ -58,6 +59,31 @@ describe('core/send-message-tool', () => {
       ok: false,
       status: 'error',
       code: 'context_unavailable',
+      requested: 0,
+      accepted: 0,
+      dispatched: 0,
+      failed: 0,
+    });
+    expect(mockedEnqueueAndProcessUserMessage).not.toHaveBeenCalled();
+  });
+
+  it('returns chat context error when trusted runtime chatId is missing even if world has currentChatId', async () => {
+    const tool = buildWrappedSendMessageTool();
+    const result = await tool.execute(
+      { messages: ['hello'] },
+      undefined,
+      undefined,
+      {
+        world: { id: 'world-1', currentChatId: 'chat-from-world-state' } as any,
+      },
+    );
+
+    const payload = JSON.parse(String(result));
+    expect(payload).toMatchObject({
+      ok: false,
+      status: 'error',
+      code: 'chat_context_missing',
+      message: 'send_message requires a chatId in trusted runtime context.',
       requested: 0,
       accepted: 0,
       dispatched: 0,

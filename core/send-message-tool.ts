@@ -14,8 +14,10 @@
  * Implementation Notes:
  * - This tool does not claim downstream response completion; it reports dispatch/enqueue outcomes only.
  * - Root-level `worldId` and `chatId` are accepted for compatibility but never used for routing.
+ * - Runtime routing requires explicit `context.chatId`; it does not fall back to `world.currentChatId`.
  *
  * Recent Changes:
+ * - 2026-03-04: Removed `world.currentChatId` fallback from trusted runtime routing; `context.chatId` is now required.
  * - 2026-03-04: Initial implementation of built-in `send_message` tool with trusted context injection.
  */
 
@@ -120,14 +122,12 @@ function resolveTrustedContext(context?: SendMessageContext):
     };
   }
 
-  const contextChatId = typeof context?.chatId === 'string' ? context.chatId.trim() : '';
-  const worldChatId = typeof world.currentChatId === 'string' ? world.currentChatId.trim() : '';
-  const chatId = contextChatId || worldChatId;
+  const chatId = typeof context?.chatId === 'string' ? context.chatId.trim() : '';
   if (!chatId) {
     return {
       ok: false,
       code: 'chat_context_missing',
-      message: 'send_message requires a chatId in context (context.chatId or world.currentChatId).',
+      message: 'send_message requires a chatId in trusted runtime context.',
     };
   }
 
