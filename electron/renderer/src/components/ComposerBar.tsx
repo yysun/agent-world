@@ -89,14 +89,14 @@ export default function ComposerBar({
               <span>Project</span>
             </button>
           </div>
-          {onAddToQueue && (
+          {onAddToQueue && !showStopButton && (
             <button
               type="button"
               onClick={() => onAddToQueue(composer)}
               disabled={!composer.trim() || composerDisabled}
               className="flex h-8 items-center gap-1 rounded-full border border-border px-3 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
               aria-label="Add to queue"
-              title={showStopButton ? 'Queue message (world is busy)' : 'Add to queue (send later)'}
+              title="Add to queue (send later)"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"

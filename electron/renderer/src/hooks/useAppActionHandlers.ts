@@ -103,7 +103,6 @@ export function useAppActionHandlers({
   hasActiveHitlPrompt,
   composer,
   onSendMessage,
-  onAddToQueue,
   loadSystemSettings,
   resetSystemSettings,
   saveSystemSettings,
@@ -363,9 +362,6 @@ export function useAppActionHandlers({
       });
 
       if (canStopCurrentSession) {
-        if (composer.trim() && onAddToQueue) {
-          onAddToQueue(composer);
-        }
         return;
       }
       if (composer.trim() && !isCurrentSessionSending) {
@@ -376,7 +372,6 @@ export function useAppActionHandlers({
     composer,
     hasActiveHitlPrompt,
     loadedWorld?.id,
-    onAddToQueue,
     onSendMessage,
     pendingResponseSessionIds,
     selectedSessionId,

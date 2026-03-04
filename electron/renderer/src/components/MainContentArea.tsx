@@ -32,7 +32,6 @@ export default function MainContentArea({
   rightPanelShellProps,
   rightPanelContentProps,
   statusBar,
-  queuePanel,
 }) {
   return (
     <div className="flex min-h-0 flex-1">
@@ -44,7 +43,6 @@ export default function MainContentArea({
 
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20">
           <div className="pointer-events-auto">
-            {queuePanel}
             <ComposerBar {...composerProps} />
             {statusBar}
           </div>
