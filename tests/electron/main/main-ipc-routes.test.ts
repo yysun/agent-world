@@ -64,14 +64,14 @@ function createHandlerMocks() {
     getSystemSettings: vi.fn(async () => ({})),
     saveSystemSettings: vi.fn(async () => true),
     openFileDialog: vi.fn(async () => ({ canceled: true, filePath: null })),
-    addToQueue: vi.fn(async () => ({ messageId: 'm-1' })),
+    addToQueue: vi.fn(async () => ({ success: true })),
     getQueuedMessages: vi.fn(async () => ([])),
-    removeFromQueue: vi.fn(async () => ({ removed: true })),
-    clearChatQueue: vi.fn(async () => ({ cleared: 0 })),
-    pauseChatQueue: vi.fn(async () => ({ paused: true })),
-    resumeChatQueue: vi.fn(async () => ({ resumed: true })),
-    stopChatQueue: vi.fn(async () => ({ stopped: true })),
-    retryQueueMessage: vi.fn(async () => ({ retried: true }))
+    removeFromQueue: vi.fn(async () => ({ success: true })),
+    clearChatQueue: vi.fn(async () => ({ success: true })),
+    pauseChatQueue: vi.fn(async () => ({ success: true })),
+    resumeChatQueue: vi.fn(async () => ({ success: true })),
+    stopChatQueue: vi.fn(async () => ({ success: true })),
+    retryQueueMessage: vi.fn(async () => ({ success: true }))
   };
 }
 
@@ -148,6 +148,14 @@ describe('buildMainIpcRoutes', () => {
     await routes.find((route) => route.channel === 'settings:get')?.handler({});
     await routes.find((route) => route.channel === 'settings:save')?.handler({}, { storageType: 'sqlite' });
     await routes.find((route) => route.channel === 'dialog:pickFile')?.handler({});
+    await routes.find((route) => route.channel === 'queue:add')?.handler({}, { worldId: 'w-1', chatId: 'c-1', content: 'hello' });
+    await routes.find((route) => route.channel === 'queue:get')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
+    await routes.find((route) => route.channel === 'queue:remove')?.handler({}, { messageId: 'q-1' });
+    await routes.find((route) => route.channel === 'queue:clear')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
+    await routes.find((route) => route.channel === 'queue:pause')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
+    await routes.find((route) => route.channel === 'queue:resume')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
+    await routes.find((route) => route.channel === 'queue:stop')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
+    await routes.find((route) => route.channel === 'queue:retry')?.handler({}, { messageId: 'q-1' });
 
     expect(handlers.writeWorldPreference).toHaveBeenCalledWith('world-99');
     expect(handlers.openWorkspaceDialog).toHaveBeenCalledWith({ directoryPath: '/tmp/workspace' });
@@ -165,6 +173,14 @@ describe('buildMainIpcRoutes', () => {
     expect(handlers.getSystemSettings).toHaveBeenCalledTimes(1);
     expect(handlers.saveSystemSettings).toHaveBeenCalledWith({ storageType: 'sqlite' });
     expect(handlers.openFileDialog).toHaveBeenCalledTimes(1);
+    expect(handlers.addToQueue).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1', content: 'hello' });
+    expect(handlers.getQueuedMessages).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1' });
+    expect(handlers.removeFromQueue).toHaveBeenCalledWith({ messageId: 'q-1' });
+    expect(handlers.clearChatQueue).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1' });
+    expect(handlers.pauseChatQueue).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1' });
+    expect(handlers.resumeChatQueue).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1' });
+    expect(handlers.stopChatQueue).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1' });
+    expect(handlers.retryQueueMessage).toHaveBeenCalledWith({ messageId: 'q-1' });
   });
 });
 

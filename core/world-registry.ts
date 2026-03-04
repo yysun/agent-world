@@ -17,6 +17,8 @@
  * - Storage context defaults are sourced from environment when not provided.
  *
  * Recent Changes:
+ * - 2026-03-04: Runtime refresh now updates the registry's `world` reference.
+ *   - Prevents callers from receiving stale pre-refresh world instances.
  * - 2026-03-03: Initial runtime registry implementation for canonical world runtime ownership.
  */
 
@@ -37,7 +39,7 @@ export interface WorldRuntimeStorageContext {
 export interface ManagedWorldRuntime<TWorld> {
   world: TWorld;
   stop: () => Promise<void>;
-  refresh?: () => Promise<void>;
+  refresh?: () => Promise<TWorld | void>;
 }
 
 export interface StartWorldRuntimeParams<TWorld> {
@@ -147,11 +149,20 @@ function toStartedRuntime<TWorld>(record: RuntimeRecord<TWorld>, consumerId: str
       if (!current) {
         throw new Error(`Runtime not found: ${record.runtimeKey}`);
       }
-      if (typeof current.runtime.refresh === 'function') {
-        await current.runtime.refresh();
-      }
+      await refreshRuntimeRecord(current);
     }
   };
+}
+
+async function refreshRuntimeRecord<TWorld>(record: RuntimeRecord<TWorld>): Promise<void> {
+  if (typeof record.runtime.refresh !== 'function') {
+    return;
+  }
+
+  const refreshedWorld = await record.runtime.refresh();
+  if (refreshedWorld !== undefined) {
+    record.runtime.world = refreshedWorld;
+  }
 }
 
 export async function startWorldRuntime<TWorld>(params: StartWorldRuntimeParams<TWorld>): Promise<StartedWorldRuntime<TWorld>> {
@@ -271,9 +282,7 @@ export function getWorldRuntimeByKey<TWorld>(runtimeKey: string): StartedWorldRu
       throw new Error('Use the release() handle returned from startWorldRuntime().');
     },
     refresh: async () => {
-      if (typeof record.runtime.refresh === 'function') {
-        await record.runtime.refresh();
-      }
+      await refreshRuntimeRecord(record);
     }
   };
 }

@@ -955,6 +955,7 @@ export default function App() {
     hasActiveHitlPrompt,
     composer,
     onSendMessage,
+    onAddToQueue: selectedSessionId ? onAddToQueue : undefined,
     loadSystemSettings,
     resetSystemSettings,
     saveSystemSettings,
@@ -1277,23 +1278,19 @@ export default function App() {
             composerProps: mainContentComposerProps,
             rightPanelShellProps: mainContentRightPanelShellProps,
             rightPanelContentProps: mainContentRightPanelContentProps,
+            queuePanel: queuedMessages.length > 0 ? (
+              <MessageQueuePanel
+                queuedMessages={queuedMessages}
+                onRemove={removeMessageFromQueue}
+                onRetry={retryMessageFromQueue}
+                onPause={pauseQueue}
+                onResume={resumeQueue}
+                onStop={stopQueue}
+                onClear={clearQueue}
+              />
+            ) : null,
           }}
-          statusBar={(
-            <>
-              {queuedMessages.length > 0 && (
-                <MessageQueuePanel
-                  queuedMessages={queuedMessages}
-                  onRemove={removeMessageFromQueue}
-                  onRetry={retryMessageFromQueue}
-                  onPause={pauseQueue}
-                  onResume={resumeQueue}
-                  onStop={stopQueue}
-                  onClear={clearQueue}
-                />
-              )}
-              <WorkingStatusBar chatStatus={chatStatus} agentStatuses={agentStatuses} notification={notification} />
-            </>
-          )}
+          statusBar={<WorkingStatusBar chatStatus={chatStatus} agentStatuses={agentStatuses} notification={notification} />}
         />
       )}
       overlays={(

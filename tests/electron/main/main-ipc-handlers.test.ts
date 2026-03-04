@@ -11,6 +11,7 @@
  * - Mocks the Electron `dialog` module virtually to avoid runtime Electron dependency.
  *
  * Recent Changes:
+ * - 2026-03-04: Added `sendChatMessage` response coverage for queue metadata (`queueStatus`, `queueRetryCount`).
  * - 2026-02-28: Added edit-message IPC coverage asserting the subscribed runtime world is injected into core `editUserMessage` for realtime-safe resubmission events.
  * - 2026-02-26: Added coverage for env-derived renderer logging config payload (`getLoggingConfig`).
  * - 2026-02-15: Added edit-message guardrail coverage for chat existence and user-role-only enforcement parity with web/API.
@@ -66,6 +67,7 @@ function createDependencies(overrides: Record<string, unknown> = {}) {
     updateWorld: vi.fn(async () => ({})),
     editUserMessage: vi.fn(async () => ({ success: true, resubmissionStatus: 'success' })),
     removeMessagesFrom: vi.fn(async () => ({ success: true, messagesRemovedTotal: 3 })),
+    resumeChatQueue: vi.fn(async () => ({})),
     ...overrides
   };
 }
@@ -120,10 +122,12 @@ describe('createMainIpcHandlers.getLoggingConfig', () => {
     const previousLogLevel = process.env.LOG_LEVEL;
     const previousElectronSession = process.env.LOG_ELECTRON_RENDERER_SESSION;
     const previousElectronRenderer = process.env.LOG_ELECTRON_RENDERER;
+    const previousMessageQueue = process.env.LOG_MESSAGE_QUEUE;
 
     process.env.LOG_LEVEL = 'warn';
     process.env.LOG_ELECTRON_RENDERER_SESSION = 'debug';
     process.env.LOG_ELECTRON_RENDERER = 'info';
+    process.env.LOG_MESSAGE_QUEUE = 'trace';
 
     try {
       const { handlers } = await createHandlers();
@@ -133,7 +137,8 @@ describe('createMainIpcHandlers.getLoggingConfig', () => {
         globalLevel: 'warn',
         categoryLevels: {
           'electron.renderer.session': 'debug',
-          'electron.renderer': 'info'
+          'electron.renderer': 'info',
+          'message.queue': 'trace'
         }
       });
     } finally {
@@ -145,6 +150,9 @@ describe('createMainIpcHandlers.getLoggingConfig', () => {
 
       if (previousElectronRenderer === undefined) delete process.env.LOG_ELECTRON_RENDERER;
       else process.env.LOG_ELECTRON_RENDERER = previousElectronRenderer;
+
+      if (previousMessageQueue === undefined) delete process.env.LOG_MESSAGE_QUEUE;
+      else process.env.LOG_MESSAGE_QUEUE = previousMessageQueue;
     }
   });
 });
@@ -345,7 +353,6 @@ describe('createMainIpcHandlers.sendChatMessage', () => {
     expect(restoreChat).not.toHaveBeenCalled();
     expect(enqueueAndProcessUserMessage).not.toHaveBeenCalled();
   });
-
   it('rejects sending when provided chatId cannot be restored', async () => {
     const restoreChat = vi.fn(async () => null);
     const enqueueAndProcessUserMessage = vi.fn();
@@ -378,6 +385,8 @@ describe('createMainIpcHandlers.sendChatMessage', () => {
       sender: 'human',
       content: 'hello',
       createdAt: new Date().toISOString(),
+      status: 'queued',
+      retryCount: 0,
     }));
 
     const previousGlobalEnabled = process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS;
@@ -388,7 +397,7 @@ describe('createMainIpcHandlers.sendChatMessage', () => {
     try {
       const { handlers } = await createHandlers({ ensureWorldSubscribed, restoreChat, enqueueAndProcessUserMessage });
 
-      await handlers.sendChatMessage({
+      const result = await handlers.sendChatMessage({
         worldId: 'world-1',
         chatId: 'chat-1',
         content: 'hello',
@@ -406,6 +415,11 @@ describe('createMainIpcHandlers.sendChatMessage', () => {
       expect(process.env.AGENT_WORLD_DISABLED_GLOBAL_SKILLS).toBe('find-skills,rpd');
       expect(process.env.AGENT_WORLD_DISABLED_PROJECT_SKILLS).toBe('apprun-skills');
       expect(enqueueAndProcessUserMessage).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({
+        messageId: 'queued-msg-1',
+        queueStatus: 'queued',
+        queueRetryCount: 0,
+      });
     } finally {
       if (previousGlobalEnabled === undefined) {
         delete process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS;
@@ -431,5 +445,64 @@ describe('createMainIpcHandlers.sendChatMessage', () => {
         process.env.AGENT_WORLD_DISABLED_PROJECT_SKILLS = previousProjectDisabled;
       }
     }
+  });
+});
+
+describe('createMainIpcHandlers.loadSpecificWorld', () => {
+  it('subscribes runtime and resumes active chat queue when loading a world', async () => {
+    const world = {
+      id: 'world-1',
+      name: 'World 1',
+      currentChatId: 'chat-7',
+      turnLimit: 5,
+      createdAt: new Date(),
+      lastUpdated: new Date(),
+      agents: new Map(),
+      chats: new Map(),
+    } as any;
+
+    const getWorld = vi.fn(async () => world);
+    const ensureWorldSubscribed = vi.fn(async () => ({ id: 'world-1', currentChatId: 'chat-7' }));
+    const resumeChatQueue = vi.fn(async () => undefined);
+    const listChats = vi.fn(async () => [{ id: 'chat-7', name: 'Chat 7', messageCount: 0 }]);
+    const getMemory = vi.fn(async () => []);
+
+    const { handlers } = await createHandlers({
+      getWorld,
+      ensureWorldSubscribed,
+      resumeChatQueue,
+      listChats,
+      getMemory,
+    });
+
+    const result = await handlers.loadSpecificWorld('world-1');
+
+    expect(result).toMatchObject({ success: true });
+    expect(getWorld).toHaveBeenCalledWith('world-1');
+    expect(ensureWorldSubscribed).toHaveBeenCalledWith('world-1');
+    expect(resumeChatQueue).toHaveBeenCalledWith('world-1', 'chat-7');
+  });
+});
+
+describe('createMainIpcHandlers.selectWorldSession', () => {
+  it('ensures runtime subscription before activating selected chat', async () => {
+    const ensureWorldSubscribed = vi.fn(async () => ({ id: 'world-1', currentChatId: 'chat-2' }));
+    const activateChatWithSnapshot = vi.fn(async () => ({
+      world: { id: 'world-1', currentChatId: 'chat-2' },
+      chatId: 'chat-2',
+      memory: [],
+      hitlPrompts: [],
+    }));
+
+    const { handlers } = await createHandlers({
+      ensureWorldSubscribed,
+      activateChatWithSnapshot,
+    });
+
+    const result = await handlers.selectWorldSession('world-1', 'chat-2');
+
+    expect(result).toMatchObject({ worldId: 'world-1', chatId: 'chat-2' });
+    expect(ensureWorldSubscribed).toHaveBeenCalledWith('world-1');
+    expect(activateChatWithSnapshot).toHaveBeenCalledWith('world-1', 'chat-2');
   });
 });

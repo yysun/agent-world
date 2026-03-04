@@ -16,6 +16,7 @@
  * - Existing persisted output is preserved; only in-flight work is interrupted.
  *
  * Recent Changes:
+ * - 2026-03-04: Added stale-handle self-healing in `hasActiveChatMessageProcessing()` to clear orphaned chat locks.
  * - 2026-02-13: Added chat-scoped processing handle registry with abort signals so stop requests also prevent follow-up continuation work.
  * - 2026-02-14: Added `hasActiveChatMessageProcessing()` for chat-scoped lock checks (e.g., message edit guards).
  */
@@ -24,7 +25,21 @@ import { cancelLLMCallsForChat } from './llm-manager.js';
 import { stopShellCommandsForChat } from './shell-cmd-tool.js';
 import { generateId } from './utils.js';
 
-const activeProcessingByChat = new Map<string, Map<string, AbortController>>();
+type ActiveProcessingHandle = {
+  controller: AbortController;
+  startedAtMs: number;
+};
+
+const DEFAULT_STALE_PROCESSING_TTL_MS = 10 * 60 * 1000;
+const ACTIVE_PROCESSING_STALE_TTL_MS = (() => {
+  const configured = Number.parseInt(String(process.env.AGENT_WORLD_ACTIVE_PROCESSING_TTL_MS || ''), 10);
+  if (!Number.isFinite(configured) || configured <= 0) {
+    return DEFAULT_STALE_PROCESSING_TTL_MS;
+  }
+  return Math.max(configured, 1000);
+})();
+
+const activeProcessingByChat = new Map<string, Map<string, ActiveProcessingHandle>>();
 
 function toChatKey(worldId: string, chatId: string): string {
   return `${worldId}::${chatId}`;
@@ -34,11 +49,11 @@ function toAbortError(message = 'Message processing canceled by user'): DOMExcep
   return new DOMException(message, 'AbortError');
 }
 
-function getOrCreateChatProcessingMap(worldId: string, chatId: string): Map<string, AbortController> {
+function getOrCreateChatProcessingMap(worldId: string, chatId: string): Map<string, ActiveProcessingHandle> {
   const key = toChatKey(worldId, chatId);
   const existing = activeProcessingByChat.get(key);
   if (existing) return existing;
-  const created = new Map<string, AbortController>();
+  const created = new Map<string, ActiveProcessingHandle>();
   activeProcessingByChat.set(key, created);
   return created;
 }
@@ -70,7 +85,10 @@ export function beginChatMessageProcessing(
   const operationId = generateId();
   const controller = new AbortController();
   const operations = getOrCreateChatProcessingMap(worldId, chatId);
-  operations.set(operationId, controller);
+  operations.set(operationId, {
+    controller,
+    startedAtMs: Date.now(),
+  });
   let completed = false;
 
   return {
@@ -99,8 +117,13 @@ export function hasActiveChatMessageProcessing(worldId: string, chatId: string):
     return false;
   }
 
-  for (const [operationId, controller] of operations.entries()) {
-    if (controller.signal.aborted) {
+  const nowMs = Date.now();
+  for (const [operationId, handle] of operations.entries()) {
+    const isStale = nowMs - handle.startedAtMs > ACTIVE_PROCESSING_STALE_TTL_MS;
+    if (isStale && !handle.controller.signal.aborted) {
+      handle.controller.abort();
+    }
+    if (handle.controller.signal.aborted || isStale) {
       operations.delete(operationId);
     }
   }
@@ -155,9 +178,9 @@ export function stopMessageProcessing(
   const processingOperations = activeProcessingByChat.get(chatKey);
   let abortedProcessing = 0;
   if (processingOperations && processingOperations.size > 0) {
-    for (const controller of processingOperations.values()) {
-      if (controller.signal.aborted) continue;
-      controller.abort();
+    for (const handle of processingOperations.values()) {
+      if (handle.controller.signal.aborted) continue;
+      handle.controller.abort();
       abortedProcessing += 1;
     }
   }

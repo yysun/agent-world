@@ -11,12 +11,15 @@
  * - Uses world-id keyed runtime tracking with safe register/unregister semantics.
  *
  * Recent Changes:
+ * - 2026-03-04: Queue/runtime selection no longer relies on `world.currentChatId`.
+ *   - `getActiveSubscribedWorld(worldId, preferredChatId)` now matches only by runtime chat membership.
+ *   - Subscription startup no longer auto-resumes queue from runtime `currentChatId`.
  * - 2026-02-28: Re-applied world-level message subscriptions during runtime refresh to preserve chat-title scheduling after session/world updates.
  * - 2026-02-14: Added active runtime world tracking and `getActiveSubscribedWorld()` for core edit-message resubmission to publish on live emitters.
  */
 
 import { World } from './types.js';
-import { getWorld, recoverQueueSendingMessages, resumeChatQueue } from './managers.js';
+import { getWorld, recoverQueueSendingMessages } from './managers.js';
 import { createCategoryLogger, type LogLevel, addLogStreamCallback } from './logger.js';
 import { subscribeAgentToMessages, subscribeWorldToMessages } from './events/index.js';
 import { generateId, toKebabCase } from './utils.js';
@@ -74,12 +77,21 @@ function unregisterActiveSubscribedWorld(world: World): void {
   }
 }
 
-export function getActiveSubscribedWorld(worldIdentifier: string): World | null {
+export function getActiveSubscribedWorld(worldIdentifier: string, preferredChatId?: string | null): World | null {
   const resolvedWorldId = toKebabCase(String(worldIdentifier || '').trim());
   if (!resolvedWorldId) return null;
 
   const activeWorldSet = activeSubscribedWorlds.get(resolvedWorldId);
   if (!activeWorldSet || activeWorldSet.size === 0) return null;
+
+  const normalizedPreferredChatId = String(preferredChatId || '').trim();
+  if (normalizedPreferredChatId) {
+    for (const world of activeWorldSet.values()) {
+      if (world?.chats instanceof Map && world.chats.has(normalizedPreferredChatId)) {
+        return world;
+      }
+    }
+  }
 
   for (const world of activeWorldSet.values()) {
     return world;
@@ -115,6 +127,10 @@ export async function startWorld(world: World, client: ClientConnection): Promis
 
       if (typeof currentWorld._worldMessagesUnsubscriber === 'function') {
         currentWorld._worldMessagesUnsubscriber();
+      }
+
+      if (currentWorld._agentUnsubscribers instanceof Map) {
+        currentWorld._agentUnsubscribers.clear();
       }
 
       // Remove all listeners from the EventEmitter to prevent memory leaks
@@ -236,16 +252,11 @@ export async function subscribeWorld(
         // Base runtime setup uses minimal client; forwarding listeners are per-subscriber.
         const runtimeSubscription = await startWorld(loadedWorld, { isOpen: true });
 
-        const activeChatId = String(runtimeSubscription.world.currentChatId || '').trim();
-        if (activeChatId) {
-          await resumeChatQueue(runtimeSubscription.world.id, activeChatId);
-        }
-
         return {
           world: runtimeSubscription.world,
           stop: () => runtimeSubscription.unsubscribe(),
           refresh: async () => {
-            await runtimeSubscription.refresh();
+            return await runtimeSubscription.refresh();
           }
         };
       }
