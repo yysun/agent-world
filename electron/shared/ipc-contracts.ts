@@ -43,6 +43,10 @@ export const DESKTOP_INVOKE_CHANNELS = {
   WORLD_CREATE: 'world:create',
   WORLD_UPDATE: 'world:update',
   WORLD_DELETE: 'world:delete',
+  HEARTBEAT_LIST: 'heartbeat:list',
+  HEARTBEAT_RUN: 'heartbeat:run',
+  HEARTBEAT_PAUSE: 'heartbeat:pause',
+  HEARTBEAT_STOP: 'heartbeat:stop',
   AGENT_CREATE: 'agent:create',
   AGENT_UPDATE: 'agent:update',
   AGENT_DELETE: 'agent:delete',
@@ -94,6 +98,15 @@ export interface WorldImportPayload {
 
 export interface WorldChatPayload extends WorldIdPayload {
   chatId: string;
+}
+
+export interface HeartbeatJobPayload extends WorldIdPayload { }
+
+export interface HeartbeatJobStatus {
+  worldId: string;
+  worldName: string;
+  interval: string;
+  status: 'running' | 'paused' | 'stopped';
 }
 
 export interface BranchSessionFromMessagePayload extends WorldChatPayload {
@@ -196,6 +209,10 @@ export interface DesktopApi {
   createWorld: (payload: Record<string, unknown>) => Promise<unknown>;
   updateWorld: (worldId: string, payload: Record<string, unknown>) => Promise<unknown>;
   deleteWorld: (worldId: string) => Promise<unknown>;
+  listHeartbeatJobs: () => Promise<HeartbeatJobStatus[]>;
+  runHeartbeat: (worldId: string) => Promise<unknown>;
+  pauseHeartbeat: (worldId: string) => Promise<unknown>;
+  stopHeartbeat: (worldId: string) => Promise<unknown>;
   createAgent: (worldId: string, payload: Record<string, unknown>) => Promise<unknown>;
   updateAgent: (worldId: string, agentId: string, payload: Record<string, unknown>) => Promise<unknown>;
   deleteAgent: (worldId: string, agentId: string) => Promise<unknown>;

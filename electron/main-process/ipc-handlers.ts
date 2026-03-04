@@ -172,6 +172,15 @@ interface MainIpcHandlerFactoryDependencies {
   loggerIpcMessages?: LoggerLike;
   GitHubWorldImportError: new (...args: any[]) => GitHubWorldImportErrorLike;
   stageGitHubWorldFromShorthand: (shorthand: string) => Promise<GitHubWorldImportStagedResult>;
+  heartbeatManager: {
+    startJob: (world: any) => void;
+    restartJob: (world: any) => void;
+    pauseJob: (worldId: string) => void;
+    resumeJob: (worldId: string) => void;
+    stopJob: (worldId: string) => void;
+    stopAll: () => void;
+    listJobs: () => Array<{ worldId: string; worldName: string; interval: string; status: 'running' | 'paused' | 'stopped' }>;
+  };
 }
 
 interface GitHubWorldImportSource {
@@ -239,7 +248,8 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     loggerIpcSession = NOOP_LOGGER,
     loggerIpcMessages = NOOP_LOGGER,
     GitHubWorldImportError,
-    stageGitHubWorldFromShorthand
+    stageGitHubWorldFromShorthand,
+    heartbeatManager
   } = dependencies;
 
   interface StorageLike {
@@ -317,6 +327,26 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     }
   }
 
+  async function startHeartbeatJobsForWorkspace(worlds: any[]): Promise<void> {
+    const worldList = Array.isArray(worlds) ? worlds : [];
+    for (const world of worldList) {
+      if (world?.heartbeatEnabled !== true) {
+        heartbeatManager.stopJob(String(world?.id || ''));
+        continue;
+      }
+
+      const worldId = String(world?.id || '').trim();
+      if (!worldId) continue;
+
+      try {
+        const runtimeWorld = await ensureWorldSubscribed(worldId);
+        heartbeatManager.restartJob(runtimeWorld as any);
+      } catch {
+        // Keep workspace loading resilient even if one world cannot subscribe.
+      }
+    }
+  }
+
   async function loadWorldsFromWorkspace() {
     try {
       await ensureCoreReady();
@@ -332,6 +362,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       }
 
       const sortedWorlds = [...worlds].sort((a, b) => a.name.localeCompare(b.name));
+      await startHeartbeatJobsForWorkspace(sortedWorlds);
 
       return {
         success: true,
@@ -432,6 +463,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
   async function listWorkspaceWorlds() {
     await ensureCoreReady();
     const worlds = await listWorlds();
+    await startHeartbeatJobsForWorkspace(worlds);
     return worlds.map((world) => serializeWorldInfo(world));
   }
 
@@ -577,6 +609,18 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       updates.variables = payload.variables == null ? '' : String(payload.variables);
     }
 
+    if (payload?.heartbeatEnabled !== undefined) {
+      updates.heartbeatEnabled = Boolean(payload.heartbeatEnabled);
+    }
+
+    if (payload?.heartbeatInterval !== undefined) {
+      updates.heartbeatInterval = String(payload.heartbeatInterval || '').trim() || null;
+    }
+
+    if (payload?.heartbeatPrompt !== undefined) {
+      updates.heartbeatPrompt = String(payload.heartbeatPrompt || '').trim() || null;
+    }
+
     if (Object.keys(updates).length === 0) {
       throw new Error('No world updates were provided.');
     }
@@ -587,6 +631,12 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     }
 
     const refreshWarning = await refreshWorldSubscription(worldId);
+    try {
+      const runtimeWorld = await ensureWorldSubscribed(worldId);
+      heartbeatManager.restartJob(runtimeWorld as any);
+    } catch {
+      // If subscription cannot be resolved, heartbeat runtime state will be reconciled on next workspace load.
+    }
     const serialized = serializeWorldInfo(updated);
     if (refreshWarning) {
       return {
@@ -728,8 +778,45 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     }
 
     await removeWorldSubscriptions(worldId);
+    heartbeatManager.stopJob(worldId);
 
     return { success: true, worldId };
+  }
+
+  async function listHeartbeatJobs() {
+    await ensureCoreReady();
+    return heartbeatManager.listJobs();
+  }
+
+  async function runHeartbeatJob(payload: any) {
+    await ensureCoreReady();
+    const worldId = String(payload?.worldId || '').trim();
+    if (!worldId) {
+      throw new Error('World ID is required.');
+    }
+    const runtimeWorld = await ensureWorldSubscribed(worldId);
+    heartbeatManager.restartJob(runtimeWorld as any);
+    return { ok: true };
+  }
+
+  async function pauseHeartbeatJob(payload: any) {
+    await ensureCoreReady();
+    const worldId = String(payload?.worldId || '').trim();
+    if (!worldId) {
+      throw new Error('World ID is required.');
+    }
+    heartbeatManager.pauseJob(worldId);
+    return { ok: true };
+  }
+
+  async function stopHeartbeatJob(payload: any) {
+    await ensureCoreReady();
+    const worldId = String(payload?.worldId || '').trim();
+    if (!worldId) {
+      throw new Error('World ID is required.');
+    }
+    heartbeatManager.stopJob(worldId);
+    return { ok: true };
   }
 
   async function importWorld(payload?: any) {
@@ -1423,6 +1510,10 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     listSkillRegistry,
     createWorkspaceWorld,
     updateWorkspaceWorld,
+    listHeartbeatJobs,
+    runHeartbeatJob,
+    pauseHeartbeatJob,
+    stopHeartbeatJob,
     createWorldAgent,
     updateWorldAgent,
     deleteWorldAgent,

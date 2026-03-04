@@ -220,14 +220,75 @@ describe('sqlite-storage behavior', () => {
       eventEmitter: {} as any,
     } as any);
 
-    await expect(loadWorld(ctx, 'world-1')).resolves.toEqual(worldRow);
-    await expect(listWorlds(ctx)).resolves.toEqual([worldRow]);
+    await expect(loadWorld(ctx, 'world-1')).resolves.toEqual({
+      ...worldRow,
+      heartbeatEnabled: false,
+      heartbeatInterval: null,
+      heartbeatPrompt: null,
+    });
+    await expect(listWorlds(ctx)).resolves.toEqual([
+      {
+        ...worldRow,
+        heartbeatEnabled: false,
+        heartbeatInterval: null,
+        heartbeatPrompt: null,
+      }
+    ]);
     await expect(deleteWorld(ctx, 'world-1')).resolves.toBe(true);
 
     const failingDelete = createMockDb({
       onRun: (sql) => (sql.includes('DELETE FROM worlds') ? { error: new Error('delete fail') } : {}),
     });
     await expect(deleteWorld(createCtx(failingDelete.db, true), 'world-1')).resolves.toBe(false);
+  });
+
+  it('persists heartbeat fields on worlds and restores booleans/nullables', async () => {
+    const worldRow = {
+      id: 'world-hb',
+      name: 'Heartbeat World',
+      description: 'Desc',
+      turnLimit: 7,
+      mainAgent: null,
+      chatLLMProvider: null,
+      chatLLMModel: null,
+      currentChatId: 'chat-1',
+      mcpConfig: null,
+      variables: '',
+      heartbeatEnabled: 1,
+      heartbeatInterval: '*/5 * * * *',
+      heartbeatPrompt: 'ping',
+    };
+    const mock = createMockDb({
+      onGet: (sql) => (sql.includes('FROM worlds WHERE id = ?') ? worldRow : null),
+      onAll: (sql) => (sql.includes('FROM worlds') ? [worldRow] : []),
+    });
+    const ctx = createCtx(mock.db, true);
+
+    await saveWorld(ctx, {
+      ...worldRow,
+      heartbeatEnabled: true,
+      agents: new Map(),
+      chats: new Map(),
+      isProcessing: false,
+      eventEmitter: {} as any,
+    } as any);
+
+    const insertCall = mock.runCalls.find((call) => call.sql.includes('INSERT INTO worlds'));
+    expect(insertCall?.params).toEqual(expect.arrayContaining([1, '*/5 * * * *', 'ping']));
+
+    await expect(loadWorld(ctx, 'world-hb')).resolves.toMatchObject({
+      heartbeatEnabled: true,
+      heartbeatInterval: '*/5 * * * *',
+      heartbeatPrompt: 'ping',
+    });
+
+    await expect(listWorlds(ctx)).resolves.toEqual([
+      expect.objectContaining({
+        heartbeatEnabled: true,
+        heartbeatInterval: '*/5 * * * *',
+        heartbeatPrompt: 'ping',
+      })
+    ]);
   });
 
   it('hydrates aliased tool call fields when loading an agent', async () => {

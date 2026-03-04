@@ -346,6 +346,9 @@ export interface CreateWorldParams {
   chatLLMModel?: string; // For chat summarization
   mcpConfig?: string | null; // MCP configuration JSON string
   variables?: string; // .env-style world variables text
+  heartbeatEnabled?: boolean;
+  heartbeatInterval?: string | null;
+  heartbeatPrompt?: string | null;
   uiMode?: 'chat' | 'dashboard'; // UI layout mode (default: 'chat')
   dashboardZones?: DashboardZone[]; // Zone config for dashboard mode
 }
@@ -371,6 +374,9 @@ export interface World {
   currentChatId?: string | null; // Track active chat session
   mcpConfig?: string | null; // MCP configuration JSON string
   variables?: string; // .env-style world variables text
+  heartbeatEnabled?: boolean;
+  heartbeatInterval?: string | null;
+  heartbeatPrompt?: string | null;
   uiMode?: 'chat' | 'dashboard'; // UI layout mode (default: 'chat')
   dashboardZones?: DashboardZone[]; // Zone config for dashboard mode
   isProcessing?: boolean; // Flag to prevent edits during agent processing

@@ -17,6 +17,15 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('react', () => ({
+  useCallback: (fn: unknown) => fn,
+  useEffect: () => undefined,
+  useMemo: (fn: () => unknown) => fn(),
+  useRef: (value?: unknown) => ({ current: value }),
+  useState: (value: unknown) => [value, () => undefined],
+}), { virtual: true });
+
 import { persistSkillSettingsAutosave } from '../../../electron/renderer/src/hooks/useThemeSettings';
 
 describe('electron/renderer theme settings skill autosave helper', () => {

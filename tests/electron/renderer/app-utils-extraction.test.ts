@@ -148,6 +148,35 @@ describe('extracted validation utils', () => {
     expect(result.error).toContain('MCP Config');
   });
 
+  it('requires heartbeat prompt and strict 5-field interval when enabled', () => {
+    const missingPrompt = validateWorldForm({
+      name: 'World',
+      heartbeatEnabled: true,
+      heartbeatInterval: '*/5 * * * *',
+      heartbeatPrompt: ' '
+    });
+    expect(missingPrompt.valid).toBe(false);
+    expect(String(missingPrompt.error || '')).toContain('Heartbeat prompt');
+
+    const invalidInterval = validateWorldForm({
+      name: 'World',
+      heartbeatEnabled: true,
+      heartbeatInterval: '*/5 * * * * *',
+      heartbeatPrompt: 'ping'
+    });
+    expect(invalidInterval.valid).toBe(false);
+    expect(String(invalidInterval.error || '')).toContain('5-field cron');
+
+    const valid = validateWorldForm({
+      name: 'World',
+      heartbeatEnabled: true,
+      heartbeatInterval: '*/5 * * * *',
+      heartbeatPrompt: 'ping'
+    });
+    expect(valid.valid).toBe(true);
+    expect(valid.data?.heartbeatEnabled).toBe(true);
+  });
+
   it('validates agent form and requires name/model', () => {
     expect(validateAgentForm({ name: '', model: 'x' }).valid).toBe(false);
     expect(validateAgentForm({ name: 'a', model: '' }).valid).toBe(false);

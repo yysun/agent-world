@@ -29,6 +29,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createDesktopApi, exposeDesktopApi } from '../../../electron/preload/bridge';
 
+vi.mock('electron', () => ({
+  contextBridge: {
+    exposeInMainWorld: vi.fn(),
+  },
+  ipcRenderer: {
+    invoke: vi.fn(),
+    on: vi.fn(),
+    removeListener: vi.fn(),
+  }
+}), { virtual: true });
+
 function createBridgeMocks() {
   return {
     invoke: vi.fn().mockResolvedValue(undefined),
@@ -56,6 +67,10 @@ describe('electron preload bridge', () => {
       loadWorldFromFolder: expect.any(Function),
       listWorlds: expect.any(Function),
       exportWorld: expect.any(Function),
+      listHeartbeatJobs: expect.any(Function),
+      runHeartbeat: expect.any(Function),
+      pauseHeartbeat: expect.any(Function),
+      stopHeartbeat: expect.any(Function),
       listSkills: expect.any(Function),
       sendMessage: expect.any(Function),
       branchSessionFromMessage: expect.any(Function),
@@ -83,6 +98,10 @@ describe('electron preload bridge', () => {
     api.openWorkspace('/tmp/workspace');
     api.importWorld({ source: '@awesome-agent-world/infinite-etude' });
     api.exportWorld('world-1');
+    api.listHeartbeatJobs();
+    api.runHeartbeat('world-1');
+    api.pauseHeartbeat('world-1');
+    api.stopHeartbeat('world-1');
     api.listSkills();
     api.branchSessionFromMessage('world-1', 'chat-1', 'msg-1');
     api.editMessage('world-1', 'msg-1', 'Updated', 'chat-1');
@@ -99,37 +118,41 @@ describe('electron preload bridge', () => {
       source: '@awesome-agent-world/infinite-etude'
     });
     expect(mocks.invoke).toHaveBeenNthCalledWith(5, 'world:export', { worldId: 'world-1' });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(6, 'skill:list');
-    expect(mocks.invoke).toHaveBeenNthCalledWith(7, 'session:branchFromMessage', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(6, 'heartbeat:list');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(7, 'heartbeat:run', { worldId: 'world-1' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(8, 'heartbeat:pause', { worldId: 'world-1' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(9, 'heartbeat:stop', { worldId: 'world-1' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(10, 'skill:list');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(11, 'session:branchFromMessage', {
       worldId: 'world-1',
       chatId: 'chat-1',
       messageId: 'msg-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(8, 'message:edit', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(12, 'message:edit', {
       worldId: 'world-1',
       messageId: 'msg-1',
       newContent: 'Updated',
       chatId: 'chat-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(9, 'hitl:respond', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(13, 'hitl:respond', {
       worldId: 'world-1',
       requestId: 'req-1',
       optionId: 'yes_once',
       chatId: 'chat-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(10, 'chat:stopMessage', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(14, 'chat:stopMessage', {
       worldId: 'world-1',
       chatId: 'chat-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(11, 'chat:subscribeEvents', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(15, 'chat:subscribeEvents', {
       worldId: 'world-1',
       chatId: 'chat-1',
       subscriptionId: 'sub-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(12, 'chat:unsubscribeEvents', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(16, 'chat:unsubscribeEvents', {
       subscriptionId: 'sub-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(13, 'logging:getConfig');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(17, 'logging:getConfig');
   });
 
   it('wires chat event listener callback and cleanup correctly', () => {

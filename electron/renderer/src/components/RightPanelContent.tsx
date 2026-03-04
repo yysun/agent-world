@@ -610,6 +610,42 @@ export default function RightPanelContent({
                   disabled={updatingWorld || deletingWorld}
                 />
               </div>
+              <div className="rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-sidebar-foreground/90">Heartbeat</label>
+                  <input
+                    type="checkbox"
+                    checked={editingWorld.heartbeatEnabled === true}
+                    onChange={(event) => setEditingWorld((value) => ({ ...value, heartbeatEnabled: event.target.checked }))}
+                    disabled={updatingWorld || deletingWorld}
+                  />
+                </div>
+                {editingWorld.heartbeatEnabled === true ? (
+                  <div className="mt-2 flex flex-col gap-2">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-bold text-sidebar-foreground/90">Interval</label>
+                      <input
+                        value={editingWorld.heartbeatInterval || ''}
+                        onChange={(event) => setEditingWorld((value) => ({ ...value, heartbeatInterval: event.target.value }))}
+                        placeholder="*/5 * * * *"
+                        className="w-full rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                        disabled={updatingWorld || deletingWorld}
+                      />
+                      <span className="text-[11px] text-sidebar-foreground/70">Standard 5-field cron format</span>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-bold text-sidebar-foreground/90">Prompt</label>
+                      <textarea
+                        value={editingWorld.heartbeatPrompt || ''}
+                        onChange={(event) => setEditingWorld((value) => ({ ...value, heartbeatPrompt: event.target.value }))}
+                        placeholder="Message to send on each heartbeat"
+                        className="h-20 w-full rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                        disabled={updatingWorld || deletingWorld}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+              </div>
               <div className="flex items-center justify-between rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground">
                 <span>Variables (.env): {String(editingWorld.variables || '').trim() ? 'Configured' : 'Not configured'}</span>
                 <button

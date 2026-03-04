@@ -94,6 +94,9 @@ export function getDefaultWorldForm() {
     mainAgent: '',
     chatLLMProvider: DEFAULT_WORLD_CHAT_LLM_PROVIDER,
     chatLLMModel: DEFAULT_WORLD_CHAT_LLM_MODEL,
+    heartbeatEnabled: false,
+    heartbeatInterval: '',
+    heartbeatPrompt: '',
     mcpConfig: '',
     variables: ''
   };
@@ -109,6 +112,9 @@ export function getWorldFormFromWorld(world: unknown) {
     mainAgent?: unknown;
     chatLLMProvider?: unknown;
     chatLLMModel?: unknown;
+    heartbeatEnabled?: unknown;
+    heartbeatInterval?: unknown;
+    heartbeatPrompt?: unknown;
     mcpConfig?: unknown;
     variables?: unknown;
   };
@@ -128,6 +134,9 @@ export function getWorldFormFromWorld(world: unknown) {
     mainAgent,
     chatLLMProvider,
     chatLLMModel,
+    heartbeatEnabled: worldValue.heartbeatEnabled === true,
+    heartbeatInterval: worldValue.heartbeatInterval == null ? '' : String(worldValue.heartbeatInterval),
+    heartbeatPrompt: worldValue.heartbeatPrompt == null ? '' : String(worldValue.heartbeatPrompt),
     mcpConfig: worldValue.mcpConfig == null ? '' : String(worldValue.mcpConfig),
     variables: worldValue.variables == null ? '' : String(worldValue.variables)
   };

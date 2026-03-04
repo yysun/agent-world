@@ -35,6 +35,7 @@ import {
   DESKTOP_INVOKE_CHANNELS,
   type ChatEventPayload,
   type DesktopApi,
+  type HeartbeatJobStatus,
   type RendererLoggingConfig,
   type SkillRegistrySummary,
   type QueueAddPayload
@@ -112,6 +113,28 @@ export function createDesktopApi(ipcRendererLike: IpcRendererLike = ipcRenderer)
       invokeDesktopChannel(
         ipcRendererLike,
         DESKTOP_INVOKE_CHANNELS.WORLD_DELETE,
+        toWorldPayload(worldId)
+      ),
+    listHeartbeatJobs: () => invokeDesktopChannel<HeartbeatJobStatus[]>(
+      ipcRendererLike,
+      DESKTOP_INVOKE_CHANNELS.HEARTBEAT_LIST
+    ),
+    runHeartbeat: (worldId) =>
+      invokeDesktopChannel(
+        ipcRendererLike,
+        DESKTOP_INVOKE_CHANNELS.HEARTBEAT_RUN,
+        toWorldPayload(worldId)
+      ),
+    pauseHeartbeat: (worldId) =>
+      invokeDesktopChannel(
+        ipcRendererLike,
+        DESKTOP_INVOKE_CHANNELS.HEARTBEAT_PAUSE,
+        toWorldPayload(worldId)
+      ),
+    stopHeartbeat: (worldId) =>
+      invokeDesktopChannel(
+        ipcRendererLike,
+        DESKTOP_INVOKE_CHANNELS.HEARTBEAT_STOP,
         toWorldPayload(worldId)
       ),
     createAgent: (worldId, payload) =>

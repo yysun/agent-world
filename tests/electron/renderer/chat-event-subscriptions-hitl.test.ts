@@ -11,7 +11,13 @@
  * - Preserves metadata used by refresh-after-dismiss behavior.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('react', () => ({
+  useEffect: () => undefined,
+  useRef: (value?: unknown) => ({ current: value }),
+}), { virtual: true });
+
 import { enqueueHitlPromptFromToolEvent } from '../../../electron/renderer/src/hooks/useChatEventSubscriptions';
 
 describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {

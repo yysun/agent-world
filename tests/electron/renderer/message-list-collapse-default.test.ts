@@ -8,7 +8,32 @@
  * - 2026-03-01: Added regression coverage for default-expanded tool/assistant message cards.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+const { jsxFactory } = vi.hoisted(() => ({
+  jsxFactory: (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({
+    type,
+    props: props ?? {},
+    key,
+  }),
+}));
+
+vi.mock('react', () => ({
+  useMemo: (fn: () => unknown) => fn(),
+  useCallback: (fn: unknown) => fn,
+}), { virtual: true });
+
+vi.mock('react/jsx-runtime', () => ({
+  Fragment: 'Fragment',
+  jsx: jsxFactory,
+  jsxs: jsxFactory,
+}), { virtual: true });
+
+vi.mock('react/jsx-dev-runtime', () => ({
+  Fragment: 'Fragment',
+  jsxDEV: jsxFactory,
+}), { virtual: true });
+
 import { getInitialMessageCollapsedState } from '../../../electron/renderer/src/components/MessageListPanel';
 
 describe('MessageListPanel default collapse policy', () => {

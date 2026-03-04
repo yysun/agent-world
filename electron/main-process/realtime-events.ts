@@ -77,6 +77,7 @@ interface CreateRealtimeEventsRuntimeDependencies {
   getMemory?: (worldId: string, chatId: string | null) => Promise<any[] | null>;
   listPendingHitlPromptEvents?: (world: any, chatId?: string | null) => Array<{ chatId: string | null; prompt: Record<string, unknown> }>;
   listPendingHitlPromptEventsFromMessages?: (messages: any[], chatId?: string | null) => Array<{ chatId: string | null; prompt: Record<string, unknown> }>;
+  stopAllHeartbeatJobs?: () => void;
   loggerRealtime?: LoggerLike;
 }
 
@@ -111,6 +112,7 @@ export function createRealtimeEventsRuntime(
     getMemory,
     listPendingHitlPromptEvents,
     listPendingHitlPromptEventsFromMessages,
+    stopAllHeartbeatJobs,
     loggerRealtime = NOOP_LOGGER
   } = dependencies;
 
@@ -531,6 +533,8 @@ export function createRealtimeEventsRuntime(
       }
     }
 
+
+    stopAllHeartbeatJobs?.();
     // Keep tombstones so unsubscribed IDs remain non-reusable after resets.
     chatEventSubscriptionVersions.clear();
   }

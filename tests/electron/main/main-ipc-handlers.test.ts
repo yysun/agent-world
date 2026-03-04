@@ -68,6 +68,15 @@ function createDependencies(overrides: Record<string, unknown> = {}) {
     editUserMessage: vi.fn(async () => ({ success: true, resubmissionStatus: 'success' })),
     removeMessagesFrom: vi.fn(async () => ({ success: true, messagesRemovedTotal: 3 })),
     resumeChatQueue: vi.fn(async () => ({})),
+    heartbeatManager: {
+      startJob: vi.fn(),
+      restartJob: vi.fn(),
+      pauseJob: vi.fn(),
+      resumeJob: vi.fn(),
+      stopJob: vi.fn(),
+      stopAll: vi.fn(),
+      listJobs: vi.fn(() => []),
+    },
     ...overrides
   };
 }
@@ -504,5 +513,54 @@ describe('createMainIpcHandlers.selectWorldSession', () => {
     expect(result).toMatchObject({ worldId: 'world-1', chatId: 'chat-2' });
     expect(ensureWorldSubscribed).toHaveBeenCalledWith('world-1');
     expect(activateChatWithSnapshot).toHaveBeenCalledWith('world-1', 'chat-2');
+  });
+});
+
+describe('createMainIpcHandlers.updateWorkspaceWorld heartbeat mapping', () => {
+  it('maps heartbeat fields and restarts heartbeat job with subscribed world', async () => {
+    const updateWorld = vi.fn(async () => ({
+      id: 'world-1',
+      name: 'World 1',
+      description: '',
+      turnLimit: 5,
+      heartbeatEnabled: true,
+      heartbeatInterval: '*/5 * * * *',
+      heartbeatPrompt: 'tick',
+    }));
+    const refreshWorldSubscription = vi.fn(async () => null);
+    const runtimeWorld = { id: 'world-1', name: 'World 1', heartbeatEnabled: true, heartbeatInterval: '*/5 * * * *', heartbeatPrompt: 'tick' };
+    const ensureWorldSubscribed = vi.fn(async () => runtimeWorld);
+    const heartbeatManager = {
+      startJob: vi.fn(),
+      restartJob: vi.fn(),
+      pauseJob: vi.fn(),
+      resumeJob: vi.fn(),
+      stopJob: vi.fn(),
+      stopAll: vi.fn(),
+      listJobs: vi.fn(() => []),
+    };
+
+    const { handlers } = await createHandlers({
+      updateWorld,
+      refreshWorldSubscription,
+      ensureWorldSubscribed,
+      heartbeatManager,
+    });
+
+    await handlers.updateWorkspaceWorld({
+      worldId: 'world-1',
+      heartbeatEnabled: true,
+      heartbeatInterval: ' */5 * * * * ',
+      heartbeatPrompt: 'tick',
+    });
+
+    expect(updateWorld).toHaveBeenCalledWith('world-1', expect.objectContaining({
+      heartbeatEnabled: true,
+      heartbeatInterval: '*/5 * * * *',
+      heartbeatPrompt: 'tick',
+    }));
+    expect(refreshWorldSubscription).toHaveBeenCalledWith('world-1');
+    expect(ensureWorldSubscribed).toHaveBeenCalledWith('world-1');
+    expect(heartbeatManager.restartJob).toHaveBeenCalledWith(runtimeWorld);
   });
 });

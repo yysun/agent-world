@@ -17,7 +17,14 @@
  * - 2026-02-28: Added to validate optional `targetWorld` parameter acceptance.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('electron', () => ({
+  dialog: {
+    showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
+  },
+}), { virtual: true });
+
 import { createMainIpcHandlers } from '../../electron/main-process/ipc-handlers';
 
 describe('createMainIpcHandlers', () => {

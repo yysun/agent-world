@@ -85,6 +85,9 @@ export function serializeWorldInfo(world: any): Record<string, unknown> {
     chatLLMModel: world.chatLLMModel || null,
     mcpConfig: world.mcpConfig || null,
     variables: typeof world.variables === 'string' ? world.variables : '',
+    heartbeatEnabled: world.heartbeatEnabled === true,
+    heartbeatInterval: world.heartbeatInterval == null ? null : String(world.heartbeatInterval),
+    heartbeatPrompt: world.heartbeatPrompt == null ? null : String(world.heartbeatPrompt),
     totalAgents: world.totalAgents,
     totalMessages: world.totalMessages,
     agents: serializeWorldAgents(world)

@@ -220,8 +220,8 @@ export async function saveWorld(ctx: SQLiteStorageContext, worldData: World): Pr
   await ensureInitialized(ctx);
   // Use INSERT with ON CONFLICT UPDATE instead of INSERT OR REPLACE to avoid foreign key cascade issues
   await run(ctx, `
-    INSERT INTO worlds (id, name, description, turn_limit, main_agent, chat_llm_provider, chat_llm_model, current_chat_id, mcp_config, variables, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    INSERT INTO worlds (id, name, description, turn_limit, main_agent, chat_llm_provider, chat_llm_model, current_chat_id, mcp_config, variables, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       description = excluded.description,
@@ -232,9 +232,13 @@ export async function saveWorld(ctx: SQLiteStorageContext, worldData: World): Pr
       current_chat_id = excluded.current_chat_id,
       variables = excluded.variables,
       mcp_config = excluded.mcp_config,
+      heartbeat_enabled = excluded.heartbeat_enabled,
+      heartbeat_interval = excluded.heartbeat_interval,
+      heartbeat_prompt = excluded.heartbeat_prompt,
       updated_at = CURRENT_TIMESTAMP
   `, worldData.id, worldData.name, worldData.description, worldData.turnLimit,
-    worldData.mainAgent, worldData.chatLLMProvider, worldData.chatLLMModel, worldData.currentChatId, worldData.mcpConfig, worldData.variables);
+    worldData.mainAgent, worldData.chatLLMProvider, worldData.chatLLMModel, worldData.currentChatId, worldData.mcpConfig, worldData.variables,
+    worldData.heartbeatEnabled ? 1 : 0, worldData.heartbeatInterval ?? null, worldData.heartbeatPrompt ?? null);
 }
 
 export async function loadWorld(ctx: SQLiteStorageContext, worldId: string): Promise<World | null> {
@@ -244,10 +248,19 @@ export async function loadWorld(ctx: SQLiteStorageContext, worldId: string): Pro
            main_agent as mainAgent,
            chat_llm_provider as chatLLMProvider, chat_llm_model as chatLLMModel,
            current_chat_id as currentChatId, mcp_config as mcpConfig,
-           variables as variables
+           variables as variables,
+           heartbeat_enabled as heartbeatEnabled,
+           heartbeat_interval as heartbeatInterval,
+           heartbeat_prompt as heartbeatPrompt
     FROM worlds WHERE id = ?
   `, worldId) as World | undefined;
-  return result || null;
+  if (!result) return null;
+  return {
+    ...result,
+    heartbeatEnabled: Boolean((result as any).heartbeatEnabled),
+    heartbeatInterval: result.heartbeatInterval ?? null,
+    heartbeatPrompt: result.heartbeatPrompt ?? null,
+  };
 }
 
 export async function deleteWorld(ctx: SQLiteStorageContext, worldId: string): Promise<boolean> {
@@ -267,11 +280,19 @@ export async function listWorlds(ctx: SQLiteStorageContext): Promise<World[]> {
            main_agent as mainAgent,
            chat_llm_provider as chatLLMProvider, chat_llm_model as chatLLMModel,
            current_chat_id as currentChatId, mcp_config as mcpConfig,
-           variables as variables
+           variables as variables,
+           heartbeat_enabled as heartbeatEnabled,
+           heartbeat_interval as heartbeatInterval,
+           heartbeat_prompt as heartbeatPrompt
     FROM worlds
     ORDER BY name
   `) as World[];
-  return results || [];
+  return (results || []).map((world) => ({
+    ...world,
+    heartbeatEnabled: Boolean((world as any).heartbeatEnabled),
+    heartbeatInterval: world.heartbeatInterval ?? null,
+    heartbeatPrompt: world.heartbeatPrompt ?? null,
+  }));
 }
 
 // AGENT OPERATIONS

@@ -81,6 +81,7 @@ import os from 'node:os';
 import { buildMainIpcRoutes } from './main-process/ipc-routes.js';
 import { registerIpcRoutes } from './main-process/ipc-registration.js';
 import { createMainIpcHandlers } from './main-process/ipc-handlers.js';
+import { createHeartbeatManager } from './main-process/heartbeat-manager.js';
 import { resolvePreloadPath, resolveRendererIndexPath } from './main-process/window-paths.js';
 import { setupMainLifecycle } from './main-process/lifecycle.js';
 import type { RealtimeEventsRuntime } from './main-process/realtime-events.js';
@@ -139,6 +140,9 @@ const {
   listPendingHitlPromptEventsFromMessages,
   submitWorldHitlResponse,
   stopMessageProcessing,
+  isValidCronExpression,
+  startHeartbeat,
+  stopHeartbeat,
   activateChatWithSnapshot,
   restoreChat,
   syncSkills,
@@ -182,6 +186,12 @@ let ensureCoreReady: () => Promise<void> = async () => {
   throw new Error('Workspace runtime not initialized');
 };
 
+const heartbeatManager = createHeartbeatManager({
+  isValidCronExpression,
+  startHeartbeat,
+  stopHeartbeat,
+});
+
 const realtimeEventsRuntime = createRealtimeEventsRuntime({
   getMainWindow: () => mainWindow,
   chatEventChannel: CHAT_EVENT_CHANNEL,
@@ -191,6 +201,7 @@ const realtimeEventsRuntime = createRealtimeEventsRuntime({
   getMemory,
   listPendingHitlPromptEvents,
   listPendingHitlPromptEventsFromMessages,
+  stopAllHeartbeatJobs: () => heartbeatManager.stopAll(),
   loggerRealtime: mainRealtimeLogger,
 });
 
@@ -265,6 +276,7 @@ const ipcHandlers = createMainIpcHandlers({
   createStorageFromEnv,
   GitHubWorldImportError,
   stageGitHubWorldFromShorthand,
+  heartbeatManager,
   loggerIpc: mainIpcLogger,
   loggerIpcSession: mainIpcSessionLogger,
   loggerIpcMessages: mainIpcMessagesLogger
@@ -284,6 +296,10 @@ function registerIpcHandlers() {
     createWorkspaceWorld: ipcHandlers.createWorkspaceWorld,
     updateWorkspaceWorld: ipcHandlers.updateWorkspaceWorld,
     deleteWorkspaceWorld: ipcHandlers.deleteWorkspaceWorld,
+    listHeartbeatJobs: ipcHandlers.listHeartbeatJobs,
+    runHeartbeatJob: ipcHandlers.runHeartbeatJob,
+    pauseHeartbeatJob: ipcHandlers.pauseHeartbeatJob,
+    stopHeartbeatJob: ipcHandlers.stopHeartbeatJob,
     createWorldAgent: ipcHandlers.createWorldAgent,
     updateWorldAgent: ipcHandlers.updateWorldAgent,
     deleteWorldAgent: ipcHandlers.deleteWorldAgent,

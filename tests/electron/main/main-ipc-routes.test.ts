@@ -41,6 +41,10 @@ function createHandlerMocks() {
     createWorkspaceWorld: vi.fn(async () => ({})),
     updateWorkspaceWorld: vi.fn(async () => ({})),
     deleteWorkspaceWorld: vi.fn(async () => ({ deleted: true })),
+    listHeartbeatJobs: vi.fn(async () => ([])),
+    runHeartbeatJob: vi.fn(async () => ({ ok: true })),
+    pauseHeartbeatJob: vi.fn(async () => ({ ok: true })),
+    stopHeartbeatJob: vi.fn(async () => ({ ok: true })),
     createWorldAgent: vi.fn(async () => ({})),
     updateWorldAgent: vi.fn(async () => ({})),
     deleteWorldAgent: vi.fn(async () => ({ deleted: true })),
@@ -93,6 +97,10 @@ describe('buildMainIpcRoutes', () => {
       'world:create',
       'world:update',
       'world:delete',
+      'heartbeat:list',
+      'heartbeat:run',
+      'heartbeat:pause',
+      'heartbeat:stop',
       'agent:create',
       'agent:update',
       'agent:delete',
@@ -138,6 +146,10 @@ describe('buildMainIpcRoutes', () => {
     await routes.find((route) => route.channel === 'world:import')?.handler({}, { source: '@awesome-agent-world/infinite-etude' });
     await routes.find((route) => route.channel === 'world:export')?.handler({}, { worldId: 'w-9' });
     await routes.find((route) => route.channel === 'skill:list')?.handler({});
+    await routes.find((route) => route.channel === 'heartbeat:list')?.handler({});
+    await routes.find((route) => route.channel === 'heartbeat:run')?.handler({}, { worldId: 'w-1' });
+    await routes.find((route) => route.channel === 'heartbeat:pause')?.handler({}, { worldId: 'w-1' });
+    await routes.find((route) => route.channel === 'heartbeat:stop')?.handler({}, { worldId: 'w-1' });
     await routes.find((route) => route.channel === 'session:list')?.handler({}, { worldId: 'w-1' });
     await routes.find((route) => route.channel === 'session:branchFromMessage')?.handler({}, { worldId: 'w-1', chatId: 'c-1', messageId: 'm-1' });
     await routes.find((route) => route.channel === 'chat:delete')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
@@ -150,12 +162,12 @@ describe('buildMainIpcRoutes', () => {
     await routes.find((route) => route.channel === 'dialog:pickFile')?.handler({});
     await routes.find((route) => route.channel === 'queue:add')?.handler({}, { worldId: 'w-1', chatId: 'c-1', content: 'hello' });
     await routes.find((route) => route.channel === 'queue:get')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
-    await routes.find((route) => route.channel === 'queue:remove')?.handler({}, { messageId: 'q-1' });
+    await routes.find((route) => route.channel === 'queue:remove')?.handler({}, { worldId: 'w-1', messageId: 'm-1' });
     await routes.find((route) => route.channel === 'queue:clear')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
     await routes.find((route) => route.channel === 'queue:pause')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
     await routes.find((route) => route.channel === 'queue:resume')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
     await routes.find((route) => route.channel === 'queue:stop')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
-    await routes.find((route) => route.channel === 'queue:retry')?.handler({}, { messageId: 'q-1' });
+    await routes.find((route) => route.channel === 'queue:retry')?.handler({}, { worldId: 'w-1', messageId: 'm-1', chatId: 'c-1' });
 
     expect(handlers.writeWorldPreference).toHaveBeenCalledWith('world-99');
     expect(handlers.openWorkspaceDialog).toHaveBeenCalledWith({ directoryPath: '/tmp/workspace' });
@@ -163,6 +175,10 @@ describe('buildMainIpcRoutes', () => {
     expect(handlers.importWorld).toHaveBeenCalledWith({ source: '@awesome-agent-world/infinite-etude' });
     expect(handlers.exportWorld).toHaveBeenCalledWith({ worldId: 'w-9' });
     expect(handlers.listSkillRegistry).toHaveBeenCalledTimes(1);
+    expect(handlers.listHeartbeatJobs).toHaveBeenCalledTimes(1);
+    expect(handlers.runHeartbeatJob).toHaveBeenCalledWith({ worldId: 'w-1' });
+    expect(handlers.pauseHeartbeatJob).toHaveBeenCalledWith({ worldId: 'w-1' });
+    expect(handlers.stopHeartbeatJob).toHaveBeenCalledWith({ worldId: 'w-1' });
     expect(handlers.listWorldSessions).toHaveBeenCalledWith('w-1');
     expect(handlers.branchWorldSessionFromMessage).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1', messageId: 'm-1' });
     expect(handlers.deleteWorldSession).toHaveBeenCalledWith('w-1', 'c-1');
@@ -175,12 +191,12 @@ describe('buildMainIpcRoutes', () => {
     expect(handlers.openFileDialog).toHaveBeenCalledTimes(1);
     expect(handlers.addToQueue).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1', content: 'hello' });
     expect(handlers.getQueuedMessages).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1' });
-    expect(handlers.removeFromQueue).toHaveBeenCalledWith({ messageId: 'q-1' });
+    expect(handlers.removeFromQueue).toHaveBeenCalledWith({ worldId: 'w-1', messageId: 'm-1' });
     expect(handlers.clearChatQueue).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1' });
     expect(handlers.pauseChatQueue).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1' });
     expect(handlers.resumeChatQueue).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1' });
     expect(handlers.stopChatQueue).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1' });
-    expect(handlers.retryQueueMessage).toHaveBeenCalledWith({ messageId: 'q-1' });
+    expect(handlers.retryQueueMessage).toHaveBeenCalledWith({ worldId: 'w-1', messageId: 'm-1', chatId: 'c-1' });
   });
 });
 

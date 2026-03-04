@@ -21,17 +21,21 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-const sanitizeMock = vi.fn((html: string) => html);
-const purifierInstance = {
-  sanitize: sanitizeMock,
-};
-const dompurifyFactory = Object.assign(
-  (_window?: unknown) => purifierInstance,
-  {
-    sanitize: sanitizeMock,
-    default: purifierInstance,
-  }
-);
+const { sanitizeMock, dompurifyFactory } = vi.hoisted(() => {
+  const sanitize = vi.fn((html: string) => html);
+  const purifierInstance = { sanitize };
+  const factory = Object.assign(
+    (_window?: unknown) => purifierInstance,
+    {
+      sanitize,
+      default: purifierInstance,
+    }
+  );
+  return {
+    sanitizeMock: sanitize,
+    dompurifyFactory: factory,
+  };
+});
 
 vi.mock('dompurify', () => ({
   default: dompurifyFactory,

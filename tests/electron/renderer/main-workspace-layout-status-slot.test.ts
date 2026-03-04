@@ -18,11 +18,13 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const jsxFactory = (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({
-  type,
-  props: props ?? {},
-  key,
-});
+const { jsxFactory } = vi.hoisted(() => ({
+  jsxFactory: (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({
+    type,
+    props: props ?? {},
+    key,
+  }),
+}));
 
 vi.mock('react', () => ({
   default: { createElement: jsxFactory },

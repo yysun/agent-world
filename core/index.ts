@@ -140,6 +140,13 @@ export {
 } from './message-processing-control.js';
 
 export {
+  isValidCronExpression,
+  startHeartbeat,
+  stopHeartbeat,
+  type HeartbeatHandle,
+} from './heartbeat.js';
+
+export {
   GitHubWorldImportError,
   stageGitHubWorldFromShorthand,
   type GitHubWorldImportErrorCode,

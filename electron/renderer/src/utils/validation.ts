@@ -31,6 +31,12 @@ function parseOptionalNumber(value) {
   return parsed;
 }
 
+function isStrictFiveFieldCron(expression) {
+  const text = String(expression || '').trim();
+  if (!text) return false;
+  return text.split(/\s+/).length === 5;
+}
+
 export function validateWorldForm(worldForm) {
   const name = String(worldForm.name || '').trim();
   if (!name) return { valid: false, error: 'World name is required.' };
@@ -42,8 +48,19 @@ export function validateWorldForm(worldForm) {
   const chatLLMProvider = String(worldForm.chatLLMProvider || '').trim() || DEFAULT_WORLD_CHAT_LLM_PROVIDER;
   const chatLLMModel = String(worldForm.chatLLMModel || '').trim() || DEFAULT_WORLD_CHAT_LLM_MODEL;
   const mainAgent = String(worldForm.mainAgent || '').trim();
+  const heartbeatEnabled = worldForm.heartbeatEnabled === true;
+  const heartbeatInterval = worldForm.heartbeatInterval == null ? '' : String(worldForm.heartbeatInterval).trim();
+  const heartbeatPrompt = worldForm.heartbeatPrompt == null ? '' : String(worldForm.heartbeatPrompt);
   const mcpConfig = worldForm.mcpConfig == null ? '' : String(worldForm.mcpConfig);
   const variables = worldForm.variables == null ? '' : String(worldForm.variables);
+
+  if (heartbeatEnabled && !heartbeatPrompt.trim()) {
+    return { valid: false, error: 'Heartbeat prompt is required when heartbeat is enabled.' };
+  }
+
+  if (heartbeatEnabled && !isStrictFiveFieldCron(heartbeatInterval)) {
+    return { valid: false, error: 'Heartbeat interval must be a valid 5-field cron expression (e.g. */5 * * * *).' };
+  }
 
   if (mcpConfig.trim()) {
     try {
@@ -62,6 +79,9 @@ export function validateWorldForm(worldForm) {
       mainAgent,
       chatLLMProvider,
       chatLLMModel,
+      heartbeatEnabled,
+      heartbeatInterval,
+      heartbeatPrompt,
       mcpConfig,
       variables
     }

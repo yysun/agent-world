@@ -867,6 +867,9 @@ export default function App() {
         creatingWorld.mainAgent !== defaultForm.mainAgent ||
         creatingWorld.chatLLMProvider !== defaultForm.chatLLMProvider ||
         creatingWorld.chatLLMModel !== defaultForm.chatLLMModel ||
+        creatingWorld.heartbeatEnabled !== defaultForm.heartbeatEnabled ||
+        creatingWorld.heartbeatInterval !== defaultForm.heartbeatInterval ||
+        creatingWorld.heartbeatPrompt !== defaultForm.heartbeatPrompt ||
         creatingWorld.mcpConfig !== defaultForm.mcpConfig ||
         creatingWorld.variables !== defaultForm.variables;
     }
@@ -878,6 +881,9 @@ export default function App() {
         editingWorld.mainAgent !== originalForm.mainAgent ||
         editingWorld.chatLLMProvider !== originalForm.chatLLMProvider ||
         editingWorld.chatLLMModel !== originalForm.chatLLMModel ||
+        editingWorld.heartbeatEnabled !== originalForm.heartbeatEnabled ||
+        editingWorld.heartbeatInterval !== originalForm.heartbeatInterval ||
+        editingWorld.heartbeatPrompt !== originalForm.heartbeatPrompt ||
         editingWorld.mcpConfig !== originalForm.mcpConfig ||
         editingWorld.variables !== originalForm.variables;
     }

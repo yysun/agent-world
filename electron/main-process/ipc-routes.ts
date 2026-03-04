@@ -50,6 +50,10 @@ export interface MainIpcHandlers {
   createWorkspaceWorld: (payload: unknown) => Promise<unknown> | unknown;
   updateWorkspaceWorld: (payload: unknown) => Promise<unknown> | unknown;
   deleteWorkspaceWorld: (payload: unknown) => Promise<unknown> | unknown;
+  listHeartbeatJobs: () => Promise<unknown> | unknown;
+  runHeartbeatJob: (payload: unknown) => Promise<unknown> | unknown;
+  pauseHeartbeatJob: (payload: unknown) => Promise<unknown> | unknown;
+  stopHeartbeatJob: (payload: unknown) => Promise<unknown> | unknown;
   createWorldAgent: (payload: unknown) => Promise<unknown> | unknown;
   updateWorldAgent: (payload: unknown) => Promise<unknown> | unknown;
   deleteWorldAgent: (payload: unknown) => Promise<unknown> | unknown;
@@ -103,6 +107,10 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
     { channel: DESKTOP_INVOKE_CHANNELS.WORLD_CREATE, handler: async (_event, payload) => handlers.createWorkspaceWorld(payload) },
     { channel: DESKTOP_INVOKE_CHANNELS.WORLD_UPDATE, handler: async (_event, payload) => handlers.updateWorkspaceWorld(payload) },
     { channel: DESKTOP_INVOKE_CHANNELS.WORLD_DELETE, handler: async (_event, payload) => handlers.deleteWorkspaceWorld(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.HEARTBEAT_LIST, handler: async () => handlers.listHeartbeatJobs() },
+    { channel: DESKTOP_INVOKE_CHANNELS.HEARTBEAT_RUN, handler: async (_event, payload) => handlers.runHeartbeatJob(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.HEARTBEAT_PAUSE, handler: async (_event, payload) => handlers.pauseHeartbeatJob(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.HEARTBEAT_STOP, handler: async (_event, payload) => handlers.stopHeartbeatJob(payload) },
     { channel: DESKTOP_INVOKE_CHANNELS.AGENT_CREATE, handler: async (_event, payload) => handlers.createWorldAgent(payload) },
     { channel: DESKTOP_INVOKE_CHANNELS.AGENT_UPDATE, handler: async (_event, payload) => handlers.updateWorldAgent(payload) },
     { channel: DESKTOP_INVOKE_CHANNELS.AGENT_DELETE, handler: async (_event, payload) => handlers.deleteWorldAgent(payload) },
