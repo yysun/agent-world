@@ -30,12 +30,14 @@ export default function MainContentArea({
   rightPanelShellProps,
   rightPanelContentProps,
   statusBar,
+  queuePanel,
 }) {
   return (
     <div className="flex min-h-0 flex-1">
       <section className="flex min-w-0 flex-1 flex-col">
         <MessageListPanel {...messageListProps} />
 
+        {queuePanel}
         <ComposerBar {...composerProps} />
         {statusBar}
       </section>
