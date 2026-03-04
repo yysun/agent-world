@@ -8,7 +8,7 @@
  * Key Features:
  * - Lists queued messages in order (queued, sending)
  * - Pause / Resume / Stop / Clear controls
- * - Auto-hides when no active queue items
+ * - Auto-hides unless a message is actively sending and there is backlog in queue
  *
  * Implementation Notes:
  * - Stateless presentation; parent owns queue state and action callbacks.
@@ -41,6 +41,8 @@ export default function MessageQueuePanel({
   if (queuedMessages.length === 0) return null;
 
   const hasSending = queuedMessages.some((m) => m.status === 'sending');
+  const hasQueuedBacklog = queuedMessages.some((m) => m.status === 'queued');
+  if (!hasSending || !hasQueuedBacklog) return null;
 
   return (
     <div className="mx-auto w-full max-w-[750px] px-4 pb-2">
