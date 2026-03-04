@@ -192,6 +192,19 @@ describe('extracted message utils', () => {
     expect(className).toContain('rounded-lg');
   });
 
+  it('omits message left border class when disabled by view mode', () => {
+    const message = { messageId: 'msg-2', role: 'assistant', sender: 'Agent A' };
+    const className = getMessageCardClassName(message, new Map(), [message], 0, { showLeftBorder: false });
+    expect(className).not.toContain(' border-l ');
+  });
+
+  it('renders non-chat user cards at full width when requested', () => {
+    const message = { messageId: 'msg-3', role: 'user', sender: 'HUMAN' };
+    const className = getMessageCardClassName(message, new Map(), [message], 0, { fullWidthUserMessage: true });
+    expect(className).toContain('w-full');
+    expect(className).not.toContain('w-[80%]');
+  });
+
   it('hides assistant human-intervention tool-call placeholders from renderable rows', () => {
     const hitlToolCallMessage = {
       messageId: 'msg-hitl-1',

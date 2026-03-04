@@ -19,6 +19,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  getGridLaneClassName,
   normalizeWorldGridLayoutChoiceId,
   normalizeWorldViewMode,
   partitionWorldViewMessages,
@@ -73,5 +74,13 @@ describe('electron/renderer world-view domain', () => {
     expect(alphabetical.map((lane) => lane.label)).toEqual(['Alpha', 'Beta']);
     expect(recency.map((lane) => lane.label)).toEqual(['Beta', 'Alpha']);
     expect(sortAgentLanesForGrid(lanes, '1+2')).toEqual(lanes);
+  });
+
+  it('treats the "1" lane as full-width in 1+2 and 2+1 grid choices', () => {
+    expect(getGridLaneClassName('1+2', 0)).toContain('md:col-span-2');
+    expect(getGridLaneClassName('1+2', 1)).toBe('');
+    expect(getGridLaneClassName('2+1', 2)).toContain('md:col-span-2');
+    expect(getGridLaneClassName('2+1', 0)).toBe('');
+    expect(getGridLaneClassName('2+2', 0)).toBe('');
   });
 });

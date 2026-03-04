@@ -6,16 +6,62 @@
  *   not merged away into tool result cards.
  *
  * Recent changes:
+ * - 2026-03-04: Added view-mode coverage ensuring message chrome only appears in `Chat View`.
  * - 2026-03-01: Added coverage for narrated assistant tool-call rows remaining as assistant messages.
  */
 
 import { describe, expect, it } from 'vitest';
 import {
+  getBoardBottomSectionClassName,
+  getBoardLaneClassName,
   buildCombinedRenderableMessages,
+  getBoardLaneContainerClassName,
+  getLatestUserMessageEntry,
   isNarratedAssistantToolCallMessage,
+  shouldRenderNonChatSectionLabels,
+  shouldShowMessageChrome,
 } from '../../../electron/renderer/src/components/MessageListPanel';
 
 describe('MessageListPanel narrated tool-call visibility', () => {
+  it('shows message chrome only for chat view', () => {
+    expect(shouldShowMessageChrome('chat')).toBe(true);
+    expect(shouldShowMessageChrome('board')).toBe(false);
+    expect(shouldShowMessageChrome('grid')).toBe(false);
+    expect(shouldShowMessageChrome('canvas')).toBe(false);
+    expect(shouldShowMessageChrome('unsupported')).toBe(true);
+  });
+
+  it('selects only the latest user message for non-chat top row', () => {
+    const entries = [
+      { index: 1, message: { messageId: 'u1', role: 'user', content: 'first' } },
+      { index: 3, message: { messageId: 'u2', role: 'user', content: 'second' } },
+    ];
+
+    expect(getLatestUserMessageEntry(entries)?.message?.messageId).toBe('u2');
+    expect(getLatestUserMessageEntry([])).toBeNull();
+  });
+
+  it('hides non-chat section title labels', () => {
+    expect(shouldRenderNonChatSectionLabels()).toBe(false);
+  });
+
+  it('uses horizontal board lane strip where each lane stacks messages vertically', () => {
+    const className = getBoardLaneContainerClassName();
+    expect(className).toContain('flex');
+    expect(className).toContain('overflow-x-auto');
+    expect(className).toContain('flex-1');
+    expect(className).toContain('items-stretch');
+
+    const laneClassName = getBoardLaneClassName();
+    expect(laneClassName).toContain('flex-col');
+    expect(laneClassName).toContain('min-h-0');
+
+    const boardSectionClassName = getBoardBottomSectionClassName();
+    expect(boardSectionClassName).toContain('flex-col');
+    expect(boardSectionClassName).toContain('flex-1');
+    expect(boardSectionClassName).toContain('overflow-hidden');
+  });
+
   it('detects narrated assistant tool-call rows as narrated messages', () => {
     const message = {
       role: 'assistant',

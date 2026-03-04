@@ -14,11 +14,13 @@
  * - Preserves existing render order and layout structure from the previous inline block.
  *
  * Recent Changes:
+ * - 2026-03-04: Floated queue/composer/status stack above the message area and exposed a CSS inset variable for message-panel bottom padding.
  * - 2026-02-28: Moved status-bar slot into the composer column so status content aligns with composer width/position.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component decomposition.
  * - 2026-02-17: Simplified integration contract to grouped prop objects for message/composer/right-panel composition.
  */
 
+import type React from 'react';
 import ComposerBar from './ComposerBar';
 import MessageListPanel from './MessageListPanel';
 import RightPanelContent from './RightPanelContent';
@@ -34,12 +36,19 @@ export default function MainContentArea({
 }) {
   return (
     <div className="flex min-h-0 flex-1">
-      <section className="flex min-w-0 flex-1 flex-col">
+      <section
+        className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+        style={{ '--floating-composer-height': '8.5rem' } as React.CSSProperties}
+      >
         <MessageListPanel {...messageListProps} />
 
-        {queuePanel}
-        <ComposerBar {...composerProps} />
-        {statusBar}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20">
+          <div className="pointer-events-auto">
+            {queuePanel}
+            <ComposerBar {...composerProps} />
+            {statusBar}
+          </div>
+        </div>
       </section>
 
       <RightPanelShell {...rightPanelShellProps}>

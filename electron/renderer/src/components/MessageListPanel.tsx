@@ -13,6 +13,13 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-03-04: Board agent lanes now stretch to full available height with per-lane internal scrolling.
+ * - 2026-03-04: Board view now renders per-agent vertical lanes in a horizontal lane strip.
+ * - 2026-03-04: Hid non-chat section title labels (`Latest User Message`, `Board`, `Grid`, `Canvas`) per updated UI requirements.
+ * - 2026-03-04: Added floating-composer bottom inset spacing for bottom panes so board/grid/canvas content remains visible above overlay controls.
+ * - 2026-03-04: Made non-chat layouts use static top row + flexing bottom row so the lower pane consumes available height.
+ * - 2026-03-04: Non-chat world views now render as two rows (top latest user message, bottom board/grid/canvas) using full-width layout.
+ * - 2026-03-04: Hide per-message avatar chips and left border accents outside `Chat View`.
  * - 2026-03-04: Added `Chat/Board/Grid/Canvas` view-mode rendering with agent lanes/cells/shared-canvas layouts and grid choice support.
  * - 2026-03-01: Changed collapsible message cards (assistant/tool) to default expanded state; per-message toggle overrides still apply.
  * - 2026-03-01: Kept narrated assistant tool-call messages as assistant cards; only placeholder `Calling tool:` rows are merged into tool cards.
@@ -70,6 +77,33 @@ import {
   resolveToolNameForMessage,
   resolveMessageAvatar,
 } from '../utils/message-utils';
+
+export function shouldShowMessageChrome(worldViewMode: unknown): boolean {
+  return normalizeWorldViewMode(worldViewMode) === 'chat';
+}
+
+export function shouldRenderNonChatSectionLabels(): boolean {
+  return false;
+}
+
+export function getBoardLaneContainerClassName(): string {
+  return 'flex min-h-0 flex-1 items-stretch gap-3 overflow-x-auto pb-1';
+}
+
+export function getBoardLaneClassName(): string {
+  return 'min-w-[260px] flex-1 min-h-0 rounded-lg border border-border/70 bg-card/40 p-3 flex flex-col';
+}
+
+export function getBoardBottomSectionClassName(): string {
+  return 'min-h-0 flex-1 overflow-hidden rounded-xl border border-border/70 bg-card/25 p-3 pb-[var(--floating-composer-height,8.5rem)] flex flex-col gap-3';
+}
+
+export function getLatestUserMessageEntry(userMessages: Array<{ message: any; index: number }>): { message: any; index: number } | null {
+  if (!Array.isArray(userMessages) || userMessages.length === 0) {
+    return null;
+  }
+  return userMessages[userMessages.length - 1] || null;
+}
 
 function collectToolCallIds(message) {
   if (!Array.isArray(message?.tool_calls)) {
@@ -382,6 +416,8 @@ export default function MessageListPanel({
   onRespondHitlOption,
 }) {
   const normalizedWorldViewMode = normalizeWorldViewMode(worldViewMode);
+  const showChatMessageChrome = shouldShowMessageChrome(normalizedWorldViewMode);
+  const showNonChatSectionLabels = shouldRenderNonChatSectionLabels();
   const normalizedGridChoiceId = normalizeWorldGridLayoutChoiceId(worldGridLayoutChoiceId);
   const inlinePrimaryText = String(inlineWorkingIndicatorState?.primaryText || 'Agent');
   const inlineStatusText = String(
@@ -426,6 +462,14 @@ export default function MessageListPanel({
   const flatCanvasAgentMessages = partitionedMessages.agentLanes
     .flatMap((lane) => lane.messages)
     .sort((left, right) => left.index - right.index);
+  const latestUserMessageEntry = normalizedWorldViewMode === 'chat'
+    ? null
+    : getLatestUserMessageEntry(partitionedMessages.userMessages);
+  const baseContainerClassName = shouldShowWelcome && selectedSession
+    ? 'mx-auto flex min-h-full w-full max-w-[920px] items-start justify-center py-4'
+    : normalizedWorldViewMode === 'chat'
+      ? 'mx-auto w-full max-w-[750px] space-y-3'
+      : 'h-full w-full';
 
   const renderMessageCard = (message, messageIndex, sourceMessages) => {
     const senderLabel = getMessageSenderLabel(
@@ -474,7 +518,7 @@ export default function MessageListPanel({
         key={messageKey}
         className={`flex min-w-0 w-full items-start gap-2 ${shouldRightAlignMessage ? 'justify-end' : 'justify-start'}`}
       >
-        {messageAvatar ? (
+        {showChatMessageChrome && messageAvatar ? (
           <div
             className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-secondary text-[10px] font-semibold text-secondary-foreground"
             title={messageAvatar.name}
@@ -484,7 +528,11 @@ export default function MessageListPanel({
           </div>
         ) : null}
 
-        <article className={`min-w-0 ${getMessageCardClassName(message, messagesById, sourceMessages, messageIndex, { isToolCallPending: isPendingToolCallRequest })} ${isStreamingAssistantMessage ? 'agent-streaming-card' : ''} ${isActiveToolMessage ? 'agent-tool-active-card' : ''}`}>
+        <article className={`min-w-0 ${getMessageCardClassName(message, messagesById, sourceMessages, messageIndex, {
+          isToolCallPending: isPendingToolCallRequest,
+          showLeftBorder: showChatMessageChrome,
+          fullWidthUserMessage: !showChatMessageChrome && isHuman,
+        })} ${isStreamingAssistantMessage ? 'agent-streaming-card' : ''} ${isActiveToolMessage ? 'agent-tool-active-card' : ''}`}>
           <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
             {isToolMessage ? (
               <span className="flex items-center gap-2">
@@ -640,13 +688,14 @@ export default function MessageListPanel({
   };
 
   return (
-    <div ref={messagesContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden p-5">
+    <div
+      ref={messagesContainerRef}
+      className={normalizedWorldViewMode === 'chat'
+        ? 'flex-1 overflow-y-auto overflow-x-hidden p-5 pb-[var(--floating-composer-height,8.5rem)]'
+        : 'flex-1 overflow-hidden p-5'}
+    >
       <div
-        className={
-          shouldShowWelcome && selectedSession
-            ? 'mx-auto flex min-h-full w-full max-w-[920px] items-start justify-center py-4'
-            : 'mx-auto w-full max-w-[750px] space-y-3'
-        }
+        className={baseContainerClassName}
       >
         {shouldShowLoading ? (
           selectedSession ? (
@@ -723,87 +772,104 @@ export default function MessageListPanel({
           normalizedWorldViewMode === 'chat' ? (
             renderableMessages.map((message, messageIndex) => renderMessageCard(message, messageIndex, renderableMessages))
           ) : normalizedWorldViewMode === 'board' ? (
-            <div className="space-y-3">
-              {partitionedMessages.userMessages.length > 0 ? (
-                <section className="rounded-lg border border-border/70 bg-card/40 p-3">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">User Thread</div>
-                  <div className="space-y-3">
-                    {partitionedMessages.userMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
-                  </div>
+            <div className="flex h-full min-h-0 w-full flex-col gap-3">
+              {latestUserMessageEntry ? (
+                <section className="shrink-0 rounded-lg border border-border/70 bg-card/40 p-3">
+                  {showNonChatSectionLabels ? (
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Latest User Message</div>
+                  ) : null}
+                  {renderMessageCard(latestUserMessageEntry.message, latestUserMessageEntry.index, renderableMessages)}
                 </section>
               ) : null}
-              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                {partitionedMessages.agentLanes.map((lane) => (
-                  <section key={lane.id} className="rounded-lg border border-border/70 bg-card/40 p-3">
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{lane.label}</div>
+              <section className={getBoardBottomSectionClassName()}>
+                {showNonChatSectionLabels ? (
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Board</div>
+                ) : null}
+                <div className={getBoardLaneContainerClassName()}>
+                  {partitionedMessages.agentLanes.map((lane) => (
+                    <section key={lane.id} className={getBoardLaneClassName()}>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{lane.label}</div>
+                      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+                        {lane.messages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+                {partitionedMessages.systemMessages.length > 0 ? (
+                  <section className="shrink-0 rounded-lg border border-dashed border-border/80 bg-muted/30 p-3">
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">System</div>
                     <div className="space-y-3">
-                      {lane.messages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
+                      {partitionedMessages.systemMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
                     </div>
                   </section>
-                ))}
-              </div>
-              {partitionedMessages.systemMessages.length > 0 ? (
-                <section className="rounded-lg border border-dashed border-border/80 bg-muted/30 p-3">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">System</div>
-                  <div className="space-y-3">
-                    {partitionedMessages.systemMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
-                  </div>
-                </section>
-              ) : null}
+                ) : null}
+              </section>
             </div>
           ) : normalizedWorldViewMode === 'grid' ? (
-            <div className="space-y-3">
-              {partitionedMessages.userMessages.length > 0 ? (
-                <section className="rounded-lg border border-border/70 bg-card/40 p-3">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">User Thread</div>
-                  <div className="space-y-3">
-                    {partitionedMessages.userMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
-                  </div>
+            <div className="flex h-full min-h-0 w-full flex-col gap-3">
+              {latestUserMessageEntry ? (
+                <section className="shrink-0 rounded-lg border border-border/70 bg-card/40 p-3">
+                  {showNonChatSectionLabels ? (
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Latest User Message</div>
+                  ) : null}
+                  {renderMessageCard(latestUserMessageEntry.message, latestUserMessageEntry.index, renderableMessages)}
                 </section>
               ) : null}
-              <div className={getGridContainerClassName(normalizedGridChoiceId)}>
-                {sortedGridAgentLanes.map((lane, laneIndex) => (
-                  <section key={lane.id} className={`rounded-lg border border-border/70 bg-card/40 p-3 ${getGridLaneClassName(normalizedGridChoiceId, laneIndex)}`}>
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{lane.label}</div>
+              <section className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-xl border border-border/70 bg-card/25 p-3 pb-[var(--floating-composer-height,8.5rem)]">
+                {showNonChatSectionLabels ? (
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Grid</div>
+                ) : null}
+                <div className={getGridContainerClassName(normalizedGridChoiceId)}>
+                  {sortedGridAgentLanes.map((lane, laneIndex) => (
+                    <section key={lane.id} className={`rounded-lg border border-border/70 bg-card/40 p-3 ${getGridLaneClassName(normalizedGridChoiceId, laneIndex)}`}>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{lane.label}</div>
+                      <div className="space-y-3">
+                        {lane.messages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+                {partitionedMessages.systemMessages.length > 0 ? (
+                  <section className="rounded-lg border border-dashed border-border/80 bg-muted/30 p-3">
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">System</div>
                     <div className="space-y-3">
-                      {lane.messages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
+                      {partitionedMessages.systemMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
                     </div>
                   </section>
-                ))}
-              </div>
-              {partitionedMessages.systemMessages.length > 0 ? (
-                <section className="rounded-lg border border-dashed border-border/80 bg-muted/30 p-3">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">System</div>
-                  <div className="space-y-3">
-                    {partitionedMessages.systemMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
-                  </div>
-                </section>
-              ) : null}
+                ) : null}
+              </section>
             </div>
           ) : (
-            <div className="space-y-3">
-              {partitionedMessages.userMessages.length > 0 ? (
-                <section className="rounded-lg border border-border/70 bg-card/40 p-3">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">User Thread</div>
-                  <div className="space-y-3">
-                    {partitionedMessages.userMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
-                  </div>
+            <div className="flex h-full min-h-0 w-full flex-col gap-3">
+              {latestUserMessageEntry ? (
+                <section className="shrink-0 rounded-lg border border-border/70 bg-card/40 p-3">
+                  {showNonChatSectionLabels ? (
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Latest User Message</div>
+                  ) : null}
+                  {renderMessageCard(latestUserMessageEntry.message, latestUserMessageEntry.index, renderableMessages)}
                 </section>
               ) : null}
-              <section className="rounded-xl border border-border/70 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.12),_transparent_56%),radial-gradient(circle_at_bottom,_rgba(16,185,129,0.12),_transparent_58%)] p-3">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Agent Canvas</div>
-                <div className="space-y-3">
-                  {flatCanvasAgentMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
-                </div>
+              <section className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-xl border border-border/70 bg-card/25 p-3 pb-[var(--floating-composer-height,8.5rem)]">
+                {showNonChatSectionLabels ? (
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Canvas</div>
+                ) : null}
+                <section className="rounded-xl border border-border/70 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.12),_transparent_56%),radial-gradient(circle_at_bottom,_rgba(16,185,129,0.12),_transparent_58%)] p-3">
+                  {showNonChatSectionLabels ? (
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Agent Canvas</div>
+                  ) : null}
+                  <div className="space-y-3">
+                    {flatCanvasAgentMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
+                  </div>
+                </section>
+                {partitionedMessages.systemMessages.length > 0 ? (
+                  <section className="rounded-lg border border-dashed border-border/80 bg-muted/30 p-3">
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">System</div>
+                    <div className="space-y-3">
+                      {partitionedMessages.systemMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
+                    </div>
+                  </section>
+                ) : null}
               </section>
-              {partitionedMessages.systemMessages.length > 0 ? (
-                <section className="rounded-lg border border-dashed border-border/80 bg-muted/30 p-3">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">System</div>
-                  <div className="space-y-3">
-                    {partitionedMessages.systemMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
-                  </div>
-                </section>
-              ) : null}
             </div>
           )
         )}

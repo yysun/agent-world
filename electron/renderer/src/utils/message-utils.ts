@@ -13,6 +13,8 @@
  * - Helper functions are intentionally colocated to preserve behavior parity.
  *
  * Recent Changes:
+ * - 2026-03-04: Added optional `fullWidthUserMessage` card-style flag so non-chat user cards can span full width.
+ * - 2026-03-04: Added optional `showLeftBorder` card-style flag so alternate world views can hide message left accents.
  * - 2026-02-28: Added tool-message status border helper so completed tool cards use green/red left borders while pending states keep amber.
  * - 2026-02-28: Added `resolveToolNameForMessage` helper and fixed assistant tool-request name resolution to prefer current message `tool_calls` before history fallback.
  * - 2026-02-28: Added tool-request lookup helper to map tool-result rows back to matching assistant `tool_calls` by `tool_call_id`.
@@ -500,13 +502,21 @@ export function getMessageCardClassName(message, messagesById, messages, current
   const isTool = isToolRelatedMessage(message);
   const isSystem = role === 'system' || message?.type === 'log' || Boolean(message?.logEvent);
   const isCrossAgent = isCrossAgentAssistantMessage(message, messagesById, messages, currentIndex);
-  const normalizedOptions = (options || {}) as { isToolCallPending?: boolean };
+  const normalizedOptions = (options || {}) as {
+    isToolCallPending?: boolean;
+    showLeftBorder?: boolean;
+    fullWidthUserMessage?: boolean;
+  };
   const isToolCallPending = typeof normalizedOptions.isToolCallPending === 'boolean'
     ? normalizedOptions.isToolCallPending
     : undefined;
+  const showLeftBorder = normalizedOptions.showLeftBorder !== false;
+  const fullWidthUserMessage = normalizedOptions.fullWidthUserMessage === true;
 
   const roleClassName = isUser
-    ? 'ml-auto w-[80%] border-l-sidebar-border bg-sidebar-accent'
+    ? (fullWidthUserMessage
+      ? 'w-full border-l-sidebar-border bg-sidebar-accent'
+      : 'ml-auto w-[80%] border-l-sidebar-border bg-sidebar-accent')
     : isTool
       ? `ml-auto w-[92%] ${getToolMessageBorderClassName(message, isToolCallPending)}`
       : isCrossAgent
@@ -515,7 +525,7 @@ export function getMessageCardClassName(message, messagesById, messages, current
           ? 'mr-auto w-[90%] border-l-border bg-muted/40'
           : 'ml-auto w-[92%] border-l-sky-500/40';
 
-  return `group relative rounded-lg border-l p-3 ${roleClassName}`;
+  return `group relative rounded-lg p-3 ${showLeftBorder ? 'border-l' : ''} ${roleClassName}`;
 }
 
 function getReplyTarget(message, messagesById) {
