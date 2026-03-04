@@ -6,6 +6,7 @@
  * - shell_cmd tool availability in all worlds
  * - load_skill built-in tool availability in all worlds
  * - create_agent built-in tool availability in all worlds
+ * - send_message built-in tool availability in all worlds
  * - web_fetch built-in tool availability in all worlds
  * - read_file/list_files/grep built-in tool availability in all worlds
  * - Tool schema and parameter validation
@@ -75,6 +76,11 @@ describe('shell_cmd integration with worlds', () => {
     expect(tools.create_agent).toBeDefined();
     expect(tools.create_agent.parameters).toBeDefined();
     expect(tools.create_agent.execute).toBeInstanceOf(Function);
+
+    expect(tools).toHaveProperty('send_message');
+    expect(tools.send_message).toBeDefined();
+    expect(tools.send_message.parameters).toBeDefined();
+    expect(tools.send_message.execute).toBeInstanceOf(Function);
 
     expect(tools).toHaveProperty('web_fetch');
     expect(tools.web_fetch).toBeDefined();

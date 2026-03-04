@@ -63,7 +63,15 @@ function createHandlerMocks() {
     getLoggingConfig: vi.fn(async () => ({ globalLevel: 'error', categoryLevels: {}, nodeEnv: 'test' })),
     getSystemSettings: vi.fn(async () => ({})),
     saveSystemSettings: vi.fn(async () => true),
-    openFileDialog: vi.fn(async () => ({ canceled: true, filePath: null }))
+    openFileDialog: vi.fn(async () => ({ canceled: true, filePath: null })),
+    addToQueue: vi.fn(async () => ({ messageId: 'm-1' })),
+    getQueuedMessages: vi.fn(async () => ([])),
+    removeFromQueue: vi.fn(async () => ({ removed: true })),
+    clearChatQueue: vi.fn(async () => ({ cleared: 0 })),
+    pauseChatQueue: vi.fn(async () => ({ paused: true })),
+    resumeChatQueue: vi.fn(async () => ({ resumed: true })),
+    stopChatQueue: vi.fn(async () => ({ stopped: true })),
+    retryQueueMessage: vi.fn(async () => ({ retried: true }))
   };
 }
 
@@ -108,7 +116,15 @@ describe('buildMainIpcRoutes', () => {
       'logging:getConfig',
       'settings:get',
       'settings:save',
-      'dialog:pickFile'
+      'dialog:pickFile',
+      'queue:add',
+      'queue:get',
+      'queue:remove',
+      'queue:clear',
+      'queue:pause',
+      'queue:resume',
+      'queue:stop',
+      'queue:retry'
     ]);
   });
 
@@ -168,7 +184,7 @@ describe('registerIpcRoutes', () => {
     );
     expect(ipcMainLike.handle).toHaveBeenNthCalledWith(
       routes.length,
-      'dialog:pickFile',
+      'queue:retry',
       expect.any(Function)
     );
   });

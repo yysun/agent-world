@@ -147,6 +147,14 @@ vi.mock('../../core/web-fetch-tool.js', () => ({
   })),
 }));
 
+vi.mock('../../core/send-message-tool.js', () => ({
+  createSendMessageToolDefinition: vi.fn(() => ({
+    description: 'send-message',
+    parameters: { type: 'object', properties: {} },
+    execute: vi.fn(),
+  })),
+}));
+
 vi.mock('../../core/file-tools.js', () => ({
   createReadFileToolDefinition: vi.fn(() => ({
     description: 'read-file',
@@ -366,6 +374,7 @@ describe('mcp-server-registry behavior', () => {
 
     const toolsFirst = await getMCPToolsForWorld('world-1');
     expect(toolsFirst).toHaveProperty('shell_cmd');
+    expect(toolsFirst).toHaveProperty('send_message');
     expect(toolsFirst).toHaveProperty('web_fetch');
     expect(toolsFirst).toHaveProperty('write_file');
     expect(toolsFirst).toHaveProperty('demo_lookup');

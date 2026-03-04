@@ -24,6 +24,7 @@ vi.mock('../../core/index.js', async (importOriginal) => {
   return {
     ...actual,
     publishMessage: vi.fn(),
+    enqueueAndProcessUserMessage: vi.fn(async () => null),
     restoreChat: vi.fn(async (worldId: string, chatId: string) => ({
       id: worldId,
       currentChatId: chatId
@@ -32,7 +33,7 @@ vi.mock('../../core/index.js', async (importOriginal) => {
 });
 
 import { processCLIInput } from '../../cli/commands.js';
-import { publishMessage, restoreChat } from '../../core/index.js';
+import { enqueueAndProcessUserMessage, publishMessage, restoreChat } from '../../core/index.js';
 
 describe('processCLIInput message sending', () => {
   beforeEach(() => {
@@ -51,6 +52,7 @@ describe('processCLIInput message sending', () => {
     expect(result.success).toBe(false);
     expect(result.message).toContain('no active chat session');
     expect(restoreChat).not.toHaveBeenCalled();
+    expect(enqueueAndProcessUserMessage).not.toHaveBeenCalled();
     expect(publishMessage).not.toHaveBeenCalled();
   });
 
@@ -68,6 +70,7 @@ describe('processCLIInput message sending', () => {
     expect(result.success).toBe(false);
     expect(result.message).toContain('chat not found: chat-missing');
     expect(restoreChat).toHaveBeenCalledWith('world-1', 'chat-missing');
+    expect(enqueueAndProcessUserMessage).not.toHaveBeenCalled();
     expect(publishMessage).not.toHaveBeenCalled();
   });
 
@@ -82,7 +85,8 @@ describe('processCLIInput message sending', () => {
 
     expect(result.success).toBe(true);
     expect(restoreChat).toHaveBeenCalledWith('world-1', 'chat-1');
-    expect(publishMessage).toHaveBeenCalledWith(world, 'hello', 'human', 'chat-1');
+    expect(enqueueAndProcessUserMessage).toHaveBeenCalledWith('world-1', 'chat-1', 'hello', 'human', world);
+    expect(publishMessage).not.toHaveBeenCalled();
     expect(result.data).toMatchObject({ sender: 'human', chatId: 'chat-1' });
   });
 });

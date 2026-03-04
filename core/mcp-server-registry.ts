@@ -107,6 +107,7 @@
  * 2026-02-20: Added built-in `create_agent` tool registration for approval-gated agent creation.
  * 2026-02-14: Added built-in `load_skill` tool registration for progressive skill instruction loading.
  * 2026-02-19: Added built-in `create_agent` tool registration with approval-gated agent creation.
+ * 2026-03-04: Added built-in `send_message` tool registration for context-injected batch message dispatch.
  */
 
 import { createHash } from 'crypto';
@@ -122,6 +123,7 @@ import { createLoadSkillToolDefinition } from './load-skill-tool.js';
 import { createCreateAgentToolDefinition } from './create-agent-tool.js';
 import { createHitlToolDefinition } from './hitl-tool.js';
 import { createWebFetchToolDefinition } from './web-fetch-tool.js';
+import { createSendMessageToolDefinition } from './send-message-tool.js';
 import {
   createReadFileToolDefinition,
   createWriteFileToolDefinition,
@@ -1609,6 +1611,7 @@ export async function updateMCPServersForWorld(worldId: string, newMcpConfig: st
  * - load_skill: Load full SKILL.md instructions by registry skill_id
  * - create_agent: Create a new agent after explicit user approval
  * - human_intervention_request: Ask a human question with options (single-step selection)
+ * - send_message: Dispatch message arrays to the active world/chat context
  * - web_fetch: Fetch URL content and convert to markdown
  * - read_file: Read file contents with pagination controls
  * - write_file: Write text content into files within trusted scope
@@ -1622,6 +1625,7 @@ function getBuiltInTools(): Record<string, any> {
   const loadSkillTool = createLoadSkillToolDefinition();
   const createAgentTool = createCreateAgentToolDefinition();
   const hitlTool = createHitlToolDefinition();
+  const sendMessageTool = createSendMessageToolDefinition();
   const webFetchTool = createWebFetchToolDefinition();
   const readFileTool = createReadFileToolDefinition();
   const writeFileTool = createWriteFileToolDefinition();
@@ -1633,6 +1637,7 @@ function getBuiltInTools(): Record<string, any> {
     'load_skill': wrapToolWithValidation(loadSkillTool, 'load_skill'),
     'create_agent': wrapToolWithValidation(createAgentTool, 'create_agent'),
     'human_intervention_request': wrapToolWithValidation(hitlTool, 'human_intervention_request'),
+    'send_message': wrapToolWithValidation(sendMessageTool, 'send_message'),
     'web_fetch': wrapToolWithValidation(webFetchTool, 'web_fetch'),
     'read_file': wrapToolWithValidation(readFileTool, 'read_file'),
     'write_file': wrapToolWithValidation(writeFileTool, 'write_file'),
