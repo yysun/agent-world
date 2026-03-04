@@ -2087,17 +2087,92 @@ export async function addToQueue(
   worldId: string,
   chatId: string,
   content: string,
-  sender: string
+  sender: string,
+  options?: {
+    triggerProcessing?: boolean;
+    targetWorld?: World | null;
+    source?: 'direct' | 'queue' | 'retry';
+    preassignedMessageId?: string;
+  }
 ): Promise<QueuedMessage | null> {
   await ensureInitialization();
   const resolvedWorldId = await getResolvedWorldId(worldId);
   if (!storageWrappers?.addQueuedMessage) return null;
 
-  const messageId = `msg-${Date.now()}-${nanoid(6)}`;
+  const messageId = String(options?.preassignedMessageId || '').trim() || `msg-${Date.now()}-${nanoid(6)}`;
   await storageWrappers.addQueuedMessage(resolvedWorldId, chatId, messageId, content.trim(), sender || 'human');
 
   const messages = await storageWrappers.getQueuedMessages!(resolvedWorldId, chatId);
-  return messages?.find((m: QueuedMessage) => m.messageId === messageId) ?? null;
+  const queuedMessage = messages?.find((m: QueuedMessage) => m.messageId === messageId) ?? null;
+
+  const shouldTrigger = options?.triggerProcessing ?? true;
+  if (shouldTrigger) {
+    const runtimeWorld = options?.targetWorld ?? await getWorld(resolvedWorldId);
+    if (runtimeWorld) {
+      triggerPendingQueueResume(runtimeWorld, chatId);
+    }
+  }
+
+  return queuedMessage;
+}
+
+/**
+ * Runtime-start recovery hook.
+ * Resets interrupted `sending` queue rows back to `queued`.
+ */
+export async function recoverQueueSendingMessages(): Promise<number> {
+  await ensureInitialization();
+  return await storageWrappers?.recoverSendingMessages?.() ?? 0;
+}
+
+function isUserQueueSender(sender: string): boolean {
+  const normalized = String(sender || '').trim().toLowerCase();
+  return normalized === 'human' || normalized.startsWith('user');
+}
+
+/**
+ * External user-send ingress helper.
+ * Keeps queue-backed dispatch semantics for user messages while preserving
+ * immediate internal publish behavior for assistant/tool/system paths.
+ */
+export async function enqueueAndProcessUserMessage(
+  worldId: string,
+  chatId: string,
+  content: string,
+  sender: string,
+  targetWorld?: World | null,
+  options?: {
+    source?: 'direct' | 'queue' | 'retry';
+    preassignedMessageId?: string;
+  }
+): Promise<QueuedMessage | null> {
+  const targetChatId = String(chatId || '').trim();
+  if (!targetChatId) {
+    throw new Error('enqueueAndProcessUserMessage: chatId is required for user message dispatch.');
+  }
+
+  if (!isUserQueueSender(sender)) {
+    const resolvedWorldId = await getResolvedWorldId(worldId);
+    const runtimeWorld = targetWorld ?? await getWorld(resolvedWorldId);
+    if (!runtimeWorld) {
+      throw new Error(`enqueueAndProcessUserMessage: world not found for immediate dispatch (${resolvedWorldId}).`);
+    }
+    const { publishMessage, publishMessageWithId } = await import('./events/index.js');
+    const forcedMessageId = String(options?.preassignedMessageId || '').trim();
+    if (forcedMessageId) {
+      publishMessageWithId(runtimeWorld, content, sender, forcedMessageId, targetChatId);
+    } else {
+      publishMessage(runtimeWorld, content, sender, targetChatId);
+    }
+    return null;
+  }
+
+  return addToQueue(worldId, targetChatId, content, sender, {
+    triggerProcessing: true,
+    targetWorld,
+    source: options?.source,
+    preassignedMessageId: options?.preassignedMessageId,
+  });
 }
 
 /**

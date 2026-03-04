@@ -50,7 +50,7 @@ import {
   createWorld,
   getWorld,
   updateWorld,
-  publishMessage,
+  enqueueAndProcessUserMessage,
   listWorlds,
   deleteWorld,
   listAgents,
@@ -2219,7 +2219,7 @@ export async function processCLIInput(
       };
     }
 
-    publishMessage(world as any, input, sender, currentChatId);
+    await enqueueAndProcessUserMessage(world.id, currentChatId, input, sender, world as any);
     return {
       success: true,
       message: '',

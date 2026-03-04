@@ -23,6 +23,8 @@ const managerMocks = vi.hoisted(() => ({
 
 vi.mock('../../core/managers.js', () => ({
   getWorld: managerMocks.getWorld,
+  recoverQueueSendingMessages: vi.fn(async () => 0),
+  resumeChatQueue: vi.fn(async () => undefined),
 }));
 
 import { startWorld } from '../../core/subscription.js';

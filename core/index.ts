@@ -58,6 +58,8 @@ export {
   logEditError,
   getEditErrors,
   addToQueue,
+  enqueueAndProcessUserMessage,
+  recoverQueueSendingMessages,
   getQueueMessages,
   removeFromQueue,
   pauseChatQueue,
@@ -201,6 +203,20 @@ export { type LoggerConfig, type LogLevel, logger, createCategoryLogger, loggers
 
 // === SUBSCRIPTION SYSTEM ===
 export { type ClientConnection, subscribeWorld } from './subscription.js';
+
+export {
+  createWorldRuntimeKey,
+  startWorldRuntime,
+  getWorldRuntime,
+  releaseWorldRuntime,
+  getWorldRuntimeByKey,
+  listWorldRuntimeSnapshots,
+  stopWorldRuntime,
+  stopAllWorldRuntimes,
+  type StartedWorldRuntime,
+  type WorldRuntimeSnapshot,
+  type WorldRuntimeStorageContext,
+} from './world-registry.js';
 
 export { getDefaultRootPath } from './storage/storage-factory.js';
 

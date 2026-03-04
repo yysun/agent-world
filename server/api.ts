@@ -57,7 +57,7 @@ import {
   createWorld,
   listWorlds,
   createCategoryLogger,
-  publishMessage,
+  enqueueAndProcessUserMessage,
   enableStreaming,
   disableStreaming,
   // core managers (function-based)
@@ -755,8 +755,8 @@ async function handleNonStreamingChat(
         world.eventEmitter.on(EventType.SSE, sseListener);
         listeners.set(EventType.SSE, sseListener);
 
-        // Publish message
-        publishMessage(world, message, sender, chatId);
+        // Queue-backed user ingress: enqueue then trigger event-driven processing.
+        await enqueueAndProcessUserMessage(world.id, chatId || world.currentChatId || '', message, sender, world);
       }).catch(error => {
         hasError = true;
         errorMessage = `Failed to connect to world: ${error instanceof Error ? error.message : error}`;
@@ -849,8 +849,8 @@ async function handleStreamingChat(
   res.on('close', cleanupSubscription);
 
   try {
-    // Publish message - events will be automatically streamed
-    publishMessage(world, message, sender, chatId);
+    // Queue-backed user ingress: enqueue then trigger event-driven processing.
+    await enqueueAndProcessUserMessage(world.id, chatId || world.currentChatId || '', message, sender, world);
   } catch (error) {
     sseHandler.sendSSE({
       type: 'error',

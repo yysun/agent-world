@@ -134,7 +134,7 @@ const {
   listWorlds,
   newChat,
   branchChatFromMessage,
-  publishMessage,
+  enqueueAndProcessUserMessage,
   listPendingHitlPromptEvents,
   listPendingHitlPromptEventsFromMessages,
   submitWorldHitlResponse,
@@ -156,8 +156,8 @@ const {
   retryQueueMessage,
   LLMProvider,
   configureLLMProvider,
+  createCategoryLogger,
   addLogStreamCallback,
-  createCategoryLogger
 } = await importCoreModule(__dirname);
 const { createStorage, createStorageFromEnv } = await importCoreStorageFactoryModule(__dirname);
 const { GitHubWorldImportError, stageGitHubWorldFromShorthand } = await importCoreGitHubWorldImportModule(__dirname);
@@ -245,7 +245,7 @@ const ipcHandlers = createMainIpcHandlers({
   syncSkills,
   newChat,
   branchChatFromMessage,
-  publishMessage,
+  enqueueAndProcessUserMessage,
   submitWorldHitlResponse,
   stopMessageProcessing,
   activateChatWithSnapshot,

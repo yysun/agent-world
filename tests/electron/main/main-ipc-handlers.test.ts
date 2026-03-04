@@ -54,7 +54,12 @@ function createDependencies(overrides: Record<string, unknown> = {}) {
     getSkillsForSystemPrompt: vi.fn(() => []),
     syncSkills: vi.fn(async () => ({ added: 0, updated: 0, removed: 0, unchanged: 0, total: 0 })),
     newChat: vi.fn(async () => null),
-    publishMessage: vi.fn(() => ({})),
+    enqueueAndProcessUserMessage: vi.fn(async () => ({
+      messageId: 'queued-msg-1',
+      sender: 'human',
+      content: 'hello',
+      createdAt: new Date().toISOString(),
+    })),
     submitWorldHitlResponse: vi.fn(() => ({ accepted: true })),
     stopMessageProcessing: vi.fn(async () => ({ stopped: true })),
     restoreChat: vi.fn(async () => null),
@@ -320,12 +325,12 @@ describe('createMainIpcHandlers.listSkillRegistry', () => {
 describe('createMainIpcHandlers.sendChatMessage', () => {
   it('rejects sending when chatId is missing', async () => {
     const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1' }));
-    const publishMessage = vi.fn();
+    const enqueueAndProcessUserMessage = vi.fn();
     const ensureWorldSubscribed = vi.fn(async () => ({ id: 'world-1' }));
 
     const { handlers } = await createHandlers({
       restoreChat,
-      publishMessage,
+      enqueueAndProcessUserMessage,
       ensureWorldSubscribed
     });
 
@@ -338,17 +343,17 @@ describe('createMainIpcHandlers.sendChatMessage', () => {
     ).rejects.toThrow('Chat ID is required.');
 
     expect(restoreChat).not.toHaveBeenCalled();
-    expect(publishMessage).not.toHaveBeenCalled();
+    expect(enqueueAndProcessUserMessage).not.toHaveBeenCalled();
   });
 
   it('rejects sending when provided chatId cannot be restored', async () => {
     const restoreChat = vi.fn(async () => null);
-    const publishMessage = vi.fn();
+    const enqueueAndProcessUserMessage = vi.fn();
     const ensureWorldSubscribed = vi.fn(async () => ({ id: 'world-1' }));
 
     const { handlers } = await createHandlers({
       restoreChat,
-      publishMessage,
+      enqueueAndProcessUserMessage,
       ensureWorldSubscribed
     });
 
@@ -362,17 +367,17 @@ describe('createMainIpcHandlers.sendChatMessage', () => {
     ).rejects.toThrow('Chat not found: chat-missing');
 
     expect(restoreChat).toHaveBeenCalledWith('world-1', 'chat-missing');
-    expect(publishMessage).not.toHaveBeenCalled();
+    expect(enqueueAndProcessUserMessage).not.toHaveBeenCalled();
   });
 
   it('applies provided skill settings payload to env before publishing', async () => {
     const ensureWorldSubscribed = vi.fn(async () => ({ id: 'world-1' }));
     const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1' }));
-    const publishMessage = vi.fn(() => ({
-      messageId: 'msg-1',
+    const enqueueAndProcessUserMessage = vi.fn(async () => ({
+      messageId: 'queued-msg-1',
       sender: 'human',
       content: 'hello',
-      timestamp: Date.now(),
+      createdAt: new Date().toISOString(),
     }));
 
     const previousGlobalEnabled = process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS;
@@ -381,7 +386,7 @@ describe('createMainIpcHandlers.sendChatMessage', () => {
     const previousProjectDisabled = process.env.AGENT_WORLD_DISABLED_PROJECT_SKILLS;
 
     try {
-      const { handlers } = await createHandlers({ ensureWorldSubscribed, restoreChat, publishMessage });
+      const { handlers } = await createHandlers({ ensureWorldSubscribed, restoreChat, enqueueAndProcessUserMessage });
 
       await handlers.sendChatMessage({
         worldId: 'world-1',
@@ -400,7 +405,7 @@ describe('createMainIpcHandlers.sendChatMessage', () => {
       expect(process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS).toBe('true');
       expect(process.env.AGENT_WORLD_DISABLED_GLOBAL_SKILLS).toBe('find-skills,rpd');
       expect(process.env.AGENT_WORLD_DISABLED_PROJECT_SKILLS).toBe('apprun-skills');
-      expect(publishMessage).toHaveBeenCalledTimes(1);
+      expect(enqueueAndProcessUserMessage).toHaveBeenCalledTimes(1);
     } finally {
       if (previousGlobalEnabled === undefined) {
         delete process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS;

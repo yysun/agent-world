@@ -16,10 +16,11 @@
  */
 
 import { World } from './types.js';
-import { getWorld } from './managers.js';
+import { getWorld, recoverQueueSendingMessages, resumeChatQueue } from './managers.js';
 import { createCategoryLogger, type LogLevel, addLogStreamCallback } from './logger.js';
 import { subscribeAgentToMessages, subscribeWorldToMessages } from './events/index.js';
-import { toKebabCase } from './utils.js';
+import { generateId, toKebabCase } from './utils.js';
+import { getWorldRuntimeByKey, startWorldRuntime } from './world-registry.js';
 
 // Create subscription category logger (part of core functionality)
 const logger = createCategoryLogger('world.subscription');
@@ -187,31 +188,113 @@ export async function subscribeWorld(
   worldIdentifier: string,
   client: ClientConnection
 ): Promise<WorldSubscription | null> {
+  const worldId = toKebabCase(worldIdentifier);
+  const consumerId = `subscription-${generateId()}`;
+  let runtimeHandle: Awaited<ReturnType<typeof startWorldRuntime<World>>> | null = null;
+  let worldEventListeners: Map<string, (...args: any[]) => void> = new Map();
+  let currentWorld: World | null = null;
+
+  function bindForwardingListeners(targetWorld: World): Map<string, (...args: any[]) => void> {
+    if (!client || (!client.onWorldEvent && !client.onLog)) {
+      return new Map();
+    }
+    return setupWorldEventListeners(targetWorld, client);
+  }
+
+  async function releaseRuntime() {
+    if (!runtimeHandle) {
+      return;
+    }
+
+    if (currentWorld) {
+      await cleanupWorldSubscription(currentWorld, worldEventListeners);
+      worldEventListeners = new Map();
+    }
+
+    await runtimeHandle.release();
+    runtimeHandle = null;
+    currentWorld = null;
+  }
+
   try {
-    // Load world using core manager (convert to kebab-case internally)
-    const worldId = toKebabCase(worldIdentifier);
-    const currentWorld = await getWorld(worldId);
+    runtimeHandle = await startWorldRuntime<World>({
+      worldId,
+      consumerId,
+      createRuntime: async () => {
+        await recoverQueueSendingMessages();
 
-    if (!currentWorld) {
-      if (client.onError) {
-        client.onError(`World not found: ${worldIdentifier}`);
+        const loadedWorld = await getWorld(worldId);
+        if (!loadedWorld) {
+          throw new Error(`World not found: ${worldIdentifier}`);
+        }
+
+        // MCP servers will be started on-demand in getMCPToolsForWorld()
+        if (loadedWorld.mcpConfig) {
+          logger.debug(`World ${worldId} has MCP config - servers will start on-demand`);
+        }
+
+        // Base runtime setup uses minimal client; forwarding listeners are per-subscriber.
+        const runtimeSubscription = await startWorld(loadedWorld, { isOpen: true });
+
+        const activeChatId = String(runtimeSubscription.world.currentChatId || '').trim();
+        if (activeChatId) {
+          await resumeChatQueue(runtimeSubscription.world.id, activeChatId);
+        }
+
+        return {
+          world: runtimeSubscription.world,
+          stop: () => runtimeSubscription.unsubscribe(),
+          refresh: async () => {
+            await runtimeSubscription.refresh();
+          }
+        };
       }
-      return null;
-    }
+    });
 
-    // MCP servers will be started on-demand in getMCPToolsForWorld()
-    if (currentWorld.mcpConfig) {
-      logger.debug(`World ${worldId} has MCP config - servers will start on-demand`);
-    }
+    currentWorld = runtimeHandle.world;
+    worldEventListeners = bindForwardingListeners(currentWorld);
 
-    // Use startWorld function to create the subscription
-    const subscription = await startWorld(currentWorld, client);
+    return {
+      get world() {
+        if (!currentWorld) {
+          throw new Error('World subscription has been destroyed');
+        }
+        return currentWorld;
+      },
+      unsubscribe: async () => {
+        await releaseRuntime();
+      },
+      destroy: async () => {
+        await releaseRuntime();
+      },
+      refresh: async () => {
+        if (!runtimeHandle) {
+          throw new Error('World subscription has been destroyed');
+        }
 
-    // MCP servers use connection pooling and will be cleaned up automatically
-    // when the Express app shuts down
+        const previousWorld = currentWorld;
+        if (previousWorld) {
+          await cleanupWorldSubscription(previousWorld, worldEventListeners);
+          worldEventListeners = new Map();
+        }
 
-    return subscription;
+        await runtimeHandle.refresh();
+
+        const refreshed = getWorldRuntimeByKey<World>(runtimeHandle.runtimeKey);
+        if (!refreshed) {
+          throw new Error(`Failed to refresh world runtime: ${runtimeHandle.runtimeKey}`);
+        }
+
+        currentWorld = refreshed.world;
+        worldEventListeners = bindForwardingListeners(currentWorld);
+        return currentWorld;
+      }
+    };
   } catch (error) {
+    if (runtimeHandle) {
+      await runtimeHandle.release();
+      runtimeHandle = null;
+    }
     logger.error('World subscription failed', {
       worldIdentifier,
       error: error instanceof Error ? error.message : error
@@ -280,6 +363,10 @@ export async function cleanupWorldSubscription(world: World, worldEventListeners
   try {
     // Remove all event listeners
     for (const [eventType, listener] of worldEventListeners.entries()) {
+      if (eventType === 'logStream') {
+        listener();
+        continue;
+      }
       world.eventEmitter.removeListener(eventType, listener);
     }
     worldEventListeners.clear();

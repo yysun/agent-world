@@ -145,7 +145,7 @@ interface MainIpcHandlerFactoryDependencies {
   }) => Promise<any> | any;
   newChat: (worldId: string) => Promise<any>;
   branchChatFromMessage: (worldId: string, sourceChatId: string, messageId: string) => Promise<any>;
-  publishMessage: (world: any, content: string, sender: string, chatId?: string) => any;
+  enqueueAndProcessUserMessage: (worldId: string, chatId: string, content: string, sender: string, targetWorld?: any) => Promise<any>;
   submitWorldHitlResponse: (params: { worldId: string; requestId: string; optionId: string; chatId?: string | null }) => {
     accepted: boolean;
     reason?: string;
@@ -216,7 +216,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     syncSkills,
     newChat,
     branchChatFromMessage,
-    publishMessage,
+    enqueueAndProcessUserMessage,
     submitWorldHitlResponse,
     stopMessageProcessing,
     activateChatWithSnapshot,
@@ -1219,12 +1219,12 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     const world = await ensureWorldSubscribed(worldId);
     if (!world) throw new Error(`World not found: ${worldId}`);
 
-    const event = publishMessage(world, content, sender, chatId);
+    const queued = await enqueueAndProcessUserMessage(worldId, chatId, content, sender, world);
     return {
-      messageId: event.messageId,
-      sender: event.sender,
-      content: event.content,
-      createdAt: toIsoTimestamp(event.timestamp)
+      messageId: queued?.messageId || null,
+      sender,
+      content,
+      createdAt: toIsoTimestamp(queued?.createdAt)
     };
   }
 
