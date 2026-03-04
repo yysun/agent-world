@@ -13,6 +13,8 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-03-04: Added app-level grid submenu open state so selecting a grid-layout option can dismiss the submenu.
+ * - 2026-03-04: Added world-view state (`chat|board|grid|canvas`) and grid layout choice wiring for the new header selector and message render modes.
  * - 2026-02-27: Restored stop-button visibility/behavior by deriving stop mode from both legacy pending markers and status-registry `working` state.
  * - 2026-02-28: Skill scope and per-skill settings toggles now autosave immediately when changed.
  * - 2026-02-28: Opening System Settings now triggers a skill-registry refresh to keep the settings skill list current.
@@ -102,6 +104,12 @@ import {
   createMainHeaderProps,
 } from './utils/app-layout-props';
 import { initializeRendererLogger, rendererLogger, type RendererLogEntry } from './utils/logger';
+import {
+  normalizeWorldGridLayoutChoiceId,
+  normalizeWorldViewMode,
+  type WorldGridLayoutChoiceId,
+  type WorldViewMode,
+} from './domain/world-view';
 
 type WorkspaceState = {
   workspacePath: string | null;
@@ -220,6 +228,9 @@ export default function App() {
   const [hitlPromptQueue, setHitlPromptQueue] = useState<HitlPrompt[]>([]);
   const [submittingHitlRequestId, setSubmittingHitlRequestId] = useState<string | null>(null);
   const [panelLogs, setPanelLogs] = useState<UnifiedLogEntry[]>([]);
+  const [worldViewMode, setWorldViewMode] = useState<WorldViewMode>('chat');
+  const [worldGridLayoutChoiceId, setWorldGridLayoutChoiceId] = useState<WorldGridLayoutChoiceId>('1+2');
+  const [isGridLayoutSubmenuOpen, setIsGridLayoutSubmenuOpen] = useState(false);
   const hasActiveHitlPrompt = hitlPromptQueue.length > 0;
 
   const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1084,6 +1095,8 @@ export default function App() {
   }, [messages, systemSettings.showToolMessages]);
 
   const mainContentMessageListProps = createMainContentMessageListProps({
+    worldViewMode,
+    worldGridLayoutChoiceId,
     messagesContainerRef,
     messagesLoading: loading.messages,
     hasConversationMessages,
@@ -1228,6 +1241,23 @@ export default function App() {
     activeHeaderAgentIds: [],
     onOpenEditAgentPanel,
     onOpenCreateAgentPanel,
+    worldViewMode,
+    worldGridLayoutChoiceId,
+    isGridLayoutSubmenuOpen,
+    onWorldViewModeChange: (nextMode: unknown) => {
+      const normalizedMode = normalizeWorldViewMode(nextMode);
+      setWorldViewMode(normalizedMode);
+      if (normalizedMode !== 'grid') {
+        setIsGridLayoutSubmenuOpen(false);
+      }
+    },
+    onWorldGridLayoutChoiceChange: (nextChoiceId: unknown) => {
+      setWorldGridLayoutChoiceId(normalizeWorldGridLayoutChoiceId(nextChoiceId));
+      setIsGridLayoutSubmenuOpen(false);
+    },
+    onToggleGridLayoutSubmenu: (nextOpen: unknown) => {
+      setIsGridLayoutSubmenuOpen(Boolean(nextOpen));
+    },
     onOpenLogsPanel,
     onOpenSettingsPanel,
     panelMode,

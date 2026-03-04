@@ -14,6 +14,11 @@
  * - Preserves existing drag/no-drag region behavior for Electron title area.
  *
  * Recent Changes:
+ * - 2026-03-04: Grid submenu now dismisses on option select and is left-aligned to the Grid icon button.
+ * - 2026-03-04: Replaced grid layout dropdown with a submenu anchored under the Grid icon.
+ * - 2026-03-04: Replaced grid layout cycle button with dropdown options (`1+2`, `2+1`, `2+2`) while keeping icon view-mode buttons.
+ * - 2026-03-04: Replaced world-view dropdown selector with SVG icon buttons and grid-layout cycle button.
+ * - 2026-03-04: Added world-view selector controls (Chat/Board/Grid/Canvas) positioned left of Logs and Settings buttons.
  * - 2026-02-27: Replaced the header refresh action with a logs action that opens the right panel in logs mode.
  * - 2026-02-20: Added active-streaming avatar animation state for header agent badges.
  * - 2026-02-20: Highlighted the world main agent in the top header avatar strip.
@@ -46,11 +51,22 @@ export default function MainHeaderBar({
   onOpenCreateAgentPanel,
   onOpenSettingsPanel,
   onOpenLogsPanel,
+  worldViewMode,
+  worldGridLayoutChoiceId,
+  isGridLayoutSubmenuOpen,
+  onWorldViewModeChange,
+  onWorldGridLayoutChoiceChange,
+  onToggleGridLayoutSubmenu,
   panelMode,
   panelOpen,
   dragRegionStyle,
   noDragRegionStyle,
 }) {
+  const normalizedWorldViewMode = String(worldViewMode || 'chat').trim().toLowerCase();
+  const iconButtonClassName = (active: boolean) => `flex h-7 w-7 items-center justify-center rounded transition-colors ${active
+    ? 'bg-primary text-primary-foreground'
+    : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+    }`;
   const activeHeaderAgentIdSet = new Set(
     (Array.isArray(activeHeaderAgentIds) ? activeHeaderAgentIds : [])
       .map((id) => normalizeMainAgentValue(id))
@@ -160,6 +176,136 @@ export default function MainHeaderBar({
         ) : null}
       </div>
       <div className="flex items-center justify-end gap-2" style={noDragRegionStyle}>
+        <div className="relative flex items-center gap-1" role="group" aria-label="World view selector">
+          <button
+            id="world-view-chat-btn"
+            type="button"
+            onClick={() => {
+              onWorldViewModeChange?.('chat');
+              onToggleGridLayoutSubmenu?.(false);
+            }}
+            className={iconButtonClassName(normalizedWorldViewMode === 'chat')}
+            title="Chat View"
+            aria-label="Chat View"
+            aria-pressed={normalizedWorldViewMode === 'chat'}
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+          </button>
+          <button
+            id="world-view-board-btn"
+            type="button"
+            onClick={() => {
+              onWorldViewModeChange?.('board');
+              onToggleGridLayoutSubmenu?.(false);
+            }}
+            className={iconButtonClassName(normalizedWorldViewMode === 'board')}
+            title="Board View"
+            aria-label="Board View"
+            aria-pressed={normalizedWorldViewMode === 'board'}
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="4" width="6" height="16" rx="1" />
+              <rect x="10" y="4" width="4" height="16" rx="1" />
+              <rect x="15" y="4" width="6" height="16" rx="1" />
+            </svg>
+          </button>
+          <div className="relative">
+            <button
+              id="world-view-grid-btn"
+              type="button"
+              onClick={() => {
+                if (normalizedWorldViewMode === 'grid') {
+                  onToggleGridLayoutSubmenu?.(!isGridLayoutSubmenuOpen);
+                  return;
+                }
+                onWorldViewModeChange?.('grid');
+                onToggleGridLayoutSubmenu?.(true);
+              }}
+              className={iconButtonClassName(normalizedWorldViewMode === 'grid')}
+              title="Grid View"
+              aria-label="Grid View"
+              aria-pressed={normalizedWorldViewMode === 'grid'}
+              aria-expanded={normalizedWorldViewMode === 'grid' && Boolean(isGridLayoutSubmenuOpen)}
+              aria-controls="grid-layout-submenu"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="8" height="8" rx="1" />
+                <rect x="13" y="3" width="8" height="8" rx="1" />
+                <rect x="3" y="13" width="8" height="8" rx="1" />
+                <rect x="13" y="13" width="8" height="8" rx="1" />
+              </svg>
+            </button>
+
+            {normalizedWorldViewMode === 'grid' && Boolean(isGridLayoutSubmenuOpen) ? (
+              <div
+                id="grid-layout-submenu"
+                role="menu"
+                aria-label="Grid layout options"
+                className="absolute left-0 top-8 z-20 flex min-w-[84px] flex-col gap-1 rounded-md border border-border bg-card p-1 shadow-lg"
+              >
+                <button
+                  id="grid-layout-option-1-2"
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={String(worldGridLayoutChoiceId || '1+2') === '1+2'}
+                  onClick={() => {
+                    onWorldGridLayoutChoiceChange?.('1+2');
+                    onToggleGridLayoutSubmenu?.(false);
+                  }}
+                  className={`rounded px-2 py-1 text-left text-xs transition-colors ${String(worldGridLayoutChoiceId || '1+2') === '1+2' ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-accent hover:text-accent-foreground'}`}
+                >
+                  1+2
+                </button>
+                <button
+                  id="grid-layout-option-2-1"
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={String(worldGridLayoutChoiceId || '1+2') === '2+1'}
+                  onClick={() => {
+                    onWorldGridLayoutChoiceChange?.('2+1');
+                    onToggleGridLayoutSubmenu?.(false);
+                  }}
+                  className={`rounded px-2 py-1 text-left text-xs transition-colors ${String(worldGridLayoutChoiceId || '1+2') === '2+1' ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-accent hover:text-accent-foreground'}`}
+                >
+                  2+1
+                </button>
+                <button
+                  id="grid-layout-option-2-2"
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={String(worldGridLayoutChoiceId || '1+2') === '2+2'}
+                  onClick={() => {
+                    onWorldGridLayoutChoiceChange?.('2+2');
+                    onToggleGridLayoutSubmenu?.(false);
+                  }}
+                  className={`rounded px-2 py-1 text-left text-xs transition-colors ${String(worldGridLayoutChoiceId || '1+2') === '2+2' ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-accent hover:text-accent-foreground'}`}
+                >
+                  2+2
+                </button>
+              </div>
+            ) : null}
+          </div>
+          <button
+            id="world-view-canvas-btn"
+            type="button"
+            onClick={() => {
+              onWorldViewModeChange?.('canvas');
+              onToggleGridLayoutSubmenu?.(false);
+            }}
+            className={iconButtonClassName(normalizedWorldViewMode === 'canvas')}
+            title="Canvas View"
+            aria-label="Canvas View"
+            aria-pressed={normalizedWorldViewMode === 'canvas'}
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 3h18v14H3z" />
+              <path d="M8 21h8" />
+              <path d="M12 17v4" />
+            </svg>
+          </button>
+        </div>
         <button
           type="button"
           onClick={onOpenLogsPanel}

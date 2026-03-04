@@ -12,6 +12,8 @@
  * - Data-only transformations from provided inputs.
  *
  * Recent Changes:
+ * - 2026-03-04: Added grid submenu open-state wiring for grid icon submenu toggle/dismiss behavior.
+ * - 2026-03-04: Added world-view mode and grid-layout prop wiring for header selector and message-list render strategies.
  * - 2026-02-28: Added right-panel settings autosave handlers wiring for skill scope toggles.
  * - 2026-02-27: Added `showToolMessages` wiring to message-list props for transcript-level tool-row visibility control.
  * - 2026-02-27: Added right-panel logs props wiring (`panelLogs`, `onClearPanelLogs`) and replaced header refresh wiring with `onOpenLogsPanel`.
@@ -29,6 +31,8 @@ type PropBag = Record<string, unknown>;
 
 export function createMainContentMessageListProps<T extends PropBag>(input: T) {
   return {
+    worldViewMode: input.worldViewMode,
+    worldGridLayoutChoiceId: input.worldGridLayoutChoiceId,
     messagesContainerRef: input.messagesContainerRef,
     messagesLoading: input.messagesLoading,
     hasConversationMessages: input.hasConversationMessages,
@@ -183,6 +187,12 @@ export function createMainHeaderProps<T extends PropBag>(input: T) {
     activeHeaderAgentIds: input.activeHeaderAgentIds,
     onOpenEditAgentPanel: input.onOpenEditAgentPanel,
     onOpenCreateAgentPanel: input.onOpenCreateAgentPanel,
+    worldViewMode: input.worldViewMode,
+    worldGridLayoutChoiceId: input.worldGridLayoutChoiceId,
+    isGridLayoutSubmenuOpen: input.isGridLayoutSubmenuOpen,
+    onWorldViewModeChange: input.onWorldViewModeChange,
+    onWorldGridLayoutChoiceChange: input.onWorldGridLayoutChoiceChange,
+    onToggleGridLayoutSubmenu: input.onToggleGridLayoutSubmenu,
     onOpenLogsPanel: input.onOpenLogsPanel,
     onOpenSettingsPanel: input.onOpenSettingsPanel,
     panelMode: input.panelMode,

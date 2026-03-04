@@ -13,6 +13,7 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-03-04: Added `Chat/Board/Grid/Canvas` view-mode rendering with agent lanes/cells/shared-canvas layouts and grid choice support.
  * - 2026-03-01: Changed collapsible message cards (assistant/tool) to default expanded state; per-message toggle overrides still apply.
  * - 2026-03-01: Kept narrated assistant tool-call messages as assistant cards; only placeholder `Calling tool:` rows are merged into tool cards.
  * - 2026-03-01: Fixed stale `tool: <name> - running` cards by treating reply-linked tool result rows as completion signals when `tool_call_id` metadata is absent.
@@ -49,6 +50,14 @@ import { useState } from 'react';
 import MessageContent, { getToolStatusLabel } from './MessageContent';
 import ElapsedTimeCounter from './ElapsedTimeCounter';
 import { compactSkillDescription, formatTime } from '../utils/formatting';
+import {
+  getGridContainerClassName,
+  getGridLaneClassName,
+  normalizeWorldGridLayoutChoiceId,
+  normalizeWorldViewMode,
+  partitionWorldViewMessages,
+  sortAgentLanesForGrid,
+} from '../domain/world-view';
 import {
   getMessageCardClassName,
   getMessageIdentity,
@@ -341,6 +350,8 @@ function extractStreamingInputPreview(message, messagesById, messages, messageIn
 }
 
 export default function MessageListPanel({
+  worldViewMode = 'chat',
+  worldGridLayoutChoiceId = '1+2',
   messagesContainerRef,
   messagesLoading,
   hasConversationMessages,
@@ -370,6 +381,8 @@ export default function MessageListPanel({
   submittingHitlRequestId,
   onRespondHitlOption,
 }) {
+  const normalizedWorldViewMode = normalizeWorldViewMode(worldViewMode);
+  const normalizedGridChoiceId = normalizeWorldGridLayoutChoiceId(worldGridLayoutChoiceId);
   const inlinePrimaryText = String(inlineWorkingIndicatorState?.primaryText || 'Agent');
   const inlineStatusText = String(
     inlineWorkingIndicatorState?.inlineStatusText
@@ -408,6 +421,223 @@ export default function MessageListPanel({
     return getInitialMessageCollapsedState(message, isCollapsible);
   };
   const shouldShowWelcome = !messagesLoading && !hasConversationMessages;
+  const partitionedMessages = partitionWorldViewMessages(renderableMessages);
+  const sortedGridAgentLanes = sortAgentLanesForGrid(partitionedMessages.agentLanes, normalizedGridChoiceId);
+  const flatCanvasAgentMessages = partitionedMessages.agentLanes
+    .flatMap((lane) => lane.messages)
+    .sort((left, right) => left.index - right.index);
+
+  const renderMessageCard = (message, messageIndex, sourceMessages) => {
+    const senderLabel = getMessageSenderLabel(
+      message,
+      messagesById,
+      sourceMessages,
+      messageIndex,
+      worldAgentsById,
+      worldAgentsByName
+    );
+    const messageKey = message.messageId;
+    const messageAvatar = resolveMessageAvatar(message, worldAgentsById, worldAgentsByName);
+    const isHuman = isHumanMessage(message);
+    const isPendingOptimisticUserMessage = isHuman && message?.optimisticUserPending === true;
+    const messageRole = String(message?.role || '').toLowerCase();
+    const isNarratedAssistantToolCall = isNarratedAssistantToolCallMessage(message);
+    const isToolMessage = isToolRelatedMessage(message) && !isNarratedAssistantToolCall;
+    const resolvedToolName = isToolMessage
+      ? resolveToolNameForMessage(message, messagesById, sourceMessages, messageIndex)
+      : '';
+    const messageModelLabel = resolveMessageModelLabel(message, worldAgentsById, worldAgentsByName);
+    const streamingInputPreview = extractStreamingInputPreview(message, messagesById, sourceMessages, messageIndex);
+    const shouldRightAlignMessage = isHuman || isToolMessage || messageRole === 'assistant';
+    const hasToolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
+    const isToolCallRequestMessage = isToolRequestMessage(message);
+    const isPendingToolCallRequest = isToolCallRequestMessage && hasPendingToolCalls(message, sourceMessages, messageIndex);
+    const toolStatusLabel = isToolMessage ? getToolStatusLabel(message, isPendingToolCallRequest, resolvedToolName) : '';
+    const linkedToolRequestMessage = isToolMessage
+      ? findToolRequestMessageForToolResult(message, messagesById, sourceMessages, messageIndex)
+      : null;
+    const isStreamingAssistantMessage = Boolean(message?.isStreaming) && messageRole === 'assistant' && !isToolMessage;
+    const isFinalizedAssistantMessage = message?.isStreaming !== true && message?.isToolStreaming !== true;
+    const isActiveToolMessage = isToolMessage && (Boolean(message?.isToolStreaming) || isPendingToolCallRequest);
+    const isBranchableAgentMessage = !isHuman
+      && isFinalizedAssistantMessage
+      && isTrueAgentResponseMessage(message)
+      && Boolean(message.messageId);
+    const isAssistantMessage = messageRole === 'assistant' && !isToolMessage;
+    const isCollapsible = isToolMessage || (isAssistantMessage && Boolean(messageKey));
+    const isCollapsed = isMessageCollapsed(message, messageKey, isCollapsible);
+    const normalizedEditedText = editingText.trim();
+    const normalizedOriginalText = String(message?.content || '').trim();
+    const isEditChanged = Boolean(normalizedEditedText) && normalizedEditedText !== normalizedOriginalText;
+    return (
+      <div
+        key={messageKey}
+        className={`flex min-w-0 w-full items-start gap-2 ${shouldRightAlignMessage ? 'justify-end' : 'justify-start'}`}
+      >
+        {messageAvatar ? (
+          <div
+            className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-secondary text-[10px] font-semibold text-secondary-foreground"
+            title={messageAvatar.name}
+            aria-label={`${messageAvatar.name} avatar`}
+          >
+            {messageAvatar.initials}
+          </div>
+        ) : null}
+
+        <article className={`min-w-0 ${getMessageCardClassName(message, messagesById, sourceMessages, messageIndex, { isToolCallPending: isPendingToolCallRequest })} ${isStreamingAssistantMessage ? 'agent-streaming-card' : ''} ${isActiveToolMessage ? 'agent-tool-active-card' : ''}`}>
+          <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
+            {isToolMessage ? (
+              <span className="flex items-center gap-2">
+                <span>{senderLabel}</span>
+                <span className="font-medium text-foreground/80">{toolStatusLabel}</span>
+              </span>
+            ) : (
+              <span>{isHuman ? 'You' : senderLabel}</span>
+            )}
+            <div className="flex items-center gap-1">
+              <span>{formatTime(message.createdAt)}</span>
+              {isCollapsible && messageKey ? (
+                <button
+                  type="button"
+                  onClick={() => toggleMessageCollapsed(messageKey, isCollapsed)}
+                  className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
+                  title={isCollapsed ? 'Expand' : 'Collapse'}
+                  aria-label={isCollapsed ? 'Expand' : 'Collapse'}
+                >
+                  {isCollapsed ? (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3" aria-hidden="true">
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3" aria-hidden="true">
+                      <path d="m18 15-6-6-6 6" />
+                    </svg>
+                  )}
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          {editingMessageId === getMessageIdentity(message) ? (
+            <div className="space-y-2">
+              <textarea
+                value={editingText}
+                onChange={(event) => setEditingText(event.target.value)}
+                className="w-full rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-sm text-sidebar-foreground outline-none focus:border-sidebar-ring focus:ring-2 focus:ring-sidebar-ring/20 resize-none transition-all"
+                rows={3}
+                autoFocus
+                placeholder="Edit your message..."
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    onCancelEditMessage();
+                  }
+                }}
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={onCancelEditMessage}
+                  className="rounded-md border border-sidebar-border bg-sidebar px-3 py-1.5 text-xs font-medium text-sidebar-foreground hover:bg-sidebar-accent focus:outline-none focus:ring-2 focus:ring-sidebar-ring/50 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSaveEditMessage(message)}
+                  disabled={!isEditChanged}
+                  className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          ) : (
+            <MessageContent
+              message={(() => {
+                let nextMessage = message;
+                if (resolvedToolName && !String(message?.toolName || '').trim()) {
+                  nextMessage = { ...nextMessage, toolName: resolvedToolName };
+                }
+                if (linkedToolRequestMessage && !(Array.isArray(message?.tool_calls) && message.tool_calls.length > 0)) {
+                  nextMessage = { ...nextMessage, linkedToolRequest: linkedToolRequestMessage };
+                }
+                if (isNarratedAssistantToolCall) {
+                  nextMessage = { ...nextMessage, forceAssistantMessage: true };
+                }
+                return nextMessage;
+              })()}
+              collapsed={isCollapsed}
+              isToolCallPending={isPendingToolCallRequest}
+              showToolHeader={!isToolMessage}
+              streamingDotsLabel={messageModelLabel}
+              streamingInputPreview={streamingInputPreview}
+            />
+          )}
+
+          {isHumanMessage(message) && message.messageId && !isPendingOptimisticUserMessage && editingMessageId !== getMessageIdentity(message) ? (
+            <div className="absolute bottom-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                type="button"
+                onClick={() => onStartEditMessage(message)}
+                disabled={!message.messageId}
+                className="rounded p-1 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-foreground/10 focus:outline-none focus:ring-2 focus:ring-sidebar-ring disabled:opacity-30 disabled:cursor-not-allowed transition-all bg-background/80 backdrop-blur-sm"
+                title="Edit message"
+                aria-label="Edit message"
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => onDeleteMessage(message)}
+                disabled={deletingMessageId === getMessageIdentity(message)}
+                className="rounded p-1 text-sidebar-foreground/70 hover:text-destructive hover:bg-destructive/10 focus:outline-none focus:ring-2 focus:ring-destructive/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all bg-background/80 backdrop-blur-sm"
+                title="Delete message"
+                aria-label="Delete message"
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          ) : null}
+
+          {isBranchableAgentMessage && editingMessageId !== getMessageIdentity(message) ? (
+            <div className="mt-2 flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                type="button"
+                onClick={() => onBranchFromMessage(message)}
+                className="rounded p-1 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-foreground/10 focus:outline-none focus:ring-2 focus:ring-sidebar-ring transition-all bg-background/80 backdrop-blur-sm"
+                title="Branch chat from this message"
+                aria-label="Branch chat from this message"
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M6 3v12" />
+                  <circle cx="18" cy="6" r="3" />
+                  <circle cx="6" cy="18" r="3" />
+                  <path d="M9 18h6a3 3 0 0 0 3-3V9" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => onCopyRawMarkdownFromMessage(message)}
+                className="rounded p-1 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-foreground/10 focus:outline-none focus:ring-2 focus:ring-sidebar-ring transition-all bg-background/80 backdrop-blur-sm"
+                title="Copy raw markdown"
+                aria-label="Copy raw markdown"
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              </button>
+            </div>
+          ) : null}
+        </article>
+      </div>
+    );
+  };
 
   return (
     <div ref={messagesContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden p-5">
@@ -490,217 +720,92 @@ export default function MessageListPanel({
             </div>
           )
         ) : (
-          renderableMessages.map((message, messageIndex) => {
-            const senderLabel = getMessageSenderLabel(
-              message,
-              messagesById,
-              renderableMessages,
-              messageIndex,
-              worldAgentsById,
-              worldAgentsByName
-            );
-            const messageKey = message.messageId;
-            const messageAvatar = resolveMessageAvatar(message, worldAgentsById, worldAgentsByName);
-            const isHuman = isHumanMessage(message);
-            const isPendingOptimisticUserMessage = isHuman && message?.optimisticUserPending === true;
-            const messageRole = String(message?.role || '').toLowerCase();
-            const isNarratedAssistantToolCall = isNarratedAssistantToolCallMessage(message);
-            const isToolMessage = isToolRelatedMessage(message) && !isNarratedAssistantToolCall;
-            const resolvedToolName = isToolMessage
-              ? resolveToolNameForMessage(message, messagesById, renderableMessages, messageIndex)
-              : '';
-            const messageModelLabel = resolveMessageModelLabel(message, worldAgentsById, worldAgentsByName);
-            const streamingInputPreview = extractStreamingInputPreview(message, messagesById, renderableMessages, messageIndex);
-            const shouldRightAlignMessage = isHuman || isToolMessage || messageRole === 'assistant';
-            const hasToolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
-            const isToolCallRequestMessage = isToolRequestMessage(message);
-            const isPendingToolCallRequest = isToolCallRequestMessage && hasPendingToolCalls(message, renderableMessages, messageIndex);
-            const toolStatusLabel = isToolMessage ? getToolStatusLabel(message, isPendingToolCallRequest, resolvedToolName) : '';
-            const linkedToolRequestMessage = isToolMessage
-              ? findToolRequestMessageForToolResult(message, messagesById, renderableMessages, messageIndex)
-              : null;
-            const isStreamingAssistantMessage = Boolean(message?.isStreaming) && messageRole === 'assistant' && !isToolMessage;
-            const isFinalizedAssistantMessage = message?.isStreaming !== true && message?.isToolStreaming !== true;
-            const isActiveToolMessage = isToolMessage && (Boolean(message?.isToolStreaming) || isPendingToolCallRequest);
-            const isBranchableAgentMessage = !isHuman
-              && isFinalizedAssistantMessage
-              && isTrueAgentResponseMessage(message)
-              && Boolean(message.messageId);
-            const isAssistantMessage = messageRole === 'assistant' && !isToolMessage;
-            const isCollapsible = isToolMessage || (isAssistantMessage && Boolean(messageKey));
-            const isCollapsed = isMessageCollapsed(message, messageKey, isCollapsible);
-            const normalizedEditedText = editingText.trim();
-            const normalizedOriginalText = String(message?.content || '').trim();
-            const isEditChanged = Boolean(normalizedEditedText) && normalizedEditedText !== normalizedOriginalText;
-            return (
-              <div
-                key={messageKey}
-                className={`flex min-w-0 w-full items-start gap-2 ${shouldRightAlignMessage ? 'justify-end' : 'justify-start'}`}
-              >
-                {messageAvatar ? (
-                  <div
-                    className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-secondary text-[10px] font-semibold text-secondary-foreground"
-                    title={messageAvatar.name}
-                    aria-label={`${messageAvatar.name} avatar`}
-                  >
-                    {messageAvatar.initials}
+          normalizedWorldViewMode === 'chat' ? (
+            renderableMessages.map((message, messageIndex) => renderMessageCard(message, messageIndex, renderableMessages))
+          ) : normalizedWorldViewMode === 'board' ? (
+            <div className="space-y-3">
+              {partitionedMessages.userMessages.length > 0 ? (
+                <section className="rounded-lg border border-border/70 bg-card/40 p-3">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">User Thread</div>
+                  <div className="space-y-3">
+                    {partitionedMessages.userMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
                   </div>
-                ) : null}
-
-                <article className={`min-w-0 ${getMessageCardClassName(message, messagesById, renderableMessages, messageIndex, { isToolCallPending: isPendingToolCallRequest })} ${isStreamingAssistantMessage ? 'agent-streaming-card' : ''} ${isActiveToolMessage ? 'agent-tool-active-card' : ''}`}>
-                  <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
-                    {isToolMessage ? (
-                      <span className="flex items-center gap-2">
-                        <span>{senderLabel}</span>
-                        <span className="font-medium text-foreground/80">{toolStatusLabel}</span>
-                      </span>
-                    ) : (
-                      <span>{isHuman ? 'You' : senderLabel}</span>
-                    )}
-                    <div className="flex items-center gap-1">
-                      <span>{formatTime(message.createdAt)}</span>
-                      {isCollapsible && messageKey ? (
-                        <button
-                          type="button"
-                          onClick={() => toggleMessageCollapsed(messageKey, isCollapsed)}
-                          className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
-                          title={isCollapsed ? 'Expand' : 'Collapse'}
-                          aria-label={isCollapsed ? 'Expand' : 'Collapse'}
-                        >
-                          {isCollapsed ? (
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3" aria-hidden="true">
-                              <path d="m6 9 6 6 6-6" />
-                            </svg>
-                          ) : (
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3" aria-hidden="true">
-                              <path d="m18 15-6-6-6 6" />
-                            </svg>
-                          )}
-                        </button>
-                      ) : null}
+                </section>
+              ) : null}
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                {partitionedMessages.agentLanes.map((lane) => (
+                  <section key={lane.id} className="rounded-lg border border-border/70 bg-card/40 p-3">
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{lane.label}</div>
+                    <div className="space-y-3">
+                      {lane.messages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
                     </div>
-                  </div>
-
-                  {editingMessageId === getMessageIdentity(message) ? (
-                    <div className="space-y-2">
-                      <textarea
-                        value={editingText}
-                        onChange={(event) => setEditingText(event.target.value)}
-                        className="w-full rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-sm text-sidebar-foreground outline-none focus:border-sidebar-ring focus:ring-2 focus:ring-sidebar-ring/20 resize-none transition-all"
-                        rows={3}
-                        autoFocus
-                        placeholder="Edit your message..."
-                        onKeyDown={(event) => {
-                          if (event.key === 'Escape') {
-                            onCancelEditMessage();
-                          }
-                        }}
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={onCancelEditMessage}
-                          className="rounded-md border border-sidebar-border bg-sidebar px-3 py-1.5 text-xs font-medium text-sidebar-foreground hover:bg-sidebar-accent focus:outline-none focus:ring-2 focus:ring-sidebar-ring/50 transition-all"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onSaveEditMessage(message)}
-                          disabled={!isEditChanged}
-                          className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                        >
-                          Save
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <MessageContent
-                      message={(() => {
-                        let nextMessage = message;
-                        if (resolvedToolName && !String(message?.toolName || '').trim()) {
-                          nextMessage = { ...nextMessage, toolName: resolvedToolName };
-                        }
-                        if (linkedToolRequestMessage && !(Array.isArray(message?.tool_calls) && message.tool_calls.length > 0)) {
-                          nextMessage = { ...nextMessage, linkedToolRequest: linkedToolRequestMessage };
-                        }
-                        if (isNarratedAssistantToolCall) {
-                          nextMessage = { ...nextMessage, forceAssistantMessage: true };
-                        }
-                        return nextMessage;
-                      })()}
-                      collapsed={isCollapsed}
-                      isToolCallPending={isPendingToolCallRequest}
-                      showToolHeader={!isToolMessage}
-                      streamingDotsLabel={messageModelLabel}
-                      streamingInputPreview={streamingInputPreview}
-                    />
-                  )}
-
-                  {isHumanMessage(message) && message.messageId && !isPendingOptimisticUserMessage && editingMessageId !== getMessageIdentity(message) ? (
-                    <div className="absolute bottom-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        type="button"
-                        onClick={() => onStartEditMessage(message)}
-                        disabled={!message.messageId}
-                        className="rounded p-1 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-foreground/10 focus:outline-none focus:ring-2 focus:ring-sidebar-ring disabled:opacity-30 disabled:cursor-not-allowed transition-all bg-background/80 backdrop-blur-sm"
-                        title="Edit message"
-                        aria-label="Edit message"
-                      >
-                        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onDeleteMessage(message)}
-                        disabled={deletingMessageId === getMessageIdentity(message)}
-                        className="rounded p-1 text-sidebar-foreground/70 hover:text-destructive hover:bg-destructive/10 focus:outline-none focus:ring-2 focus:ring-destructive/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all bg-background/80 backdrop-blur-sm"
-                        title="Delete message"
-                        aria-label="Delete message"
-                      >
-                        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M18 6L6 18M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                  ) : null}
-
-                  {isBranchableAgentMessage && editingMessageId !== getMessageIdentity(message) ? (
-                    <div className="mt-2 flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        type="button"
-                        onClick={() => onBranchFromMessage(message)}
-                        className="rounded p-1 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-foreground/10 focus:outline-none focus:ring-2 focus:ring-sidebar-ring transition-all bg-background/80 backdrop-blur-sm"
-                        title="Branch chat from this message"
-                        aria-label="Branch chat from this message"
-                      >
-                        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M6 3v12" />
-                          <circle cx="18" cy="6" r="3" />
-                          <circle cx="6" cy="18" r="3" />
-                          <path d="M9 18h6a3 3 0 0 0 3-3V9" />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onCopyRawMarkdownFromMessage(message)}
-                        className="rounded p-1 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-foreground/10 focus:outline-none focus:ring-2 focus:ring-sidebar-ring transition-all bg-background/80 backdrop-blur-sm"
-                        title="Copy raw markdown"
-                        aria-label="Copy raw markdown"
-                      >
-                        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                        </svg>
-                      </button>
-                    </div>
-                  ) : null}
-                </article>
+                  </section>
+                ))}
               </div>
-            );
-          })
+              {partitionedMessages.systemMessages.length > 0 ? (
+                <section className="rounded-lg border border-dashed border-border/80 bg-muted/30 p-3">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">System</div>
+                  <div className="space-y-3">
+                    {partitionedMessages.systemMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
+                  </div>
+                </section>
+              ) : null}
+            </div>
+          ) : normalizedWorldViewMode === 'grid' ? (
+            <div className="space-y-3">
+              {partitionedMessages.userMessages.length > 0 ? (
+                <section className="rounded-lg border border-border/70 bg-card/40 p-3">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">User Thread</div>
+                  <div className="space-y-3">
+                    {partitionedMessages.userMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
+                  </div>
+                </section>
+              ) : null}
+              <div className={getGridContainerClassName(normalizedGridChoiceId)}>
+                {sortedGridAgentLanes.map((lane, laneIndex) => (
+                  <section key={lane.id} className={`rounded-lg border border-border/70 bg-card/40 p-3 ${getGridLaneClassName(normalizedGridChoiceId, laneIndex)}`}>
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{lane.label}</div>
+                    <div className="space-y-3">
+                      {lane.messages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+              {partitionedMessages.systemMessages.length > 0 ? (
+                <section className="rounded-lg border border-dashed border-border/80 bg-muted/30 p-3">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">System</div>
+                  <div className="space-y-3">
+                    {partitionedMessages.systemMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
+                  </div>
+                </section>
+              ) : null}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {partitionedMessages.userMessages.length > 0 ? (
+                <section className="rounded-lg border border-border/70 bg-card/40 p-3">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">User Thread</div>
+                  <div className="space-y-3">
+                    {partitionedMessages.userMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
+                  </div>
+                </section>
+              ) : null}
+              <section className="rounded-xl border border-border/70 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.12),_transparent_56%),radial-gradient(circle_at_bottom,_rgba(16,185,129,0.12),_transparent_58%)] p-3">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Agent Canvas</div>
+                <div className="space-y-3">
+                  {flatCanvasAgentMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
+                </div>
+              </section>
+              {partitionedMessages.systemMessages.length > 0 ? (
+                <section className="rounded-lg border border-dashed border-border/80 bg-muted/30 p-3">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">System</div>
+                  <div className="space-y-3">
+                    {partitionedMessages.systemMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
+                  </div>
+                </section>
+              ) : null}
+            </div>
+          )
         )}
 
         {activeHitlPrompt ? (
