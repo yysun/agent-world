@@ -15,6 +15,7 @@
  * - Avoids DOM runtime dependencies for deterministic unit coverage.
  *
  * Summary of Recent Changes:
+ * - 2026-03-05: Updated queue wrapper overlap assertion to enforce lower queue placement near composer (`-mb-6`).
  * - 2026-03-04: Added regression coverage for floating composer/queue layout contract.
  */
 
@@ -98,7 +99,9 @@ describe('MainContentArea floating bottom stack layout', () => {
     const overlayInner = mainSectionChildren[1]?.props?.children;
     const overlayChildren = overlayInner?.props?.children ?? [];
 
-    expect(overlayChildren[0]).toBe(queueProbe);
+    expect(overlayChildren[0]?.type).toBe('div');
+    expect(String(overlayChildren[0]?.props?.className || '')).toContain('-mb-5');
+    expect(overlayChildren[0]?.props?.children).toBe(queueProbe);
     expect(overlayChildren[1]?.type).toBe(composerBarSpy);
     expect(overlayChildren[2]).toBe(statusProbe);
   });

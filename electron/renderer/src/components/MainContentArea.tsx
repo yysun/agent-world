@@ -14,6 +14,8 @@
  * - Preserves existing render order and layout structure from the previous inline block.
  *
  * Recent Changes:
+ * - 2026-03-05: Increased queue/composer overlap (`-mb-6`) so the queue card sits lower, closer to the composer input.
+ * - 2026-03-05: Added dedicated `queuePanel` slot rendered above `ComposerBar` so queued user messages appear before the composer.
  * - 2026-03-04: Floated queue/composer/status stack above the message area and exposed a CSS inset variable for message-panel bottom padding.
  * - 2026-02-28: Moved status-bar slot into the composer column so status content aligns with composer width/position.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component decomposition.
@@ -31,6 +33,7 @@ export default function MainContentArea({
   composerProps,
   rightPanelShellProps,
   rightPanelContentProps,
+  queuePanel,
   statusBar,
 }) {
   return (
@@ -43,6 +46,7 @@ export default function MainContentArea({
 
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20">
           <div className="pointer-events-auto">
+            {queuePanel ? <div className="relative z-10 -mb-5">{queuePanel}</div> : null}
             <ComposerBar {...composerProps} />
             {statusBar}
           </div>

@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-03-05: Moved `MessageQueuePanel` into a dedicated pre-composer slot so queue items render above the composer input.
  * - 2026-03-04: Added app-level grid submenu open state so selecting a grid-layout option can dismiss the submenu.
  * - 2026-03-04: Added world-view state (`chat|board|grid|canvas`) and grid layout choice wiring for the new header selector and message render modes.
  * - 2026-02-27: Restored stop-button visibility/behavior by deriving stop mode from both legacy pending markers and status-registry `working` state.
@@ -1284,21 +1285,21 @@ export default function App() {
             rightPanelShellProps: mainContentRightPanelShellProps,
             rightPanelContentProps: mainContentRightPanelContentProps,
           }}
+          queuePanel={(
+            queuedMessages.length > 0 ? (
+              <MessageQueuePanel
+                queuedMessages={queuedMessages}
+                onRemove={removeMessageFromQueue}
+                onRetry={retryMessageFromQueue}
+                onPause={pauseQueue}
+                onResume={resumeQueue}
+                onStop={stopQueue}
+                onClear={clearQueue}
+              />
+            ) : null
+          )}
           statusBar={(
-            <>
-              {queuedMessages.length > 0 && (
-                <MessageQueuePanel
-                  queuedMessages={queuedMessages}
-                  onRemove={removeMessageFromQueue}
-                  onRetry={retryMessageFromQueue}
-                  onPause={pauseQueue}
-                  onResume={resumeQueue}
-                  onStop={stopQueue}
-                  onClear={clearQueue}
-                />
-              )}
-              <WorkingStatusBar chatStatus={chatStatus} agentStatuses={agentStatuses} notification={notification} />
-            </>
+            <WorkingStatusBar chatStatus={chatStatus} agentStatuses={agentStatuses} notification={notification} />
           )}
         />
       )}
