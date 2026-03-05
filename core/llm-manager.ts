@@ -94,6 +94,7 @@
  * - Queue-based serialization prevents API rate limits and resource conflicts
  *
  * Recent Changes:
+ * - 2026-03-04: Azure client creation now maps `agent.model` to Azure deployment name (with config deployment fallback) so world/agent model selection controls deployment URL routing.
  * - 2026-02-28: Added canonical feature-path diagnostics (`llm.prep`, `llm.request.*`, `llm.response.*`) with opt-in raw payload logging and correlation metadata.
  * - 2026-02-24: Required explicit chatId for streaming SSE emission and propagated chatId through start/chunk/end/error events for strict chat-scoped frontend filtering.
  * - 2026-02-20: Switched injected tool-usage guidance to shared `buildToolUsagePromptSection()` so HITL and other tool rules are centralized in one utility.
@@ -1096,8 +1097,18 @@ function createOpenAIClientForAgent(agent: Agent) {
   switch (agent.provider) {
     case LLMProvider.OPENAI:
       return createClientForProvider('openai', config);
-    case LLMProvider.AZURE:
-      return createClientForProvider('azure', config);
+    case LLMProvider.AZURE: {
+      const configuredDeployment = typeof (config as any).deployment === 'string'
+        ? (config as any).deployment.trim()
+        : '';
+      const modelDeployment = typeof agent.model === 'string' ? agent.model.trim() : '';
+
+      // For Azure, deployment is selected in the URL path. Prefer runtime model when provided.
+      return createClientForProvider('azure', {
+        ...(config as any),
+        deployment: modelDeployment || configuredDeployment,
+      });
+    }
     case LLMProvider.OPENAI_COMPATIBLE:
       return createClientForProvider('openai-compatible', config);
     case LLMProvider.XAI:

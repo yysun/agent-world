@@ -14,6 +14,7 @@
  * - Captures per-category logger calls via mocked `createCategoryLogger`.
  *
  * Recent changes:
+ * - 2026-03-04: Added Azure deployment routing tests to ensure `agent.model` drives Azure deployment URL selection, with configured deployment fallback.
  * - 2026-02-28: Added targeted coverage for feature-path LLM boundary logging.
  */
 
@@ -30,12 +31,35 @@ type LoggedCall = {
 type LoadResult = {
   mod: typeof import('../../core/llm-manager.js');
   calls: LoggedCall[];
+  openaiDirectMocks: {
+    createClientForProvider: ReturnType<typeof vi.fn>;
+    streamOpenAIResponse: ReturnType<typeof vi.fn>;
+    generateOpenAIResponse: ReturnType<typeof vi.fn>;
+  };
 };
 
-async function loadModuleWithMocks(options?: { rawEnabled?: boolean }): Promise<LoadResult> {
+async function loadModuleWithMocks(options?: {
+  rawEnabled?: boolean;
+  llmProviderConfig?: Record<string, unknown>;
+}): Promise<LoadResult> {
   vi.resetModules();
   const rawEnabled = options?.rawEnabled ?? false;
+  const llmProviderConfig = options?.llmProviderConfig ?? { apiKey: 'openai-key' };
   const calls: LoggedCall[] = [];
+  const openaiDirectMocks = {
+    createClientForProvider: vi.fn(() => ({ client: 'ok' })),
+    streamOpenAIResponse: vi.fn(async () => ({
+      type: 'text',
+      content: 'stream-response',
+      assistantMessage: { role: 'assistant', content: 'stream-response' },
+    })),
+    generateOpenAIResponse: vi.fn(async () => ({
+      type: 'text',
+      content: 'non-stream-response',
+      assistantMessage: { role: 'assistant', content: 'non-stream-response' },
+      debugToken: 'sensitive-response-token',
+    })),
+  };
 
   vi.doMock('../../core/logger.js', () => ({
     createCategoryLogger: (category: string) => ({
@@ -65,18 +89,9 @@ async function loadModuleWithMocks(options?: { rawEnabled?: boolean }): Promise<
   }));
 
   vi.doMock('../../core/openai-direct.js', () => ({
-    createClientForProvider: vi.fn(() => ({ client: 'ok' })),
-    streamOpenAIResponse: vi.fn(async () => ({
-      type: 'text',
-      content: 'stream-response',
-      assistantMessage: { role: 'assistant', content: 'stream-response' },
-    })),
-    generateOpenAIResponse: vi.fn(async () => ({
-      type: 'text',
-      content: 'non-stream-response',
-      assistantMessage: { role: 'assistant', content: 'non-stream-response' },
-      debugToken: 'sensitive-response-token',
-    })),
+    createClientForProvider: openaiDirectMocks.createClientForProvider,
+    streamOpenAIResponse: openaiDirectMocks.streamOpenAIResponse,
+    generateOpenAIResponse: openaiDirectMocks.generateOpenAIResponse,
   }));
 
   vi.doMock('../../core/anthropic-direct.js', () => ({
@@ -92,11 +107,11 @@ async function loadModuleWithMocks(options?: { rawEnabled?: boolean }): Promise<
   }));
 
   vi.doMock('../../core/llm-config.js', () => ({
-    getLLMProviderConfig: vi.fn(() => ({ apiKey: 'openai-key' })),
+    getLLMProviderConfig: vi.fn(() => llmProviderConfig),
   }));
 
   const mod = await import('../../core/llm-manager.js');
-  return { mod, calls };
+  return { mod, calls, openaiDirectMocks };
 }
 
 function buildWorld(): any {
@@ -175,5 +190,50 @@ describe('llm-manager feature-path logging', () => {
     expect(responseRawCall).toBeTruthy();
     expect(requestRawCall?.data?.payload?.tools?.shell_cmd?.apiKey).toBe('[REDACTED]');
     expect(responseRawCall?.data?.payload?.debugToken).toBe('[REDACTED]');
+  });
+
+  it('uses agent.model as Azure deployment when creating Azure OpenAI client', async () => {
+    const { mod, openaiDirectMocks } = await loadModuleWithMocks({
+      llmProviderConfig: {
+        apiKey: 'azure-key',
+        resourceName: 'my-resource',
+        deployment: 'env-deployment',
+      },
+    });
+
+    const world = buildWorld();
+    const agent = {
+      ...buildAgent(),
+      provider: LLMProvider.AZURE,
+      model: 'gpt-5-mini',
+    } as any;
+    const messages = [
+      { role: 'user', content: 'hello', sender: 'human', createdAt: new Date() },
+    ] as any;
+
+    await mod.generateAgentResponse(world, agent, messages, undefined, false, 'chat-1');
+
+    expect(openaiDirectMocks.createClientForProvider).toHaveBeenCalledWith('azure', expect.objectContaining({
+      deployment: 'gpt-5-mini',
+    }));
+  });
+
+  it('falls back to configured Azure deployment when agent.model is blank', async () => {
+    const { mod, openaiDirectMocks } = await loadModuleWithMocks({
+      llmProviderConfig: {
+        apiKey: 'azure-key',
+        resourceName: 'my-resource',
+        deployment: 'env-deployment',
+      },
+    });
+    const world = buildWorld();
+    const agent = { ...buildAgent(), provider: LLMProvider.AZURE, model: '   ' } as any;
+    const messages = [{ role: 'user', content: 'hello', sender: 'human', createdAt: new Date() }] as any;
+
+    await mod.generateAgentResponse(world, agent, messages, undefined, false, 'chat-1');
+
+    expect(openaiDirectMocks.createClientForProvider).toHaveBeenCalledWith('azure', expect.objectContaining({
+      deployment: 'env-deployment',
+    }));
   });
 });
