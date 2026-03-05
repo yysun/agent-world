@@ -15,7 +15,7 @@ import type { QueuedMessageEntry } from '../hooks/useMessageQueue';
 
 const STATUS_LABELS: Record<string, string> = {
   queued: 'Queued',
-  sending: 'Sending',
+  sending: 'Processing',
   error: 'Error',
   cancelled: 'Cancelled',
 };
