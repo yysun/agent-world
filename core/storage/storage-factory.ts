@@ -31,6 +31,8 @@
  * - Centralized environment detection and error handling
  *
  * Changes:
+ * - 2026-03-05: Added bounded retry fallback for wrapper-level `loadAgent`/`loadAgentWithRetry` to tolerate transient storage read/consistency failures, while treating `null` loads as terminal not-found (no retry-delay penalty).
+ * - 2026-03-05: Switched storage retry/timeout constants to shared reliability config.
  * - 2026-02-13: Added compare-and-set chat title helper wiring (`updateChatNameIfCurrent`) across wrappers and backends.
  * - 2025-08-07: Added memory storage for non-Node environments
  * - 2025-08-05: Consolidated code and removed redundant comments
@@ -43,6 +45,7 @@ import { validateAgentMessageIds } from './validation.js';
 import { createCategoryLogger } from '../logger.js';
 import { SQLiteConfig } from './sqlite-schema.js';
 import { isNodeEnvironment } from '../utils.js';
+import { RELIABILITY_CONFIG } from '../reliability-config.js';
 import * as path from 'path';
 
 const logger = createCategoryLogger('storage.init');
@@ -62,6 +65,78 @@ export interface StorageConfig {
  * Provides unified interface across all storage backends with graceful NoOp fallbacks.
  */
 export function createStorageWrappers(storageInstance: StorageAPI | null): StorageAPI {
+  const DEFAULT_AGENT_LOAD_RETRIES = RELIABILITY_CONFIG.storage.agentLoadRetries;
+  const DEFAULT_AGENT_LOAD_RETRY_DELAY_MS = RELIABILITY_CONFIG.storage.agentLoadRetryDelayMs;
+
+  function normalizeRetryOption(
+    options?: { retries?: number; retryCount?: number }
+  ): number {
+    const value = Number(
+      options?.retries ?? options?.retryCount ?? DEFAULT_AGENT_LOAD_RETRIES
+    );
+    if (!Number.isFinite(value) || value < 0) {
+      return DEFAULT_AGENT_LOAD_RETRIES;
+    }
+    return Math.floor(value);
+  }
+
+  function normalizeRetryDelayOption(
+    options?: { delay?: number; retryDelay?: number }
+  ): number {
+    const value = Number(
+      options?.delay ?? options?.retryDelay ?? DEFAULT_AGENT_LOAD_RETRY_DELAY_MS
+    );
+    if (!Number.isFinite(value) || value < 0) {
+      return DEFAULT_AGENT_LOAD_RETRY_DELAY_MS;
+    }
+    return Math.floor(value);
+  }
+
+  async function loadAgentWithRetryFallback(
+    worldId: string,
+    agentId: string,
+    options?: { retries?: number; retryCount?: number; delay?: number; retryDelay?: number }
+  ): Promise<any> {
+    if (!storageInstance) return null;
+    const retries = normalizeRetryOption(options);
+    const retryDelayMs = normalizeRetryDelayOption(options);
+    let lastError: unknown = null;
+
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      try {
+        const agent = await storageInstance.loadAgent(worldId, agentId);
+        // Null means not found, so retries would only add latency.
+        if (!agent) return null;
+        return agent;
+      } catch (error) {
+        lastError = error;
+        logger.warn('Storage wrapper loadAgent retry attempt failed', {
+          worldId,
+          agentId,
+          attempt: attempt + 1,
+          maxAttempts: retries + 1,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      if (attempt < retries && retryDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      }
+    }
+
+    if (lastError) {
+      logger.warn('Storage wrapper loadAgent retry exhausted', {
+        worldId,
+        agentId,
+        outcome: 'retry_exhausted',
+        attempts: retries + 1,
+        error: lastError instanceof Error ? lastError.message : String(lastError),
+      });
+    }
+
+    return null;
+  }
+
   const wrappers = {
     // World operations
     async saveWorld(worldData: any): Promise<void> {
@@ -124,12 +199,24 @@ export function createStorageWrappers(storageInstance: StorageAPI | null): Stora
 
     async loadAgent(worldId: string, agentId: string): Promise<any> {
       if (!storageInstance) return null;
-      return storageInstance.loadAgent(worldId, agentId);
+      if ('loadAgentWithRetry' in storageInstance && typeof storageInstance.loadAgentWithRetry === 'function') {
+        return storageInstance.loadAgentWithRetry(worldId, agentId, {
+          retries: DEFAULT_AGENT_LOAD_RETRIES,
+          delay: DEFAULT_AGENT_LOAD_RETRY_DELAY_MS,
+        });
+      }
+      return loadAgentWithRetryFallback(worldId, agentId, {
+        retries: DEFAULT_AGENT_LOAD_RETRIES,
+        delay: DEFAULT_AGENT_LOAD_RETRY_DELAY_MS,
+      });
     },
 
     async loadAgentWithRetry(worldId: string, agentId: string, options?: any): Promise<any> {
       if (!storageInstance) return null;
-      return storageInstance.loadAgent(worldId, agentId);
+      if ('loadAgentWithRetry' in storageInstance && typeof storageInstance.loadAgentWithRetry === 'function') {
+        return storageInstance.loadAgentWithRetry(worldId, agentId, options);
+      }
+      return loadAgentWithRetryFallback(worldId, agentId, options);
     },
 
     async deleteAgent(worldId: string, agentId: string): Promise<boolean> {
@@ -316,12 +403,13 @@ export function createStorageWrappers(storageInstance: StorageAPI | null): Stora
         return storageInstance.repairData(worldId, agentId);
       } else {
         try {
+          let repairedTarget: unknown = null;
           if (agentId) {
-            await this.loadAgent(worldId, agentId);
+            repairedTarget = await this.loadAgent(worldId, agentId);
           } else {
-            await this.loadWorld(worldId);
+            repairedTarget = await this.loadWorld(worldId);
           }
-          return true;
+          return !!repairedTarget;
         } catch {
           return false;
         }
@@ -609,17 +697,28 @@ function createFileStorageAdapter(rootPath: string): StorageAPI {
     async loadAgentWithRetry(worldId: string, agentId: string, options?: any): Promise<Agent | null> {
       await ensureModulesLoaded();
       let retries = options?.retries || 3;
+      let lastError: unknown = null;
       while (retries > 0) {
         try {
           const agent = await this.loadAgent(worldId, agentId);
-          if (agent) return agent;
+          if (!agent) return null;
+          return agent;
         } catch (error) {
+          lastError = error;
           console.warn(`[file-storage] Retry attempt ${retries} failed:`, error);
         }
         retries--;
         if (retries > 0) {
           await new Promise(resolve => setTimeout(resolve, options?.delay || 100));
         }
+      }
+      if (lastError) {
+        console.warn('[file-storage] loadAgentWithRetry retry_exhausted', {
+          worldId,
+          agentId,
+          attempts: options?.retries || 3,
+          error: lastError instanceof Error ? lastError.message : String(lastError),
+        });
       }
       return null;
     },
@@ -810,17 +909,28 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
 
       loadAgentWithRetry: async (worldId: string, agentId: string, options?: any) => {
         let retries = options?.retries || 3;
+        let lastError: unknown = null;
         while (retries > 0) {
           try {
             const agent = await loadAgent(ctx, worldId, agentId);
-            if (agent) return agent;
+            if (!agent) return null;
+            return agent;
           } catch (error) {
+            lastError = error;
             console.warn(`[sqlite-storage] Retry attempt ${retries} failed:`, error);
           }
           retries--;
           if (retries > 0) {
             await new Promise(resolve => setTimeout(resolve, options?.delay || 100));
           }
+        }
+        if (lastError) {
+          console.warn('[sqlite-storage] loadAgentWithRetry retry_exhausted', {
+            worldId,
+            agentId,
+            attempts: options?.retries || 3,
+            error: lastError instanceof Error ? lastError.message : String(lastError),
+          });
         }
         return null;
       },
@@ -925,7 +1035,7 @@ export async function createStorageFromEnv(): Promise<StorageAPI> {
       ? {
         database: process.env.AGENT_WORLD_SQLITE_DATABASE || path.join(rootPath, 'database.db'),
         enableWAL: process.env.AGENT_WORLD_SQLITE_WAL !== 'false',
-        busyTimeout: parseInt(process.env.AGENT_WORLD_SQLITE_TIMEOUT || '30000'),
+        busyTimeout: RELIABILITY_CONFIG.storage.sqliteBusyTimeoutMs,
         cacheSize: parseInt(process.env.AGENT_WORLD_SQLITE_CACHE || '-64000'),
         enableForeignKeys: process.env.AGENT_WORLD_SQLITE_FK !== 'false'
       }

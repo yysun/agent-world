@@ -13,6 +13,10 @@
  * Notes:
  * - Uses mocked MCP SDK client/transport classes and mocked world/tool dependencies.
  * - Avoids network/process side effects while preserving runtime code paths.
+ *
+ * Recent changes:
+ * - 2026-03-05: Added deterministic MCP tool-discovery timeout coverage for hanging `listTools()` calls.
+ * - 2026-03-05: Added MCP execution reconnect-retry coverage for chat-scoped retry status emissions and retry-exhaustion error mapping.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -198,6 +202,7 @@ import {
   refreshServerToolsCache,
   registerMCPServer,
   restartMCPServer,
+  mcpToolsToAiTools,
   sanitizeArgs,
   shutdownAllMCPServers,
   unregisterMCPServer,
@@ -297,6 +302,38 @@ describe('mcp-server-registry behavior', () => {
     expect(parseMCPConfig('{bad-json')).toBeNull();
   });
 
+  it('times out hanging MCP tool discovery with deterministic error', async () => {
+    vi.useFakeTimers();
+    try {
+      const hangingClientRef = {
+        current: {
+          listTools: vi.fn(() => new Promise(() => { })),
+        },
+      } as any;
+
+      const pending = mcpToolsToAiTools(
+        hangingClientRef,
+        {
+          name: 'timeout-server',
+          transport: 'stdio',
+          command: 'node',
+        } as any,
+        vi.fn(async () => undefined)
+      );
+      const observedError = pending.then(
+        () => null,
+        (error) => error as Error,
+      );
+
+      await vi.advanceTimersByTimeAsync(5000);
+      const timeoutError = await observedError;
+      expect(timeoutError).toBeInstanceOf(Error);
+      expect(timeoutError?.message).toMatch(/MCP tool discovery timeout after/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('registers/reuses server instances and supports corrected executeMCPTool arguments', async () => {
     const config = { name: 'local', transport: 'stdio' as const, command: 'node' };
 
@@ -351,6 +388,130 @@ describe('mcp-server-registry behavior', () => {
     expect(await restartMCPServer(id1)).toBe(true);
     expect(mockClientClose).toHaveBeenCalled();
     expect(mockClientConnect).toHaveBeenCalled();
+  });
+
+  it('retries AI-converted MCP tool execution with chat-scoped retry status updates', async () => {
+    vi.useFakeTimers();
+    try {
+      const callTool = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('ECONNRESET: socket hang up'))
+        .mockResolvedValueOnce({
+          content: [{ type: 'text', text: 'retried-ok' }],
+        });
+
+      const clientRef = {
+        current: {
+          listTools: vi.fn().mockResolvedValue({
+            tools: [{
+              name: 'lookup',
+              description: 'Lookup',
+              inputSchema: {
+                type: 'object',
+                properties: { query: { type: 'string' } },
+                required: ['query'],
+              },
+            }],
+          }),
+          callTool,
+        },
+        reconnecting: null,
+      } as any;
+
+      const reconnectClient = vi.fn().mockResolvedValue(undefined);
+      const aiTools = await mcpToolsToAiTools(
+        clientRef,
+        { name: 'demo', transport: 'stdio', command: 'node' } as any,
+        reconnectClient,
+      );
+
+      const world = {
+        id: 'world-1',
+        currentChatId: 'chat-1',
+        eventEmitter: { emit: vi.fn() },
+      } as any;
+
+      const pending = aiTools.demo_lookup.execute(
+        { query: 'hello' },
+        'seq-1',
+        'parent-1',
+        { world, chatId: 'chat-1', worldId: 'world-1', agentId: 'agent-1' },
+      );
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(world.eventEmitter.emit).toHaveBeenCalledWith(
+        'system',
+        expect.objectContaining({
+          chatId: 'chat-1',
+          content: expect.stringContaining('attempt 1/2'),
+        }),
+      );
+      expect(world.eventEmitter.emit).toHaveBeenCalledWith(
+        'system',
+        expect.objectContaining({
+          chatId: 'chat-1',
+          content: expect.stringContaining('remaining attempts 1'),
+        }),
+      );
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await expect(pending).resolves.toBe('retried-ok');
+      expect(reconnectClient).toHaveBeenCalledTimes(1);
+      expect(callTool).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('maps transport retry exhaustion to deterministic MCP retry-exhausted error', async () => {
+    vi.useFakeTimers();
+    try {
+      const callTool = vi
+        .fn()
+        .mockRejectedValue(new Error('ECONNRESET: still broken'));
+
+      const clientRef = {
+        current: {
+          listTools: vi.fn().mockResolvedValue({
+            tools: [{
+              name: 'lookup',
+              description: 'Lookup',
+              inputSchema: {
+                type: 'object',
+                properties: { query: { type: 'string' } },
+                required: ['query'],
+              },
+            }],
+          }),
+          callTool,
+        },
+        reconnecting: null,
+      } as any;
+
+      const reconnectClient = vi.fn().mockResolvedValue(undefined);
+      const aiTools = await mcpToolsToAiTools(
+        clientRef,
+        { name: 'demo', transport: 'stdio', command: 'node' } as any,
+        reconnectClient,
+      );
+
+      const pending = aiTools.demo_lookup.execute({ query: 'hello' });
+      const observedError = pending.then(
+        () => null,
+        (error) => error as Error & { code?: string; category?: string },
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+      const retryExhaustedError = await observedError;
+      expect(retryExhaustedError).toMatchObject({
+        name: 'MCPRetryExhaustedError',
+        code: 'MCP_RETRY_EXHAUSTED',
+        category: 'retry_exhausted',
+      });
+      expect(callTool).toHaveBeenCalledTimes(2);
+      expect(reconnectClient).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('builds world tools with cache hits and supports cache refresh operations', async () => {

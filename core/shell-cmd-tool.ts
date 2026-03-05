@@ -27,6 +27,8 @@
  * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - 2026-03-05: Hardened timeout termination to target process groups/process trees (SIGTERM + SIGKILL fallback) and removed child-process builtin timeout to keep timeout outcomes deterministic in the tool layer.
+ * - 2026-03-05: Switched shell timeout grace config to shared reliability config helper.
  * - 2026-03-01: Prevented `./` and `../` parameter tokens from being misclassified as `<skill-id>/<path>` so non-skill shell paths remain unchanged.
  * - 2026-02-28: Generalized skill-relative path fallback to work with any folder prefix, removing `scripts/`-specific behavior.
  * - 2026-02-28: Added skill-aware script path resolution so `<skill-id>/scripts/<file>` parameters are auto-resolved to absolute paths under the skill root directory.
@@ -77,6 +79,7 @@ import { createHash } from 'crypto';
 import { homedir } from 'os';
 import { existsSync, readdirSync, realpathSync, promises as fsPromises } from 'fs';
 import { createCategoryLogger } from './logger.js';
+import { getShellTimeoutKillGraceMs } from './reliability-config.js';
 import { validateToolParameters } from './tool-utils.js';
 import { requestToolApproval } from './tool-approval.js';
 import { publishMessageWithId, publishSSE } from './events/publishers.js';
@@ -1094,6 +1097,7 @@ export async function executeShellCommand(
     let timedOut = false;
     let aborted = false;
     let processExited = false;
+    let timeoutForceKillHandle: NodeJS.Timeout | null = null;
     let unsubscribeStatusListener: (() => void) | null = null;
 
     const result: CommandExecutionResult = {
@@ -1140,18 +1144,67 @@ export async function executeShellCommand(
       const childProcess = spawn(command, quotedParams, {
         cwd: resolvedDirectory,
         shell: true, // Use shell to enable PATH resolution and shell features
-        timeout: timeout
+        detached: process.platform !== 'win32',
       });
       attachShellProcessHandle(executionId, childProcess);
       transitionShellProcessExecution(executionId, 'running', {
         startedAt: new Date().toISOString()
       });
 
+      const sendTerminationSignal = (signal: NodeJS.Signals): void => {
+        const pid = childProcess.pid;
+        // On Unix-like systems, detached child uses its own process group;
+        // signaling negative PID targets the full group/tree.
+        if (pid && process.platform !== 'win32') {
+          try {
+            process.kill(-pid, signal);
+            return;
+          } catch {
+            // Fall back to direct child signal below.
+          }
+        }
+
+        if (process.platform === 'win32') {
+          // Best effort process-tree termination on Windows.
+          try {
+            const taskkill = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+              stdio: 'ignore',
+              windowsHide: true,
+            });
+            taskkill.unref();
+            return;
+          } catch {
+            // Fall back to direct child signal below.
+          }
+        }
+
+        try {
+          childProcess.kill(signal);
+        } catch {
+          // ignore if process already exited
+        }
+      };
+
+      const requestTermination = (source: 'timeout' | 'abort') => {
+        if (processExited) return;
+        sendTerminationSignal('SIGTERM');
+
+        if (source === 'timeout') {
+          const graceMs = getShellTimeoutKillGraceMs();
+          if (graceMs > 0) {
+            timeoutForceKillHandle = setTimeout(() => {
+              if (processExited) return;
+              sendTerminationSignal('SIGKILL');
+            }, graceMs);
+          }
+        }
+      };
+
       // Set up timeout handler
       const timeoutHandle = setTimeout(() => {
         if (!processExited) {
           timedOut = true;
-          childProcess.kill('SIGTERM');
+          requestTermination('timeout');
           logger.warn('Command execution timeout', { command, parameters, timeout, directory });
         }
       }, timeout);
@@ -1160,7 +1213,7 @@ export async function executeShellCommand(
         if (processExited) return;
         aborted = true;
         markShellProcessCancelRequested(executionId);
-        childProcess.kill('SIGTERM');
+        requestTermination('abort');
         logger.info('Shell command aborted by request', {
           executionId,
           command,
@@ -1210,6 +1263,10 @@ export async function executeShellCommand(
       childProcess.on('close', (code, signal) => {
         processExited = true;
         clearTimeout(timeoutHandle);
+        if (timeoutForceKillHandle) {
+          clearTimeout(timeoutForceKillHandle);
+          timeoutForceKillHandle = null;
+        }
         options.abortSignal?.removeEventListener('abort', abortHandler);
         unsubscribeStatusListener?.();
         unsubscribeStatusListener = null;
@@ -1295,6 +1352,10 @@ export async function executeShellCommand(
       childProcess.on('error', (error) => {
         processExited = true;
         clearTimeout(timeoutHandle);
+        if (timeoutForceKillHandle) {
+          clearTimeout(timeoutForceKillHandle);
+          timeoutForceKillHandle = null;
+        }
         options.abortSignal?.removeEventListener('abort', abortHandler);
         unsubscribeStatusListener?.();
         unsubscribeStatusListener = null;

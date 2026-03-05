@@ -19,10 +19,12 @@
  * - Prevents cross-chat leakage via invalid/stale chat IDs during switch flows.
  *
  * Recent Changes:
+ * - 2026-03-05: Added queue retry backoff status emission coverage (chat-scoped per-second system updates with attempt/remaining counters).
+ * - 2026-03-05: Updated preflight no-responder expectation to retry/error transition semantics (no immediate fail-fast error).
  * - 2026-03-04: Reduced queue matrix duplication and made shared subscription mocks chat-aware so queue tests exercise runtime selection logic instead of relying on injected `targetWorld`.
  * - 2026-03-04: Added queue dispatch hardening regressions for fail-closed storage checks, no-response retry/error fallback, and in-flight row-specific completion cleanup.
  * - 2026-03-04: Added queue logging diagnostics coverage to assert agent/listener status snapshots are included on publish and no-response fallback logs.
- * - 2026-03-04: Added queue responder preflight coverage for fail-fast no-responder handling and single refresh bootstrap behavior.
+ * - 2026-03-04: Added queue responder preflight coverage for no-responder handling and single refresh bootstrap behavior.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -1355,6 +1357,8 @@ describe('managers queue branch coverage', () => {
         eventEmitter: new EventEmitter(),
         agents: new Map([['agent-1', { id: 'agent-1', name: 'Agent 1', type: 'assistant', provider: 'openai', model: 'gpt-4o-mini', llmCallCount: 0, autoReply: true, status: 'active', memory: [] }]]),
       } as any;
+      const staleEmitSpy = vi.spyOn(staleWorld.eventEmitter, 'emit');
+      const freshEmitSpy = vi.spyOn(freshWorld.eventEmitter, 'emit');
 
       const getActiveSubscribedWorld = vi
         .fn()
@@ -1412,6 +1416,139 @@ describe('managers queue branch coverage', () => {
       );
       expect(storageWrappers.incrementQueueMessageRetry).toHaveBeenCalledWith(queuedMessageId);
       expect(getActiveSubscribedWorld).toHaveBeenCalledWith('world-1', 'chat-a');
+      expect(staleEmitSpy).toHaveBeenCalledWith(
+        'system',
+        expect.objectContaining({
+          chatId: 'chat-a',
+          content: expect.stringContaining('attempt 1/3'),
+        }),
+      );
+      expect(staleEmitSpy).toHaveBeenCalledWith(
+        'system',
+        expect.objectContaining({
+          chatId: 'chat-a',
+          content: expect.stringContaining('remaining attempts 2'),
+        }),
+      );
+      expect(freshEmitSpy).not.toHaveBeenCalledWith(
+        'system',
+        expect.anything(),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('applies exponential backoff schedule for subsequent queue retry attempts', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.resetModules();
+
+      const persistedWorld = createPersistedWorld('chat-a');
+      const queuedMessageId = 'q-retry-backoff';
+      const queueState = {
+        status: 'queued' as const | 'sending' | 'error',
+        retryCount: 1,
+      };
+
+      const storageWrappers = {
+        recoverSendingMessages: vi.fn().mockResolvedValue(0),
+        loadWorld: vi.fn().mockResolvedValue(persistedWorld),
+        listWorlds: vi.fn().mockResolvedValue([persistedWorld]),
+        listAgents: vi.fn().mockResolvedValue([
+          { id: 'agent-1', name: 'Agent 1', type: 'assistant', provider: 'openai', model: 'gpt-4o-mini', llmCallCount: 0, autoReply: true, status: 'active', memory: [] },
+        ]),
+        listChats: vi.fn().mockResolvedValue([{ id: 'chat-a', name: 'Chat A', messageCount: 0 }]),
+        loadChatData: vi.fn().mockResolvedValue({ id: 'chat-a', name: 'Chat A', messageCount: 0 }),
+        getMemory: vi.fn().mockResolvedValue([]),
+        saveWorld: vi.fn().mockResolvedValue(undefined),
+        addQueuedMessage: vi.fn().mockResolvedValue(undefined),
+        getQueuedMessages: vi.fn().mockImplementation(async () => {
+          if (queueState.status === 'error') return [];
+          return [{
+            messageId: queuedMessageId,
+            chatId: 'chat-a',
+            content: 'retry with backoff',
+            sender: 'human',
+            status: queueState.status,
+            retryCount: queueState.retryCount,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          }];
+        }),
+        updateMessageQueueStatus: vi.fn().mockImplementation(async (_messageId: string, status: 'queued' | 'sending' | 'error') => {
+          queueState.status = status;
+        }),
+        incrementQueueMessageRetry: vi.fn().mockImplementation(async () => {
+          queueState.retryCount += 1;
+          return queueState.retryCount;
+        }),
+        removeQueuedMessage: vi.fn().mockResolvedValue(undefined),
+      };
+
+      mockStorageFactory(storageWrappers);
+
+      vi.doMock('../../core/hitl.js', async () => {
+        const actual = await vi.importActual<typeof import('../../core/hitl.js')>('../../core/hitl.js');
+        return {
+          ...actual,
+          replayPendingHitlRequests: vi.fn().mockReturnValue(0),
+        };
+      });
+
+      vi.doMock('../../core/events/memory-manager.js', async () => {
+        const actual = await vi.importActual<typeof import('../../core/events/memory-manager.js')>('../../core/events/memory-manager.js');
+        return {
+          ...actual,
+          resumePendingToolCallsForChat: vi.fn().mockResolvedValue(0),
+        };
+      });
+
+      const runtimeWorld = {
+        id: 'world-1',
+        currentChatId: 'chat-a',
+        eventEmitter: new EventEmitter(),
+        agents: new Map([['agent-1', { id: 'agent-1', name: 'Agent 1', type: 'assistant', provider: 'openai', model: 'gpt-4o-mini', llmCallCount: 0, autoReply: true, status: 'active', memory: [] }]]),
+      } as any;
+      const getActiveSubscribedWorld = vi.fn(() => runtimeWorld);
+
+      vi.doMock('../../core/subscription.js', async () => {
+        const actual = await vi.importActual<typeof import('../../core/subscription.js')>('../../core/subscription.js');
+        return {
+          ...actual,
+          getActiveSubscribedWorld,
+        };
+      });
+
+      const publishMessageWithId = vi
+        .fn()
+        .mockImplementationOnce(() => {
+          throw new Error('first publish failed');
+        })
+        .mockImplementation(() => undefined);
+
+      vi.doMock('../../core/events/index.js', async () => {
+        const actual = await vi.importActual<typeof import('../../core/events/index.js')>('../../core/events/index.js');
+        return {
+          ...actual,
+          publishMessageWithId,
+        };
+      });
+
+      const managers = await import('../../core/managers.js');
+      await managers.resumeChatQueue('world-1', 'chat-a');
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(publishMessageWithId).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(publishMessageWithId).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(publishMessageWithId).toHaveBeenCalledTimes(2);
+      expect(storageWrappers.incrementQueueMessageRetry).toHaveBeenCalledWith(queuedMessageId);
     } finally {
       vi.useRealTimers();
     }
@@ -1467,7 +1604,7 @@ describe('managers queue branch coverage', () => {
     ).rejects.toThrow('queue storage backend missing required operations');
   });
 
-  it('fails fast to error when preflight still has no responders after one refresh attempt', async () => {
+  it('routes preflight no-responder failures through retry flow after one refresh attempt', async () => {
     const { managers, storageWrappers, publishMessageWithId } = await setupQueueManagersForMatrix({
       currentChatId: 'chat-a',
       runtimeAgents: [],
@@ -1481,8 +1618,8 @@ describe('managers queue branch coverage', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(storageWrappers.listAgents).toHaveBeenCalledWith('world-1');
-    expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith('q-no-responder-preflight', 'error');
-    expect(storageWrappers.incrementQueueMessageRetry).not.toHaveBeenCalledWith('q-no-responder-preflight');
+    expect(storageWrappers.incrementQueueMessageRetry).toHaveBeenCalledWith('q-no-responder-preflight');
+    expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith('q-no-responder-preflight', 'queued');
     expect(publishMessageWithId).not.toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),

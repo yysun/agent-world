@@ -108,6 +108,9 @@
  * 2026-02-14: Added built-in `load_skill` tool registration for progressive skill instruction loading.
  * 2026-02-19: Added built-in `create_agent` tool registration with approval-gated agent creation.
  * 2026-03-04: Added built-in `send_message` tool registration for context-injected batch message dispatch.
+ * 2026-03-05: Hardened MCP tool discovery timeout handling with deterministic timeout errors and timer cleanup.
+ * 2026-03-05: Added bounded MCP execution reconnect retry policy with chat-scoped per-second retry status emissions during retry windows.
+ * 2026-03-05: Switched timeout/retry constants to shared reliability config.
  */
 
 import { createHash } from 'crypto';
@@ -132,6 +135,8 @@ import {
 } from './file-tools.js';
 import { wrapToolWithValidation } from './tool-utils.js';
 import { type World } from './types.js';
+import { RELIABILITY_CONFIG } from './reliability-config.js';
+import { startChatScopedWaitStatusEmitter } from './reliability-runtime.js';
 
 // Scenario-based loggers for different MCP operations
 const lifecycleLogger = createCategoryLogger('mcp.lifecycle');
@@ -360,6 +365,8 @@ interface ToolExecutionContext {
   agentId?: string;
 }
 
+type MCPRetryExhaustedError = Error & { code: 'MCP_RETRY_EXHAUSTED'; category: 'retry_exhausted' };
+
 export interface MCPServerInstance {
   id: string; // Hash of configuration for sharing
   config: MCPServerConfig;
@@ -441,6 +448,98 @@ function isConnectionLevelError(error: unknown): boolean {
   ];
 
   return CONNECTION_KEYWORDS.some(keyword => lower.includes(keyword) || errorCode.includes(keyword));
+}
+
+function getMCPExecutionRetryDelayMs(failedAttempt: number): number {
+  if (RELIABILITY_CONFIG.mcp.executionRetryBaseDelayMs <= 0) return 0;
+  const normalizedAttempt = Math.max(1, Math.floor(failedAttempt));
+  return RELIABILITY_CONFIG.mcp.executionRetryBaseDelayMs * Math.pow(2, normalizedAttempt - 1);
+}
+
+async function resolveRetryStatusWorld(context?: ToolExecutionContext): Promise<World | null> {
+  if (context?.world) return context.world;
+  const worldId = String(context?.worldId || '').trim();
+  if (!worldId) return null;
+  try {
+    return await getWorld(worldId);
+  } catch {
+    return null;
+  }
+}
+
+function resolveRetryStatusChatId(context: ToolExecutionContext | undefined, world: World | null): string | null {
+  const fromContext = typeof context?.chatId === 'string' ? context.chatId.trim() : '';
+  if (fromContext) return fromContext;
+  const fromWorld = typeof world?.currentChatId === 'string' ? world.currentChatId.trim() : '';
+  return fromWorld || null;
+}
+
+function buildMCPRetryStatusContent(params: {
+  serverName: string;
+  toolName: string;
+  attempt: number;
+  maxAttempts: number;
+  attemptsRemaining: number;
+  elapsedSeconds: number;
+  remainingSeconds: number;
+}): string {
+  return `MCP tool retry scheduled for ${params.serverName}.${params.toolName}: attempt ${params.attempt}/${params.maxAttempts}, remaining attempts ${params.attemptsRemaining}, elapsed ${params.elapsedSeconds}s, next retry in ${params.remainingSeconds}s.`;
+}
+
+function createMCPRetryExhaustedError(params: {
+  serverName: string;
+  toolName: string;
+  attempts: number;
+  errorMessage: string;
+}): MCPRetryExhaustedError {
+  const error = new Error(
+    `MCP transport retry exhausted after ${params.attempts} attempts for ${params.serverName}.${params.toolName}: ${params.errorMessage}`
+  ) as MCPRetryExhaustedError;
+  error.name = 'MCPRetryExhaustedError';
+  error.code = 'MCP_RETRY_EXHAUSTED';
+  error.category = 'retry_exhausted';
+  return error;
+}
+
+async function waitForMCPRetryWindow(params: {
+  delayMs: number;
+  serverName: string;
+  toolName: string;
+  attempt: number;
+  maxAttempts: number;
+  context?: ToolExecutionContext;
+}): Promise<void> {
+  const delayMs = Math.max(0, Math.floor(params.delayMs));
+  if (delayMs <= 0) return;
+
+  const world = await resolveRetryStatusWorld(params.context);
+  const chatId = resolveRetryStatusChatId(params.context, world);
+  const emitter = startChatScopedWaitStatusEmitter({
+    world,
+    chatId,
+    phase: 'mcp_retry',
+    reason: 'transport_error',
+    durationMs: delayMs,
+    attempt: params.attempt,
+    maxAttempts: params.maxAttempts,
+    contentBuilder: (snapshot) => {
+      return buildMCPRetryStatusContent({
+        serverName: params.serverName,
+        toolName: params.toolName,
+        attempt: snapshot.attempt ?? params.attempt,
+        maxAttempts: snapshot.maxAttempts ?? params.maxAttempts,
+        attemptsRemaining: snapshot.attemptsRemaining ?? Math.max(0, params.maxAttempts - params.attempt),
+        elapsedSeconds: snapshot.elapsedSeconds,
+        remainingSeconds: snapshot.remainingSeconds ?? 0,
+      });
+    },
+  });
+
+  try {
+    await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+  } finally {
+    emitter.stop();
+  }
 }
 
 async function safelyCloseClient(client: Client | null, context: { serverName: string; reason: string }): Promise<void> {
@@ -929,13 +1028,26 @@ export async function mcpToolsToAiTools(
 
   let toolsResponse: { tools: Tool[] };
 
-  // Use MCP SDK client with timeout
+  // Use MCP SDK client with a hard timeout to avoid indefinite discovery hangs.
   const listToolsPromise = ensureClient().listTools();
+  let listToolsTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error('Timeout waiting for tools list')), 5000);
+    listToolsTimeoutHandle = setTimeout(() => {
+      reject(
+        new Error(
+          `MCP tool discovery timeout after ${RELIABILITY_CONFIG.mcp.discoveryTimeoutMs}ms for server ${serverName}`
+        )
+      );
+    }, RELIABILITY_CONFIG.mcp.discoveryTimeoutMs);
   });
 
-  toolsResponse = await Promise.race([listToolsPromise, timeoutPromise]);
+  try {
+    toolsResponse = await Promise.race([listToolsPromise, timeoutPromise]);
+  } finally {
+    if (listToolsTimeoutHandle) {
+      clearTimeout(listToolsTimeoutHandle);
+    }
+  }
 
   const { tools } = toolsResponse;
 
@@ -1025,7 +1137,7 @@ export async function mcpToolsToAiTools(
           requestPayload: JSON.stringify(requestPayload, null, 2)
         });
 
-        const maxAttempts = 2;
+        const maxAttempts = RELIABILITY_CONFIG.mcp.executionMaxAttempts;
 
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
           try {
@@ -1107,6 +1219,7 @@ export async function mcpToolsToAiTools(
             const shouldRetry = !isLastAttempt && isConnectionLevelError(error);
 
             if (shouldRetry) {
+              const retryDelayMs = getMCPExecutionRetryDelayMs(attempt + 1);
               logger.warn(`MCP tool execution detected transport issue - attempting reconnect`, {
                 executionId,
                 serverName,
@@ -1115,6 +1228,7 @@ export async function mcpToolsToAiTools(
                 status: 'retrying',
                 attempt: attempt + 1,
                 maxAttempts,
+                nextAttemptInMs: retryDelayMs,
                 duration: Math.round(duration * 100) / 100,
                 error: errorMessage,
                 transport
@@ -1122,6 +1236,14 @@ export async function mcpToolsToAiTools(
 
               try {
                 await reconnectClient('call-tool-failure');
+                await waitForMCPRetryWindow({
+                  delayMs: retryDelayMs,
+                  serverName,
+                  toolName: t.name,
+                  attempt: attempt + 1,
+                  maxAttempts,
+                  context,
+                });
                 continue;
               } catch (reconnectError) {
                 logger.error(`MCP tool execution reconnect failed`, {
@@ -1134,6 +1256,15 @@ export async function mcpToolsToAiTools(
                 });
                 throw reconnectError;
               }
+            }
+
+            if (isLastAttempt && isConnectionLevelError(error)) {
+              throw createMCPRetryExhaustedError({
+                serverName,
+                toolName: t.name,
+                attempts: maxAttempts,
+                errorMessage,
+              });
             }
 
             logger.error(`MCP tool execution failed via AI conversion: ${errorMessage}`, {
@@ -1787,7 +1918,8 @@ export async function executeMCPTool(
   args: any,
   sequenceId?: string,
   parentToolCall?: string,
-  toolSchema?: any
+  toolSchema?: any,
+  executionContext?: ToolExecutionContext
 ): Promise<any> {
   const serverInstance = serverRegistry.get(serverId);
   if (!serverInstance) {
@@ -1840,7 +1972,7 @@ export async function executeMCPTool(
     requestPayload: JSON.stringify(requestPayload, null, 2)
   });
 
-  const maxAttempts = 2;
+  const maxAttempts = RELIABILITY_CONFIG.mcp.executionMaxAttempts;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (!serverInstance.client) {
@@ -1902,6 +2034,7 @@ export async function executeMCPTool(
       const shouldRetry = !isLastAttempt && isConnectionLevelError(error);
 
       if (shouldRetry) {
+        const retryDelayMs = getMCPExecutionRetryDelayMs(attempt + 1);
         logger.warn(`MCP tool execution detected transport issue - attempting direct reconnect`, {
           executionId,
           serverId: serverId.slice(0, 8),
@@ -1910,6 +2043,7 @@ export async function executeMCPTool(
           status: 'retrying',
           attempt: attempt + 1,
           maxAttempts,
+          nextAttemptInMs: retryDelayMs,
           duration: Math.round(duration * 100) / 100,
           error: errorMessage
         });
@@ -1924,6 +2058,14 @@ export async function executeMCPTool(
           serverInstance.client = await connectMCPServer(serverInstance.config);
           serverInstance.status = 'running';
           serverInstance.lastHealthCheck = new Date();
+          await waitForMCPRetryWindow({
+            delayMs: retryDelayMs,
+            serverName: serverInstance.config.name,
+            toolName,
+            attempt: attempt + 1,
+            maxAttempts,
+            context: executionContext,
+          });
           continue;
         } catch (reconnectError) {
           const reconnectMessage = reconnectError instanceof Error ? reconnectError.message : String(reconnectError);
@@ -1938,6 +2080,15 @@ export async function executeMCPTool(
           serverInstance.error = reconnectError instanceof Error ? reconnectError : new Error(reconnectMessage);
           throw reconnectError;
         }
+      }
+
+      if (isLastAttempt && isConnectionLevelError(error)) {
+        throw createMCPRetryExhaustedError({
+          serverName: serverInstance.config.name,
+          toolName,
+          attempts: maxAttempts,
+          errorMessage,
+        });
       }
 
       logger.error(`MCP tool execution failed: ${errorMessage}`, {

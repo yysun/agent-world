@@ -25,12 +25,14 @@
  * - Error log persistence with 100-entry retention policy
  *
  * Recent Changes:
+ * - 2026-03-05: Added chat-scoped per-second queue retry system-status emissions (elapsed/remaining seconds + attempts used/remaining) with cleanup on retry dispatch/error transitions.
+ * - 2026-03-05: Switched queue retry/timeout constants to shared reliability config.
  * - 2026-03-04: Queue/chat flows now request chat-aware runtime selection via `getActiveSubscribedWorld(worldId, chatId)` to reduce stale-runtime dispatch.
  * - 2026-03-04: Queue and immediate dispatch now prioritize registry-selected active runtime worlds over caller-provided world objects.
  * - 2026-03-04: Added queue responder preflight with single refresh attempt.
  *   - Queue dispatch now checks responder availability before publish.
  *   - When no responders are available, queue attempts one runtime responder refresh from storage.
- *   - If still unavailable, the queue row is marked `error` immediately (no timeout retry loop).
+ *   - If still unavailable, queue dispatch transitions through bounded retry/error handling.
  * - 2026-03-04: Added queue dispatch agent-status snapshots to queue logs so no-responder failures include agent/listener/mention diagnostics.
  * - 2026-03-04: Hardened queue dispatch reliability.
  *   - Queue ingress now fails closed when required queue storage operations are unavailable.
@@ -105,6 +107,8 @@ import { hasActiveChatMessageProcessing, stopMessageProcessing } from './message
 import { replayPendingHitlRequests, listPendingHitlPromptEventsFromMessages, clearPendingHitlRequestsForChat } from './hitl.js';
 import { clearChatSkillApprovals, reconstructSkillApprovalsFromMessages } from './load-skill-tool.js';
 import { resumePendingToolCallsForChat } from './events/memory-manager.js';
+import { RELIABILITY_CONFIG } from './reliability-config.js';
+import { startChatScopedWaitStatusEmitter, type WaitStatusEmitterHandle } from './reliability-runtime.js';
 
 // Type imports
 import type {
@@ -157,21 +161,18 @@ const pausedQueues = new Set<string>();
 const queueListenerActive = new Set<string>();
 const queueAdvanceListeners = new Map<string, (payload: any) => void>();
 const queueResponderRefreshAttempted = new Set<string>();
-const DEFAULT_QUEUE_NO_RESPONSE_FALLBACK_MS = 5000;
-const QUEUE_NO_RESPONSE_FALLBACK_MS = (() => {
-  const configured = Number.parseInt(String(process.env.AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS || ''), 10);
-  if (!Number.isFinite(configured) || configured <= 0) {
-    return DEFAULT_QUEUE_NO_RESPONSE_FALLBACK_MS;
-  }
-  return Math.max(configured, 1000);
-})();
-const QUEUE_MAX_RETRY_ATTEMPTS = 3;
+const QUEUE_NO_RESPONSE_FALLBACK_MS = RELIABILITY_CONFIG.queue.noResponseFallbackMs;
+const QUEUE_MAX_RETRY_ATTEMPTS = RELIABILITY_CONFIG.queue.maxRetryAttempts;
 type QueueDispatchState = {
   messageId: string;
   responseStarted: boolean;
   dispatchedAt: number;
 };
 const queueDispatchStateByChat = new Map<string, QueueDispatchState>();
+type QueueRetryStatusHandle = {
+  emitter: WaitStatusEmitterHandle;
+};
+const queueRetryStatusHandles = new Map<string, QueueRetryStatusHandle>();
 type QueueAgentStatusSnapshot = {
   queueChatId: string;
   totalAgents: number;
@@ -227,6 +228,48 @@ function getQueueKey(worldId: string, chatId: string): string {
 
 function getQueueMessageKey(worldId: string, chatId: string, messageId: string): string {
   return `${worldId}:${chatId}:${messageId}`;
+}
+
+function clearQueueRetryStatusEmitter(worldId: string, chatId: string, messageId: string): void {
+  const retryStatusKey = getQueueMessageKey(worldId, chatId, messageId);
+  const handle = queueRetryStatusHandles.get(retryStatusKey);
+  if (!handle) return;
+  handle.emitter.stop();
+  queueRetryStatusHandles.delete(retryStatusKey);
+}
+
+function startQueueRetryStatusEmitter(
+  world: World,
+  chatId: string,
+  messageId: string,
+  retry: {
+    reason: string;
+    attempt: number;
+    maxAttempts: number;
+    delayMs: number;
+  }
+): void {
+  const scopedChatId = String(chatId || '').trim();
+  if (!scopedChatId) return;
+
+  clearQueueRetryStatusEmitter(world.id, scopedChatId, messageId);
+
+  const emitter = startChatScopedWaitStatusEmitter({
+    world,
+    chatId: scopedChatId,
+    phase: 'queue_retry',
+    reason: retry.reason,
+    durationMs: retry.delayMs,
+    attempt: retry.attempt,
+    maxAttempts: retry.maxAttempts,
+    contentBuilder: (snapshot) => {
+      return `Queue retry scheduled (${retry.reason}): attempt ${snapshot.attempt}/${snapshot.maxAttempts}, remaining attempts ${snapshot.attemptsRemaining ?? 0}, elapsed ${snapshot.elapsedSeconds}s, next retry in ${snapshot.remainingSeconds ?? 0}s.`;
+    },
+  });
+
+  queueRetryStatusHandles.set(getQueueMessageKey(world.id, scopedChatId, messageId), {
+    emitter,
+  });
 }
 
 function clearQueueResponderRefreshAttempt(worldId: string, chatId: string, messageId: string): void {
@@ -453,6 +496,7 @@ async function handleQueueDispatchFailure(
 ): Promise<void> {
   const queueKey = getQueueKey(world.id, chatId);
   clearQueueResponderRefreshAttempt(world.id, chatId, messageId);
+  clearQueueRetryStatusEmitter(world.id, chatId, messageId);
   queueDispatchStateByChat.delete(queueKey);
   detachQueueAdvanceListener(world, chatId);
   const agentStatus = collectQueueAgentStatus(
@@ -480,7 +524,13 @@ async function handleQueueDispatchFailure(
     const newRetryCount = await queueStorage.incrementQueueMessageRetry(messageId);
     if (newRetryCount < QUEUE_MAX_RETRY_ATTEMPTS) {
       await queueStorage.updateMessageQueueStatus(messageId, 'queued');
-      const delayMs = Math.pow(2, newRetryCount - 1) * 1000;
+      const delayMs = Math.pow(2, newRetryCount - 1) * RELIABILITY_CONFIG.queue.retryBaseDelayMs;
+      startQueueRetryStatusEmitter(world, chatId, messageId, {
+        reason,
+        attempt: newRetryCount,
+        maxAttempts: QUEUE_MAX_RETRY_ATTEMPTS,
+        delayMs,
+      });
       loggerQueue.warn('Queue dispatch failed; message re-queued for retry', {
         worldId: world.id,
         chatId,
@@ -492,6 +542,7 @@ async function handleQueueDispatchFailure(
       });
       setTimeout(() => {
         void (async () => {
+          clearQueueRetryStatusEmitter(world.id, chatId, messageId);
           try {
             const { getActiveSubscribedWorld } = await import('./subscription.js');
             const runtimeWorld =
@@ -522,6 +573,7 @@ async function handleQueueDispatchFailure(
     }
 
     await queueStorage.updateMessageQueueStatus(messageId, 'error');
+    clearQueueRetryStatusEmitter(world.id, chatId, messageId);
     loggerQueue.warn('Queue message reached max retries, marked error', {
       worldId: world.id,
       chatId,
@@ -531,6 +583,7 @@ async function handleQueueDispatchFailure(
       agentStatus,
     });
   } catch (retryErr) {
+    clearQueueRetryStatusEmitter(world.id, chatId, messageId);
     loggerQueue.error('Failed to handle queue dispatch retry transition', {
       worldId: world.id,
       chatId,
@@ -731,8 +784,11 @@ function triggerPendingQueueResume(
         sender: nextMessage.sender,
       });
       if (!preflight.ready) {
-        await queueStorage.updateMessageQueueStatus(nextMessage.messageId, 'error');
-        loggerQueue.warn('Queue dispatch blocked: no eligible responders after preflight refresh', {
+        await handleQueueDispatchFailure(world, chatId, nextMessage.messageId, 'no-responder-preflight', {
+          content: nextMessage.content,
+          sender: nextMessage.sender,
+        });
+        loggerQueue.warn('Queue dispatch blocked: no eligible responders after preflight refresh; moved to retry/error flow', {
           worldId: world.id,
           chatId,
           messageId: nextMessage.messageId,

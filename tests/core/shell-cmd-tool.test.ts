@@ -10,6 +10,7 @@
  * - Output accumulation
  * 
  * Changes:
+ * - 2026-03-05: Added deterministic timeout outcome coverage (timed_out) for long-running commands and quick-success non-timeout assertions.
  * - 2026-02-28: Added skill-aware script path resolution tests for `resolveSkillScriptParameters`.
  * - 2026-02-28: Added deterministic risk-tier tests for `allow`, `hitl_required`, and `block` shell command classification outcomes.
  * - 2026-02-15: Added coverage for core execute-time cwd boundary enforcement via `trustedWorkingDirectory`.
@@ -62,6 +63,26 @@ describe('shell command execution', () => {
 
     expect(result.error).toContain('outside trusted working directory');
     expect(result.exitCode).toBeNull();
+  });
+
+  test('should keep timedOut false for quick successful command', async () => {
+    const result = await executeShellCommand('echo', ['quick-ok'], './', {
+      timeout: 2000,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.timedOut).not.toBe(true);
+    expect(result.error).toBeUndefined();
+  });
+
+  test('should mark timeout deterministically for long-running command', async () => {
+    const result = await executeShellCommand('sh', ['-c', 'sleep 2'], './', {
+      timeout: 50,
+    });
+
+    expect(result.timedOut).toBe(true);
+    expect(result.error).toContain('Command execution timed out after 50ms');
+    expect(result.exitCode).not.toBe(0);
   });
 });
 

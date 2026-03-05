@@ -14,6 +14,7 @@
  * - Avoids any real provider/tool execution and filesystem-backed state.
  *
  * Recent Changes:
+ * - 2026-03-05: Added bounded empty-follow-up continuation retry coverage for recovery (retry succeeds) and exhaustion (stops after configured max retries).
  * - 2026-03-01: Added coverage that duplicate `shell_cmd` suppression ignores `output_format`/`output_detail` differences and omits those format fields from tool event payloads.
  * - 2026-03-01: Added regression coverage for broader script hosts (`bash`, `node`, and `env <interpreter>`) using smart shell continuation mode when skill context is loaded.
  * - 2026-03-01: Added regression coverage ensuring shell_cmd path-based interpreter commands (for example `.venv/bin/python`) use smart continuation result mode when skill context is already loaded.
@@ -550,6 +551,57 @@ describe('continueLLMAfterToolExecution guard', () => {
       emptyTextRetryCount: 2,
     });
 
+    expect(mocks.publishEvent).toHaveBeenCalledWith(
+      world,
+      'system',
+      expect.objectContaining({ type: 'warning' }),
+      'chat-1',
+    );
+  });
+
+  it('recovers from transient empty follow-up via bounded continuation retry', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    mocks.generateAgentResponse
+      .mockResolvedValueOnce(buildTextResponse('assistant-empty-first', ''))
+      .mockResolvedValueOnce(buildTextResponse('assistant-after-retry', 'retry succeeded'));
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    await continueLLMAfterToolExecution(world, agent, 'chat-1');
+
+    expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(2);
+    expect(mocks.publishMessageWithId).toHaveBeenCalledTimes(1);
+    expect(mocks.publishMessageWithId).toHaveBeenCalledWith(
+      world,
+      'retry succeeded',
+      agent.id,
+      'assistant-after-retry',
+      'chat-1',
+      undefined,
+    );
+
+    const warningEvents = mocks.publishEvent.mock.calls.filter((call) => {
+      return call[1] === 'system' && call[2]?.type === 'warning';
+    });
+    expect(warningEvents).toHaveLength(0);
+  });
+
+  it('stops empty follow-up retries at bounded limit and emits warning once', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    mocks.generateAgentResponse
+      .mockResolvedValueOnce(buildTextResponse('assistant-empty-1', ''))
+      .mockResolvedValueOnce(buildTextResponse('assistant-empty-2', ''))
+      .mockResolvedValueOnce(buildTextResponse('assistant-empty-3', ''));
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    await continueLLMAfterToolExecution(world, agent, 'chat-1');
+
+    // Initial call + two bounded retries (maxEmptyTextRetries = 2)
+    expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(3);
+    expect(mocks.publishMessageWithId).not.toHaveBeenCalled();
     expect(mocks.publishEvent).toHaveBeenCalledWith(
       world,
       'system',

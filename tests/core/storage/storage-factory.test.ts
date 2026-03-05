@@ -14,6 +14,9 @@
  * - Avoids filesystem and real sqlite usage in unit tests
  *
  * Recent changes:
+ * - 2026-03-05: Added wrapper-level agent-load retry fallback coverage for transient read failures.
+ * - 2026-03-05: Added regression coverage to avoid retry delays when agent loads return `null` (not-found) across wrapper/file/sqlite retry helpers.
+ * - 2026-03-05: Added deterministic retry-exhausted outcome coverage for file/sqlite load-agent retries after transient errors.
  * - 2026-02-27: Added wrapper fallback/error tests and mocked sqlite branch delegation coverage.
  * - 2026-02-27: Added targeted storage-factory coverage after removing stale legacy suites.
  */
@@ -248,6 +251,45 @@ describe('storage-factory runtime selection', () => {
     });
   });
 
+  it('retries wrapped loadAgent on transient backend read failures', async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = {
+        loadAgent: vi
+          .fn()
+          .mockRejectedValueOnce(new Error('temporary read failure'))
+          .mockResolvedValueOnce({ id: 'agent-1' }),
+      } as any;
+
+      const wrapped = createStorageWrappers(storage);
+      const pending = wrapped.loadAgent('world-1', 'agent-1');
+      await vi.runAllTimersAsync();
+
+      await expect(pending).resolves.toEqual({ id: 'agent-1' });
+      expect(storage.loadAgent).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not retry wrapped loadAgent when backend returns null (not found)', async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = {
+        loadAgent: vi.fn().mockResolvedValue(null),
+      } as any;
+
+      const wrapped = createStorageWrappers(storage);
+      const pending = wrapped.loadAgent('world-1', 'missing-agent');
+      await vi.runAllTimersAsync();
+
+      await expect(pending).resolves.toBeNull();
+      expect(storage.loadAgent).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('normalizes wrapped chat and world-chat storage errors', async () => {
     const storage = {
       saveChatData: vi.fn().mockRejectedValue(new Error('save failed')),
@@ -311,7 +353,7 @@ describe('storage-factory runtime selection', () => {
     expect(await wrapped.repairData('world-1', 'agent-1')).toBe(true);
 
     storage.loadWorld.mockRejectedValueOnce(new Error('world unavailable'));
-    storage.loadAgent.mockRejectedValueOnce(new Error('agent unavailable'));
+    storage.loadAgent.mockRejectedValue(new Error('agent unavailable'));
     expect(await wrapped.validateIntegrity('world-1')).toBe(false);
     expect(await wrapped.repairData('world-1', 'agent-1')).toBe(false);
   });
@@ -478,6 +520,56 @@ describe('storage-factory runtime selection', () => {
 
     expect(await storage.deleteMemoryByChatId('world-1', 'chat-1')).toBe(2);
     expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it('does not retry file/sqlite loadAgentWithRetry when agent is missing', async () => {
+    const sqliteRoot = uniqueRoot('sqlite-no-null-retry');
+    sqliteStorageMocks.loadAgent.mockResolvedValue(null);
+    const sqliteStorage = await createStorage({ type: 'sqlite', rootPath: sqliteRoot });
+
+    expect(await sqliteStorage.loadAgentWithRetry('world-1', 'missing-agent', { retries: 3, delay: 1000 })).toBeNull();
+    expect(sqliteStorageMocks.loadAgent).toHaveBeenCalledTimes(1);
+
+    const fileRoot = uniqueRoot('file-no-null-retry');
+    agentStorageMocks.loadAgent.mockResolvedValue(null);
+    const fileStorage = await createStorage({ type: 'file', rootPath: fileRoot });
+
+    expect(await fileStorage.loadAgentWithRetry('world-1', 'missing-agent', { retries: 3, delay: 1000 })).toBeNull();
+    expect(agentStorageMocks.loadAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs deterministic retry_exhausted outcome when file/sqlite loadAgent retries exhaust', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const sqliteRoot = uniqueRoot('sqlite-retry-exhausted');
+    sqliteStorageMocks.loadAgent.mockRejectedValue(new Error('sqlite transient'));
+    const sqliteStorage = await createStorage({ type: 'sqlite', rootPath: sqliteRoot });
+    await expect(
+      sqliteStorage.loadAgentWithRetry('world-1', 'agent-1', { retries: 2, delay: 0 }),
+    ).resolves.toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[sqlite-storage] loadAgentWithRetry retry_exhausted',
+      expect.objectContaining({
+        worldId: 'world-1',
+        agentId: 'agent-1',
+        attempts: 2,
+      }),
+    );
+
+    const fileRoot = uniqueRoot('file-retry-exhausted');
+    agentStorageMocks.loadAgent.mockRejectedValue(new Error('file transient'));
+    const fileStorage = await createStorage({ type: 'file', rootPath: fileRoot });
+    await expect(
+      fileStorage.loadAgentWithRetry('world-1', 'agent-1', { retries: 2, delay: 0 }),
+    ).resolves.toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[file-storage] loadAgentWithRetry retry_exhausted',
+      expect.objectContaining({
+        worldId: 'world-1',
+        agentId: 'agent-1',
+        attempts: 2,
+      }),
+    );
   });
 
   it('uses file adapter fallbacks when optional helpers are missing', async () => {

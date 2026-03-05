@@ -13,6 +13,7 @@
  * Recent Changes:
  * - 2026-02-28: Added initial unit coverage for built-in web_fetch tool.
  * - 2026-03-01: Added coverage for includeLinks=false behavior to ensure anchor text is preserved without markdown links.
+ * - 2026-03-05: Added timeout-abort coverage to enforce deterministic `timeout_error` mapping.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -182,5 +183,31 @@ describe('web_fetch tool', () => {
 
     expect(String(result)).toContain('Error: web_fetch failed - blocked_target: local/private access denied');
     expect(mockRequestWorldOption).toHaveBeenCalledTimes(1);
+  });
+
+  it('maps request timeout aborts to deterministic timeout_error category', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn((_url: string, init?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              reject(new DOMException('aborted', 'AbortError'));
+            });
+          }),
+        ),
+      );
+
+      const tool = createWebFetchToolDefinition();
+      const pending = tool.execute({ url: 'https://example.com/slow', timeoutMs: 1000 });
+      await vi.advanceTimersByTimeAsync(1000);
+
+      await expect(pending).resolves.toContain(
+        'Error: web_fetch failed - timeout_error: request exceeded 1000ms',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -14,6 +14,10 @@
  * - Captures per-category logger calls via mocked `createCategoryLogger`.
  *
  * Recent changes:
+ * - 2026-03-05: Added warning-then-success queue-timeout threshold coverage to verify `taking too long` can precede successful completion without timeout.
+ * - 2026-03-05: Added streaming-path timeout parity coverage to verify warning/timeout status behavior matches non-streaming queue semantics.
+ * - 2026-03-05: Added queue-timeout warning/timeout system-event coverage (`taking too long` + hard timeout abort path).
+ * - 2026-03-05: Added regression assertion that queue hard-timeout is classified/logged as timeout (not cancellation).
  * - 2026-03-04: Added Azure deployment routing tests to ensure `agent.model` drives Azure deployment URL selection, with configured deployment fallback.
  * - 2026-02-28: Added targeted coverage for feature-path LLM boundary logging.
  */
@@ -235,5 +239,168 @@ describe('llm-manager feature-path logging', () => {
     expect(openaiDirectMocks.createClientForProvider).toHaveBeenCalledWith('azure', expect.objectContaining({
       deployment: 'env-deployment',
     }));
+  });
+
+  it('emits chat-scoped taking-too-long and timeout system events for long LLM calls', async () => {
+    vi.useFakeTimers();
+    try {
+      const { mod, openaiDirectMocks, calls } = await loadModuleWithMocks({ rawEnabled: false });
+      let capturedAbortSignal: AbortSignal | undefined;
+
+      openaiDirectMocks.generateOpenAIResponse.mockImplementation(async (...args: any[]) => {
+        capturedAbortSignal = args[6];
+        return await new Promise(() => { });
+      });
+
+      const world = buildWorld();
+      const agent = buildAgent();
+      const messages = [
+        { role: 'user', content: 'hello', sender: 'human', createdAt: new Date() },
+      ] as any;
+
+      const pending = mod.generateAgentResponse(world, agent, messages, undefined, false, 'chat-1');
+      const observedError = pending.then(
+        () => null,
+        (error) => error as Error,
+      );
+
+      await vi.advanceTimersByTimeAsync(450000);
+      expect(world.eventEmitter.emit).toHaveBeenCalledWith(
+        'system',
+        expect.objectContaining({
+          chatId: 'chat-1',
+          content: expect.stringContaining('taking too long'),
+        }),
+      );
+
+      await vi.advanceTimersByTimeAsync(450000);
+      const timeoutError = await observedError;
+      expect(timeoutError).toBeInstanceOf(Error);
+      expect(timeoutError?.message).toContain('LLM call timeout after 900000ms');
+
+      expect(capturedAbortSignal?.aborted).toBe(true);
+      expect(world.eventEmitter.emit).toHaveBeenCalledWith(
+        'system',
+        expect.objectContaining({
+          chatId: 'chat-1',
+          content: expect.stringContaining('timed out'),
+        }),
+      );
+      expect(calls.some((call) =>
+        call.category === 'llm.queue' &&
+        call.level === 'warn' &&
+        call.message === 'LLM queue call timed out'
+      )).toBe(true);
+      expect(calls.some((call) =>
+        call.category === 'llm.queue' &&
+        call.level === 'info' &&
+        call.message === 'LLM queue call canceled'
+      )).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('emits taking-too-long warning and still succeeds before hard timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const { mod, openaiDirectMocks } = await loadModuleWithMocks({ rawEnabled: false });
+
+      openaiDirectMocks.generateOpenAIResponse.mockImplementation(async () => {
+        return await new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({
+              type: 'text',
+              content: 'completed-after-warning',
+              assistantMessage: { role: 'assistant', content: 'completed-after-warning' },
+            });
+          }, 500000);
+        });
+      });
+
+      const world = buildWorld();
+      const agent = buildAgent();
+      const messages = [
+        { role: 'user', content: 'hello', sender: 'human', createdAt: new Date() },
+      ] as any;
+
+      const pending = mod.generateAgentResponse(world, agent, messages, undefined, false, 'chat-1');
+      await vi.advanceTimersByTimeAsync(450000);
+      expect(world.eventEmitter.emit).toHaveBeenCalledWith(
+        'system',
+        expect.objectContaining({
+          chatId: 'chat-1',
+          content: expect.stringContaining('taking too long'),
+        }),
+      );
+
+      await vi.advanceTimersByTimeAsync(50000);
+      await expect(pending).resolves.toMatchObject({
+        response: expect.objectContaining({
+          type: 'text',
+          content: 'completed-after-warning',
+        }),
+      });
+      expect(world.eventEmitter.emit).not.toHaveBeenCalledWith(
+        'system',
+        expect.objectContaining({
+          chatId: 'chat-1',
+          content: expect.stringContaining('timed out'),
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('applies warning/timeout status parity for streaming LLM calls', async () => {
+    vi.useFakeTimers();
+    try {
+      const { mod, openaiDirectMocks } = await loadModuleWithMocks({ rawEnabled: false });
+      let capturedAbortSignal: AbortSignal | undefined;
+
+      openaiDirectMocks.streamOpenAIResponse.mockImplementation(async (...args: any[]) => {
+        capturedAbortSignal = args[8];
+        return await new Promise(() => { });
+      });
+
+      const world = buildWorld();
+      const agent = buildAgent();
+      const messages = [
+        { role: 'user', content: 'hello', sender: 'human', createdAt: new Date() },
+      ] as any;
+      const publishSSE = vi.fn();
+
+      const pending = mod.streamAgentResponse(world, agent, messages, publishSSE, 'chat-1');
+      const observedError = pending.then(
+        () => null,
+        (error) => error as Error,
+      );
+
+      await vi.advanceTimersByTimeAsync(450000);
+      expect(world.eventEmitter.emit).toHaveBeenCalledWith(
+        'system',
+        expect.objectContaining({
+          chatId: 'chat-1',
+          content: expect.stringContaining('taking too long'),
+        }),
+      );
+
+      await vi.advanceTimersByTimeAsync(450000);
+      const timeoutError = await observedError;
+      expect(timeoutError).toBeInstanceOf(Error);
+      expect(timeoutError?.message).toContain('LLM call timeout after 900000ms');
+      expect(capturedAbortSignal?.aborted).toBe(true);
+
+      expect(world.eventEmitter.emit).toHaveBeenCalledWith(
+        'system',
+        expect.objectContaining({
+          chatId: 'chat-1',
+          content: expect.stringContaining('timed out'),
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

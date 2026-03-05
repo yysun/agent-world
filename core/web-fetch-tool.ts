@@ -15,6 +15,8 @@
  * - Applies timeout and output-size bounds with explicit truncation metadata
  *
  * Recent Changes:
+ * - 2026-03-05: Added deterministic timeout-error mapping (`timeout_error`) for aborted fetches caused by per-request timeout limits.
+ * - 2026-03-05: Switched timeout/output bounds constants to shared reliability config.
  * - 2026-02-28: Initial implementation of fetch-only web retrieval with Turndown conversion and SPA JSON heuristics.
  */
 
@@ -25,6 +27,7 @@ import { isIP } from 'net';
 import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
 import { requestToolApproval } from './tool-approval.js';
+import { RELIABILITY_CONFIG } from './reliability-config.js';
 import { type World } from './types.js';
 
 type WebFetchArgs = {
@@ -56,10 +59,11 @@ type WebFetchResult = {
   timingMs: number;
 };
 
-const DEFAULT_TIMEOUT_MS = 12000;
-const MAX_TIMEOUT_MS = 30000;
-const DEFAULT_MAX_CHARS = 24000;
-const MAX_MAX_CHARS = 120000;
+const DEFAULT_TIMEOUT_MS = RELIABILITY_CONFIG.webFetch.defaultTimeoutMs;
+const MAX_TIMEOUT_MS = RELIABILITY_CONFIG.webFetch.maxTimeoutMs;
+const DEFAULT_MAX_CHARS = RELIABILITY_CONFIG.webFetch.defaultMaxChars;
+const MAX_MAX_CHARS = RELIABILITY_CONFIG.webFetch.maxMaxChars;
+const MIN_TIMEOUT_MS = RELIABILITY_CONFIG.webFetch.minTimeoutMs;
 const LOCAL_APPROVE_OPTION = 'yes';
 const LOCAL_DENY_OPTION = 'no';
 
@@ -69,6 +73,14 @@ function clamp(value: number, min: number, max: number): number {
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!error) return false;
+  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  if (error instanceof Error && error.name === 'AbortError') return true;
+  const message = toErrorMessage(error).toLowerCase();
+  return message.includes('aborted');
 }
 
 function parseUrlOrThrow(urlValue: unknown): URL {
@@ -344,6 +356,8 @@ function buildUnsupportedResponse(url: URL, response: Response, timingMs: number
 
 async function executeWebFetch(args: WebFetchArgs, context?: WebFetchToolContext): Promise<string> {
   const startedAt = Date.now();
+  const activeTimeoutMs = clamp(Number(args.timeoutMs ?? DEFAULT_TIMEOUT_MS), MIN_TIMEOUT_MS, MAX_TIMEOUT_MS);
+  let timedOut = false;
 
   try {
     const target = parseUrlOrThrow(args.url);
@@ -370,13 +384,16 @@ async function executeWebFetch(args: WebFetchArgs, context?: WebFetchToolContext
       }
     }
 
-    const timeoutMs = clamp(Number(args.timeoutMs ?? DEFAULT_TIMEOUT_MS), 1000, MAX_TIMEOUT_MS);
+    const timeoutMs = activeTimeoutMs;
     const maxChars = clamp(Number(args.maxChars ?? DEFAULT_MAX_CHARS), 2000, MAX_MAX_CHARS);
     const includeLinks = args.includeLinks !== false;
     const includeImages = args.includeImages === true;
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
 
     let response: Response;
     try {
@@ -504,6 +521,9 @@ async function executeWebFetch(args: WebFetchArgs, context?: WebFetchToolContext
 
     return JSON.stringify(result, null, 2);
   } catch (error) {
+    if (timedOut || isAbortError(error)) {
+      return `Error: web_fetch failed - timeout_error: request exceeded ${activeTimeoutMs}ms`;
+    }
     const message = toErrorMessage(error);
     return `Error: web_fetch failed - ${message}`;
   }

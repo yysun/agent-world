@@ -16,6 +16,7 @@
  *
  * Recent Changes:
  * - 2026-02-13: Added lifecycle/control coverage for shell process monitor/cancel/delete APIs.
+ * - 2026-03-05: Added timeout lifecycle coverage to assert terminal `timed_out` process status.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -89,6 +90,20 @@ describe('shell process lifecycle management', () => {
 
     const secondCancel = cancelProcessExecution(executionId);
     expect(secondCancel.outcome).toBe('already_finished');
+  });
+
+  it('marks execution as timed_out when command exceeds timeout limit', async () => {
+    const result = await executeShellCommand('sh', ['-c', 'sleep 2'], './', {
+      worldId: 'world-timeout',
+      chatId: 'chat-timeout',
+      timeout: 50,
+    });
+
+    expect(result.timedOut).toBe(true);
+    expect(result.error).toContain('timed out');
+
+    const record = getProcessExecution(result.executionId);
+    expect(record?.status).toBe('timed_out');
   });
 
   it('blocks delete for active execution and allows delete after terminal state', async () => {

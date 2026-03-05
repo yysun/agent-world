@@ -94,6 +94,8 @@
  * - Queue-based serialization prevents API rate limits and resource conflicts
  *
  * Recent Changes:
+ * - 2026-03-05: Added chat-scoped LLM timeout status system events (`taking too long` warning + hard-timeout event), enforced timeout-triggered abort signaling in queue processing, and classified queue timeouts separately from user cancellations.
+ * - 2026-03-05: Switched LLM queue timeout defaults to shared reliability config.
  * - 2026-03-04: Azure client creation now maps `agent.model` to Azure deployment name (with config deployment fallback) so world/agent model selection controls deployment URL routing.
  * - 2026-02-28: Added canonical feature-path diagnostics (`llm.prep`, `llm.request.*`, `llm.response.*`) with opt-in raw payload logging and correlation metadata.
  * - 2026-02-24: Required explicit chatId for streaming SSE emission and propagated chatId through start/chunk/end/error events for strict chat-scoped frontend filtering.
@@ -146,6 +148,7 @@ import {
 } from './feature-path-logging.js';
 import { createStorageWithWrappers } from './storage/storage-factory.js';
 import type { StorageAPI } from './storage/storage-factory.js';
+import { RELIABILITY_CONFIG } from './reliability-config.js';
 // Granular function-specific loggers for detailed debugging control
 const loggerQueue = createCategoryLogger('llm.queue');
 const loggerStreaming = createCategoryLogger('llm.streaming');
@@ -324,14 +327,34 @@ interface QueuedLLMCall {
   chatId: string | null;
   abortController: AbortController;
   execute: (signal: AbortSignal) => Promise<any>;
+  onTakingTooLong?: (details: { elapsedMs: number; timeoutMs: number }) => void;
+  onTimedOut?: (details: { elapsedMs: number; timeoutMs: number }) => void;
   canceled: boolean;
   resolve: (value: any) => void;
   reject: (error: any) => void;
 }
 
+type LLMQueueTimeoutError = Error & { code: 'LLM_QUEUE_TIMEOUT' };
+
 function normalizeChatId(chatId: string | null | undefined): string {
   if (chatId == null) return '__none__';
   return String(chatId);
+}
+
+function createLLMQueueTimeoutError(agentId: string, timeoutMs: number): LLMQueueTimeoutError {
+  const error = new Error(`LLM call timeout after ${timeoutMs}ms for agent ${agentId}`) as LLMQueueTimeoutError;
+  error.name = 'LLMQueueTimeoutError';
+  error.code = 'LLM_QUEUE_TIMEOUT';
+  return error;
+}
+
+function isLLMQueueTimeoutError(error: unknown): error is LLMQueueTimeoutError {
+  return Boolean(
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'LLM_QUEUE_TIMEOUT'
+  );
 }
 
 class LLMQueue {
@@ -339,13 +362,17 @@ class LLMQueue {
   private processing = false;
   private activeItem: QueuedLLMCall | null = null;
   private maxQueueSize = 100; // Prevent memory issues
-  private processingTimeoutMs = 900000; // 15 minute max processing time per call (for long-running tools)
+  private processingTimeoutMs = RELIABILITY_CONFIG.llm.processingTimeoutMs; // 15 minute max processing time per call (for long-running tools)
 
   async add<T>(
     agentId: string,
     worldId: string,
     chatId: string | null,
-    task: (signal: AbortSignal) => Promise<T>
+    task: (signal: AbortSignal) => Promise<T>,
+    options?: {
+      onTakingTooLong?: (details: { elapsedMs: number; timeoutMs: number }) => void;
+      onTimedOut?: (details: { elapsedMs: number; timeoutMs: number }) => void;
+    }
   ): Promise<T> {
     // Prevent queue overflow
     if (this.queue.length >= this.maxQueueSize) {
@@ -364,6 +391,8 @@ class LLMQueue {
         abortController: new AbortController(),
         canceled: false,
         execute: task,
+        onTakingTooLong: options?.onTakingTooLong,
+        onTimedOut: options?.onTimedOut,
         resolve,
         reject
       };
@@ -393,15 +422,15 @@ class LLMQueue {
         loggerQueue.debug(
           `LLMQueue: Processing task for agent=${item.agentId}, world=${item.worldId}, chat=${normalizeChatId(item.chatId)}, queueItemId=${item.id}`
         );
-        // Add processing timeout to prevent stuck queue
+        // Add processing timeout to prevent stuck queue.
         const processPromise = item.execute(item.abortController.signal);
 
-        // Store timeout ID so we can cancel it if process completes first
-        let timeoutId: NodeJS.Timeout;
-        let warningTimeoutId: NodeJS.Timeout;
+        // Store timeout IDs so we can cancel them on all exits.
+        let timeoutId: NodeJS.Timeout | undefined;
+        let warningTimeoutId: NodeJS.Timeout | undefined;
 
-        // Warn if processing takes more than 50% of timeout
-        const warningThreshold = this.processingTimeoutMs * 0.5;
+        // Warn if processing exceeds configured threshold ratio of timeout.
+        const warningThreshold = this.processingTimeoutMs * RELIABILITY_CONFIG.llm.warningThresholdRatio;
         warningTimeoutId = setTimeout(() => {
           const elapsed = Date.now() - taskStartTime;
           loggerQueue.warn(`LLM task is taking longer than expected`, {
@@ -411,25 +440,72 @@ class LLMQueue {
             timeoutMs: this.processingTimeoutMs,
             percentComplete: Math.round((elapsed / this.processingTimeoutMs) * 100)
           });
+          try {
+            item.onTakingTooLong?.({
+              elapsedMs: elapsed,
+              timeoutMs: this.processingTimeoutMs,
+            });
+          } catch (callbackError) {
+            loggerQueue.warn('LLM queue taking-too-long callback failed', {
+              agentId: item.agentId,
+              worldId: item.worldId,
+              chatId: normalizeChatId(item.chatId),
+              queueItemId: item.id,
+              error: callbackError instanceof Error ? callbackError.message : String(callbackError)
+            });
+          }
         }, warningThreshold);
 
         const timeoutPromise = new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => {
-            reject(new Error(`LLM call timeout after ${this.processingTimeoutMs}ms for agent ${item.agentId}`));
+            const elapsed = Date.now() - taskStartTime;
+            if (!item.abortController.signal.aborted) {
+              item.abortController.abort();
+            }
+            try {
+              item.onTimedOut?.({
+                elapsedMs: elapsed,
+                timeoutMs: this.processingTimeoutMs,
+              });
+            } catch (callbackError) {
+              loggerQueue.warn('LLM queue timeout callback failed', {
+                agentId: item.agentId,
+                worldId: item.worldId,
+                chatId: normalizeChatId(item.chatId),
+                queueItemId: item.id,
+                error: callbackError instanceof Error ? callbackError.message : String(callbackError)
+              });
+            }
+            reject(createLLMQueueTimeoutError(item.agentId, this.processingTimeoutMs));
           }, this.processingTimeoutMs);
         });
 
-        const result = await Promise.race([processPromise, timeoutPromise]);
-
-        // Clear both timeouts to prevent Jest from hanging
-        clearTimeout(timeoutId!);
-        clearTimeout(warningTimeoutId!);
+        let result: any;
+        try {
+          result = await Promise.race([processPromise, timeoutPromise]);
+        } finally {
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+          }
+          if (warningTimeoutId) {
+            clearTimeout(warningTimeoutId);
+          }
+        }
 
         item.resolve(result);
         loggerQueue.debug(`LLMQueue: Finished processing task for agent=${item.agentId}, world=${item.worldId}, queueItemId=${item.id}`);
       } catch (error) {
-        const wasCanceled = item.canceled || item.abortController.signal.aborted || isAbortError(error);
-        if (wasCanceled) {
+        const isTimeout = isLLMQueueTimeoutError(error);
+        const wasCanceled = !isTimeout && (item.canceled || item.abortController.signal.aborted || isAbortError(error));
+        if (isTimeout) {
+          loggerQueue.warn('LLM queue call timed out', {
+            agentId: item.agentId,
+            worldId: item.worldId,
+            chatId: normalizeChatId(item.chatId),
+            queueItemId: item.id,
+            reason: error instanceof Error ? error.message : String(error)
+          });
+        } else if (wasCanceled) {
           loggerQueue.info('LLM queue call canceled', {
             agentId: item.agentId,
             worldId: item.worldId,
@@ -519,8 +595,8 @@ class LLMQueue {
 
   // Set processing timeout (useful for testing or adjusting for long-running operations)
   setProcessingTimeout(timeoutMs: number): void {
-    if (timeoutMs < 1000) {
-      throw new Error('Processing timeout must be at least 1000ms');
+    if (timeoutMs < RELIABILITY_CONFIG.llm.minProcessingTimeoutMs) {
+      throw new Error(`Processing timeout must be at least ${RELIABILITY_CONFIG.llm.minProcessingTimeoutMs}ms`);
     }
     this.processingTimeoutMs = timeoutMs;
     loggerQueue.info('LLM queue processing timeout updated', { timeoutMs });
@@ -555,6 +631,24 @@ function isAbortError(error: unknown): boolean {
   if (error instanceof Error && error.name === 'AbortError') return true;
   const message = error instanceof Error ? error.message : String(error);
   return message.toLowerCase().includes('abort');
+}
+
+function emitLLMTimeoutSystemStatus(
+  world: World,
+  chatId: string | null,
+  content: string
+): void {
+  const scopedChatId = typeof chatId === 'string' ? chatId.trim() : '';
+  if (!scopedChatId) {
+    return;
+  }
+
+  world.eventEmitter.emit('system', {
+    content,
+    timestamp: new Date(),
+    messageId: generateId(),
+    chatId: scopedChatId,
+  });
 }
 
 function createCombinedAbortSignal(
@@ -626,6 +720,21 @@ export async function streamAgentResponse(
     } finally {
       dispose();
     }
+  }, {
+    onTakingTooLong: ({ elapsedMs, timeoutMs }) => {
+      emitLLMTimeoutSystemStatus(
+        world,
+        resolvedChatId,
+        `LLM processing taking too long for ${agent.id} (elapsed ${Math.floor(elapsedMs / 1000)}s, timeout ${Math.floor(timeoutMs / 1000)}s).`
+      );
+    },
+    onTimedOut: ({ timeoutMs }) => {
+      emitLLMTimeoutSystemStatus(
+        world,
+        resolvedChatId,
+        `LLM processing timed out for ${agent.id} after ${Math.floor(timeoutMs / 1000)}s.`
+      );
+    },
   });
 }
 
@@ -828,17 +937,36 @@ export async function generateAgentResponse(
     throw new DOMException(`LLM call aborted before queue for agent ${agent.id}`, 'AbortError');
   }
 
+  const normalizedChatId = typeof chatId === 'string' ? chatId.trim() : '';
+  const fallbackChatId = typeof world?.currentChatId === 'string' ? world.currentChatId.trim() : '';
+  const resolvedChatId = normalizedChatId || fallbackChatId || null;
+
   // Queue the LLM call to ensure serialized execution
-  return llmQueue.add(agent.id, world.id, chatId, async (queueAbortSignal) => {
+  return llmQueue.add(agent.id, world.id, resolvedChatId, async (queueAbortSignal) => {
     const { signal: mergedAbortSignal, dispose } = createCombinedAbortSignal(queueAbortSignal, abortSignal);
     try {
       if (mergedAbortSignal?.aborted) {
         throw new DOMException(`LLM call aborted before execution for agent ${agent.id}`, 'AbortError');
       }
-      return await executeGenerateAgentResponse(world, agent, messages, skipTools, chatId, mergedAbortSignal);
+      return await executeGenerateAgentResponse(world, agent, messages, skipTools, resolvedChatId, mergedAbortSignal);
     } finally {
       dispose();
     }
+  }, {
+    onTakingTooLong: ({ elapsedMs, timeoutMs }) => {
+      emitLLMTimeoutSystemStatus(
+        world,
+        resolvedChatId,
+        `LLM processing taking too long for ${agent.id} (elapsed ${Math.floor(elapsedMs / 1000)}s, timeout ${Math.floor(timeoutMs / 1000)}s).`
+      );
+    },
+    onTimedOut: ({ timeoutMs }) => {
+      emitLLMTimeoutSystemStatus(
+        world,
+        resolvedChatId,
+        `LLM processing timed out for ${agent.id} after ${Math.floor(timeoutMs / 1000)}s.`
+      );
+    },
   });
 }
 
