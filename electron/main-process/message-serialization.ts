@@ -12,6 +12,7 @@
  * - Runtime validation remains in higher-level handlers.
  *
  * Recent Changes:
+ * - 2026-03-06: Preserved realtime log `worldId`/`chatId` scope so chat-scoped error logs can route into the selected renderer transcript.
  * - 2026-02-28: Preserved realtime `tool_call_id` on message events so renderer can link tool-result rows back to assistant tool-call requests.
  * - 2026-02-27: Included persisted `tool_calls`, `tool_call_id`, and `toolCallStatus` in session-message serialization so renderer can consolidate tool request/result cards after loading chat history.
  * - 2026-02-21: Preserved assistant tool-call metadata (`tool_calls`, `toolCallStatus`) in realtime message serialization so renderer can reliably render tool-request rows.
@@ -389,15 +390,30 @@ export function serializeRealtimeActivityEvent(
 }
 
 export function serializeRealtimeLogEvent(logEvent: any): Record<string, unknown> {
+  const logData = logEvent?.data && typeof logEvent.data === 'object' ? logEvent.data : null;
+  const worldId =
+    (typeof logEvent?.worldId === 'string' && logEvent.worldId.trim()) ? logEvent.worldId.trim()
+      : (typeof logData?.worldId === 'string' && logData.worldId.trim()) ? logData.worldId.trim()
+        : undefined;
+  const chatId =
+    (typeof logEvent?.chatId === 'string' && logEvent.chatId.trim()) ? logEvent.chatId.trim()
+      : (logEvent?.chatId === null ? null
+        : (typeof logData?.chatId === 'string' && logData.chatId.trim()) ? logData.chatId.trim()
+          : (logData?.chatId === null ? null : undefined));
+
   return {
     type: 'log',
+    ...(worldId ? { worldId } : {}),
+    ...(chatId !== undefined ? { chatId } : {}),
     logEvent: {
       level: logEvent?.level || 'info',
       category: logEvent?.category || 'unknown',
       message: logEvent?.message || '',
       timestamp: logEvent?.timestamp || new Date().toISOString(),
-      data: logEvent?.data || null,
-      messageId: logEvent?.messageId || `log-${Date.now()}`
+      data: logData,
+      messageId: logEvent?.messageId || `log-${Date.now()}`,
+      ...(worldId ? { worldId } : {}),
+      ...(chatId !== undefined ? { chatId } : {})
     }
   };
 }

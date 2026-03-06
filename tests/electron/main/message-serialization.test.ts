@@ -9,6 +9,7 @@
  * - Uses pure helper tests with no Electron runtime dependencies.
  *
  * Recent Changes:
+ * - 2026-03-06: Added regression coverage ensuring realtime log serialization preserves world/chat scope for transcript routing.
  * - 2026-02-28: Added regression coverage ensuring realtime tool message serialization preserves `tool_call_id` for renderer-side request/result linking.
  * - 2026-02-19: Added coverage for realtime CRUD-event serialization payload shape.
  * - 2026-02-15: Added regression coverage for agent-sender messages persisted with `role: 'user'`.
@@ -18,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 import {
   normalizeSessionMessages,
   serializeChatsWithMessageCounts,
+  serializeRealtimeLogEvent,
   serializeRealtimeMessageEvent,
   serializeRealtimeCrudEvent
 } from '../../../electron/main-process/message-serialization';
@@ -108,6 +110,38 @@ describe('serializeRealtimeMessageEvent', () => {
         messageId: 'msg-tool-1',
         role: 'tool',
         tool_call_id: 'call_shell_1',
+      }
+    });
+  });
+});
+
+describe('serializeRealtimeLogEvent', () => {
+  it('preserves chat-scoped log metadata for renderer routing', () => {
+    const payload = serializeRealtimeLogEvent({
+      level: 'error',
+      category: 'agent',
+      message: 'Failed to continue LLM after tool execution',
+      timestamp: '2026-03-06T19:19:52.794Z',
+      messageId: 'log-123',
+      data: {
+        worldId: 'world-1',
+        chatId: 'chat-1',
+        agentId: 'a1',
+        error: 'Filtered by content policy.'
+      }
+    });
+
+    expect(payload).toMatchObject({
+      type: 'log',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      logEvent: {
+        level: 'error',
+        category: 'agent',
+        message: 'Failed to continue LLM after tool execution',
+        messageId: 'log-123',
+        worldId: 'world-1',
+        chatId: 'chat-1',
       }
     });
   });
