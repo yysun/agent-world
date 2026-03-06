@@ -13,6 +13,7 @@
  * - Helper functions are intentionally colocated to preserve behavior parity.
  *
  * Recent Changes:
+ * - 2026-03-06: Restored error-level realtime log rows as renderable transcript entries while keeping non-error logs in the diagnostics panel only.
  * - 2026-03-06: Unwrap persisted tool execution envelopes when deriving tool success/failure card styling after reload.
  * - 2026-03-06: Recognize canonical shell `validation_error` and `approval_denied` tool-result reasons as failed outcomes for renderer card styling.
  * - 2026-03-04: Added optional `fullWidthUserMessage` card-style flag so non-chat user cards can span full width.
@@ -137,7 +138,11 @@ export function getMessageIdentity(message) {
 
 export function isRenderableMessageEntry(message) {
   const messageType = String(message?.type || '').trim().toLowerCase();
+  const logLevel = String(message?.logEvent?.level || '').trim().toLowerCase();
   if (messageType === 'log' || Boolean(message?.logEvent)) {
+    return logLevel === 'error';
+  }
+  if (messageType === 'error') {
     return false;
   }
   if (isHitlToolCallPlaceholderMessage(message)) {

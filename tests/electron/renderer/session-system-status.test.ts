@@ -13,6 +13,7 @@
  * - Confirms unscoped events are rejected for chat-status-bar use.
  *
  * Recent Changes:
+ * - 2026-03-06: Added regression coverage ensuring error-kind system statuses stay persistent while non-error statuses remain transient.
  * - 2026-03-06: Added coverage for selected-chat system-event status normalization.
  */
 
@@ -62,8 +63,10 @@ describe('session-system-status helpers', () => {
 
     expect(timeoutStatus?.text).toContain('timed out');
     expect(timeoutStatus?.kind).toBe('error');
+    expect(timeoutStatus?.expiresAfterMs).toBeNull();
     expect(retryStatus?.text).toContain('attempt 2/3');
     expect(retryStatus?.kind).toBe('info');
+    expect(retryStatus?.expiresAfterMs).toBe(5000);
   });
 
   it('rejects unscoped events and clears state on chat switch', () => {

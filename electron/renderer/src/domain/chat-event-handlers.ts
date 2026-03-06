@@ -13,6 +13,7 @@
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
+ * - 2026-03-06: Restored selected-chat error log rows into the transcript while keeping full log ingestion in the diagnostics panel.
  * - 2026-02-27: Stopped injecting realtime `type='log'` events into chat message timelines; logs are routed to the dedicated logs panel stream only.
  * - 2026-02-27: Added unified main-process log callback support so logs are available in the right-panel diagnostics view even when no chat is selected.
  * - 2026-02-26: Suppressed redundant error-level log rows when equivalent stream errors are already shown inline on message cards.
@@ -36,7 +37,12 @@
  * - 2026-02-17: Migrated module from JS to TS with typed payload and dependency interfaces.
  */
 
-import { upsertMessageList, type MessageLike } from './message-updates';
+import {
+  createLogMessage,
+  shouldSuppressLogForExistingStreamError,
+  upsertMessageList,
+  type MessageLike
+} from './message-updates';
 import { clearChatAgents, updateRegistry } from './status-registry';
 import { applyEventToRegistry } from './status-updater';
 
@@ -230,6 +236,29 @@ export function createChatSubscriptionEventHandler({
         isToolStreaming: false,
         streamType: undefined,
       }));
+
+      return;
+    }
+
+    if (payload.type === 'log') {
+      const logEvent = payload.logEvent as Record<string, unknown> | undefined;
+      if (!logEvent) return;
+
+      const logLevel = String(logEvent.level || '').trim().toLowerCase();
+      if (logLevel !== 'error') {
+        return;
+      }
+
+      const logChatId = String(payload.chatId || logEvent.chatId || '').trim() || null;
+      if (selectedSessionId && logChatId !== selectedSessionId) return;
+
+      setMessages((existing) => {
+        if (shouldSuppressLogForExistingStreamError(existing, logEvent)) {
+          return existing;
+        }
+
+        return upsertMessageList(existing, createLogMessage(logEvent, logChatId));
+      });
 
       return;
     }

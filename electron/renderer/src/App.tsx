@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-03-06: Preserved error-kind selected-chat system statuses until replaced or context changes; non-error statuses still auto-expire.
  * - 2026-03-06: Added selected-chat system-event status-bar overlays for title updates, timeout notices, and retry tracking.
  * - 2026-03-05: Moved `MessageQueuePanel` into a dedicated pre-composer slot so queue items render above the composer input.
  * - 2026-03-04: Added app-level grid submenu open state so selecting a grid-layout option can dismiss the submenu.
@@ -288,6 +289,10 @@ export default function App() {
 
     setSystemStatus(nextStatus);
     if (!nextStatus) {
+      return;
+    }
+
+    if (typeof nextStatus.expiresAfterMs !== 'number' || nextStatus.expiresAfterMs <= 0) {
       return;
     }
 

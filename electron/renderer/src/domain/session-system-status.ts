@@ -13,6 +13,7 @@
  * - Unknown structured payloads fall back to `message`/`title` extraction when possible.
  *
  * Recent Changes:
+ * - 2026-03-06: Preserved error-kind system statuses until superseded or context changes while keeping other statuses transient.
  * - 2026-03-06: Added selected-chat system-event normalization for Electron status-bar visibility.
  */
 
@@ -34,7 +35,7 @@ export interface SessionSystemStatusEntry {
   createdAt: string | null;
   text: string;
   kind: SessionSystemStatusKind;
-  expiresAfterMs: number;
+  expiresAfterMs: number | null;
 }
 
 export const SESSION_SYSTEM_STATUS_TTL_MS = 5000;
@@ -108,6 +109,8 @@ export function createSessionSystemStatus(
     return null;
   }
 
+  const kind = inferStatusKind(normalizedEventType, content, structuredText);
+
   return {
     worldId: normalizedWorldId,
     chatId: normalizedChatId,
@@ -115,8 +118,10 @@ export function createSessionSystemStatus(
     messageId: event?.messageId || null,
     createdAt: event?.createdAt || null,
     text: structuredText,
-    kind: inferStatusKind(normalizedEventType, content, structuredText),
-    expiresAfterMs: SESSION_SYSTEM_STATUS_TTL_MS,
+    kind,
+    expiresAfterMs: kind === 'error'
+      ? null
+      : SESSION_SYSTEM_STATUS_TTL_MS,
   };
 }
 

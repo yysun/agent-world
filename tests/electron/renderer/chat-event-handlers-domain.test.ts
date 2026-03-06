@@ -11,6 +11,7 @@
  * - Focuses on orchestration behavior, not UI rendering.
  *
  * Recent Changes:
+ * - 2026-03-06: Added regression coverage restoring selected-chat error log rows to the transcript while keeping non-error logs out.
  * - 2026-02-27: Updated global-log coverage to assert logs are routed only to panel callbacks (no chat-message insertion).
  * - 2026-02-27: Added coverage for unified main-process log callback routing independent of active-session message-list updates.
  * - 2026-02-26: Added coverage for redundant error-log suppression when an equivalent inline stream error is already present.
@@ -283,6 +284,64 @@ describe('createChatSubscriptionEventHandler', () => {
     expect(messages).toHaveLength(2);
     expect(messages.map((m) => m.messageId)).toEqual(['server-user-1', 'server-user-2']);
     expect(messages.every((m) => m.optimisticUserPending !== true)).toBe(true);
+  });
+
+  it('adds only selected-chat error log events to the transcript', () => {
+    const harness = createMessageStateHarness();
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
+    });
+
+    handler({
+      type: 'log',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      logEvent: {
+        messageId: 'log-error-1',
+        chatId: 'chat-1',
+        level: 'error',
+        category: 'AGENT',
+        message: 'Failed to continue LLM after tool execution',
+        timestamp: '2026-03-06T19:19:52.794Z',
+        data: {
+          args: [{
+            agentId: 'a1',
+            error: 'The response was filtered by content policy.'
+          }]
+        }
+      }
+    } as any);
+
+    handler({
+      type: 'log',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      logEvent: {
+        messageId: 'log-info-1',
+        chatId: 'chat-1',
+        level: 'info',
+        category: 'AGENT',
+        message: 'Continuation retry scheduled',
+        timestamp: '2026-03-06T19:19:53.000Z',
+      }
+    } as any);
+
+    const messages = harness.getMessages();
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      messageId: 'log-error-1',
+      type: 'log',
+      role: 'system',
+      chatId: 'chat-1',
+    });
+    expect(String(messages[0]?.content || '')).toContain('Failed to continue LLM after tool execution');
+    expect(String(messages[0]?.content || '')).toContain('The response was filtered by content policy.');
   });
 
   it('ignores mismatched subscriptions/world IDs', () => {

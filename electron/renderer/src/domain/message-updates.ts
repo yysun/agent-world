@@ -13,6 +13,7 @@
  * - Messages without canonical `messageId` are ignored by upsert logic.
  *
  * Recent Changes:
+ * - 2026-03-06: Restored selected-chat error log rows to the transcript while keeping non-error logs panel-only.
  * - 2026-02-26: Added reusable transient-error helpers for log suppression, redundant-error cleanup, and chat-scoped transient error clearing.
  * - 2026-02-26: Added structured error-detail extraction for error log messages to avoid raw object output and improve inline indicator parity.
  * - 2026-02-20: Added optimistic user-message create/reconcile/remove helpers and deterministic fallback merge in `upsertMessageList`.
@@ -248,8 +249,8 @@ export function createLogMessage(logEvent: LogEventLike, chatId?: string): Messa
   }
 
   return {
-    id: `log-${logEvent?.messageId || Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-    messageId: `log-${Date.now()}`,
+    id: String(logEvent?.messageId || `log-${Date.now()}`),
+    messageId: String(logEvent?.messageId || `log-${Date.now()}`),
     sender: 'system',
     content: displayText,
     text: displayText,

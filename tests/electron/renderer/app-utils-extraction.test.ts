@@ -12,6 +12,7 @@
  * - No filesystem or network dependencies.
  *
  * Recent Changes:
+ * - 2026-03-06: Added regression coverage ensuring only error-level realtime log rows remain renderable in the transcript.
  * - 2026-02-28: Added regression coverage for tool-name resolution so assistant `shell_cmd` rows do not inherit earlier `list_files`/`grep` labels.
  * - 2026-02-28: Added regression coverage for locating assistant tool-request metadata from tool-result rows by `tool_call_id`.
  * - 2026-02-28: Added regression ensuring assistant `Calling tool: human_intervention_request` placeholder rows are hidden from renderable transcript entries.
@@ -219,6 +220,20 @@ describe('extracted message utils', () => {
     })).toBe(false);
     const className = getMessageCardClassName(message, new Map(), [message], 0);
     expect(className).toContain('rounded-lg');
+  });
+
+  it('renders only error-level log rows in the transcript', () => {
+    expect(isRenderableMessageEntry({
+      messageId: 'log-error-1',
+      type: 'log',
+      logEvent: { level: 'error', category: 'agent', message: 'tool continuation failed' }
+    })).toBe(true);
+
+    expect(isRenderableMessageEntry({
+      messageId: 'log-info-1',
+      type: 'log',
+      logEvent: { level: 'info', category: 'agent', message: 'tool continuation started' }
+    })).toBe(false);
   });
 
   it('omits message left border class when disabled by view mode', () => {
