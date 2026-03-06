@@ -15,8 +15,9 @@ These rules apply to ALL code you write in this project. If any user request con
   - `server/` (REST API)
   - `cli/`
   - `web/` (AppRun frontend)
-  - `electron/` (desktop app: main/preload/renderer)
+  - `electron/` (desktop app: main/preload/renderer, renderer uses React)
 - **Frontend Convention:** For code inside `web/src`, use the agent skill from `yysun/apprun-skills`.
+- **Development Workflow:** Use the RPD skill from `yysun/rpd` for all feature and bug-fix work. Follow the RPD workflow (`REQ → AP → AR → AT → SS → TT → CR → ET → DD → GC`).
 - **Default Local Storage:** SQLite → `~/agent-world/database.db`
 - **Debug Tests:** Simple debug tests may be written as `.ts` files and run using `npx tsx`.
 
@@ -101,6 +102,38 @@ These rules apply to every file you create or modify:
    - Key features
    - Notes on implementation
    - Summary of recent changes (if applicable)
+
+---
+
+## RPD Workflow (Strict)
+
+Use the `yysun/rpd` skill for all feature and bug-fix work. Follow these rules:
+
+- **Always follow the RPD keyword workflow.** Recognize `RPD`, `REQ`, `AP`, `AR`, `AT`, `SS`, `CC`, `DF`, `DD`, `ET`, `TT`, `CR`, `GC`, `WT`, `!!` as workflow commands (case-insensitive).
+- **Full workflow sequence:** `REQ → AP → AR (loop) → AT → SS → TT → CR (loop) → ET (if any) → DD → GC`.
+- **Stop for approval** after `REQ/AP/AR` before proceeding to implementation.
+- **Docs live under `.docs/`:** reqs in `.docs/reqs/`, plans in `.docs/plans/`, tests in `.docs/tests/`, done in `.docs/done/`.
+
+---
+
+## Worktree Rules (Strict)
+
+For large features and significant bug fixes, use a git worktree to isolate implementation:
+
+1. **Trigger:** Use the `WT` RPD keyword to create a worktree after planning (`AP/AR`) is approved.
+2. **Canonical command:**
+   ```sh
+   git worktree add ../feature-{name} -b feature/{name} main
+   ```
+3. **Move docs** (not copy) — move the matching REQ and AP docs into the new worktree.
+4. **Initialize the worktree** after creation:
+   ```sh
+   cd ../feature-{name}
+   export NVM_DIR="$HOME/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+   nvm use
+   npm install
+   ```
+5. **Continue all implementation** (`SS → TT → CR → DD → GC`) inside the worktree.
 
 ---
 
