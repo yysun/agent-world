@@ -5,10 +5,10 @@
  * - Validate system prompt formatting behavior for LLM-ready messages.
  *
  * Features tested:
- * - Appends `working directory: <value>` line to system prompts.
- * - Uses world `working_directory` value when configured.
- * - Falls back to core default working directory when world `working_directory` is missing.
  * - Injects progressive `<available_skills>` prompt section from skill registry data.
+ * - Omits the skills section when no skills are available after filtering.
+ * - Separates authored prompt content from runtime injections with a structural delimiter.
+ * - Keeps prompt assembly separator-free when authored content is empty.
  *
  * Implementation notes:
  * - Uses real in-memory world/agent setup via shared test helpers.
@@ -24,14 +24,13 @@
  * - 2026-02-15: Added coverage to ensure system-level mention-format rule is injected even when agent has no custom system prompt.
  * - 2026-02-15: Added coverage for concise cross-agent addressing rule injection (`@<agent_id>, <message>`).
  * - 2026-02-14: Added coverage for `## Agent Skills` prompt injection and load_skill guidance.
- * - 2026-02-14: Updated default cwd expectation to core default working directory (user home fallback), replacing `./`.
- * - 2026-02-13: Added coverage for required working-directory system prompt suffix.
+ * - 2026-03-06: Updated expectations for separator-based runtime prompt assembly and empty skills suppression.
  */
 
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { createAgent, updateWorld } from '../../core/managers.js';
 import { LLMProvider } from '../../core/types.js';
-import { getDefaultWorkingDirectory, prepareMessagesForLLM } from '../../core/utils.js';
+import { prepareMessagesForLLM } from '../../core/utils.js';
 import { getSkillSourceScope, getSkillsForSystemPrompt, waitForInitialSkillSync } from '../../core/skill-registry.js';
 import { setupTestWorld } from '../helpers/world-test-setup.js';
 
@@ -89,7 +88,7 @@ describe('prepareMessagesForLLM', () => {
     delete process.env.AGENT_WORLD_DISABLED_PROJECT_SKILLS;
   });
 
-  test('appends configured world working directory to system prompt', async () => {
+  test('separates authored prompt from runtime-injected sections', async () => {
     await updateWorld(worldId(), {
       variables: 'project_name=agent-world\nworking_directory=/tmp/agent-world'
     });
@@ -105,7 +104,7 @@ describe('prepareMessagesForLLM', () => {
     const messages = await prepareMessagesForLLM(worldId(), agent, null);
     expect(messages[0]?.role).toBe('system');
     expect(messages[0]?.content).toContain('You are helping agent-world.');
-    expect(messages[0]?.content).toContain('working directory scope: /tmp/agent-world');
+    expect(messages[0]?.content).toContain('You are helping agent-world.\n\n---\n## Agent Skills');
     expect(messages[0]?.content).toContain('## Agent Skills');
     expect(messages[0]?.content).toContain('<available_skills>');
     expect(messages[0]?.content).toContain('<id>apprun-skills</id>');
@@ -134,28 +133,57 @@ describe('prepareMessagesForLLM', () => {
 
     const messages = await prepareMessagesForLLM(worldId(), agent, null);
     expect(messages[0]?.role).toBe('system');
-    expect(messages[0]?.content).toContain('working directory scope: ');
     expect(messages[0]?.content).toContain('## Agent Skills');
     expect(messages[0]?.content).toContain('Only use @mentions when handing off to another agent; for normal user replies, do not mention agents.');
     expect(messages[0]?.content).toContain('Place each @<agent> at the start of a paragraph.');
+    expect(messages[0]?.content).not.toContain('\n\n---\n');
   });
 
-  test('appends core default working directory when world value is missing', async () => {
+  test('omits the Agent Skills section when no skills are available', async () => {
+    mockedWaitForInitialSkillSync.mockResolvedValue({
+      added: 0,
+      updated: 0,
+      removed: 0,
+      unchanged: 0,
+      total: 0,
+    });
+    mockedGetSkillsForSystemPrompt.mockReturnValue([]);
+
     await updateWorld(worldId(), {
       variables: 'project_name=agent-world'
     });
 
     const agent = await createAgent(worldId(), {
-      name: 'Prompt Agent Default',
+      name: 'Prompt Agent No Skills',
       type: 'assistant',
       provider: LLMProvider.OPENAI,
       model: 'gpt-4',
-      systemPrompt: 'You are helping {{ project_name }}.'
+      systemPrompt: 'You are helping agent-world.'
     });
 
     const messages = await prepareMessagesForLLM(worldId(), agent, null);
     expect(messages[0]?.role).toBe('system');
-    expect(messages[0]?.content).toContain(`working directory scope: ${getDefaultWorkingDirectory()}`);
+    expect(messages[0]?.content).toContain('You are helping agent-world.\n\n---\nOnly use @mentions when handing off to another agent; for normal user replies, do not mention agents.');
+    expect(messages[0]?.content).not.toContain('## Agent Skills');
+    expect(messages[0]?.content).not.toContain('<available_skills>');
+  });
+
+  test('does not add a separator when the authored prompt is empty', async () => {
+    await updateWorld(worldId(), {
+      variables: 'working_directory=/tmp/agent-world'
+    });
+
+    const agent = await createAgent(worldId(), {
+      name: 'Prompt Agent Empty Prompt',
+      type: 'assistant',
+      provider: LLMProvider.OPENAI,
+      model: 'gpt-4',
+      systemPrompt: ''
+    });
+
+    const messages = await prepareMessagesForLLM(worldId(), agent, null);
+    expect(messages[0]?.role).toBe('system');
+    expect(messages[0]?.content).not.toContain('\n\n---\n');
     expect(messages[0]?.content).toContain('## Agent Skills');
   });
 

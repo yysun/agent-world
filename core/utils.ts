@@ -34,6 +34,7 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-03-06: Suppressed empty Agent Skills injections and grouped runtime prompt sections behind a structural separator.
  * - 2026-03-01: Added explicit `grep` prompt guidance to require `includePattern` (no leading dot) and reduce tool-parameter validation failures.
  * - 2026-03-01: Added global pre-tool planning guidance so all tool-enabled agents narrate next steps before calling tools.
  * - 2026-03-01: Added `available_skills` prompt rule requiring explicit post-`load_skill` acknowledgment before taking action.
@@ -309,6 +310,10 @@ async function buildAgentSkillsPromptSection(): Promise<string> {
     return !disabledGlobalSkillIds.has(skillId);
   });
 
+  if (filteredAvailableSkills.length === 0) {
+    return '';
+  }
+
   const lines: string[] = [
     '## Agent Skills',
     'You have access to a library of agent skills. Find skill by:',
@@ -582,21 +587,13 @@ export async function prepareMessagesForLLM(
   // IDEMPOTENCE: Always add a system message first.
   // System messages are NEVER saved to storage.
   const interpolatedPrompt = interpolateTemplateVariables(freshSystemPrompt || '', worldEnvMap);
-  const workingDirectory = getEnvValueFromText(worldVariablesText, 'working_directory') || getDefaultWorkingDirectory();
-  const shellExecutionRule = 'When using `shell_cmd`, execute commands only within this trusted working directory scope: ' + workingDirectory;
-  const promptWithShellExecutionRule = interpolatedPrompt.trim().length > 0
-    ? (interpolatedPrompt.endsWith('\n')
-      ? `${interpolatedPrompt}${shellExecutionRule}`
-      : `${interpolatedPrompt}\n${shellExecutionRule}`)
-    : shellExecutionRule;
   const agentSkillsPromptSection = await buildAgentSkillsPromptSection();
-  const promptWithSkills = promptWithShellExecutionRule.endsWith('\n')
-    ? `${promptWithShellExecutionRule}\n${agentSkillsPromptSection}`
-    : `${promptWithShellExecutionRule}\n\n${agentSkillsPromptSection}`;
   const mentionFormatRule = buildAgentMentionFormatRule();
-  const promptWithMentionRule = promptWithSkills.endsWith('\n')
-    ? `${promptWithSkills}\n${mentionFormatRule}`
-    : `${promptWithSkills}\n\n${mentionFormatRule}`;
+  const injectedSections = [agentSkillsPromptSection, mentionFormatRule].filter((section) => section.length > 0);
+  const injectedPrompt = injectedSections.join('\n\n');
+  const promptWithMentionRule = interpolatedPrompt.trim().length > 0 && injectedPrompt.length > 0
+    ? `${interpolatedPrompt}\n\n---\n${injectedPrompt}`
+    : (interpolatedPrompt || injectedPrompt);
 
   messages.push({
     role: 'system',

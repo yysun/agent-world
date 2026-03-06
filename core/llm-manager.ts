@@ -94,6 +94,7 @@
  * - Queue-based serialization prevents API rate limits and resource conflicts
  *
  * Recent Changes:
+ * - 2026-03-06: Moved `shell_cmd` working-directory prompt guidance into tool-aware system-message injection.
  * - 2026-03-06: Widened queue timeout field typing to `number` so runtime timeout overrides compile cleanly.
  * - 2026-03-05: Added chat-scoped LLM timeout status system events (`taking too long` warning + hard-timeout event), enforced timeout-triggered abort signaling in queue processing, and classified queue timeouts separately from user cancellations.
  * - 2026-03-05: Switched LLM queue timeout defaults to shared reliability config.
@@ -139,7 +140,7 @@ import {
   generateGoogleResponse
 } from './google-direct.js';
 
-import { buildToolUsagePromptSection, generateId } from './utils.js';
+import { buildToolUsagePromptSection, generateId, getDefaultWorkingDirectory, getEnvValueFromText } from './utils.js';
 import { createCategoryLogger } from './logger.js';
 import {
   buildFeaturePathCorrelation,
@@ -289,18 +290,28 @@ function emitLLMResponseDiagnostics(params: {
  * Append tool usage guidance to system message when tools are available
  * Returns a new array with updated system message (doesn't mutate original)
  */
-function appendToolRulesToSystemMessage(messages: AgentMessage[], toolNames: string[]): AgentMessage[] {
+export function appendToolRulesToSystemMessage(
+  messages: AgentMessage[],
+  toolNames: string[],
+  options?: { workingDirectory?: string }
+): AgentMessage[] {
   if (messages.length === 0 || messages[0].role !== 'system') {
     return messages;
   }
 
   const systemMessage = messages[0];
+  const normalizedToolNames = new Set(toolNames.map((toolName) => String(toolName || '').trim().toLowerCase()).filter(Boolean));
   const toolUsageSection = buildToolUsagePromptSection({ toolNames });
-  if (!toolUsageSection) {
+  const workingDirectory = typeof options?.workingDirectory === 'string' ? options.workingDirectory.trim() : '';
+  const shellExecutionRule = normalizedToolNames.has('shell_cmd') && workingDirectory
+    ? 'When using `shell_cmd`, execute commands only within this trusted working directory scope: ' + workingDirectory
+    : '';
+  const injectedSections = [shellExecutionRule, toolUsageSection].filter(Boolean);
+  if (injectedSections.length === 0) {
     return messages;
   }
 
-  const toolRules = ['', '', toolUsageSection].join('\n');
+  const toolRules = `\n\n${injectedSections.join('\n\n')}`;
 
   return [
     { ...systemMessage, content: systemMessage.content + toolRules },
@@ -775,9 +786,10 @@ async function executeStreamAgentResponse(
     const mcpTools = await getMCPToolsForWorld(world.id);
     const mcpToolNames = Object.keys(mcpTools);
     const hasMCPTools = mcpToolNames.length > 0;
+    const workingDirectory = getEnvValueFromText(world.variables, 'working_directory') || getDefaultWorkingDirectory();
 
     // Add tool usage instructions to system message when tools are available
-    preparedMessages = appendToolRulesToSystemMessage(preparedMessages, mcpToolNames);
+    preparedMessages = appendToolRulesToSystemMessage(preparedMessages, mcpToolNames, { workingDirectory });
 
     if (hasMCPTools) {
       loggerMCP.debug(`LLM: Including ${Object.keys(mcpTools).length} MCP tools for agent=${agent.id}, world=${world.id}`);
@@ -994,9 +1006,10 @@ async function executeGenerateAgentResponse(
   const mcpTools = skipTools ? {} : await getMCPToolsForWorld(world.id);
   const mcpToolNames = Object.keys(mcpTools);
   const hasMCPTools = mcpToolNames.length > 0;
+  const workingDirectory = getEnvValueFromText(world.variables, 'working_directory') || getDefaultWorkingDirectory();
 
   // Add tool usage instructions to system message when tools are available
-  preparedMessages = appendToolRulesToSystemMessage(preparedMessages, mcpToolNames);
+  preparedMessages = appendToolRulesToSystemMessage(preparedMessages, mcpToolNames, { workingDirectory });
 
   emitLLMRequestDiagnostics({
     world,
