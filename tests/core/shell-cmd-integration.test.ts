@@ -44,6 +44,7 @@ import * as path from 'path';
 import { getWorld } from '../../core/managers.js';
 import { getMCPToolsForWorld } from '../../core/mcp-server-registry.js';
 import { LLMProvider } from '../../core/types.js';
+import { parseToolExecutionEnvelopeContent } from '../../core/tool-execution-envelope.js';
 import { setupTestWorld } from '../helpers/world-test-setup.js';
 import { clearExecutionHistory, getExecutionHistory } from '../../core/shell-cmd-tool.js';
 
@@ -342,6 +343,60 @@ describe('shell_cmd integration with worlds', () => {
 
     expect(result).toContain('<skill_context id="__missing_skill_for_integration_test__">');
     expect(result).toContain('not found');
+  });
+
+  test('should return shell_cmd tool execution envelope in persisted runtime mode', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    const rawResult = await shellCmdTool.execute(
+      {
+        command: 'echo',
+        parameters: ['enveloped-shell-output']
+      },
+      undefined,
+      undefined,
+      {
+        llmResultMode: 'minimal',
+        persistToolEnvelope: true,
+        toolCallId: 'tc-shell-envelope',
+        world: {
+          id: worldId(),
+          variables: `working_directory=${workspaceRoot}`
+        }
+      }
+    );
+
+    const envelope = parseToolExecutionEnvelopeContent(rawResult);
+    expect(envelope).not.toBeNull();
+    expect(envelope?.tool).toBe('shell_cmd');
+    expect(envelope?.tool_call_id).toBe('tc-shell-envelope');
+    expect(String(envelope?.result || '')).toContain('status: success');
+    expect(JSON.stringify(envelope?.preview || null)).toContain('enveloped-shell-output');
+  });
+
+  test('should return load_skill tool execution envelope in persisted runtime mode', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const loadSkillTool = tools.load_skill;
+
+    const rawResult = await loadSkillTool.execute(
+      {
+        skill_id: '__missing_skill_for_integration_test__'
+      },
+      undefined,
+      undefined,
+      {
+        persistToolEnvelope: true,
+        toolCallId: 'tc-load-skill-envelope',
+      }
+    );
+
+    const envelope = parseToolExecutionEnvelopeContent(rawResult);
+    expect(envelope).not.toBeNull();
+    expect(envelope?.tool).toBe('load_skill');
+    expect(envelope?.tool_call_id).toBe('tc-load-skill-envelope');
+    expect(String(envelope?.result || '')).toContain('not found');
+    expect(JSON.stringify(envelope?.preview || null)).toContain('__missing_skill_for_integration_test__');
   });
 
   test('should have correct tool schema', async () => {

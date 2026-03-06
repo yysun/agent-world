@@ -15,6 +15,7 @@
  * - NOT used directly by llm-manager.ts (receives pre-filtered messages from utils.ts)
  *
  * Changes:
+ * - 2026-03-06: Unwrap persisted tool execution envelopes so only canonical `result` content flows back into LLM continuation.
  * - 2026-02-28: Added canonical `llm.prep` category emission while preserving legacy `llm.message-prep` logs for migration compatibility.
  * - 2026-02-11: Added unresolved-tool-call cleanup.
  * - Assistant `tool_calls` are pruned to only IDs that have matching tool-result messages.
@@ -29,6 +30,7 @@
  */
 
 import { createCategoryLogger } from './logger.js';
+import { parseToolExecutionEnvelopeContent, stringifyToolExecutionResult } from './tool-execution-envelope.js';
 import type { ChatMessage } from './types.js';
 
 const loggerLegacy = createCategoryLogger('llm.message-prep');
@@ -224,6 +226,11 @@ export function filterClientSideMessages(messages: ChatMessage[]): ChatMessage[]
           toolCallId: clonedMessage.tool_call_id
         });
         continue;
+      }
+
+      const envelope = parseToolExecutionEnvelopeContent(clonedMessage.content || '');
+      if (envelope) {
+        clonedMessage.content = stringifyToolExecutionResult(envelope.result);
       }
     }
 

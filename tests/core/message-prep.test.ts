@@ -7,6 +7,7 @@
  * - Uses OpenAI-style ChatMessage fixtures with mixed assistant/tool sequences
  * - Asserts ordering and orphaned tool-message cleanup after filtering
  * Recent changes:
+ * - 2026-03-06: Added coverage that persisted tool execution envelopes are unwrapped to their canonical `result` before LLM continuation.
  * - 2026-02-11: Added regression coverage for unresolved assistant tool_calls cleanup.
  * - Removed legacy decision-flow wording and switched to neutral client tool names
  */
@@ -487,5 +488,36 @@ describe('filterClientSideMessages', () => {
     expect(result[1].tool_call_id).toBe('call_resolved');
     expect(result[2].role).toBe('assistant');
     expect(result[2].content).toBe('Done');
+  });
+
+  it('should unwrap tool execution envelopes to their result payload for llm preparation', () => {
+    const messages: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'shell_cmd', arguments: '{}' } }
+        ]
+      },
+      {
+        role: 'tool',
+        tool_call_id: 'call_1',
+        content: JSON.stringify({
+          __type: 'tool_execution_envelope',
+          version: 1,
+          tool: 'shell_cmd',
+          tool_call_id: 'call_1',
+          status: 'completed',
+          preview: { kind: 'text', renderer: 'text', text: 'preview only' },
+          result: 'status: success\nexit_code: 0',
+        })
+      }
+    ];
+
+    const result = filterClientSideMessages(messages);
+
+    expect(result).toHaveLength(2);
+    expect(result[1].role).toBe('tool');
+    expect(result[1].content).toBe('status: success\nexit_code: 0');
   });
 });

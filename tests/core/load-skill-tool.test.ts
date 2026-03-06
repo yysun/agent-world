@@ -35,6 +35,7 @@ import {
   reconstructSkillApprovalsFromMessages,
 } from '../../core/load-skill-tool.js';
 import { requestWorldOption } from '../../core/hitl.js';
+import { parseToolExecutionEnvelopeContent } from '../../core/tool-execution-envelope.js';
 import {
   executeShellCommand,
   formatResultForLLM,
@@ -188,6 +189,45 @@ describe('core/load-skill-tool', () => {
     const result = await tool.execute({ skill_id: 'pdf-extract' });
 
     expect(result).toContain('Skill purpose: pdf-extract');
+  });
+
+  it('adds stable preview URLs for persisted load_skill artifact previews', async () => {
+    mockedGetSkill.mockReturnValue({
+      skill_id: 'pdf-extract',
+      description: 'Extract PDF content',
+      hash: 'e99a18ad',
+      lastUpdated: '2026-02-14T12:00:00.000Z',
+    });
+    mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
+    vi.mocked(fs.readFile).mockResolvedValue(
+      '# PDF Extraction Instructions\nSee [Rendered score](assets/score.svg)\n' as any,
+    );
+    vi.mocked((fs as any).stat).mockImplementation(async (targetPath: string) => {
+      if (String(targetPath).endsWith('/skills/pdf-extract/assets/score.svg')) {
+        return { isFile: () => true, isDirectory: () => false, size: 321 };
+      }
+      throw new Error('ENOENT');
+    });
+
+    const tool = createLoadSkillToolDefinition();
+    const result = await tool.execute(
+      { skill_id: 'pdf-extract' },
+      undefined,
+      undefined,
+      {
+        world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+        chatId: 'chat-1',
+        workingDirectory: '/skills/pdf-extract',
+        persistToolEnvelope: true,
+      },
+    );
+
+    const envelope = parseToolExecutionEnvelopeContent(String(result));
+
+    expect(envelope?.tool).toBe('load_skill');
+    expect(JSON.stringify(envelope?.preview || null)).toContain(
+      '/api/tool-artifact?path=%2Fskills%2Fpdf-extract%2Fassets%2Fscore.svg&worldId=world-1',
+    );
   });
 
   it('returns structured not-found output when skill id does not exist', async () => {

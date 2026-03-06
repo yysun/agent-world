@@ -155,4 +155,41 @@ describe('message content tool status label', () => {
     expect(content).toContain('Result:');
     expect(content).toContain('"status":"failed"');
   });
+
+  it('renders preview text instead of raw envelope json for enveloped tool rows', () => {
+    const content = getToolBodyContent({
+      role: 'tool',
+      tool_call_id: 'call_shell_2',
+      content: JSON.stringify({
+        __type: 'tool_execution_envelope',
+        version: 1,
+        tool: 'shell_cmd',
+        tool_call_id: 'call_shell_2',
+        status: 'completed',
+        preview: {
+          kind: 'text',
+          renderer: 'text',
+          text: 'status: success\nexit_code: 0\nstdout_preview:\npreview only',
+        },
+        result: 'status: success\nexit_code: 0\nstdout_preview:\npreview only',
+      }),
+      linkedToolRequest: {
+        role: 'assistant',
+        tool_calls: [{
+          id: 'call_shell_2',
+          type: 'function',
+          function: {
+            name: 'shell_cmd',
+            arguments: '{"command":"echo","parameters":["preview only"]}'
+          }
+        }]
+      }
+    });
+
+    expect(content).toContain('Args:');
+    expect(content).toContain('shell_cmd');
+    expect(content).toContain('Result:');
+    expect(content).toContain('preview only');
+    expect(content).not.toContain('tool_execution_envelope');
+  });
 });

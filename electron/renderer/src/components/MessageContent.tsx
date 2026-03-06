@@ -13,6 +13,7 @@
  * - Helper functions are scoped to this module because only this component uses them.
  *
  * Recent Changes:
+ * - 2026-03-06: Render persisted tool execution envelope previews in tool bodies and status helpers after reload.
  * - 2026-03-06: Recognize canonical shell `validation_error` and `approval_denied` result reasons as failed tool outcomes in renderer status labels.
  * - 2026-02-28: Added linked tool-request backfill support so tool-result cards render combined `Args` + `Result` even when `tool_calls` live on a separate assistant row.
  * - 2026-02-28: Updated tool status label format to `tool - <name> - <status>` and added optional resolved-name override for history rows missing direct tool metadata.
@@ -42,6 +43,11 @@ import { useMemo } from 'react';
 import { renderMarkdown } from '../utils/markdown';
 import { formatLogMessage } from '../utils/formatting';
 import { isToolRelatedMessage } from '../utils/message-utils';
+import {
+  getToolPreviewDisplayText,
+  parseToolExecutionEnvelopeContent,
+  stringifyToolEnvelopeResult,
+} from '../utils/tool-execution-envelope';
 import ThinkingIndicator from './ThinkingIndicator';
 
 function isStreamingPlaceholderContent(content) {
@@ -97,6 +103,15 @@ function toToolResultRecord(content) {
   const text = String(content || '').trim();
   if (!text) {
     return null;
+  }
+
+  const envelope = parseToolExecutionEnvelopeContent(text);
+  if (envelope) {
+    const resultText = stringifyToolEnvelopeResult(envelope.result);
+    if (resultText && resultText !== text) {
+      return toToolResultRecord(resultText) || envelope;
+    }
+    return envelope;
   }
   try {
     const parsed = JSON.parse(text);
@@ -201,7 +216,7 @@ function buildCombinedToolResultContent(results) {
   }
 
   if (results.length === 1) {
-    return String(results[0]?.content || '');
+    return getToolPreviewDisplayText(results[0]) || String(results[0]?.content || '');
   }
 
   return results
@@ -209,7 +224,7 @@ function buildCombinedToolResultContent(results) {
       const toolName = String(result?.toolName || '').trim();
       const toolCallId = String(result?.tool_call_id || result?.messageId || '').trim();
       const title = toolName || toolCallId || `tool-${index + 1}`;
-      const content = String(result?.content || '').trim() || '(no output)';
+      const content = String(getToolPreviewDisplayText(result) || result?.content || '').trim() || '(no output)';
       return `[${title}]\n${content}`;
     })
     .join('\n\n');
@@ -272,7 +287,7 @@ function buildToolRequestContent(message) {
 function buildCombinedRequestAndResultContent(message, combinedResults) {
   const requestText = buildToolRequestContent(message);
   const resultText = buildCombinedToolResultContent(combinedResults) || '(no output)';
-  const planningText = String(message?.content || '').trim();
+  const planningText = String(message?.role === 'assistant' ? message?.content || '' : '').trim();
   const hasMeaningfulPlanningText = planningText.length > 0 && !/^calling tool\s*:/i.test(planningText);
   if (hasMeaningfulPlanningText) {
     return `${planningText}\n\nArgs:\n${requestText}\n\nResult:\n${resultText}`;
@@ -301,7 +316,7 @@ export function getToolBodyContent(message) {
     return buildCombinedRequestAndResultContent(message, resultRows);
   }
 
-  return String(message?.content || '');
+  return String(getToolPreviewDisplayText(message) || message?.content || '');
 }
 
 export default function MessageContent({

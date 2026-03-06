@@ -89,6 +89,13 @@ import { publishSSE } from './events/publishers.js';
 import { getDefaultWorkingDirectory, getEnvValueFromText } from './utils.js';
 import { getSkillSourcePath, getSkills } from './skill-registry.js';
 import {
+  buildToolArtifactPreviewUrl,
+  createArtifactToolPreview,
+  createTextToolPreview,
+  serializeToolExecutionEnvelope,
+  type ToolExecutionEnvelope,
+} from './tool-execution-envelope.js';
+import {
   createShellProcessExecution,
   transitionShellProcessExecution,
   attachShellProcessHandle,
@@ -201,6 +208,16 @@ interface OutputSnippet {
 interface OutputFormattingOptions {
   detail?: 'minimal' | 'full';
   maxOutputChars?: number;
+}
+
+interface ShellToolReturnOptions {
+  llmResultMode: 'minimal' | 'verbose';
+  outputFormat: 'markdown' | 'json';
+  outputDetail: 'minimal' | 'full';
+  toolCallId?: string;
+  persistToolEnvelope?: boolean;
+  artifacts?: CommandExecutionArtifact[];
+  worldId?: string;
 }
 
 const DEFAULT_MIN_OUTPUT_CHARS = 400;
@@ -1839,6 +1856,118 @@ export function formatShellToolErrorResultForLLM(options: {
   });
 }
 
+function buildShellToolResultContent(
+  result: CommandExecutionResult,
+  options: Omit<ShellToolReturnOptions, 'persistToolEnvelope' | 'toolCallId'>
+): string {
+  if (options.llmResultMode === 'minimal') {
+    if (options.outputFormat === 'json') {
+      return JSON.stringify(formatPreviewShellResult(result), null, 2);
+    }
+    return formatPreviewShellResultForLLM(result);
+  }
+
+  if (options.outputFormat === 'json') {
+    return JSON.stringify(
+      formatStructuredResult(result, options.artifacts || [], { detail: options.outputDetail }),
+      null,
+      2,
+    );
+  }
+
+  return formatResultForLLM(result, { detail: options.outputDetail });
+}
+
+function buildShellToolPreviewEnvelope(
+  result: CommandExecutionResult,
+  options: Omit<ShellToolReturnOptions, 'persistToolEnvelope'>,
+): ToolExecutionEnvelope<string> {
+  const resultContent = buildShellToolResultContent(result, {
+    llmResultMode: options.llmResultMode,
+    outputFormat: options.outputFormat,
+    outputDetail: options.outputDetail,
+    artifacts: options.artifacts,
+  });
+  const previewItems = [
+    createTextToolPreview(
+      options.outputFormat === 'json'
+        ? resultContent
+        : formatResultForLLM(result, { detail: options.outputDetail }),
+      { markdown: options.outputFormat !== 'json', title: 'shell_cmd result' },
+    ),
+    ...(options.artifacts || []).map((artifact) =>
+      createArtifactToolPreview({
+        path: artifact.path,
+        bytes: artifact.bytes,
+        display_name: artifact.path,
+        ...(options.worldId ? { url: buildToolArtifactPreviewUrl({ path: artifact.path, worldId: options.worldId }) } : {}),
+      })
+    ),
+  ];
+
+  return {
+    __type: 'tool_execution_envelope',
+    version: 1,
+    tool: 'shell_cmd',
+    ...(options.toolCallId ? { tool_call_id: options.toolCallId } : {}),
+    status: result.exitCode === 0 && !result.error && !result.timedOut && !result.canceled ? 'completed' : 'failed',
+    preview: previewItems,
+    result: resultContent,
+  };
+}
+
+function formatShellToolReturnContent(
+  result: CommandExecutionResult,
+  options: ShellToolReturnOptions,
+): string {
+  if (!options.persistToolEnvelope) {
+    return buildShellToolResultContent(result, {
+      llmResultMode: options.llmResultMode,
+      outputFormat: options.outputFormat,
+      outputDetail: options.outputDetail,
+      artifacts: options.artifacts,
+    });
+  }
+
+  return serializeToolExecutionEnvelope(buildShellToolPreviewEnvelope(result, options));
+}
+
+export function formatShellToolErrorEnvelopeContent(options: {
+  command?: unknown;
+  parameters?: unknown;
+  error: unknown;
+  failureReason?: ShellFailureReason;
+  toolCallId?: string;
+}): string {
+  const errorMessage = options.error instanceof Error ? options.error.message : String(options.error);
+  const parameters = Array.isArray(options.parameters)
+    ? options.parameters.map((parameter) => String(parameter))
+    : [];
+
+  const result: CommandExecutionResult = {
+    executionId: 'shell-tool-error',
+    command: typeof options.command === 'string' && options.command.trim()
+      ? options.command
+      : '<shell_cmd>',
+    parameters,
+    stdout: '',
+    stderr: errorMessage,
+    exitCode: null,
+    signal: null,
+    error: errorMessage,
+    failureReason: options.failureReason || inferShellFailureReason(errorMessage) || 'execution_error',
+    executedAt: new Date(),
+    duration: 0,
+  };
+
+  return serializeToolExecutionEnvelope(buildShellToolPreviewEnvelope(result, {
+    llmResultMode: 'minimal',
+    outputFormat: 'markdown',
+    outputDetail: 'minimal',
+    toolCallId: options.toolCallId,
+  }));
+}
+
 /**
  * Format command execution result for LLM consumption
  * Provides a human-readable summary of the execution with improved markdown formatting
@@ -2011,6 +2140,7 @@ export function createShellCmdToolDefinition() {
       const llmResultMode = typeof context?.llmResultMode === 'string'
         ? context.llmResultMode === 'verbose' ? 'verbose' : 'minimal'
         : 'verbose';
+      const persistToolEnvelope = context?.persistToolEnvelope === true;
 
       const validation = validateToolParameters(args, toolSchema, 'shell_cmd');
       if (!validation.valid) {
@@ -2027,15 +2157,15 @@ export function createShellCmdToolDefinition() {
           executedAt: new Date(),
           duration: 0
         };
-
-        if (llmResultMode === 'minimal') {
-          if (validation.correctedArgs?.output_format === 'json') {
-            return JSON.stringify(formatPreviewShellResult(validationResult), null, 2);
-          }
-          return formatPreviewShellResultForLLM(validationResult);
-        }
-
-        return formatResultForLLM(validationResult);
+        const validationOutputFormat = validation.correctedArgs?.output_format === 'json' ? 'json' : 'markdown';
+        return formatShellToolReturnContent(validationResult, {
+          llmResultMode,
+          outputFormat: validationOutputFormat,
+          outputDetail: 'minimal',
+          toolCallId: typeof context?.toolCallId === 'string' ? context.toolCallId : undefined,
+          persistToolEnvelope,
+          worldId: typeof context?.world?.id === 'string' ? context.world.id : undefined,
+        });
       }
 
       const {
@@ -2198,23 +2328,22 @@ export function createShellCmdToolDefinition() {
         });
       }
 
-      if (llmResultMode === 'minimal') {
-        if (outputFormat === 'json') {
-          return JSON.stringify(formatPreviewShellResult(result), null, 2);
-        }
-        return formatPreviewShellResultForLLM(result);
-      }
-
       const validatedArtifactPaths = Array.isArray(artifactPaths)
         ? artifactPaths.filter((artifactPath: any) => typeof artifactPath === 'string')
         : [];
-      const artifacts = await collectCommandArtifacts(validatedArtifactPaths, resolvedDirectory);
+      const artifacts = llmResultMode === 'minimal'
+        ? []
+        : await collectCommandArtifacts(validatedArtifactPaths, resolvedDirectory);
 
-      if (outputFormat === 'json') {
-        return JSON.stringify(formatStructuredResult(result, artifacts, { detail: outputDetail }), null, 2);
-      }
-
-      return formatResultForLLM(result, { detail: outputDetail });
+      return formatShellToolReturnContent(result, {
+        llmResultMode,
+        outputFormat,
+        outputDetail,
+        toolCallId: typeof context?.toolCallId === 'string' ? context.toolCallId : undefined,
+        persistToolEnvelope,
+        artifacts,
+        worldId: typeof context?.world?.id === 'string' ? context.world.id : undefined,
+      });
     }
   };
 }

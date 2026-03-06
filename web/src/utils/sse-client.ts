@@ -920,9 +920,10 @@ export const handleToolResult = <T extends SSEComponentState>(state: T, data: an
   );
 
   if (toolMessageIndex !== -1) {
-    const resultPreview = typeof toolExecution.result === 'string'
-      ? toolExecution.result.slice(0, 100)
-      : JSON.stringify(toolExecution.result).slice(0, 100);
+    const previewSource = toolExecution.preview !== undefined ? toolExecution.preview : toolExecution.result;
+    const resultPreview = typeof previewSource === 'string'
+      ? previewSource.slice(0, 100)
+      : JSON.stringify(previewSource).slice(0, 100);
 
     messages[toolMessageIndex] = {
       ...messages[toolMessageIndex],

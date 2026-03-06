@@ -13,6 +13,7 @@
  * - Helper functions are intentionally colocated to preserve behavior parity.
  *
  * Recent Changes:
+ * - 2026-03-06: Unwrap persisted tool execution envelopes when deriving tool success/failure card styling after reload.
  * - 2026-03-06: Recognize canonical shell `validation_error` and `approval_denied` tool-result reasons as failed outcomes for renderer card styling.
  * - 2026-03-04: Added optional `fullWidthUserMessage` card-style flag so non-chat user cards can span full width.
  * - 2026-03-04: Added optional `showLeftBorder` card-style flag so alternate world views can hide message left accents.
@@ -27,6 +28,10 @@
  */
 
 import { HUMAN_SENDER_VALUES } from '../constants/app-constants';
+import {
+  parseToolExecutionEnvelopeContent,
+  stringifyToolEnvelopeResult,
+} from './tool-execution-envelope';
 
 function isHitlToolCallPlaceholderMessage(message) {
   const role = String(message?.role || '').trim().toLowerCase();
@@ -343,6 +348,16 @@ function parseToolResultRecord(content) {
   const text = String(content || '').trim();
   if (!text) {
     return null;
+  }
+
+  const envelope = parseToolExecutionEnvelopeContent(text);
+  if (envelope) {
+    const resultText = stringifyToolEnvelopeResult(envelope.result);
+    if (resultText && resultText !== text) {
+      const parsedResult = parseToolResultRecord(resultText);
+      return parsedResult || envelope;
+    }
+    return envelope;
   }
 
   try {

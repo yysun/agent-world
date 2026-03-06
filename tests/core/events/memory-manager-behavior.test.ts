@@ -15,6 +15,7 @@
  * - No real filesystem, database, or external LLM/tool network calls.
  *
  * Recent changes:
+ * - 2026-03-06: Added coverage ensuring live `tool-result` events publish envelope preview payloads instead of truncated serialized envelope JSON.
  * - 2026-03-06: Added coverage for canonical shell approval-denied failure reasons and null exit codes in continuation-persisted tool results.
  * - 2026-03-06: Updated shell continuation coverage to assert the unified bounded-preview shell result mode across default and skill-script contexts.
  * - 2026-03-01: Added regression coverage that continuation executes `shell_cmd` with `llmResultMode: minimal` by default and upgrades to `smart` for skill-script execution context.
@@ -23,6 +24,7 @@
 import { EventEmitter } from 'events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, World, WorldMessageEvent } from '../../../core/types.js';
+import { parseToolExecutionEnvelopeContent } from '../../../core/tool-execution-envelope.js';
 
 const mocks = vi.hoisted(() => ({
   saveAgent: vi.fn(async () => undefined),
@@ -382,12 +384,62 @@ describe('memory-manager behavior', () => {
       && message.tool_call_id === 'tc-shell-error-1'
     );
 
-    expect(shellErrorMessage?.content).toContain('status: failed');
-    expect(shellErrorMessage?.content).toContain('exit_code: null');
-    expect(shellErrorMessage?.content).toContain('reason: approval_denied');
-    expect(shellErrorMessage?.content).toContain('stderr_preview:');
-    expect(shellErrorMessage?.content).toContain('approval required for remote_download and request was not approved');
-    expect(shellErrorMessage?.content).not.toContain('Error executing tool:');
+    const envelope = parseToolExecutionEnvelopeContent(shellErrorMessage?.content || '');
+    expect(envelope).not.toBeNull();
+    expect(envelope?.tool).toBe('shell_cmd');
+    expect(String(envelope?.result || '')).toContain('status: failed');
+    expect(String(envelope?.result || '')).toContain('exit_code: null');
+    expect(String(envelope?.result || '')).toContain('reason: approval_denied');
+    expect(JSON.stringify(envelope?.preview || null)).toContain('approval required for remote_download and request was not approved');
+    expect(String(envelope?.result || '')).not.toContain('Error executing tool:');
+  });
+
+  it('publishes envelope preview payloads for live tool-result events during continuation', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    const envelopeResult = JSON.stringify({
+      __type: 'tool_execution_envelope',
+      version: 1,
+      tool: 'load_skill',
+      tool_call_id: 'tc-preview-1',
+      status: 'completed',
+      preview: {
+        kind: 'url',
+        renderer: 'youtube',
+        url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      },
+      result: '<skill_context id="demo"></skill_context>',
+    });
+    const execute = vi.fn(async () => envelopeResult);
+    mocks.getMCPToolsForWorld.mockResolvedValue({ load_skill: { execute } });
+
+    mocks.generateAgentResponse
+      .mockResolvedValueOnce(toolCallResult('assistant-preview-1', 'load_skill', '{"skill_id":"demo"}', 'tc-preview-1'))
+      .mockResolvedValueOnce(textResult('assistant-preview-2', 'Done'));
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    await continueLLMAfterToolExecution(world, agent, 'chat-1');
+
+    expect(mocks.publishToolEvent).toHaveBeenCalledWith(
+      world,
+      expect.objectContaining({
+        type: 'tool-result',
+        messageId: 'tc-preview-1',
+        chatId: 'chat-1',
+        toolExecution: expect.objectContaining({
+          toolName: 'load_skill',
+          preview: {
+            kind: 'url',
+            renderer: 'youtube',
+            url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+          },
+          result: '<skill_context id="demo"></skill_context>',
+          resultType: 'string',
+          resultSize: envelopeResult.length,
+        }),
+      }),
+    );
   });
 
   it('handles unknown tool definitions by publishing tool-error and continuing', async () => {

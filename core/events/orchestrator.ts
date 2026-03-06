@@ -97,10 +97,17 @@ import {
 import { publishMessage, publishSSE, publishEvent, publishToolEvent, isStreamingEnabled } from './publishers.js';
 import { handleTextResponse } from './memory-manager.js';
 import {
-  formatShellToolErrorResultForLLM,
+  formatShellToolErrorEnvelopeContent,
   validateShellDirectoryRequest,
   validateShellCommandScope
 } from '../shell-cmd-tool.js';
+import {
+  createTextToolPreview,
+  getToolEventPreviewPayload,
+  parseToolExecutionEnvelopeContent,
+  serializeToolExecutionEnvelope,
+  stringifyToolExecutionResult,
+} from '../tool-execution-envelope.js';
 import {
   beginChatMessageProcessing,
   isMessageProcessingCanceledError,
@@ -253,9 +260,43 @@ function getSuccessfulLoadSkillIdForContinuationSeed(
     return null;
   }
 
-  const normalizedResult = String(serializedToolResult || '');
+  const envelope = parseToolExecutionEnvelopeContent(serializedToolResult);
+  const normalizedResult = envelope
+    ? stringifyToolExecutionResult(envelope.result)
+    : String(serializedToolResult || '');
   const isSuccess = /<skill_context\b/i.test(normalizedResult) && !/<error>/i.test(normalizedResult);
   return isSuccess ? skillId : null;
+}
+
+function formatPersistedToolErrorContent(options: {
+  toolName: string;
+  toolCallId: string;
+  toolArgs?: Record<string, any>;
+  error: unknown;
+}): string {
+  if (options.toolName === 'shell_cmd') {
+    return formatShellToolErrorEnvelopeContent({
+      command: options.toolArgs?.command,
+      parameters: options.toolArgs?.parameters,
+      error: options.error,
+      toolCallId: options.toolCallId,
+    });
+  }
+
+  const message = `Error executing tool: ${options.error instanceof Error ? options.error.message : String(options.error)}`;
+  if (options.toolName === 'load_skill') {
+    return serializeToolExecutionEnvelope({
+      __type: 'tool_execution_envelope',
+      version: 1,
+      tool: 'load_skill',
+      tool_call_id: options.toolCallId,
+      status: 'failed',
+      preview: createTextToolPreview(message),
+      result: message,
+    });
+  }
+
+  return message;
 }
 
 /**
@@ -790,7 +831,8 @@ export async function processAgentMessage(
             abortSignal: processingHandle?.signal,
             workingDirectory: trustedWorkingDirectory,
             agentName: agent.id,
-            llmResultMode: toolCall.function.name === 'shell_cmd' ? 'minimal' : 'verbose'
+            llmResultMode: toolCall.function.name === 'shell_cmd' ? 'minimal' : 'verbose',
+            persistToolEnvelope: toolCall.function.name === 'shell_cmd' || toolCall.function.name === 'load_skill',
           };
 
           const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);
@@ -851,7 +893,9 @@ export async function processAgentMessage(
           const serializedToolResult = typeof toolResult === 'string'
             ? toolResult
             : JSON.stringify(toolResult) ?? String(toolResult);
-          const toolResultPreview = serializedToolResult.slice(0, 4000);
+          const toolEnvelope = parseToolExecutionEnvelopeContent(serializedToolResult);
+          const toolEventPreview = getToolEventPreviewPayload(serializedToolResult);
+          const toolEventResult = toolEnvelope ? toolEnvelope.result : toolResult;
           publishToolEvent(world, {
             agentName: agent.id,
             type: 'tool-result',
@@ -861,15 +905,16 @@ export async function processAgentMessage(
               toolName: toolCall.function.name,
               toolCallId: toolCall.id,
               input: toolArgs,
-              result: toolResultPreview,
-              resultType: typeof toolResult === 'string'
-                ? 'string'
-                : Array.isArray(toolResult)
-                  ? 'array'
-                  : toolResult === null
-                    ? 'null'
+              ...(toolEventPreview !== undefined ? { preview: toolEventPreview } : {}),
+              result: toolEventResult,
+              resultType: Array.isArray(toolEventResult)
+                ? 'array'
+                : toolEventResult === null
+                  ? 'null'
+                  : typeof toolEventResult === 'string'
+                    ? 'string'
                     : 'object',
-              resultSize: toolResultPreview.length
+              resultSize: serializedToolResult.length
             }
           });
 
@@ -1008,13 +1053,12 @@ export async function processAgentMessage(
           // Save error as tool result
           const errorMessage: AgentMessage = {
             role: 'tool',
-            content: toolCall.function.name === 'shell_cmd'
-              ? formatShellToolErrorResultForLLM({
-                command: toolArgs?.command,
-                parameters: toolArgs?.parameters,
-                error,
-              })
-              : `Error executing tool: ${error instanceof Error ? error.message : String(error)}`,
+            content: formatPersistedToolErrorContent({
+              toolName: toolCall.function.name,
+              toolCallId: toolCall.id,
+              toolArgs,
+              error,
+            }),
             tool_call_id: toolCall.id,
             sender: agent.id,
             createdAt: new Date(),

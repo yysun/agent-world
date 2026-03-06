@@ -49,6 +49,16 @@ import {
   formatResultForLLM,
   validateShellCommandScope,
 } from './shell-cmd-tool.js';
+import {
+  buildToolArtifactPreviewUrl,
+  createArtifactToolPreview,
+  createTextToolPreview,
+  createUrlToolPreview,
+  guessMediaTypeFromPath,
+  parseToolExecutionEnvelopeContent,
+  serializeToolExecutionEnvelope,
+  type ToolPreview,
+} from './tool-execution-envelope.js';
 import { createCategoryLogger } from './logger.js';
 import { parseSkillIdListFromEnv } from './skill-settings.js';
 import { requestWorldOption, type HitlOptionResolution } from './hitl.js';
@@ -75,12 +85,15 @@ type LoadSkillToolContext = {
   messages?: Array<Record<string, any>>;
   toolCallId?: string;
   agentName?: string;
+  persistToolEnvelope?: boolean;
 };
 
 type LoadSkillExecutionOutcome = {
   result: string;
   cacheableForRun: boolean;
 };
+
+const LOAD_SKILL_PREVIEW_SCRIPT_OUTPUT_CHARS = 800;
 
 class SkillScriptExecutionError extends Error {
   constructor(message: string) {
@@ -143,6 +156,14 @@ function buildDisabledBySettingsResult(skillId: string): string {
   ].join('\n');
 }
 
+function truncatePreviewText(text: string, maxChars: number = LOAD_SKILL_PREVIEW_SCRIPT_OUTPUT_CHARS): string {
+  const normalized = String(text || '').trim();
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxChars)}\n...[truncated ${normalized.length - maxChars} chars]`;
+}
+
 function isSkillEnabledBySettings(skillId: string): boolean {
   const includeGlobalSkills = String(process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS ?? 'true').toLowerCase() !== 'false';
   const includeProjectSkills = String(process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS ?? 'true').toLowerCase() !== 'false';
@@ -163,16 +184,40 @@ function normalizeScriptPath(scriptPath: string): string {
   return scriptPath.replace(/\\/g, '/').replace(/^\.\//, '').trim();
 }
 
+function normalizeComparablePath(targetPath: string): string {
+  const resolvedPath = path.resolve(targetPath).replace(/\\/g, '/');
+  return process.platform === 'win32'
+    ? resolvedPath.replace(/\/+/g, '/').replace(/\/$/, '')
+    : resolvedPath.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
+}
+
+function normalizeAbsoluteLocalPath(targetPath: string): string {
+  return normalizeComparablePath(targetPath);
+}
+
+function toRootRelativePath(rootPath: string, targetPath: string): string {
+  const normalizedRoot = normalizeComparablePath(rootPath);
+  const normalizedTarget = normalizeComparablePath(targetPath);
+
+  if (normalizedTarget === normalizedRoot) {
+    return '';
+  }
+
+  if (normalizedTarget.startsWith(`${normalizedRoot}/`)) {
+    return normalizedTarget.slice(normalizedRoot.length + 1);
+  }
+
+  return normalizedTarget.replace(/^\/+/, '');
+}
+
 function stripYamlFrontMatter(markdown: string): string {
   const frontMatterPattern = /^\uFEFF?---\s*\r?\n[\s\S]*?\r?\n---\s*(?:\r?\n|$)/;
   return markdown.replace(frontMatterPattern, '');
 }
 
 function isPathWithinRoot(skillRoot: string, targetPath: string): boolean {
-  const normalize = (value: string): string =>
-    path.resolve(value).replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '');
-  const normalizedRoot = normalize(skillRoot);
-  const normalizedTarget = normalize(targetPath);
+  const normalizedRoot = normalizeComparablePath(skillRoot);
+  const normalizedTarget = normalizeComparablePath(targetPath);
   return normalizedTarget === normalizedRoot || normalizedTarget.startsWith(`${normalizedRoot}/`);
 }
 
@@ -224,14 +269,14 @@ async function collectReferenceFiles(skillRoot: string, markdown: string): Promi
     if (linkedPath.startsWith('#')) {
       continue;
     }
-    const absolutePath = path.resolve(skillRoot, linkedPath);
+    const absolutePath = normalizeAbsoluteLocalPath(path.resolve(skillRoot, linkedPath));
     if (!isPathWithinRoot(skillRoot, absolutePath)) {
       continue;
     }
     try {
       const stat = await fs.stat(absolutePath);
       if (stat.isFile()) {
-        collected.add(path.relative(skillRoot, absolutePath).replace(/\\/g, '/'));
+        collected.add(toRootRelativePath(skillRoot, absolutePath));
       }
     } catch {
       // Ignore missing links.
@@ -261,11 +306,11 @@ async function collectReferenceFiles(skillRoot: string, markdown: string): Promi
     entries.sort((left, right) => left.name.localeCompare(right.name));
 
     for (const entry of entries) {
-      const absolutePath = path.join(currentPath, entry.name);
+      const absolutePath = normalizeAbsoluteLocalPath(path.join(currentPath, entry.name));
       if (entry.isDirectory()) {
         queue.push(absolutePath);
       } else if (entry.isFile()) {
-        collected.add(path.relative(skillRoot, absolutePath).replace(/\\/g, '/'));
+        collected.add(toRootRelativePath(skillRoot, absolutePath));
       }
     }
   }
@@ -871,6 +916,192 @@ async function executeSkillScripts(options: {
   return scriptOutputs;
 }
 
+function isYouTubeUrl(value: string): boolean {
+  return /https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)\//i.test(String(value || ''));
+}
+
+function extractUrlsFromText(text: string): string[] {
+  const matches = String(text || '').match(/https?:\/\/[^\s)>\]}]+/gi) || [];
+  return [...new Set(matches.map((match) => match.replace(/[),.;!?]+$/g, '')))];
+}
+
+function extractArtifactPathCandidates(text: string): string[] {
+  const matches = String(text || '').match(/(?:\/[^\s"'`<>]+|\.[/\\][^\s"'`<>]+|[A-Za-z0-9_.-]+\.(?:svg|png|jpg|jpeg|gif|webp|mp3|wav|ogg|m4a|mp4|webm|mov|md|txt))/gi) || [];
+  return [...new Set(matches)];
+}
+
+async function resolvePreviewArtifactFromCandidate(
+  candidate: string,
+  roots: string[],
+  options: { worldId?: string | null } = {},
+): Promise<ToolPreview | null> {
+  const normalizedCandidate = String(candidate || '').trim();
+  if (!normalizedCandidate) {
+    return null;
+  }
+
+  for (const root of roots) {
+    const absolutePath = path.isAbsolute(normalizedCandidate)
+      ? normalizeAbsoluteLocalPath(normalizedCandidate)
+      : normalizeAbsoluteLocalPath(path.resolve(root, normalizedCandidate));
+    const isAllowedPath = roots.some((allowedRoot) => isPathWithinRoot(allowedRoot, absolutePath));
+    if (!isAllowedPath) {
+      continue;
+    }
+    try {
+      const stat = await fs.stat(absolutePath);
+      if (!stat.isFile()) {
+        continue;
+      }
+
+      const mediaType = guessMediaTypeFromPath(absolutePath);
+      return createArtifactToolPreview({
+        path: absolutePath,
+        bytes: stat.size,
+        media_type: mediaType,
+        display_name: path.basename(absolutePath),
+        url: buildToolArtifactPreviewUrl({ path: absolutePath, worldId: options.worldId }),
+      });
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+async function collectLoadSkillPreviewArtifacts(options: {
+  skillRoot: string;
+  referenceFiles: string[];
+  scriptOutputs: Array<{ source: string; output: string }>;
+  context?: LoadSkillToolContext;
+}): Promise<ToolPreview[]> {
+  const previews: ToolPreview[] = [];
+  const seen = new Set<string>();
+  const roots = [
+    options.skillRoot,
+    ...(options.context?.workingDirectory ? [options.context.workingDirectory] : []),
+  ];
+
+  for (const referenceFile of options.referenceFiles) {
+    const absolutePath = path.isAbsolute(referenceFile)
+      ? normalizeAbsoluteLocalPath(referenceFile)
+      : normalizeAbsoluteLocalPath(path.resolve(options.skillRoot, referenceFile));
+    try {
+      const stat = await fs.stat(absolutePath);
+      if (!stat.isFile()) {
+        continue;
+      }
+
+      const key = `path:${absolutePath}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+
+      previews.push(createArtifactToolPreview({
+        path: absolutePath,
+        bytes: stat.size,
+        media_type: guessMediaTypeFromPath(absolutePath),
+        display_name: path.basename(referenceFile),
+        title: referenceFile,
+        url: buildToolArtifactPreviewUrl({
+          path: absolutePath,
+          worldId: typeof options.context?.world?.id === 'string' ? options.context.world.id : undefined,
+        }),
+      }));
+    } catch {
+      continue;
+    }
+  }
+
+  for (const output of options.scriptOutputs) {
+    for (const url of extractUrlsFromText(output.output)) {
+      const key = `url:${url}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      previews.push(createUrlToolPreview(url, {
+        renderer: isYouTubeUrl(url) ? 'youtube' : undefined,
+        text: output.source,
+        title: output.source,
+      }));
+    }
+
+    for (const candidate of extractArtifactPathCandidates(output.output)) {
+      const preview = await resolvePreviewArtifactFromCandidate(candidate, roots, {
+        worldId: typeof options.context?.world?.id === 'string' ? options.context.world.id : undefined,
+      });
+      if (!preview) {
+        continue;
+      }
+
+      const key = `artifact:${JSON.stringify(preview.artifact)}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      previews.push(preview);
+    }
+  }
+
+  return previews;
+}
+
+async function buildLoadSkillSuccessPreview(options: {
+  skillId: string;
+  skillDescription: string;
+  skillRoot: string;
+  scriptOutputs: Array<{ source: string; output: string }>;
+  referenceFiles: string[];
+  scriptPaths: string[];
+  context?: LoadSkillToolContext;
+}): Promise<ToolPreview[]> {
+  const summaryLines = [
+    `Loaded skill \`${options.skillId}\`.`,
+    '',
+    `${options.skillDescription}`,
+    '',
+    `Referenced scripts: ${options.scriptPaths.length > 0 ? options.scriptPaths.join(', ') : '(none)'}`,
+    `Reference files: ${options.referenceFiles.length > 0 ? options.referenceFiles.join(', ') : '(none)'}`,
+  ];
+
+  if (options.scriptOutputs.length > 0) {
+    summaryLines.push('');
+    summaryLines.push('Script outputs:');
+    for (const scriptOutput of options.scriptOutputs) {
+      summaryLines.push(`- ${scriptOutput.source}: ${truncatePreviewText(scriptOutput.output)}`);
+    }
+  }
+
+  const previews: ToolPreview[] = [
+    createTextToolPreview(summaryLines.join('\n'), {
+      markdown: true,
+      title: `load_skill ${options.skillId}`,
+    }),
+  ];
+
+  previews.push(...await collectLoadSkillPreviewArtifacts(options));
+  return previews;
+}
+
+function wrapLoadSkillToolResult(options: {
+  result: string;
+  preview: ToolPreview | ToolPreview[] | null;
+  toolCallId?: string;
+}): string {
+  return serializeToolExecutionEnvelope({
+    __type: 'tool_execution_envelope',
+    version: 1,
+    tool: 'load_skill',
+    ...(options.toolCallId ? { tool_call_id: options.toolCallId } : {}),
+    status: /<error>/i.test(options.result) ? 'failed' : 'completed',
+    preview: options.preview,
+    result: options.result,
+  });
+}
+
 function buildSuccessResult(options: {
   skillId: string;
   skillName: string;
@@ -962,10 +1193,19 @@ export function createLoadSkillToolDefinition() {
     },
     execute: async (args: any, _sequenceId?: string, _parentToolCall?: string, context?: LoadSkillToolContext) => {
       await waitForInitialSkillSync();
+      const persistToolEnvelope = context?.persistToolEnvelope === true;
+      const toolCallId = typeof context?.toolCallId === 'string' ? context.toolCallId : undefined;
 
       const requestedSkillId = typeof args?.skill_id === 'string' ? args.skill_id.trim() : '';
       if (!requestedSkillId) {
-        return buildReadErrorResult('', 'Missing required parameter: skill_id');
+        const result = buildReadErrorResult('', 'Missing required parameter: skill_id');
+        return persistToolEnvelope
+          ? wrapLoadSkillToolResult({
+            result,
+            preview: createTextToolPreview('Missing required parameter: skill_id'),
+            toolCallId,
+          })
+          : result;
       }
 
       const runScopedResultKey = getRunScopedLoadSkillResultKey(requestedSkillId, context);
@@ -988,15 +1228,17 @@ export function createLoadSkillToolDefinition() {
         const entry = getSkill(requestedSkillId);
         const sourcePath = getSkillSourcePath(requestedSkillId);
         if (!entry || !sourcePath) {
+          const result = buildNotFoundResult(requestedSkillId);
           return {
-            result: buildNotFoundResult(requestedSkillId),
+            result,
             cacheableForRun: false,
           };
         }
 
         if (!isSkillEnabledBySettings(requestedSkillId)) {
+          const result = buildDisabledBySettingsResult(requestedSkillId);
           return {
-            result: buildDisabledBySettingsResult(requestedSkillId),
+            result,
             cacheableForRun: false,
           };
         }
@@ -1012,8 +1254,9 @@ export function createLoadSkillToolDefinition() {
             context,
           });
           if (!isApproved) {
+            const result = buildDeclinedResult(requestedSkillId);
             return {
-              result: buildDeclinedResult(requestedSkillId),
+              result,
               cacheableForRun: false,
             };
           }
@@ -1023,16 +1266,38 @@ export function createLoadSkillToolDefinition() {
             context,
           });
           const referenceFiles = await collectReferenceFiles(skillRoot, instructionsMarkdown);
+          const result = buildSuccessResult({
+            skillId: requestedSkillId,
+            skillName: entry.skill_id,
+            skillDescription: entry.description?.trim() || entry.skill_id,
+            skillRoot,
+            markdown: instructionsMarkdown,
+            scriptOutputs,
+            referenceFiles,
+            scriptPaths,
+          });
+
+          if (!persistToolEnvelope) {
+            return {
+              result,
+              cacheableForRun: true,
+            };
+          }
+
+          const preview = await buildLoadSkillSuccessPreview({
+            skillId: requestedSkillId,
+            skillDescription: entry.description?.trim() || entry.skill_id,
+            skillRoot,
+            scriptOutputs,
+            referenceFiles,
+            scriptPaths,
+            context,
+          });
           return {
-            result: buildSuccessResult({
-              skillId: requestedSkillId,
-              skillName: entry.skill_id,
-              skillDescription: entry.description?.trim() || entry.skill_id,
-              skillRoot,
-              markdown: instructionsMarkdown,
-              scriptOutputs,
-              referenceFiles,
-              scriptPaths,
+            result: wrapLoadSkillToolResult({
+              result,
+              preview,
+              toolCallId,
             }),
             cacheableForRun: true,
           };
@@ -1041,8 +1306,15 @@ export function createLoadSkillToolDefinition() {
             throw error;
           }
           const message = error instanceof Error ? error.message : String(error);
+          const result = buildReadErrorResult(requestedSkillId, message);
           return {
-            result: buildReadErrorResult(requestedSkillId, message),
+            result: persistToolEnvelope
+              ? wrapLoadSkillToolResult({
+                result,
+                preview: createTextToolPreview(message),
+                toolCallId,
+              })
+              : result,
             cacheableForRun: false,
           };
         }
@@ -1050,6 +1322,13 @@ export function createLoadSkillToolDefinition() {
 
       if (!runScopedResultKey) {
         const outcome = await computeResult();
+        if (persistToolEnvelope && !parseToolExecutionEnvelopeContent(outcome.result)) {
+          return wrapLoadSkillToolResult({
+            result: outcome.result,
+            preview: createTextToolPreview(truncatePreviewText(outcome.result, 1600)),
+            toolCallId,
+          });
+        }
         return outcome.result;
       }
 
@@ -1061,7 +1340,15 @@ export function createLoadSkillToolDefinition() {
       });
       inFlightLoadSkillRunResults.set(runScopedResultKey, runScopedPromise);
       try {
-        return await runScopedPromise;
+        const result = await runScopedPromise;
+        if (persistToolEnvelope && !parseToolExecutionEnvelopeContent(result)) {
+          return wrapLoadSkillToolResult({
+            result,
+            preview: createTextToolPreview(truncatePreviewText(result, 1600)),
+            toolCallId,
+          });
+        }
+        return result;
       } finally {
         const inFlightResult = inFlightLoadSkillRunResults.get(runScopedResultKey);
         if (inFlightResult === runScopedPromise) {

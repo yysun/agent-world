@@ -5,6 +5,7 @@
  * Supports world/agent/chat management with optimized serialization and error handling.
  *
  * Changes:
+ * - 2026-03-06: Added `/tool-artifact` for stable, restorable adopted-tool preview URLs limited to approved world working directories and registered skill roots.
  * - 2026-03-06: Hardened `POST /worlds/:worldName/hitl/respond` for restart-safe validation: when the runtime pending map lacks the request entry but it exists in persisted messages, trigger `activateChatWithSnapshot` to seed the runtime map and return an actionable error.
  * - 2026-03-04: Added queue metadata fields to non-streaming `/messages` success responses (`queueMessageId`, `queueStatus`, `queueRetryCount`) to expose queue terminal/error state.
  * - 2026-02-27: Hardened non-streaming `/messages` event collection with chat-scoped filtering to prevent cross-chat response contamination.
@@ -53,6 +54,8 @@
  * - 2026-02-08: Removed legacy manual intervention endpoint and related server handling
  */
 import express, { Request, Response } from 'express';
+import { promises as fs } from 'fs';
+import * as path from 'path';
 import { z } from 'zod';
 import { createSSEHandler } from './sse-handler.js';
 import {
@@ -96,6 +99,8 @@ import {
 import { subscribeWorld, ClientConnection } from '../core/index.js';
 // Opik integration: optional tracer attach for API-managed world subscriptions.
 import { attachOptionalOpikTracer } from '../core/optional-tracers/opik-runtime.js';
+import { getSkillSourcePath, getSkills } from '../core/skill-registry.js';
+import { getDefaultWorkingDirectory, getEnvValueFromText, toKebabCase } from '../core/utils.js';
 import {
   listMCPServers,
   restartMCPServer,
@@ -205,7 +210,96 @@ function sendError(res: Response, status: number, message: string, code?: string
   res.status(status).json(error);
 }
 
-import { toKebabCase } from '../core/utils.js';
+function isPathWithinRoot(rootPath: string, candidatePath: string): boolean {
+  const normalizedRoot = normalizeResolvedPath(rootPath);
+  const normalizedCandidate = normalizeResolvedPath(candidatePath);
+  return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}/`);
+}
+
+function normalizeResolvedPath(targetPath: string): string {
+  return path.resolve(targetPath).replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '') || '/';
+}
+
+async function getRegisteredSkillRoots(): Promise<string[]> {
+  const skillRoots = await Promise.all(
+    getSkills()
+      .map((skill) => getSkillSourcePath(skill.skill_id))
+      .filter((skillPath): skillPath is string => typeof skillPath === 'string' && skillPath.trim().length > 0)
+      .map(async (skillPath) => {
+        try {
+          return normalizeResolvedPath(path.dirname(await fs.realpath(path.resolve(skillPath))));
+        } catch {
+          return null;
+        }
+      }),
+  );
+
+  return [...new Set(skillRoots.filter((skillRoot): skillRoot is string => typeof skillRoot === 'string' && skillRoot.length > 0))];
+}
+
+async function resolveWorldArtifactRoot(worldId: string | undefined): Promise<string | null> {
+  if (!worldId) {
+    return null;
+  }
+
+  const world = await getWorld(toKebabCase(worldId));
+  if (!world) {
+    return null;
+  }
+
+  const lexicalRoot = path.resolve(
+    getEnvValueFromText(
+      typeof world.variables === 'string' ? world.variables : '',
+      'working_directory',
+    ) || getDefaultWorkingDirectory(),
+  );
+
+  try {
+    return normalizeResolvedPath(await fs.realpath(lexicalRoot));
+  } catch {
+    return null;
+  }
+}
+
+async function resolveToolArtifactPath(requestedPath: string, worldId?: string): Promise<string | null> {
+  const normalizedPath = String(requestedPath || '').trim();
+  if (!normalizedPath) {
+    return null;
+  }
+
+  const worldRoot = await resolveWorldArtifactRoot(worldId);
+  const skillRoots = await getRegisteredSkillRoots();
+  const uniqueRoots = [...new Set([
+    ...(worldRoot ? [worldRoot] : []),
+    ...skillRoots,
+  ].map((root) => normalizeResolvedPath(root)))];
+
+  if (uniqueRoots.length === 0) {
+    return null;
+  }
+
+  const candidatePaths = path.isAbsolute(normalizedPath)
+    ? [normalizeResolvedPath(normalizedPath)]
+    : uniqueRoots.map((root) => normalizeResolvedPath(path.resolve(root, normalizedPath)));
+
+  for (const candidatePath of candidatePaths) {
+    try {
+      const realCandidatePath = normalizeResolvedPath(await fs.realpath(candidatePath));
+      if (!uniqueRoots.some((root) => isPathWithinRoot(root, realCandidatePath))) {
+        continue;
+      }
+
+      const stat = await fs.stat(realCandidatePath);
+      if (stat.isFile()) {
+        return realCandidatePath;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
 
 async function isAgentNameUnique(worldCtx: ReturnType<typeof createWorldContext>, agentName: string, excludeAgent?: string): Promise<boolean> {
   const normalizedAgentName = toKebabCase(agentName);
@@ -298,6 +392,11 @@ const HitlResponseSchema = z.object({
   chatId: z.string().nullable().optional()
 });
 
+const ToolArtifactQuerySchema = z.object({
+  path: z.string().min(1),
+  worldId: z.string().min(1).optional(),
+});
+
 const AgentUpdateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   type: z.string().optional(),
@@ -312,6 +411,22 @@ const AgentUpdateSchema = z.object({
 });
 
 const router = express.Router();
+
+router.get('/tool-artifact', async (req: Request, res: Response): Promise<void> => {
+  const validation = ToolArtifactQuerySchema.safeParse(req.query);
+  if (!validation.success) {
+    sendError(res, 400, 'Invalid tool artifact request', 'VALIDATION_ERROR', validation.error.issues);
+    return;
+  }
+
+  const resolvedPath = await resolveToolArtifactPath(validation.data.path, validation.data.worldId);
+  if (!resolvedPath) {
+    sendError(res, 404, 'Tool artifact not found', 'TOOL_ARTIFACT_NOT_FOUND');
+    return;
+  }
+
+  res.sendFile(resolvedPath);
+});
 
 // World Routes
 router.get('/worlds', async (req, res) => {

@@ -17,6 +17,8 @@
  * - Keeps helper logic local to this domain module for focused maintenance
  *
  * Recent Changes:
+ * - 2026-03-06: Restore merged completed tool-card custom renderers from attached tool-result rows and allow same-origin artifact preview URLs.
+ * - 2026-03-06: Render persisted tool execution envelope previews for adopted tools instead of showing raw envelope JSON in restored tool cards.
  * - 2026-03-06: Parse canonical JSON tool-result payloads in web status detection so failed shell results serialized as JSON do not render as `done`.
  * - 2026-03-06: Treat canonical shell `validation_error` and `approval_denied` tool results as failures in merged web tool cards and completed summaries.
  * - 2026-03-01: Unified tool card headers to single-line summaries (`tool: <name> - <status>`) for web/electron parity.
@@ -29,7 +31,15 @@
 import { app, safeHTML } from 'apprun';
 import type { Message } from '../types';
 import { renderMarkdown } from '../utils/markdown';
-import { getCustomRenderer } from './custom-renderers';
+import { getCustomRenderer, getCustomRendererMatch } from './custom-renderers';
+import {
+  getToolExecutionEnvelope,
+  getToolPreviewDisplayText,
+  normalizeToolPreviewItems,
+  parseToolExecutionEnvelopeContent,
+  stringifyToolEnvelopeResult,
+  type ToolPreview,
+} from './tool-execution-envelope';
 
 export function isToolResultMessage(message: Message): boolean {
   return message.type === 'tool';
@@ -72,6 +82,18 @@ function isToolResultFailureText(text: string): boolean {
   const normalized = String(text || '').trim();
   if (!normalized) {
     return false;
+  }
+
+  const envelope = parseToolExecutionEnvelopeContent(normalized);
+  if (envelope) {
+    if (String(envelope.status || '').trim().toLowerCase() === 'failed') {
+      return true;
+    }
+
+    const resultText = stringifyToolEnvelopeResult(envelope.result);
+    if (resultText && resultText !== normalized) {
+      return isToolResultFailureText(resultText);
+    }
   }
 
   const record = parseToolResultRecord(normalized);
@@ -153,6 +175,107 @@ export function getToolOneLineSummary(message: Message): string {
   return `tool: ${name} - ${status}`;
 }
 
+function getToolDisplayText(message: Message): string {
+  return getToolPreviewDisplayText(message)
+    ?? String((message as any)?.text || (message as any)?.content || '');
+}
+
+function canEmbedWebMedia(source: string): boolean {
+  return /^https?:\/\//i.test(source) || /^data:/i.test(source) || source.startsWith('blob:') || source.startsWith('/');
+}
+
+function renderToolPreviewItem(item: ToolPreview, key: string) {
+  const source = String(item.url || item.artifact?.url || '').trim();
+  const displayName = String(item.artifact?.display_name || item.title || source || item.artifact?.path || 'artifact').trim();
+  const mediaType = String(item.media_type || item.artifact?.media_type || '').trim();
+
+  if ((item.kind === 'markdown' || item.renderer === 'markdown') && typeof item.text === 'string') {
+    return (
+      <div className="tool-preview-item tool-preview-markdown" key={key}>
+        {safeHTML(renderMarkdown(item.text))}
+      </div>
+    );
+  }
+
+  if ((item.kind === 'text' || item.renderer === 'text') && typeof item.text === 'string') {
+    return (
+      <div className="tool-preview-item tool-preview-text" key={key}>
+        <pre className="tool-output-text">{item.text}</pre>
+      </div>
+    );
+  }
+
+  if ((item.renderer === 'image' || item.renderer === 'svg') && source && canEmbedWebMedia(source)) {
+    return (
+      <div className="tool-preview-item tool-preview-image" key={key}>
+        <img src={source} alt={displayName} className="max-w-full rounded" />
+      </div>
+    );
+  }
+
+  if (item.renderer === 'audio' && source && canEmbedWebMedia(source)) {
+    return (
+      <div className="tool-preview-item tool-preview-audio" key={key}>
+        <audio controls src={source} className="w-full" />
+      </div>
+    );
+  }
+
+  if (item.renderer === 'video' && source && canEmbedWebMedia(source)) {
+    return (
+      <div className="tool-preview-item tool-preview-video" key={key}>
+        <video controls src={source} className="max-w-full rounded" />
+      </div>
+    );
+  }
+
+  const href = source || String(item.artifact?.path || '').trim();
+  const secondaryText = typeof item.text === 'string' && item.text.trim()
+    ? item.text.trim()
+    : String(item.artifact?.path || '').trim();
+
+  return (
+    <div className="tool-preview-item tool-preview-artifact" key={key}>
+      {href
+        ? <a href={href} target="_blank" rel="noopener noreferrer" className="underline break-all">{displayName}</a>
+        : <span className="break-all">{displayName}</span>}
+      {secondaryText && secondaryText !== displayName && (
+        <div className="tool-preview-meta break-all">{secondaryText}</div>
+      )}
+      {mediaType && (
+        <div className="tool-preview-meta">{mediaType}</div>
+      )}
+    </div>
+  );
+}
+
+function renderToolPreview(message: Message) {
+  const envelope = getToolExecutionEnvelope(message);
+  if (!envelope) {
+    return null;
+  }
+
+  const items = normalizeToolPreviewItems(envelope.preview);
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="tool-preview-list">
+      {items.map((item, index) => renderToolPreviewItem(item, `tool-preview-${index}`))}
+    </div>
+  );
+}
+
+function renderToolResultBody(message: Message, textContent: string) {
+  const rendererMatch = getCustomRendererMatch(message);
+  if (rendererMatch) {
+    return rendererMatch.renderer.render(rendererMatch.message);
+  }
+
+  return renderToolPreview(message) || <pre className="tool-output-text">{textContent}</pre>;
+}
+
 function truncateToolOutput(text: string): { content: string; wasTruncated: boolean } {
   const MAX_LENGTH = 50000;
   if (text.length > MAX_LENGTH) {
@@ -226,7 +349,7 @@ function renderMergedToolCard(message: Message) {
             const args = String(tc?.function?.arguments || tc?.arguments || '');
             const result = combinedToolResults.find(r => String((r as any).tool_call_id || '') === callId)
               || (combinedToolResults.length === 1 && i === 0 ? combinedToolResults[0] : null);
-            const resultText = result ? String((result as any).text || (result as any).content || '') : null;
+            const resultText = result ? getToolDisplayText(result as Message) : null;
             const { content: truncatedResult, wasTruncated } = resultText !== null
               ? truncateToolOutput(resultText)
               : { content: null, wasTruncated: false };
@@ -243,7 +366,7 @@ function renderMergedToolCard(message: Message) {
                 )}
                 {truncatedResult !== null && (
                   <div className="tool-output-content tool-output-stdout">
-                    <pre className="tool-output-text">{truncatedResult}</pre>
+                    {renderToolResultBody(result as Message, truncatedResult)}
                     {wasTruncated && (
                       <div className="tool-output-truncated">
                         ⚠️ Output truncated (exceeded 50,000 characters)
@@ -266,15 +389,15 @@ function renderMergedToolCard(message: Message) {
 }
 
 export function renderMessageContent(message: Message) {
+  // Merged tool call card: tool request + results combined into one card
+  if (Array.isArray((message as any).combinedToolResults)) {
+    return renderMergedToolCard(message);
+  }
+
   // Check for custom renderers first (e.g., sheet music, charts)
   const customRenderer = getCustomRenderer(message);
   if (customRenderer) {
     return customRenderer.render(message);
-  }
-
-  // Merged tool call card: tool request + results combined into one card
-  if (Array.isArray((message as any).combinedToolResults)) {
-    return renderMergedToolCard(message);
   }
 
   if (message.isToolStreaming) {
@@ -291,7 +414,7 @@ export function renderMessageContent(message: Message) {
   }
 
   if (isToolResultMessage(message)) {
-    const { content, wasTruncated } = truncateToolOutput(message.text);
+    const { content, wasTruncated } = truncateToolOutput(getToolDisplayText(message));
     const isExpanded = message.isToolOutputExpanded || false;
     const outputClass = isStderrOutput(message) ? 'tool-output-stderr' : 'tool-output-stdout';
     const status = resolveToolSummaryStatus(message);
@@ -331,7 +454,7 @@ export function renderMessageContent(message: Message) {
         </div>
         {isExpanded && (
           <div className={`tool-output-content ${outputClass}`}>
-            <pre className="tool-output-text">{content}</pre>
+            {renderToolResultBody(message, content)}
             {wasTruncated && (
               <div className="tool-output-truncated">
                 ⚠️ Output truncated (exceeded 50,000 characters)

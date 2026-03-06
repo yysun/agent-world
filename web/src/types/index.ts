@@ -120,6 +120,7 @@ export interface Message {
     sequenceId?: string;
     duration?: number;
     input?: any;
+    preview?: any;
     result?: any;
     resultType?: 'string' | 'object' | 'array' | 'null';
     resultSize?: number;

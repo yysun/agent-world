@@ -80,6 +80,16 @@ function extractFirstUrl(text: string): string | null {
 }
 
 function extractYouTubeInfoFromPayload(payload: unknown): { videoId: string | null; sourceUrl: string | null } {
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const match = extractYouTubeInfoFromPayload(item);
+      if (match.videoId) {
+        return match;
+      }
+    }
+    return { videoId: null, sourceUrl: null };
+  }
+
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return { videoId: null, sourceUrl: null };
   }
@@ -104,6 +114,13 @@ function extractYouTubeInfoFromPayload(payload: unknown): { videoId: string | nu
     return {
       videoId: extractVideoIdFromUrl(candidateUrl),
       sourceUrl: candidateUrl,
+    };
+  }
+
+  if (record.renderer === 'youtube' && typeof record.url === 'string') {
+    return {
+      videoId: extractVideoIdFromUrl(record.url),
+      sourceUrl: record.url,
     };
   }
 
