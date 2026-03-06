@@ -26,12 +26,20 @@ export interface HeartbeatHandle {
   task: ScheduledTask;
 }
 
+// keep node-cron as a direct import so test-time module mocking works
+
 export function isValidCronExpression(expr: string): boolean {
   const normalized = String(expr || '').trim();
   if (!normalized) return false;
   // Product contract: strict 5-field cron only.
   if (normalized.split(/\s+/).length !== 5) return false;
-  return nodeCron.validate(normalized);
+  const cron: any = (nodeCron && (nodeCron as any).default) ? (nodeCron as any).default : nodeCron;
+  if (!cron || typeof cron.validate !== 'function') return false;
+  try {
+    return Boolean(cron.validate(normalized));
+  } catch (err) {
+    return false;
+  }
 }
 
 export function startHeartbeat(world: World): HeartbeatHandle | null {
@@ -39,11 +47,12 @@ export function startHeartbeat(world: World): HeartbeatHandle | null {
   const interval = String(world?.heartbeatInterval || '').trim();
   const prompt = String(world?.heartbeatPrompt || '');
 
-  if (!enabled || !prompt.trim() || !isValidCronExpression(interval)) {
-    return null;
-  }
+  if (!enabled || !prompt.trim()) return null;
+  const cron: any = (nodeCron && (nodeCron as any).default) ? (nodeCron as any).default : nodeCron;
+  if (!cron || typeof cron.schedule !== 'function') return null;
+  if (!isValidCronExpression(interval)) return null;
 
-  const task = nodeCron.schedule(interval, () => {
+  const task = cron.schedule(interval, () => {
     const currentChatId = String(world?.currentChatId || '').trim();
     if (world?.isProcessing) return;
     if (!currentChatId) return;
@@ -56,8 +65,12 @@ export function startHeartbeat(world: World): HeartbeatHandle | null {
 
 export function stopHeartbeat(handle: HeartbeatHandle | null | undefined): void {
   if (!handle?.task) return;
-  handle.task.stop();
-  if (typeof handle.task.destroy === 'function') {
-    handle.task.destroy();
+  try {
+    handle.task.stop();
+    if (typeof handle.task.destroy === 'function') {
+      handle.task.destroy();
+    }
+  } catch (err) {
+    // ignore failures when stopping/destroying scheduled task
   }
 }

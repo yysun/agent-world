@@ -1037,12 +1037,15 @@ async function collectLoadSkillPreviewArtifacts(options: {
         continue;
       }
 
-      const key = `artifact:${JSON.stringify(preview.artifact)}`;
+      if (!('artifact' in preview)) {
+        continue;
+      }
+      const key = `artifact:${JSON.stringify((preview as any).artifact)}`;
       if (seen.has(key)) {
         continue;
       }
       seen.add(key);
-      previews.push(preview);
+      previews.push(preview as any);
     }
   }
 

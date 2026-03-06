@@ -1505,16 +1505,8 @@ export async function getWorld(worldId: string): Promise<World | null> {
     world._activityListenerCleanup = setupWorldActivityListener(world);
   }
 
-  // Seed _queuedChatIds from per-chat storage fan-out
+  // Initialize queued chat set; per-chat seeding deferred to explicit queue operations
   world._queuedChatIds = new Set<string>();
-  if (storageWrappers?.getQueuedMessages) {
-    for (const chat of world.chats.values()) {
-      const msgs = await storageWrappers.getQueuedMessages(world.id, chat.id);
-      if (msgs?.some((m: QueuedMessage) => m.status === 'queued')) {
-        world._queuedChatIds.add(chat.id);
-      }
-    }
-  }
 
   return world;
 }
