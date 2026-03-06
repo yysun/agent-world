@@ -2451,9 +2451,15 @@ export async function editUserMessage(
     throw new Error(`World '${worldId}' not found`);
   }
 
-  if (hasActiveChatMessageProcessing(resolvedWorldId, chatId)) {
-    stopMessageProcessing(resolvedWorldId, chatId);
-  }
+  // Always cancel any in-flight or queued LLM work for this chat before
+  // resubmitting an edited message. This covers both registered agent
+  // processing handles (stopMessageProcessing aborts those) AND title
+  // generation calls that go through the global llmQueue without
+  // registering in activeProcessingByChat (so hasActiveChatMessageProcessing
+  // returns false even when title gen is the active queue item). Leaving the
+  // guard would cause the agent's resubmission LLM call to queue behind an
+  // active title gen call, producing "no response" until title gen finishes.
+  stopMessageProcessing(resolvedWorldId, chatId);
 
   // Clear cached skill approvals and orphaned HITL requests so the
   // resubmitted message triggers fresh HITL prompts instead of silently
