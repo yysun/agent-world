@@ -393,6 +393,7 @@ export interface World {
   _activityListenerCleanup?: () => void; // Internal cleanup function for activity listener
   _agentUnsubscribers?: Map<string, () => void>; // Per-agent message listener unsubscribe functions
   _worldMessagesUnsubscriber?: () => void; // World-level message listener unsubscribe for title scheduling
+  _queuedChatIds?: Set<string>; // Cache of chat IDs with at least one 'queued' message (sync-safe, managed by managers.ts)
 }
 
 // Unified Storage Interface - Consolidated from StorageManager and StorageAPI

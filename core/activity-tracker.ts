@@ -39,6 +39,8 @@ export interface WorldActivityEventPayload {
   chatId?: string | null; // Chat context for the activity lifecycle event
   activeSources: string[];
   activeChatIds: string[]; // Chat IDs currently being processed
+  queuedChatIds: string[]; // Chat IDs waiting in the message queue (not yet dispatched)
+  activeAgentNames: string[]; // Names of agents currently generating responses
   queue: ReturnType<typeof getLLMQueueStatus>;
   messageId: string; // Added for event persistence
 }
@@ -80,6 +82,10 @@ function emitActivityEvent(
     chatId: chatId ?? null,
     activeSources: Array.from(activityState.activeSources.keys()),
     activeChatIds: Array.from(activityState.activeChatOps.keys()),
+    queuedChatIds: Array.from(world._queuedChatIds ?? []),
+    activeAgentNames: Array.from(activityState.activeSources.keys())
+      .filter(s => s.startsWith('agent:'))
+      .map(s => s.slice('agent:'.length)),
     queue: getLLMQueueStatus(),
     messageId: nanoid(10) // Generate unique ID for event persistence
   };
@@ -159,6 +165,18 @@ export function getActiveProcessingChatIds(world: World): ReadonlySet<string> {
   const state = (world as any)[stateKey] as ActivityState | undefined;
   if (!state) return new Set<string>();
   return new Set(state.activeChatOps.keys());
+}
+
+/**
+ * Returns the names of agents currently generating responses in this world.
+ * Derived from activeSources keys (stored as `agent:<id>`).
+ */
+export function getActiveAgentNames(world: World): string[] {
+  const state = (world as any)[stateKey] as ActivityState | undefined;
+  if (!state) return [];
+  return Array.from(state.activeSources.keys())
+    .filter(s => s.startsWith('agent:'))
+    .map(s => s.slice('agent:'.length));
 }
 
 /**

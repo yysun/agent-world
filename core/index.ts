@@ -177,6 +177,7 @@ export {
   beginWorldActivity,
   trackWorldActivity,
   getActiveProcessingChatIds,
+  getActiveAgentNames,
   isChatProcessing,
   type WorldActivityEventPayload,
   type WorldActivityEventType,

@@ -20,6 +20,7 @@
 import nodeCron, { type ScheduledTask } from 'node-cron';
 import type { World } from './types.js';
 import { publishMessage } from './events/publishers.js';
+import { isChatProcessing } from './activity-tracker.js';
 
 export interface HeartbeatHandle {
   task: ScheduledTask;
@@ -46,6 +47,7 @@ export function startHeartbeat(world: World): HeartbeatHandle | null {
     const currentChatId = String(world?.currentChatId || '').trim();
     if (world?.isProcessing) return;
     if (!currentChatId) return;
+    if (isChatProcessing(world, currentChatId) || world._queuedChatIds?.has(currentChatId)) return;
     publishMessage(world, prompt, 'world', currentChatId);
   });
 

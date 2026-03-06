@@ -84,6 +84,8 @@ import {
   stopMessageProcessing,
   submitWorldHitlResponse,
   listPendingHitlPromptEventsFromMessages,
+  getActiveProcessingChatIds,
+  getActiveAgentNames,
   type World,
   type Agent,
   type Chat,
@@ -343,6 +345,27 @@ router.get('/worlds/:worldName', validateWorld, async (req: Request, res: Respon
     res.json(serializeWorld(world));
   } catch (error) {
     loggerWorld.error('Error getting world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    sendError(res, 500, 'Internal server error', 'INTERNAL_ERROR');
+  }
+});
+
+router.get('/worlds/:worldName/status', validateWorld, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const world = (req as any).world as World;
+    const activeChatIds = [...getActiveProcessingChatIds(world)];
+    const queuedChatIds = [...(world._queuedChatIds ?? [])];
+    const activeAgentNames = getActiveAgentNames(world);
+    res.json({
+      worldId: world.id,
+      isProcessing: world.isProcessing ?? false,
+      activeChatIds,
+      queuedChatIds,
+      activeAgentNames,
+      queueDepth: queuedChatIds.length,
+      sendingCount: activeChatIds.length,
+    });
+  } catch (error) {
+    loggerWorld.error('Error getting world status', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Internal server error', 'INTERNAL_ERROR');
   }
 });

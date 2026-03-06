@@ -524,6 +524,9 @@ async function handleQueueDispatchFailure(
     const newRetryCount = await queueStorage.incrementQueueMessageRetry(messageId);
     if (newRetryCount < QUEUE_MAX_RETRY_ATTEMPTS) {
       await queueStorage.updateMessageQueueStatus(messageId, 'queued');
+      // Re-add to queued cache: this message is waiting for retry dispatch
+      if (!world._queuedChatIds) world._queuedChatIds = new Set();
+      world._queuedChatIds.add(chatId);
       const delayMs = Math.pow(2, newRetryCount - 1) * RELIABILITY_CONFIG.queue.retryBaseDelayMs;
       startQueueRetryStatusEmitter(world, chatId, messageId, {
         reason,
@@ -634,6 +637,8 @@ function attachQueueAdvanceListener(world: World, chatId: string): void {
           // Successful completion — remove from queue (message now lives in agent_memory)
           await queueStorage.removeQueuedMessage(sendingMsg.messageId);
           clearQueueResponderRefreshAttempt(world.id, chatId, sendingMsg.messageId);
+          // Safety: ensure chatId is not left in the queued cache
+          world._queuedChatIds?.delete(chatId);
         } else {
           loggerQueue.warn('Queue completion observed but no matching sending row found', {
             worldId: world.id,
@@ -801,6 +806,8 @@ function triggerPendingQueueResume(
       }
 
       await queueStorage.updateMessageQueueStatus(nextMessage.messageId, 'sending');
+      // Remove from queued cache: this chat is now transitioning to active processing
+      world._queuedChatIds?.delete(chatId);
       queueDispatchStateByChat.set(queueKey, {
         messageId: nextMessage.messageId,
         responseStarted: false,
@@ -1496,6 +1503,17 @@ export async function getWorld(worldId: string): Promise<World | null> {
     const { setupEventPersistence, setupWorldActivityListener } = await import('./events/index.js');
     world._eventPersistenceCleanup = setupEventPersistence(world);
     world._activityListenerCleanup = setupWorldActivityListener(world);
+  }
+
+  // Seed _queuedChatIds from per-chat storage fan-out
+  world._queuedChatIds = new Set<string>();
+  if (storageWrappers?.getQueuedMessages) {
+    for (const chat of world.chats.values()) {
+      const msgs = await storageWrappers.getQueuedMessages(world.id, chat.id);
+      if (msgs?.some((m: QueuedMessage) => m.status === 'queued')) {
+        world._queuedChatIds.add(chat.id);
+      }
+    }
   }
 
   return world;
@@ -2680,14 +2698,16 @@ export async function addToQueue(
     throw new Error(`addToQueue: failed to persist queue row for message '${messageId}'.`);
   }
 
-  const shouldTrigger = options?.triggerProcessing ?? true;
-  if (shouldTrigger) {
-    const { getActiveSubscribedWorld } = await import('./subscription.js');
-    const runtimeWorld =
-      getActiveSubscribedWorld(resolvedWorldId, chatId) ||
-      options?.targetWorld ||
-      await getWorld(resolvedWorldId);
-    if (runtimeWorld) {
+  // Always look up the runtime world so we can update the _queuedChatIds cache
+  const { getActiveSubscribedWorld } = await import('./subscription.js');
+  const runtimeWorld =
+    getActiveSubscribedWorld(resolvedWorldId, chatId) ||
+    options?.targetWorld ||
+    await getWorld(resolvedWorldId);
+  if (runtimeWorld) {
+    if (!runtimeWorld._queuedChatIds) runtimeWorld._queuedChatIds = new Set();
+    runtimeWorld._queuedChatIds.add(chatId);
+    if (options?.triggerProcessing ?? true) {
       triggerPendingQueueResume(runtimeWorld, chatId);
     }
   }
@@ -2816,6 +2836,10 @@ export async function stopChatQueue(worldId: string, chatId: string): Promise<vo
   // Prevent any follow-up trigger
   pausedQueues.add(`${resolvedWorldId}:${chatId}`);
 
+  // Update queued chat ID cache
+  const { getActiveSubscribedWorld: getWorldForStop } = await import('./subscription.js');
+  getWorldForStop(resolvedWorldId, chatId)?._queuedChatIds?.delete(chatId);
+
   loggerQueue.debug('Queue stopped by user', { worldId: resolvedWorldId, chatId });
 }
 
@@ -2827,6 +2851,10 @@ export async function clearChatQueue(worldId: string, chatId: string): Promise<v
   const resolvedWorldId = await getResolvedWorldId(worldId);
   await storageWrappers?.deleteQueueForChat?.(resolvedWorldId, chatId);
   pausedQueues.delete(`${resolvedWorldId}:${chatId}`);
+
+  // Update queued chat ID cache
+  const { getActiveSubscribedWorld: getWorldForClear } = await import('./subscription.js');
+  getWorldForClear(resolvedWorldId, chatId)?._queuedChatIds?.delete(chatId);
 }
 
 /**

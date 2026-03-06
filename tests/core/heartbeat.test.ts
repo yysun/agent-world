@@ -8,6 +8,7 @@
  * - Strict 5-field cron validation coverage.
  * - Start guard behavior for disabled/invalid configs.
  * - Tick publishes canonical world-sender message on active chat.
+ * - Queue guard: heartbeat skips when _queuedChatIds or isChatProcessing blocks.
  *
  * Implementation Notes:
  * - Uses mocked node-cron schedule callback for deterministic tick execution.
@@ -93,5 +94,33 @@ describe('core heartbeat', () => {
     stopHeartbeat(handle);
     expect(task.stop).toHaveBeenCalledTimes(1);
     expect(task.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips tick when _queuedChatIds contains currentChatId', async () => {
+    validateMock.mockReturnValue(true);
+
+    let tickHandler: (() => void) | null = null;
+    const task = { stop: vi.fn(), destroy: vi.fn(), start: vi.fn() };
+    scheduleMock.mockImplementation((_expr: string, callback: () => void) => {
+      tickHandler = callback;
+      return task;
+    });
+
+    const { startHeartbeat } = await import('../../core/heartbeat.js');
+
+    const world: any = {
+      id: 'world-1',
+      currentChatId: 'chat-1',
+      isProcessing: false,
+      heartbeatEnabled: true,
+      heartbeatInterval: '*/5 * * * *',
+      heartbeatPrompt: 'tick',
+      _queuedChatIds: new Set(['chat-1']),
+    };
+
+    startHeartbeat(world);
+    tickHandler?.();
+
+    expect(publishMessageMock).not.toHaveBeenCalled();
   });
 });
