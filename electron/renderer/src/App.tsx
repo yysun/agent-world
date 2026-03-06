@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-03-06: Added selected-chat system-event status-bar overlays for title updates, timeout notices, and retry tracking.
  * - 2026-03-05: Moved `MessageQueuePanel` into a dedicated pre-composer slot so queue items render above the composer input.
  * - 2026-03-04: Added app-level grid submenu open state so selecting a grid-layout option can dismiss the submenu.
  * - 2026-03-04: Added world-view state (`chat|board|grid|canvas`) and grid layout choice wiring for the new header selector and message render modes.
@@ -116,6 +117,11 @@ import {
   countAgentConversationResponses,
   countConversationDisplayMessages,
 } from '../../shared/conversation-message-counts';
+import {
+  createSessionSystemStatus,
+  retainSessionSystemStatusForContext,
+  type SessionSystemStatusEntry,
+} from './domain/session-system-status';
 
 type WorkspaceState = {
   workspacePath: string | null;
@@ -244,6 +250,8 @@ export default function App() {
 
   const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [notification, setNotification] = useState<{ text: string; kind: 'error' | 'success' | 'info' } | null>(null);
+  const systemStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [systemStatus, setSystemStatus] = useState<SessionSystemStatusEntry | null>(null);
 
   useEffect(() => {
     void initializeRendererLogger(api);
@@ -253,6 +261,9 @@ export default function App() {
     return () => {
       if (notificationTimerRef.current !== null) {
         clearTimeout(notificationTimerRef.current);
+      }
+      if (systemStatusTimerRef.current !== null) {
+        clearTimeout(systemStatusTimerRef.current);
       }
     };
   }, []);
@@ -267,6 +278,34 @@ export default function App() {
       setNotification(null);
       notificationTimerRef.current = null;
     }, 5000);
+  }, []);
+
+  const showSessionSystemStatus = useCallback((nextStatus: SessionSystemStatusEntry | null) => {
+    if (systemStatusTimerRef.current !== null) {
+      clearTimeout(systemStatusTimerRef.current);
+      systemStatusTimerRef.current = null;
+    }
+
+    setSystemStatus(nextStatus);
+    if (!nextStatus) {
+      return;
+    }
+
+    systemStatusTimerRef.current = setTimeout(() => {
+      setSystemStatus((current) => {
+        if (!current) {
+          return null;
+        }
+        if (current.messageId && nextStatus.messageId && current.messageId !== nextStatus.messageId) {
+          return current;
+        }
+        if (!current.messageId && current.text !== nextStatus.text) {
+          return current;
+        }
+        return null;
+      });
+      systemStatusTimerRef.current = null;
+    }, nextStatus.expiresAfterMs);
   }, []);
 
   const appendUnifiedLogEntry = useCallback((incoming: {
@@ -760,6 +799,16 @@ export default function App() {
     );
   }, [selectedSessionId]);
 
+  useEffect(() => {
+    setSystemStatus((current) => retainSessionSystemStatusForContext(current, loadedWorld?.id, selectedSessionId));
+    if (!loadedWorld?.id || !selectedSessionId) {
+      if (systemStatusTimerRef.current !== null) {
+        clearTimeout(systemStatusTimerRef.current);
+        systemStatusTimerRef.current = null;
+      }
+    }
+  }, [loadedWorld?.id, selectedSessionId]);
+
   // Phase 6.2b: Replay stored events to reconstruct status on chat switch.
   // Clear and replay happen atomically after the fetch so the previous status
   // remains visible while events are loading (no brief flash to idle).
@@ -874,6 +923,16 @@ export default function App() {
     resetActivityRuntimeState,
     setHitlPromptQueue,
     onMainLogEvent: onMainProcessLogEvent,
+    onSessionSystemEvent: (event) => {
+      const nextStatus = createSessionSystemStatus(loadedWorld?.id, {
+        eventType: String(event?.eventType || ''),
+        chatId: String(event?.chatId || '').trim() || null,
+        messageId: event?.messageId ? String(event.messageId) : null,
+        createdAt: event?.createdAt ? String(event.createdAt) : null,
+        content: event?.content,
+      });
+      showSessionSystemStatus(nextStatus);
+    },
   });
 
   const {
@@ -1338,7 +1397,7 @@ export default function App() {
             ) : null
           )}
           statusBar={(
-            <WorkingStatusBar chatStatus={chatStatus} agentStatuses={agentStatuses} notification={notification} />
+            <WorkingStatusBar chatStatus={chatStatus} agentStatuses={agentStatuses} notification={notification} systemStatus={systemStatus} />
           )}
         />
       )}

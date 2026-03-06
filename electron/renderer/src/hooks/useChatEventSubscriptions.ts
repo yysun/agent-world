@@ -13,6 +13,7 @@
  * - Accepts state setters/callbacks via dependency injection.
  *
  * Recent Changes:
+ * - 2026-03-06: Added app-level selected-chat system-event callback wiring for status-bar visibility while preserving title-refresh side effects.
  * - 2026-02-27: Global log listener now routes events only to logs-panel ingestion; chat message list is no longer mutated for realtime log events.
  * - 2026-02-27: Added app-level main log callback wiring so global log events can feed the logs panel independently of chat message rendering.
  * - 2026-02-26: Replaced chat-subscription lifecycle console traces with categorized renderer logger output controlled by env-derived log config.
@@ -89,13 +90,44 @@ type UseChatEventSubscriptionsArgs = {
   resetActivityRuntimeState: () => void;
   setHitlPromptQueue: Dispatch<SetStateAction<HitlPrompt[]>>;
   onMainLogEvent?: (entry: MainProcessLogEntry) => void;
+  onSessionSystemEvent?: (event: SessionSystemEventPayload) => void;
 };
 
-type SessionSystemEventPayload = {
+export type SessionSystemEventPayload = {
   eventType?: string | null;
   chatId?: string | null;
+  messageId?: string | null;
+  createdAt?: string | null;
   content?: unknown;
 };
+
+export function forwardSessionSystemEvent(args: {
+  loadedWorldId: string | null | undefined;
+  selectedSessionId: string | null;
+  refreshSessions: (worldId: string, preferredSessionId?: string | null) => Promise<void>;
+  onSessionSystemEvent?: (event: SessionSystemEventPayload) => void;
+  systemEvent: SessionSystemEventPayload;
+}): void {
+  const {
+    loadedWorldId,
+    selectedSessionId,
+    refreshSessions,
+    onSessionSystemEvent,
+    systemEvent,
+  } = args;
+
+  if (!loadedWorldId) return;
+
+  const eventType = String(systemEvent?.eventType || '').trim();
+  if (eventType === 'chat-title-updated') {
+    const targetChatId = String(systemEvent?.chatId || selectedSessionId || '').trim() || null;
+    refreshSessions(loadedWorldId, targetChatId).catch(() => { });
+  }
+
+  if (typeof onSessionSystemEvent === 'function') {
+    onSessionSystemEvent(systemEvent);
+  }
+}
 
 export function enqueueHitlPromptFromToolEvent(
   existing: HitlPrompt[],
@@ -171,6 +203,7 @@ export function useChatEventSubscriptions({
   resetActivityRuntimeState,
   setHitlPromptQueue,
   onMainLogEvent,
+  onSessionSystemEvent,
 }: UseChatEventSubscriptionsArgs) {
   const pendingHitlEventsRef = useRef<Array<{ payload: any; fallbackChatId: string | null }>>([]);
   const pendingHitlFlushTimerRef = useRef<number | null>(null);
@@ -205,13 +238,13 @@ export function useChatEventSubscriptions({
       streamingStateRef,
       setMessages,
       onSessionSystemEvent: (systemEvent) => {
-        if (!loadedWorldId) return;
-        const eventType = String(systemEvent?.eventType || '').trim();
-        if (eventType === 'chat-title-updated') {
-          const targetChatId = String(systemEvent?.chatId || selectedSessionId || '').trim() || null;
-          refreshSessions(loadedWorldId, targetChatId).catch(() => { });
-          return;
-        }
+        forwardSessionSystemEvent({
+          loadedWorldId,
+          selectedSessionId,
+          refreshSessions,
+          onSessionSystemEvent,
+          systemEvent,
+        });
       }
     });
 
@@ -277,6 +310,7 @@ export function useChatEventSubscriptions({
     api,
     chatSubscriptionCounter,
     loadedWorldId,
+    onSessionSystemEvent,
     refreshSessions,
     resetActivityRuntimeState,
     selectedSessionId,

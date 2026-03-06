@@ -15,11 +15,13 @@
  * - Reuses ActivityPulse and ThinkingIndicator for animation consistency.
  *
  * Recent Changes:
+ * - 2026-03-06: Added selected-chat system-event overlay rendering between local notifications and working-state fallback.
  * - 2026-02-28: Preserved an always-mounted status bar row so hide behavior clears content instead of removing layout space.
  * - 2026-02-22: Created as part of status-registry migration (Phase 7.1).
  */
 
 import React from 'react';
+import type { SessionSystemStatusEntry } from '../domain/session-system-status';
 import type { WorkingStatus } from '../domain/status-types';
 import ActivityPulse from './ActivityPulse';
 import ThinkingIndicator from './ThinkingIndicator';
@@ -28,6 +30,7 @@ export interface WorkingStatusBarProps {
   chatStatus: WorkingStatus;
   agentStatuses: { id: string; name: string; status: WorkingStatus }[];
   notification?: { text: string; kind: 'error' | 'success' | 'info' } | null;
+  systemStatus?: SessionSystemStatusEntry | null;
 }
 
 const notificationTextClass: Record<string, string> = {
@@ -36,12 +39,22 @@ const notificationTextClass: Record<string, string> = {
   info: 'text-muted-foreground',
 };
 
-export default function WorkingStatusBar({ chatStatus, agentStatuses, notification }: WorkingStatusBarProps) {
+export default function WorkingStatusBar({ chatStatus, agentStatuses, notification, systemStatus }: WorkingStatusBarProps) {
   if (notification) {
     return (
       <div className="px-4 pb-1">
         <div className={`mx-auto flex min-h-5 w-full max-w-[750px] items-center gap-1.5 text-xs ${notificationTextClass[notification.kind] ?? 'text-muted-foreground'}`}>
           <span>{notification.text}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (systemStatus) {
+    return (
+      <div className="px-4 pb-1">
+        <div className={`mx-auto flex min-h-5 w-full max-w-[750px] items-center gap-1.5 text-xs ${notificationTextClass[systemStatus.kind] ?? 'text-muted-foreground'}`}>
+          <span>{systemStatus.text}</span>
         </div>
       </div>
     );
