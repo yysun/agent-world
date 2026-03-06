@@ -305,7 +305,7 @@ describe('restoreChat validation', () => {
     expect(snapshot?.chatId).toBe('chat-2');
     expect(snapshot?.memory).toEqual(memoryRows);
     expect(snapshot?.hitlPrompts).toHaveLength(1);
-    expect(listPendingHitlPromptEvents).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-1' }), 'chat-2');
+    expect(listPendingHitlPromptEvents).not.toHaveBeenCalled();
     expect(listPendingHitlPromptEventsFromMessages).toHaveBeenCalledWith(memoryRows, 'chat-2');
   });
 
