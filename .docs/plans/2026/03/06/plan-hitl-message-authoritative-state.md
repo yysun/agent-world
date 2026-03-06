@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-06  
 **Status:** Proposed  
-**Related REQ:** `/Users/esun/Documents/Projects/agent-world.worktrees/feature-heart-beat/.docs/reqs/2026/03/06/req-hitl-message-authoritative-state.md`
+**Related REQ:** `.docs/reqs/2026/03/06/req-hitl-message-authoritative-state.md`
 
 ## Overview
 

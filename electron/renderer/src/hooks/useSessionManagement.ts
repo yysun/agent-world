@@ -21,7 +21,6 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { safeMessage } from '../domain/desktop-api';
-import { clearChatTransientErrors } from '../domain/message-updates';
 import { resolveSelectedSessionId } from '../domain/session-selection';
 import { sortSessionsByNewest } from '../utils/data-transform';
 import { getRefreshWarning } from '../utils/formatting';
@@ -110,12 +109,17 @@ export function useSessionManagement({
       previousChatId: previousSessionId || null
     });
     messageRefreshCounter.current += 1;
-    setMessages((existing) => clearChatTransientErrors(existing, String(previousSessionId || '').trim() || null));
+    const prefetchRefreshId = messageRefreshCounter.current;
+    // Clear the full previous transcript immediately so stale rows are never
+    // actionable while the new chat's history loads (AD-2).
+    setMessages([]);
     setSelectedSessionId(chatId);
 
     void (async () => {
       try {
         const history = await api.getMessages(loadedWorldId, chatId);
+        // Discard if a later chat switch started after this prefetch (AD-6).
+        if (prefetchRefreshId !== messageRefreshCounter.current) return;
         rendererLogger.debug('electron.renderer.session', 'Session history prefetched', {
           worldId: loadedWorldId,
           chatId,

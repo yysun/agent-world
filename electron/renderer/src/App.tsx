@@ -94,6 +94,7 @@ import { useChatEventSubscriptions } from './hooks/useChatEventSubscriptions';
 import { useMessageQueue } from './hooks/useMessageQueue';
 import type { MainProcessLogEntry } from './domain/chat-event-handlers';
 import { computeCanStopCurrentSession } from './domain/chat-stop-state';
+import { shouldActivateSessionForRefresh, shouldApplyChatRefresh } from './domain/chat-refresh-guard';
 import { clearChatAgents, finalizeReplayedChat, getChatStatus, syncWorldRoster, updateRegistry } from './domain/status-registry';
 import { applyEventToRegistry, parseStoredEventReplayArgs } from './domain/status-updater';
 import {
@@ -190,6 +191,9 @@ export default function App() {
   const api = useMemo(() => getDesktopApi(), []);
   const chatSubscriptionCounter = useRef(0);
   const messageRefreshCounter = useRef(0);
+  // Always reflects the latest selectedSessionId so async callbacks can read the
+  // current value without stale closures. Updated synchronously each render below.
+  const selectedSessionIdRef = useRef<string | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const previousMessageCountRef = useRef(0);
@@ -358,6 +362,9 @@ export default function App() {
 
   sessionSetterProxyRef.current.setSessions = setSessions;
   sessionSetterProxyRef.current.setSelectedSessionId = setSelectedSessionId;
+  // Sync ref so async callbacks (refreshMessages, edit/delete follow-up) always
+  // read the latest selected chat without needing it in their dependency arrays.
+  selectedSessionIdRef.current = selectedSessionId;
 
   const {
     streamingStateRef,
@@ -576,14 +583,25 @@ export default function App() {
 
     setLoading((value: { sessions: boolean; messages: boolean }) => ({ ...value, messages: true }));
     try {
-      const activation = await api.selectSession(worldId, sessionId);
-      rendererLogger.debug('electron.renderer.messages', 'Session activation resolved while refreshing messages', {
-        worldId,
-        requestedChatId: sessionId,
-        resolvedChatId: String((activation as any)?.chatId || '').trim() || null
-      });
+      // Only activate the backend session when this is still the selected chat.
+      // Edit/delete follow-up may call refreshMessages with a non-selected targetChatId;
+      // activating the backend for a non-visible chat drifts backend/frontend chat state.
+      if (shouldActivateSessionForRefresh(sessionId, selectedSessionIdRef.current)) {
+        const activation = await api.selectSession(worldId, sessionId);
+        rendererLogger.debug('electron.renderer.messages', 'Session activation resolved while refreshing messages', {
+          worldId,
+          requestedChatId: sessionId,
+          resolvedChatId: String((activation as any)?.chatId || '').trim() || null
+        });
+      }
       const nextMessages = (await api.getMessages(worldId, sessionId)) as any[];
-      if (refreshId !== messageRefreshCounter.current) return;
+      // Discard if a later refresh started or the target chat is no longer selected.
+      if (!shouldApplyChatRefresh({
+        refreshId,
+        currentCounter: messageRefreshCounter.current,
+        targetChatId: sessionId,
+        selectedChatId: selectedSessionIdRef.current,
+      })) return;
       setMessages(nextMessages);
     } catch (error) {
       if (refreshId !== messageRefreshCounter.current) return;
@@ -652,11 +670,13 @@ export default function App() {
     onDeleteMessage,
     onBranchFromMessage,
     onCopyRawMarkdownFromMessage,
+    clearEditDeleteState,
     resetMessageRuntimeState,
   } = useMessageManagement({
     api,
     loadedWorldId: loadedWorld?.id,
     selectedSessionId,
+    selectedSessionIdRef,
     systemSettings,
     messages,
     messagesById,
@@ -720,6 +740,23 @@ export default function App() {
   useEffect(() => {
     refreshMessages(loadedWorld?.id, selectedSessionId);
   }, [loadedWorld?.id, selectedSessionId, refreshMessages]);
+
+  // On chat switch: clear inline edit/delete UI state so stale actions from
+  // the previous chat are not shown in the newly selected chat (AD-2, AD-3).
+  useEffect(() => {
+    clearEditDeleteState();
+  }, [selectedSessionId, clearEditDeleteState]);
+
+  // On chat switch: filter the HITL prompt queue to only prompts that belong
+  // to the newly selected chat (null chatId prompts are kept as they are
+  // considered unscoped/global). This prevents prompts for another chat from
+  // appearing in the active UI while remaining recoverable on return (AD-4).
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    setHitlPromptQueue((existing) =>
+      existing.filter((prompt) => !prompt.chatId || prompt.chatId === selectedSessionId)
+    );
+  }, [selectedSessionId]);
 
   // Phase 6.2b: Replay stored events to reconstruct status on chat switch.
   // Clear and replay happen atomically after the fetch so the previous status

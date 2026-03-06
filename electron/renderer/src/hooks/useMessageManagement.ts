@@ -46,6 +46,7 @@ export function useMessageManagement({
   api,
   loadedWorldId,
   selectedSessionId,
+  selectedSessionIdRef,
   systemSettings,
   messages,
   messagesById,
@@ -333,7 +334,11 @@ export function useMessageManagement({
           'error'
         );
         setMessages((existing) => removeOptimisticUserMessage(existing, optimisticEditedMessageId));
-        await refreshMessages(loadedWorldId, targetChatId);
+        // Only refresh if the user is still on the edited chat; if they switched away
+        // the chat will be refreshed when they return (AD-3, AD-7).
+        if (selectedSessionIdRef?.current === targetChatId) {
+          await refreshMessages(loadedWorldId, targetChatId);
+        }
         return;
       }
 
@@ -359,7 +364,11 @@ export function useMessageManagement({
 
       setStatusText(errorMessage, 'error');
       setMessages((existing) => removeOptimisticUserMessage(existing, optimisticEditedMessageId));
-      await refreshMessages(loadedWorldId, targetChatId);
+      // Only refresh if the user is still on the edited chat; if they switched away
+      // the chat will be refreshed when they return (AD-3, AD-7).
+      if (selectedSessionIdRef?.current === targetChatId) {
+        await refreshMessages(loadedWorldId, targetChatId);
+      }
     } finally {
       setSendingSessionIds((prev) => {
         const next = new Set(prev);
@@ -373,6 +382,7 @@ export function useMessageManagement({
     loadedWorldId,
     refreshMessages,
     resolveMessageTargetChatId,
+    selectedSessionIdRef,
     setMessages,
     setStatusText,
   ]);
@@ -403,14 +413,18 @@ export function useMessageManagement({
         }
       }
 
-      await refreshMessages(loadedWorldId, targetChatId);
+      // Only refresh if the user is still on the deleted chat; if they switched away
+      // the chat will be refreshed when they return (AD-3, AD-7).
+      if (selectedSessionIdRef?.current === targetChatId) {
+        await refreshMessages(loadedWorldId, targetChatId);
+      }
       setStatusText('Message deleted successfully', 'success');
     } catch (error) {
       setStatusText(error.message || 'Failed to delete message', 'error');
     } finally {
       setDeletingMessageId(null);
     }
-  }, [api, loadedWorldId, refreshMessages, resolveMessageTargetChatId, setStatusText]);
+  }, [api, loadedWorldId, refreshMessages, resolveMessageTargetChatId, selectedSessionIdRef, setStatusText]);
 
   const onBranchFromMessage = useCallback(async (message) => {
     const worldId = String(loadedWorldId || '').trim();
@@ -504,6 +518,15 @@ export function useMessageManagement({
     }
   }, [setStatusText]);
 
+  // Clears only edit/delete-local UI state on chat switch (AD-3).
+  // Does NOT touch sendingSessionIds/stoppingSessionIds/pendingResponseSessionIds
+  // to avoid disrupting concurrent per-chat send/stop state.
+  const clearEditDeleteState = useCallback(() => {
+    setEditingMessageId(null);
+    setEditingText('');
+    setDeletingMessageId(null);
+  }, []);
+
   const resetMessageRuntimeState = useCallback(() => {
     setSendingSessionIds(new Set());
     setStoppingSessionIds(new Set());
@@ -533,6 +556,7 @@ export function useMessageManagement({
     onDeleteMessage,
     onBranchFromMessage,
     onCopyRawMarkdownFromMessage,
+    clearEditDeleteState,
     resetMessageRuntimeState,
   };
 }
