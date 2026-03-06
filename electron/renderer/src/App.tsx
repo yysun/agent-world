@@ -112,6 +112,10 @@ import {
   type WorldGridLayoutChoiceId,
   type WorldViewMode,
 } from './domain/world-view';
+import {
+  countAgentConversationResponses,
+  countConversationDisplayMessages,
+} from '../../shared/conversation-message-counts';
 
 type WorkspaceState = {
   workspacePath: string | null;
@@ -454,7 +458,7 @@ export default function App() {
 
     return {
       totalAgents: totalAgentsParsed ?? fallbackTotalAgents,
-      totalMessages: totalMessagesParsed ?? fallbackTotalMessages,
+      totalMessages: sessions.length > 0 ? fallbackTotalMessages : (totalMessagesParsed ?? fallbackTotalMessages),
       turnLimit: turnLimitParsed ?? DEFAULT_TURN_LIMIT
     };
   }, [loadedWorld, sessions]);
@@ -482,26 +486,24 @@ export default function App() {
       }
     });
 
-    const counts = new Map();
-    for (const message of messages) {
+    const sessionMessages = messages.filter((message) => {
       const messageChatId = String(message?.chatId || '').trim();
-      if (!messageChatId || messageChatId !== normalizedSelectedSessionId) continue;
-      if (isHumanMessage(message)) continue;
+      return Boolean(messageChatId) && messageChatId === normalizedSelectedSessionId;
+    });
 
-      const fromAgentId = String(message?.fromAgentId || '').trim();
-      let resolvedAgentId: string | null = null;
-
-      if (fromAgentId && idToAgentId.has(fromAgentId)) {
-        resolvedAgentId = fromAgentId;
-      } else {
-        const sender = String(message?.sender || '').trim().toLowerCase();
-        if (sender && nameToAgentId.has(sender)) {
-          resolvedAgentId = nameToAgentId.get(sender);
+    const counts = new Map();
+    for (const agentId of idToAgentId.keys()) {
+      const nextCount = countAgentConversationResponses(sessionMessages, (message) => {
+        const fromAgentId = String(message?.fromAgentId || '').trim();
+        if (fromAgentId && idToAgentId.has(fromAgentId)) {
+          return fromAgentId === agentId;
         }
-      }
 
-      if (!resolvedAgentId) continue;
-      counts.set(resolvedAgentId, (counts.get(resolvedAgentId) || 0) + 1);
+        const sender = String(message?.sender || '').trim().toLowerCase();
+        return Boolean(sender) && nameToAgentId.get(sender) === agentId;
+      });
+
+      counts.set(agentId, nextCount);
     }
 
     return counts;
@@ -808,7 +810,7 @@ export default function App() {
     const normalizedSessionId = String(selectedSessionId || '').trim();
     if (!normalizedSessionId) return;
 
-    const nextMessageCount = Array.isArray(messages) ? messages.length : 0;
+    const nextMessageCount = countConversationDisplayMessages(messages);
     setSessions((existing: any[]) => {
       let changed = false;
       const next = existing.map((session: any) => {

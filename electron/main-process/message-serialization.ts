@@ -23,6 +23,8 @@
 
 type GetMemory = (worldId: string, chatId: string | null) => Promise<any>;
 
+import { countConversationDisplayMessages } from '../shared/conversation-message-counts.js';
+
 export function serializeAgentSummary(agent: any, fallbackIndex = 0): Record<string, unknown> {
   const rawId = typeof agent?.id === 'string' ? agent.id.trim() : '';
   const rawName = typeof agent?.name === 'string' ? agent.name.trim() : '';
@@ -126,7 +128,12 @@ export async function serializeChatsWithMessageCounts(
 
     try {
       const messages = await getMemory(worldKey, chatId);
-      const count = Array.isArray(messages) ? messages.length : 0;
+      const normalizedMessages = normalizeSessionMessages(
+        Array.isArray(messages)
+          ? messages.map((message: any) => serializeMessage(message))
+          : [],
+      );
+      const count = countConversationDisplayMessages(normalizedMessages);
       messageCounts.set(chatId, count);
     } catch {
       const fallbackCount = Number(chat?.messageCount);

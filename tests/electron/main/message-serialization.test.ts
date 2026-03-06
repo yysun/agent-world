@@ -17,6 +17,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   normalizeSessionMessages,
+  serializeChatsWithMessageCounts,
   serializeRealtimeMessageEvent,
   serializeRealtimeCrudEvent
 } from '../../../electron/main-process/message-serialization';
@@ -108,6 +109,88 @@ describe('serializeRealtimeMessageEvent', () => {
         role: 'tool',
         tool_call_id: 'call_shell_1',
       }
+    });
+  });
+});
+
+describe('serializeChatsWithMessageCounts', () => {
+  it('counts only user-visible conversation messages for session badges', async () => {
+    const sessions = await serializeChatsWithMessageCounts(
+      'world-1',
+      [{ id: 'chat-1', worldId: 'world-1', name: 'Chat 1', messageCount: 99 }],
+      async () => ([
+        {
+          messageId: 'user-1',
+          role: 'user',
+          sender: 'human',
+          content: 'find videos',
+          chatId: 'chat-1',
+          createdAt: '2026-03-06T17:52:38.869Z',
+          agentId: 'gemini'
+        },
+        {
+          messageId: 'user-1',
+          role: 'user',
+          sender: 'human',
+          content: 'find videos',
+          chatId: 'chat-1',
+          createdAt: '2026-03-06T17:52:38.869Z',
+          agentId: 'qwen'
+        },
+        {
+          messageId: 'assistant-1',
+          role: 'assistant',
+          sender: 'gemini',
+          content: 'I loaded yt-dlp.',
+          chatId: 'chat-1',
+          createdAt: '2026-03-06T17:52:40.030Z',
+          agentId: 'gemini',
+          tool_calls: [{ id: 'tool-req-1', function: { name: 'load_skill' } }]
+        },
+        {
+          messageId: 'assistant-tool-request',
+          role: 'assistant',
+          sender: 'gemini',
+          content: 'Calling tool: yt-dlp',
+          chatId: 'chat-1',
+          createdAt: '2026-03-06T17:52:40.067Z',
+          agentId: 'gemini'
+        },
+        {
+          messageId: 'tool-1',
+          role: 'tool',
+          sender: 'gemini',
+          content: '{"ok":true}',
+          chatId: 'chat-1',
+          createdAt: '2026-03-06T17:52:43.267Z',
+          agentId: 'gemini'
+        },
+        {
+          messageId: 'assistant-2',
+          role: 'assistant',
+          sender: 'gemini',
+          content: 'I found the videos.',
+          chatId: 'chat-1',
+          createdAt: '2026-03-06T17:52:50.000Z',
+          agentId: 'gemini',
+          tool_calls: [{ id: 'tool-req-2', function: { name: 'shell_cmd' } }]
+        },
+        {
+          messageId: 'assistant-3',
+          role: 'assistant',
+          sender: 'gemini',
+          content: 'I created the notebook.',
+          chatId: 'chat-1',
+          createdAt: '2026-03-06T17:53:14.179Z',
+          agentId: 'gemini'
+        }
+      ])
+    );
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({
+      id: 'chat-1',
+      messageCount: 4,
     });
   });
 });
