@@ -890,6 +890,17 @@ export default function App() {
     updateRegistry(r => syncWorldRoster(r, loadedWorld.id, chatIds, agentIds));
   }, [loadedWorld, sessions]);
 
+  const onSessionSystemEvent = useCallback((event: { eventType?: string | null; chatId?: string | null; messageId?: string | null; createdAt?: string | null; content?: unknown }) => {
+    const nextStatus = createSessionSystemStatus(loadedWorld?.id, {
+      eventType: String(event?.eventType || ''),
+      chatId: String(event?.chatId || '').trim() || null,
+      messageId: event?.messageId ? String(event.messageId) : null,
+      createdAt: event?.createdAt ? String(event.createdAt) : null,
+      content: event?.content,
+    });
+    showSessionSystemStatus(nextStatus);
+  }, [loadedWorld?.id, showSessionSystemStatus]);
+
   useChatEventSubscriptions({
     api,
     loadedWorld,
@@ -901,16 +912,7 @@ export default function App() {
     resetActivityRuntimeState,
     setHitlPromptQueue,
     onMainLogEvent: onMainProcessLogEvent,
-    onSessionSystemEvent: (event) => {
-      const nextStatus = createSessionSystemStatus(loadedWorld?.id, {
-        eventType: String(event?.eventType || ''),
-        chatId: String(event?.chatId || '').trim() || null,
-        messageId: event?.messageId ? String(event.messageId) : null,
-        createdAt: event?.createdAt ? String(event.createdAt) : null,
-        content: event?.content,
-      });
-      showSessionSystemStatus(nextStatus);
-    },
+    onSessionSystemEvent,
   });
 
   const {
