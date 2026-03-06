@@ -103,14 +103,12 @@ export type SessionSystemEventPayload = {
 
 export function forwardSessionSystemEvent(args: {
   loadedWorldId: string | null | undefined;
-  selectedSessionId: string | null;
   refreshSessions: (worldId: string, preferredSessionId?: string | null) => Promise<void>;
   onSessionSystemEvent?: (event: SessionSystemEventPayload) => void;
   systemEvent: SessionSystemEventPayload;
 }): void {
   const {
     loadedWorldId,
-    selectedSessionId,
     refreshSessions,
     onSessionSystemEvent,
     systemEvent,
@@ -119,8 +117,9 @@ export function forwardSessionSystemEvent(args: {
   if (!loadedWorldId) return;
 
   const eventType = String(systemEvent?.eventType || '').trim();
+  const targetChatId = String(systemEvent?.chatId || '').trim() || null;
+  if (!targetChatId) return;
   if (eventType === 'chat-title-updated') {
-    const targetChatId = String(systemEvent?.chatId || selectedSessionId || '').trim() || null;
     refreshSessions(loadedWorldId, targetChatId).catch(() => { });
   }
 
@@ -132,7 +131,6 @@ export function forwardSessionSystemEvent(args: {
 export function enqueueHitlPromptFromToolEvent(
   existing: HitlPrompt[],
   payload: any,
-  fallbackChatId: string | null
 ): HitlPrompt[] {
   const toolPayload = payload?.tool && typeof payload.tool === 'object'
     ? (payload.tool as Record<string, unknown>)
@@ -174,11 +172,16 @@ export function enqueueHitlPromptFromToolEvent(
     ? (content.metadata as Record<string, unknown>)
     : null;
 
+  const promptChatId = String(content?.chatId || payload?.chatId || '').trim() || null;
+  if (!promptChatId) {
+    return existing;
+  }
+
   return [
     ...existing,
     {
       requestId,
-      chatId: String(content?.chatId || payload?.chatId || fallbackChatId || '').trim() || null,
+      chatId: promptChatId,
       title: String(content?.title || 'Approval required').trim() || 'Approval required',
       message: String(content?.message || '').trim(),
       mode: 'option',
@@ -205,7 +208,7 @@ export function useChatEventSubscriptions({
   onMainLogEvent,
   onSessionSystemEvent,
 }: UseChatEventSubscriptionsArgs) {
-  const pendingHitlEventsRef = useRef<Array<{ payload: any; fallbackChatId: string | null }>>([]);
+  const pendingHitlEventsRef = useRef<any[]>([]);
   const pendingHitlFlushTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -240,7 +243,6 @@ export function useChatEventSubscriptions({
       onSessionSystemEvent: (systemEvent) => {
         forwardSessionSystemEvent({
           loadedWorldId,
-          selectedSessionId,
           refreshSessions,
           onSessionSystemEvent,
           systemEvent,
@@ -258,7 +260,7 @@ export function useChatEventSubscriptions({
         return;
       }
 
-      pendingHitlEventsRef.current.push({ payload, fallbackChatId: selectedSessionId });
+      pendingHitlEventsRef.current.push(payload);
       if (pendingHitlFlushTimerRef.current === null) {
         pendingHitlFlushTimerRef.current = window.setTimeout(() => {
           const batch = pendingHitlEventsRef.current.splice(0);
@@ -273,7 +275,7 @@ export function useChatEventSubscriptions({
           setHitlPromptQueue((existing) => {
             let queue = existing;
             for (const entry of batch) {
-              queue = enqueueHitlPromptFromToolEvent(queue, entry.payload, entry.fallbackChatId);
+              queue = enqueueHitlPromptFromToolEvent(queue, entry);
             }
             return queue;
           });

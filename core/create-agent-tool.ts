@@ -246,7 +246,9 @@ export function createCreateAgentToolDefinition() {
 
       const world = context?.world;
       const worldId = String(world?.id || '').trim();
-      const chatId = context?.chatId ?? world?.currentChatId ?? null;
+      const chatId = typeof context?.chatId === 'string' && context.chatId.trim()
+        ? context.chatId.trim()
+        : null;
 
       if (!world || !worldId) {
         return stringifyResult({
@@ -319,31 +321,33 @@ export function createCreateAgentToolDefinition() {
           slotAlreadyClaimed: true,
         });
 
-        // Notify UI to refresh the agent list
-        publishEvent(world, EventType.SYSTEM, {
-          eventType: 'agent-created',
-          agent: {
-            id: createdAgent.id,
-            name: createdAgent.name,
-            type: createdAgent.type,
-            autoReply: createdAgent.autoReply ?? false,
-          },
-        }, chatId);
+        if (chatId) {
+          // Notify UI to refresh the agent list
+          publishEvent(world, EventType.SYSTEM, {
+            eventType: 'agent-created',
+            agent: {
+              id: createdAgent.id,
+              name: createdAgent.name,
+              type: createdAgent.type,
+              autoReply: createdAgent.autoReply ?? false,
+            },
+          }, chatId);
 
-        try {
-          await requestCreateAgentCreatedInfo({
-            world,
-            chatId,
-            name: createdAgent.name,
-            autoReply: createdAgent.autoReply ?? false,
-            role: normalized.args.role,
-            nextAgent: normalized.args.nextAgent,
-            provider: createdAgent.provider,
-            model: createdAgent.model,
-          });
-        } catch {
-          // Agent creation already succeeded. Failure to show a follow-up info
-          // prompt must not turn a successful create into an error result.
+          try {
+            await requestCreateAgentCreatedInfo({
+              world,
+              chatId,
+              name: createdAgent.name,
+              autoReply: createdAgent.autoReply ?? false,
+              role: normalized.args.role,
+              nextAgent: normalized.args.nextAgent,
+              provider: createdAgent.provider,
+              model: createdAgent.model,
+            });
+          } catch {
+            // Agent creation already succeeded. Failure to show a follow-up info
+            // prompt must not turn a successful create into an error result.
+          }
         }
 
         return stringifyResult({

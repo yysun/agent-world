@@ -183,6 +183,30 @@ describe('API chat route isolation', () => {
     });
   });
 
+  it('rejects message send when chatId is omitted', async () => {
+    const { default: router } = await import('../../server/api.js');
+    const [validateWorld, routeHandler] = getRouteHandlers(router, 'post', '/worlds/:worldName/messages');
+
+    const req: any = {
+      params: { worldName: 'world-1' },
+      body: {
+        message: 'hello',
+        sender: 'human',
+        stream: false
+      }
+    };
+    const res = createMockResponse();
+
+    await runMiddleware(validateWorld, req, res);
+    await routeHandler(req, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toMatchObject({
+      error: 'Invalid request body',
+      code: 'VALIDATION_ERROR'
+    });
+  });
+
   it('rejects message edit when requested chatId does not exist', async () => {
     const { default: router } = await import('../../server/api.js');
     const [validateWorld, routeHandler] = getRouteHandlers(router, 'put', '/worlds/:worldName/messages/:messageId');

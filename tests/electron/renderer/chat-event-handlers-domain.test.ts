@@ -87,11 +87,17 @@ describe('createGlobalLogEventHandler', () => {
 
     handler({
       type: 'log',
+      worldId: 'world-1',
+      chatId: 'chat-1',
       logEvent: {
         message: 'Something happened',
         level: 'info',
         category: 'system',
-        timestamp: '2026-02-27T10:00:00.000Z'
+        timestamp: '2026-02-27T10:00:00.000Z',
+        data: {
+          worldId: 'world-1',
+          chatId: 'chat-1',
+        }
       }
     });
 
@@ -102,6 +108,12 @@ describe('createGlobalLogEventHandler', () => {
       category: 'system',
       message: 'Something happened',
       timestamp: '2026-02-27T10:00:00.000Z',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      data: {
+        worldId: 'world-1',
+        chatId: 'chat-1',
+      }
     });
   });
 
@@ -752,7 +764,7 @@ describe('createChatSubscriptionEventHandler', () => {
     expect(msgs[0].command).toBeUndefined();
   });
 
-  it('calls handleEnd for unscoped SSE end events', () => {
+  it('ignores unscoped SSE end events', () => {
     const harness = createMessageStateHarness();
     const streamingStateRef = makeFullStreamingRef();
 
@@ -775,10 +787,10 @@ describe('createChatSubscriptionEventHandler', () => {
       }
     });
 
-    expect(streamingStateRef.current.handleEnd).toHaveBeenCalledWith('m-1');
+    expect(streamingStateRef.current.handleEnd).not.toHaveBeenCalled();
   });
 
-  it('ends all tool streams on SSE end without messageId', () => {
+  it('ignores unscoped SSE end events without messageId', () => {
     const harness = createMessageStateHarness();
     const streamingStateRef = makeFullStreamingRef();
     (streamingStateRef.current.endAllToolStreams as ReturnType<typeof vi.fn>).mockReturnValue(['tool-1']);
@@ -800,11 +812,11 @@ describe('createChatSubscriptionEventHandler', () => {
       }
     });
 
-    expect(streamingStateRef.current.endAllToolStreams).toHaveBeenCalledTimes(1);
+    expect(streamingStateRef.current.endAllToolStreams).not.toHaveBeenCalled();
     expect(streamingStateRef.current.handleEnd).not.toHaveBeenCalled();
   });
 
-  it('processes unscoped tool-result events without error', () => {
+  it('ignores unscoped tool-result events', () => {
     const harness = createMessageStateHarness();
     const streamingStateRef = makeFullStreamingRef();
 
@@ -816,7 +828,6 @@ describe('createChatSubscriptionEventHandler', () => {
       setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
     });
 
-    // tool-result with no chatId scoping — should be processed without throwing
     expect(() => handler({
       type: 'tool',
       subscriptionId: 'sub-1',
@@ -828,7 +839,8 @@ describe('createChatSubscriptionEventHandler', () => {
       }
     })).not.toThrow();
 
-    expect(streamingStateRef.current.endAllToolStreams).toHaveBeenCalled();
+    expect(streamingStateRef.current.endAllToolStreams).not.toHaveBeenCalled();
+    expect(harness.getMessages()).toEqual([]);
   });
 
   it('upserts a live tool message for tool-result events', () => {

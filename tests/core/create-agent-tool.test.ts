@@ -358,6 +358,32 @@ describe('core/create-agent-tool', () => {
     });
   });
 
+  it('does not emit post-create chat-scoped follow-up when explicit chatId is missing', async () => {
+    const emit = vi.fn();
+    const tool = buildWrappedCreateAgentTool();
+
+    await tool.execute(
+      { name: 'No Chat Agent' },
+      undefined,
+      undefined,
+      {
+        world: {
+          id: 'world-1',
+          name: 'World 1',
+          turnLimit: 5,
+          chatLLMProvider: LLMProvider.OPENAI,
+          chatLLMModel: 'gpt-4.1',
+          currentChatId: 'chat-1',
+          eventEmitter: { emit },
+        } as any,
+        chatId: null,
+      },
+    );
+
+    expect(mockedRequestWorldOption).toHaveBeenCalledTimes(1);
+    expect(emit).not.toHaveBeenCalled();
+  });
+
   it('returns create_failed result when manager createAgent throws', async () => {
     mockedCreateAgent.mockRejectedValueOnce(new Error("Agent with ID 'dup-agent' already exists"));
 

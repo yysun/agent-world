@@ -14,6 +14,7 @@
  * - Keeps tests focused on processCLIInput behavior only.
  *
  * Recent Changes:
+ * - 2026-03-06: Updated coverage to require explicit selected-chat input instead of runtime `world.currentChatId`.
  * - 2026-03-04: Added queue metadata assertions (`messageId`, `queueStatus`, `queueRetryCount`) for successful plain-message sends.
  * - 2026-02-15: Added chat-binding and restore guard coverage to prevent chat-id drift in CLI sends.
  */
@@ -27,7 +28,7 @@ vi.mock('../../core/index.js', async (importOriginal) => {
     enqueueAndProcessUserMessage: vi.fn(),
     restoreChat: vi.fn(async (worldId: string, chatId: string) => ({
       id: worldId,
-      currentChatId: chatId
+      chats: new Map([[chatId, { id: chatId }]])
     }))
   };
 });
@@ -44,10 +45,9 @@ describe('processCLIInput message sending', () => {
     const world = {
       id: 'world-1',
       name: 'World 1',
-      currentChatId: null
     } as any;
 
-    const result = await processCLIInput('hello', world, 'human');
+    const result = await processCLIInput('hello', world, 'human', null);
 
     expect(result.success).toBe(false);
     expect(result.message).toContain('no active chat session');
@@ -61,10 +61,9 @@ describe('processCLIInput message sending', () => {
     const world = {
       id: 'world-1',
       name: 'World 1',
-      currentChatId: 'chat-missing'
     } as any;
 
-    const result = await processCLIInput('hello', world, 'human');
+    const result = await processCLIInput('hello', world, 'human', 'chat-missing');
 
     expect(result.success).toBe(false);
     expect(result.message).toContain('chat not found: chat-missing');
@@ -82,10 +81,9 @@ describe('processCLIInput message sending', () => {
     const world = {
       id: 'world-1',
       name: 'World 1',
-      currentChatId: 'chat-1'
     } as any;
 
-    const result = await processCLIInput('hello', world, 'human');
+    const result = await processCLIInput('hello', world, 'human', 'chat-1');
 
     expect(result.success).toBe(true);
     expect(restoreChat).toHaveBeenCalledWith('world-1', 'chat-1');

@@ -230,6 +230,30 @@ describe('core/load-skill-tool', () => {
     );
   });
 
+  it('requires an explicit chatId for interactive load_skill approval', async () => {
+    mockedGetSkill.mockReturnValue({
+      skill_id: 'pdf-extract',
+      description: 'Extract PDF content',
+      hash: 'e99a18ad',
+      lastUpdated: '2026-02-14T12:00:00.000Z',
+    });
+    mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
+    vi.mocked(fs.readFile).mockResolvedValue('# PDF Extraction Instructions\n1. Use tool X...\n' as any);
+
+    const tool = createLoadSkillToolDefinition();
+    const result = await tool.execute(
+      { skill_id: 'pdf-extract' },
+      undefined,
+      undefined,
+      {
+        world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+      },
+    );
+
+    expect(result).toContain('Interactive load_skill execution requires an explicit chatId.');
+    expect(mockedRequestWorldOption).not.toHaveBeenCalled();
+  });
+
   it('returns structured not-found output when skill id does not exist', async () => {
     mockedGetSkill.mockReturnValue(undefined);
     mockedGetSkillSourcePath.mockReturnValue(undefined);

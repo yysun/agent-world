@@ -13,6 +13,8 @@
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
+ * - 2026-03-06: Enforced explicit chat-scoped handling for SSE/tool/activity events; removed selected-session fallback rebinding.
+ * - 2026-03-06: Preserved `worldId` / `chatId` on global main-process log callbacks for scoped logs-panel filtering.
  * - 2026-03-06: Restored selected-chat error log rows into the transcript while keeping full log ingestion in the diagnostics panel.
  * - 2026-02-27: Stopped injecting realtime `type='log'` events into chat message timelines; logs are routed to the dedicated logs panel stream only.
  * - 2026-02-27: Added unified main-process log callback support so logs are available in the right-panel diagnostics view even when no chat is selected.
@@ -92,6 +94,8 @@ export interface MainProcessLogEntry {
   message: string;
   timestamp: string;
   data?: unknown;
+  worldId?: string | null;
+  chatId?: string | null;
 }
 
 function toToolContent(value: unknown): string {
@@ -134,6 +138,11 @@ export function createGlobalLogEventHandler({
 
     const logEvent = payload.logEvent;
     if (!logEvent) return;
+    const logData = logEvent.data && typeof logEvent.data === 'object'
+      ? logEvent.data as Record<string, unknown>
+      : null;
+    const worldId = String(payload.worldId || logEvent.worldId || logData?.worldId || '').trim() || null;
+    const chatId = String(payload.chatId || logEvent.chatId || logData?.chatId || '').trim() || null;
     if (typeof onMainLogEvent === 'function') {
       onMainLogEvent({
         process: 'main',
@@ -142,6 +151,8 @@ export function createGlobalLogEventHandler({
         message: String(logEvent.message || '').trim() || '(empty log message)',
         timestamp: String(logEvent.timestamp || '').trim() || new Date().toISOString(),
         ...(logEvent.data !== undefined ? { data: logEvent.data } : {}),
+        worldId,
+        chatId,
       });
     }
   };
@@ -268,7 +279,8 @@ export function createChatSubscriptionEventHandler({
       if (!streamPayload) return;
 
       const streamChatId = String(streamPayload.chatId || payload.chatId || '').trim() || null;
-      if (selectedSessionId && streamChatId && streamChatId !== selectedSessionId) return;
+      if (!streamChatId) return;
+      if (selectedSessionId && streamChatId !== selectedSessionId) return;
 
       const eventType = String(streamPayload.eventType || '').toLowerCase();
       const messageId = streamPayload.messageId ? String(streamPayload.messageId) : '';
@@ -286,7 +298,7 @@ export function createChatSubscriptionEventHandler({
       const shellCommand = toolCommandByUseId.get(shellStdoutToolUseId || messageId);
 
       const sseAgentName = String(streamPayload.agentName || '').trim() || null;
-      const sseChatId = streamChatId || selectedSessionId || null;
+      const sseChatId = streamChatId;
 
       if (!messageId) {
         if (eventType === 'end' || eventType === 'error') {
@@ -372,14 +384,15 @@ export function createChatSubscriptionEventHandler({
       const toolPayload = payload.tool as Record<string, unknown> | undefined;
       if (!toolPayload) return;
       const toolChatId = String(payload.chatId || toolPayload.chatId || '').trim() || null;
-      if (selectedSessionId && toolChatId && toolChatId !== selectedSessionId) return;
+      if (!toolChatId) return;
+      if (selectedSessionId && toolChatId !== selectedSessionId) return;
 
       const toolEventType = String(toolPayload.eventType || '').toLowerCase();
       const toolUseId = String(toolPayload.toolUseId || '').trim();
       if (!toolUseId) return;
 
       const toolAgentName = String(toolPayload.agentName || toolPayload.agentId || '').trim() || null;
-      const toolChatIdResolved = toolChatId || selectedSessionId || null;
+      const toolChatIdResolved = toolChatId;
 
       if (toolEventType === 'tool-start') {
         const toolName = String(toolPayload.toolName || 'unknown');
@@ -506,8 +519,8 @@ export function createChatSubscriptionEventHandler({
       if (!activityPayload) return;
 
       const activityChatId = String(payload.chatId || activityPayload.chatId || '').trim() || null;
-      // Allow unscoped (no chatId) activity events through; only filter explicit mismatches.
-      if (selectedSessionId && activityChatId && activityChatId !== selectedSessionId) return;
+      if (!activityChatId) return;
+      if (selectedSessionId && activityChatId !== selectedSessionId) return;
 
       const activityEventType = String(activityPayload.eventType || '').toLowerCase();
       const pendingOps = Number(activityPayload.pendingOperations ?? -1);
@@ -519,8 +532,7 @@ export function createChatSubscriptionEventHandler({
         // Agent(s) started working — set registry to working so the indicator shows.
         // Use activeSources (agent names) or fall back to source (single agent name).
         if (!loadedWorldId) return;
-        const targetChatId = activityChatId || selectedSessionId || null;
-        if (!targetChatId) return;
+        const targetChatId = activityChatId;
 
         const activeSources = Array.isArray(activityPayload.activeSources)
           ? (activityPayload.activeSources as unknown[])
@@ -558,10 +570,7 @@ export function createChatSubscriptionEventHandler({
 
       // Reset registry so the working indicator clears.
       if (loadedWorldId) {
-        const targetChatId = activityChatId || selectedSessionId || null;
-        if (targetChatId) {
-          updateRegistry((r) => clearChatAgents(r, loadedWorldId, targetChatId));
-        }
+        updateRegistry((r) => clearChatAgents(r, loadedWorldId, activityChatId));
       }
     }
   };

@@ -14,6 +14,7 @@
  * - Payload normalization helpers preserve existing invoke payload formats.
  *
  * Recent Changes:
+ * - 2026-03-06: Fixed `runHeartbeat()` payload normalization to omit `chatId` when not provided.
  * - 2026-02-26: Added `getLoggingConfig()` bridge method for renderer-safe env-controlled logging category/level configuration.
  * - 2026-02-25: Updated `importWorld()` bridge method to accept optional source payload.
  * - 2026-02-20: Enforced options-only HITL bridge surface (`respondHitlOption` only).
@@ -44,6 +45,7 @@ import { invokeDesktopChannel } from './invoke.js';
 import {
   toAgentPayload,
   toBranchSessionPayload,
+  toHeartbeatJobPayload,
   toHitlResponsePayload,
   toMessageEditPayload,
   toMessageDeletePayload,
@@ -119,11 +121,11 @@ export function createDesktopApi(ipcRendererLike: IpcRendererLike = ipcRenderer)
       ipcRendererLike,
       DESKTOP_INVOKE_CHANNELS.HEARTBEAT_LIST
     ),
-    runHeartbeat: (worldId) =>
+    runHeartbeat: (worldId, chatId) =>
       invokeDesktopChannel(
         ipcRendererLike,
         DESKTOP_INVOKE_CHANNELS.HEARTBEAT_RUN,
-        toWorldPayload(worldId)
+        toHeartbeatJobPayload(worldId, chatId)
       ),
     pauseHeartbeat: (worldId) =>
       invokeDesktopChannel(

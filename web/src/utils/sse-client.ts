@@ -21,6 +21,9 @@
  * - Streams shell command output with stdout/stderr distinction
  * - Preserves tool_calls metadata for complete tool call display with parameters
  * - Extracts error details from log data for better error visibility in UI
+ *
+ * Recent Changes:
+ * - 2026-03-06: Removed runtime fallback to backend `currentChatId` from web SSE log filtering; active-chat routing now uses explicit UI selection only.
  * 
  * Created: 2025-10-25 - Initial SSE client implementation
  * Updated: 2026-02-27 - Enforced strict active-chat filtering for realtime log events (drop unscoped and mismatched logs when a chat is selected).
@@ -827,7 +830,7 @@ export const handleLogEvent = <T extends SSEComponentState>(state: T, data: any)
   }
 
   const stateAny = state as any;
-  const activeChatId = stateAny.currentChat?.id || stateAny.world?.currentChatId || null;
+  const activeChatId = stateAny.currentChat?.id || null;
   const incomingChatId = data?.chatId ?? null;
   if (activeChatId && (!incomingChatId || incomingChatId !== activeChatId)) {
     return state;

@@ -100,7 +100,9 @@ export interface WorldChatPayload extends WorldIdPayload {
   chatId: string;
 }
 
-export interface HeartbeatJobPayload extends WorldIdPayload { }
+export interface HeartbeatJobPayload extends WorldIdPayload {
+  chatId?: string;
+}
 
 export interface HeartbeatJobStatus {
   worldId: string;
@@ -210,7 +212,7 @@ export interface DesktopApi {
   updateWorld: (worldId: string, payload: Record<string, unknown>) => Promise<unknown>;
   deleteWorld: (worldId: string) => Promise<unknown>;
   listHeartbeatJobs: () => Promise<HeartbeatJobStatus[]>;
-  runHeartbeat: (worldId: string) => Promise<unknown>;
+  runHeartbeat: (worldId: string, chatId?: string) => Promise<unknown>;
   pauseHeartbeat: (worldId: string) => Promise<unknown>;
   stopHeartbeat: (worldId: string) => Promise<unknown>;
   createAgent: (worldId: string, payload: Record<string, unknown>) => Promise<unknown>;

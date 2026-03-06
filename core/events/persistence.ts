@@ -22,6 +22,7 @@
  * - logger.ts
  *
  * Changes:
+ * - 2026-03-06: Required explicit `chatId` on persisted message/SSE/tool/activity/system events; unscoped events are now rejected instead of inheriting `world.currentChatId`.
  * - 2026-03-03: Combined world-level listeners to eliminate MaxListenersExceededWarning;
  *   title-scheduling and idle-activity logic moved here from subscribers.ts (Layer 6) via
  *   title-scheduler.ts (Layer 4) to respect module layering.
@@ -94,11 +95,21 @@ export function setupEventPersistence(world: World): () => void {
 
   // Combined message handler: persistence + no-activity title scheduling
   const messageHandler = async (event: WorldMessageEvent): Promise<void> => {
+    const targetChatId = typeof event.chatId === 'string' ? event.chatId.trim() : '';
+    if (!targetChatId) {
+      loggerPublish.error('Message event missing required chatId', {
+        worldId: world.id,
+        messageId: event.messageId,
+        sender: event.sender,
+      });
+      return;
+    }
+
     loggerPublish.debug('Message event received for persistence', {
       worldId: world.id,
       messageId: event.messageId,
       sender: event.sender,
-      chatId: event.chatId
+      chatId: targetChatId
     });
 
     // Calculate enhanced metadata using helper functions
@@ -122,7 +133,7 @@ export function setupEventPersistence(world: World): () => void {
     const eventData = {
       id: event.messageId,
       worldId: world.id,
-      chatId: event.chatId || null,
+      chatId: targetChatId,
       type: 'message',
       payload: {
         content: event.content,
@@ -175,11 +186,10 @@ export function setupEventPersistence(world: World): () => void {
     await persistEvent(eventData);
 
     // Title scheduling: debounce on human messages while chat title is still default
-    const msgChatId = event.chatId ?? world.currentChatId ?? null;
-    if (msgChatId && isHumanSender(event.sender)) {
-      const chat = world.chats.get(msgChatId);
+    if (isHumanSender(event.sender)) {
+      const chat = world.chats.get(targetChatId);
       if (chat && isDefaultChatTitle(chat.name)) {
-        scheduleNoActivityTitleUpdate(world, msgChatId, event.content || '');
+        scheduleNoActivityTitleUpdate(world, targetChatId, event.content || '');
       }
     }
   };
@@ -193,12 +203,22 @@ export function setupEventPersistence(world: World): () => void {
       return;
     }
 
+    const targetChatId = typeof event.chatId === 'string' ? event.chatId.trim() : '';
+    if (!targetChatId) {
+      loggerPublish.error('SSE event missing required chatId', {
+        worldId: world.id,
+        eventType: event.type,
+        messageId: event.messageId,
+        agentName: event.agentName,
+      });
+      return;
+    }
+
     // Persist start/end events for metadata tracking
-    // Use event.chatId for concurrency-safe routing (falls back to null for broadcast)
     const eventData = {
       id: `${event.messageId}-sse-${event.type}`,
       worldId: world.id,
-      chatId: event.chatId || null,
+      chatId: targetChatId,
       type: 'sse',
       payload: {
         agentName: event.agentName,
@@ -224,6 +244,7 @@ export function setupEventPersistence(world: World): () => void {
     // Check event type category
     const isActivityEvent = event.type && ['response-start', 'response-end', 'idle'].includes(event.type);
     const isToolEvent = event.type && ['tool-start', 'tool-result', 'tool-error', 'tool-progress'].includes(event.type);
+    const targetChatId = typeof event?.chatId === 'string' ? event.chatId.trim() : '';
 
     // OPTIMIZATION: Skip tool-progress events (high frequency status updates)
     // Keep tool-start (marks beginning), tool-result (final result), tool-error (failures)
@@ -233,6 +254,15 @@ export function setupEventPersistence(world: World): () => void {
 
     // Validate required fields for tool events only
     if (isToolEvent) {
+      if (!targetChatId) {
+        loggerPublish.error('Tool event missing required chatId', {
+          worldId: world.id,
+          eventType: event.type,
+          messageId: event.messageId,
+          agentName: event.agentName,
+        });
+        return;
+      }
       if (!event.messageId) {
         loggerPublish.error('Tool event missing required messageId', {
           worldId: world.id,
@@ -251,6 +281,16 @@ export function setupEventPersistence(world: World): () => void {
       }
     }
 
+    if (isActivityEvent && !targetChatId) {
+      loggerPublish.error('Activity event missing required chatId', {
+        worldId: world.id,
+        eventType: event.type,
+        messageId: event.messageId,
+        source: event.source,
+      });
+      return;
+    }
+
     // Generate unique ID for tool events by combining messageId with tool type
     // This prevents duplicate ID conflicts when multiple tool events (tool-start, tool-result, tool-error)
     // share the same messageId
@@ -261,9 +301,7 @@ export function setupEventPersistence(world: World): () => void {
     const eventData = {
       id: eventId,
       worldId: world.id,
-      // Activity events (response-start/end, idle) are world-level, use null chatId
-      // Tool events use chatId from event for concurrency-safe routing
-      chatId: isActivityEvent ? null : (event.chatId || null),
+      chatId: targetChatId,
       type: isActivityEvent ? 'world' : 'tool',
       payload: isActivityEvent ? {
         activityType: event.type,
@@ -302,10 +340,19 @@ export function setupEventPersistence(world: World): () => void {
 
   // System event persistence
   const systemHandler = (event: WorldSystemEvent): void | Promise<void> => {
+    const targetChatId = typeof event.chatId === 'string' ? event.chatId.trim() : '';
+    if (!targetChatId) {
+      loggerPublish.error('System event missing required chatId', {
+        worldId: world.id,
+        messageId: event.messageId,
+      });
+      return;
+    }
+
     const eventData = {
       id: event.messageId,
       worldId: world.id,
-      chatId: event.chatId !== undefined ? event.chatId : (world.currentChatId || null), // Default to current chat
+      chatId: targetChatId,
       type: 'system',
       payload: event.content,
       meta: {},

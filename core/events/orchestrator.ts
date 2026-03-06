@@ -37,6 +37,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-03-06: Required explicit `messageEvent.chatId` for agent-turn processing; removed `world.currentChatId` fallback from agent activity and turn-limit routing.
  * - 2026-03-06: Updated shell execution persistence to use explicit canonical failure reasons for shell validation/policy failures while keeping bounded-preview continuation output.
  * - 2026-03-06: Switched shell tool execution to one bounded-preview continuation mode and normalized persisted shell tool failures through the canonical shell-result formatter.
  * - 2026-02-28: Added canonical `turn.trace` diagnostics around per-message processing lifecycle.
@@ -465,7 +466,10 @@ export async function processAgentMessage(
   messageEvent: WorldMessageEvent
 ): Promise<void> {
   // Derive target chatId before activity begins so it is captured in per-chat tracking
-  const targetChatId = messageEvent.chatId ?? world.currentChatId ?? null;
+  const targetChatId = typeof messageEvent.chatId === 'string' ? messageEvent.chatId.trim() : '';
+  if (!targetChatId) {
+    throw new Error(`processAgentMessage: explicit chatId is required for agent ${agent.id}`);
+  }
   const turnId = messageEvent.messageId || generateId();
   const turnStartMs = Date.now();
   let turnStatus: 'completed' | 'canceled' | 'failed' = 'completed';
@@ -479,12 +483,10 @@ export async function processAgentMessage(
     sender: messageEvent.sender,
   });
 
-  const completeActivity = beginWorldActivity(world, `agent:${agent.id}`, targetChatId ?? undefined);
+  const completeActivity = beginWorldActivity(world, `agent:${agent.id}`, targetChatId);
   let processingHandle: ReturnType<typeof beginChatMessageProcessing> | null = null;
   try {
-    if (targetChatId) {
-      processingHandle = beginChatMessageProcessing(world.id, targetChatId);
-    }
+    processingHandle = beginChatMessageProcessing(world.id, targetChatId);
     throwIfMessageProcessingStopped(processingHandle?.signal);
 
     // Prepare messages for LLM - loads fresh data from storage
@@ -515,7 +517,12 @@ export async function processAgentMessage(
       const storage = await getStorageWrappers();
       await storage.saveAgent(world.id, agent);
     } catch (error) {
-      loggerAgent.error('Failed to auto-save agent after LLM call increment', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+      loggerAgent.error('Failed to auto-save agent after LLM call increment', {
+        worldId: world.id,
+        chatId: targetChatId,
+        agentId: agent.id,
+        error: error instanceof Error ? error.message : error
+      });
     }
 
     // Generate LLM response (streaming or non-streaming) - now returns LLMResponse
@@ -848,7 +855,10 @@ export async function processAgentMessage(
               await storage.saveAgent(world.id, agent);
             } catch (error) {
               loggerAgent.error('Failed to save canceled tool state', {
+                worldId: world.id,
+                chatId: targetChatId,
                 agentId: agent.id,
+                toolCallId: toolCall.id,
                 error: error instanceof Error ? error.message : error
               });
             }
@@ -961,7 +971,10 @@ export async function processAgentMessage(
             });
           } catch (error) {
             loggerAgent.error('Failed to save tool result', {
+              worldId: world.id,
+              chatId: targetChatId,
               agentId: agent.id,
+              toolCallId: toolCall.id,
               error: error instanceof Error ? error.message : error
             });
           }
@@ -1006,7 +1019,10 @@ export async function processAgentMessage(
               await storage.saveAgent(world.id, agent);
             } catch (saveError) {
               loggerAgent.error('Failed to save canceled tool state', {
+                worldId: world.id,
+                chatId: targetChatId,
                 agentId: agent.id,
+                toolCallId: toolCall.id,
                 error: saveError instanceof Error ? saveError.message : saveError
               });
             }
@@ -1025,6 +1041,8 @@ export async function processAgentMessage(
           }
 
           loggerAgent.error('Tool execution error', {
+            worldId: world.id,
+            chatId: targetChatId,
             agentId: agent.id,
             toolCallId: toolCall.id,
             error: error instanceof Error ? error.message : error
@@ -1085,7 +1103,10 @@ export async function processAgentMessage(
             await storage.saveAgent(world.id, agent);
           } catch (saveError) {
             loggerAgent.error('Failed to save error message', {
+              worldId: world.id,
+              chatId: targetChatId,
               agentId: agent.id,
+              toolCallId: toolCall.id,
               error: saveError instanceof Error ? saveError.message : saveError
             });
           }
@@ -1111,7 +1132,7 @@ export async function processAgentMessage(
       turnStatus = 'canceled';
       loggerAgent.info('Agent message processing canceled', {
         agentId: agent.id,
-        chatId: messageEvent.chatId ?? world.currentChatId ?? null,
+        chatId: targetChatId,
         error: error instanceof Error ? error.message : String(error)
       });
       return;
@@ -1119,6 +1140,8 @@ export async function processAgentMessage(
 
     turnStatus = 'failed';
     loggerAgent.error('Error processing agent message', {
+      worldId: world.id,
+      chatId: targetChatId,
       agentId: agent.id,
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined
@@ -1164,7 +1187,7 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
   if (agent.llmCallCount >= worldTurnLimit) {
     loggerTurnLimit.debug('Turn limit reached, sending turn limit message', { agentId: agent.id, llmCallCount: agent.llmCallCount, worldTurnLimit });
     const turnLimitMessage = `@human Turn limit reached (${worldTurnLimit} LLM calls). Please take control of the conversation.`;
-    const turnLimitChatId = messageEvent.chatId ?? world.currentChatId ?? null;
+    const turnLimitChatId = typeof messageEvent.chatId === 'string' ? messageEvent.chatId.trim() : '';
     if (turnLimitChatId) {
       publishMessage(world, turnLimitMessage, agent.id, turnLimitChatId);
     } else {

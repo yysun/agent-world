@@ -15,6 +15,7 @@
  * - Tool execution requires world context; no external side effects beyond HITL events.
  *
  * Recent Changes:
+ * - 2026-03-06: Removed `world.currentChatId` fallback from HITL approval routing; interactive requests now require explicit `context.chatId`.
  * - 2026-02-28: Added shorthand default-option resolution so values like "No" can map to a single matching option label.
  * - 2026-02-27: Removed built-in post-selection confirmation stage and removed deprecated confirmation parameters from the tool contract.
  * - 2026-02-20: Removed free-text mode from `human_intervention_request`; tool now enforces options-only interactions.
@@ -200,7 +201,7 @@ function buildOptionPromptOptions(optionLabels: string[]): HitlOption[] {
 
 async function requestPrimaryResolution(options: {
   world: World;
-  chatId: string | null;
+  chatId: string;
   args: NormalizedHitlRequestArgs;
   agentName?: string | null;
   toolCallId?: string;
@@ -309,8 +310,20 @@ export function createHitlToolDefinition() {
         });
       }
 
-      const chatId = context?.chatId ?? world.currentChatId ?? null;
+      const chatId = typeof context?.chatId === 'string' && context.chatId.trim()
+        ? context.chatId.trim()
+        : null;
       const agentName = context?.agentName || null;
+
+      if (!chatId) {
+        return buildFinalResult({
+          requestId: '',
+          selectedOption: null,
+          status: 'error',
+          source: 'system',
+          message: 'human_intervention_request requires an explicit chatId in the tool execution context.',
+        });
+      }
 
       try {
         const primaryResolution = await requestPrimaryResolution({

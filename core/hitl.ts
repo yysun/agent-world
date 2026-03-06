@@ -16,6 +16,7 @@
  * - Runtime is in-memory and process-local by design.
  *
  * Recent Changes:
+ * - 2026-03-06: Removed `world.currentChatId` fallback from HITL option requests; interactive requests now require explicit `chatId`.
  * - 2026-02-26: Replaced direct `[hitl]` console traces with categorized structured logger events (`hitl`) for env-controlled filtering.
  * - 2026-02-25: Added HITL runtime trace logs for request emission, replay, and resolution lifecycle diagnostics.
  * - 2026-02-24: Removed HITL `system` event emission/replay and switched to tool-progress prompt payloads.
@@ -126,12 +127,12 @@ function resolveDefaultOptionId(
   return options[0]?.id || 'no';
 }
 
-function normalizeWorldChatId(world: World, chatId: string | null | undefined): string | null {
-  if (chatId !== undefined) {
-    const normalized = chatId ? String(chatId).trim() : '';
-    return normalized || null;
+function normalizeExplicitChatId(chatId: string | null | undefined): string | null {
+  if (chatId === undefined || chatId === null) {
+    return null;
   }
-  return world.currentChatId ?? null;
+  const normalized = String(chatId).trim();
+  return normalized || null;
 }
 
 function resolvePendingRequest(params: {
@@ -277,7 +278,10 @@ export async function requestWorldOption(
     throw new Error(`HITL requestId '${explicitRequestId}' must match toolCallId '${requestedToolCallId}'.`);
   }
   const requestId = explicitRequestId || requestedToolCallId || generateId();
-  const chatId = normalizeWorldChatId(world, request.chatId);
+  const chatId = normalizeExplicitChatId(request.chatId);
+  if (!chatId) {
+    throw new Error('HITL option request requires an explicit chatId.');
+  }
   const defaultOptionId = resolveDefaultOptionId(normalizedOptions, request.defaultOptionId);
   const pendingKey = getPendingKey(worldId, requestId);
   const sequence = ++pendingRequestSequence;

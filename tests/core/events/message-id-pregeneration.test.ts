@@ -75,7 +75,7 @@ describe('Pre-Generated Message IDs', () => {
         capturedEvent = event;
       });
 
-      const result = publishMessageWithId(mockWorld, testContent, testSender, testId);
+      const result = publishMessageWithId(mockWorld, testContent, testSender, testId, mockWorld.currentChatId);
 
       expect(result.messageId).toBe(testId);
       expect(result.content).toBe(testContent);
@@ -99,15 +99,15 @@ describe('Pre-Generated Message IDs', () => {
           resolve();
         });
 
-        publishMessageWithId(mockWorld, testContent, testSender, testId);
+        publishMessageWithId(mockWorld, testContent, testSender, testId, mockWorld.currentChatId);
       });
     });
 
     test('publishMessage should still generate IDs automatically', () => {
       // Note: In test environment, if nanoid fails to load, publishMessage might return undefined messageId
       // This test verifies the API contract, but acknowledges ESM module loading issues
-      const result1 = publishMessage(mockWorld, 'Message 1', 'user');
-      const result2 = publishMessage(mockWorld, 'Message 2', 'user');
+      const result1 = publishMessage(mockWorld, 'Message 1', 'user', mockWorld.currentChatId);
+      const result2 = publishMessage(mockWorld, 'Message 2', 'user', mockWorld.currentChatId);
 
       expect(result1).toBeDefined();
       expect(result2).toBeDefined();
@@ -124,9 +124,9 @@ describe('Pre-Generated Message IDs', () => {
     });
 
     test('both publish methods should produce consistent event structure', () => {
-      const autoId = publishMessage(mockWorld, 'Auto message', 'user');
+      const autoId = publishMessage(mockWorld, 'Auto message', 'user', mockWorld.currentChatId);
       const manualId = 'manual-id-xyz';
-      const preGenId = publishMessageWithId(mockWorld, 'Pre-gen message', 'agent', manualId);
+      const preGenId = publishMessageWithId(mockWorld, 'Pre-gen message', 'agent', manualId, mockWorld.currentChatId);
 
       // Both should have same structure
       expect(autoId).toHaveProperty('content');
@@ -147,7 +147,7 @@ describe('Pre-Generated Message IDs', () => {
       // The important part is that publishMessageWithId works with pre-generated IDs
       const testIds = ['id-1', 'id-2', 'id-3'];
       const results = testIds.map(id =>
-        publishMessageWithId(mockWorld, `Message ${id}`, 'user', id)
+        publishMessageWithId(mockWorld, `Message ${id}`, 'user', id, mockWorld.currentChatId)
       );
 
       // Verify that pre-generated IDs are used correctly
@@ -181,7 +181,8 @@ describe('Pre-Generated Message IDs', () => {
         mockWorld,
         message.content,
         mockAgent.id,
-        testId
+        testId,
+        mockWorld.currentChatId
       );
 
       expect(publishedEvent.messageId).toBe(testId);
@@ -210,7 +211,8 @@ describe('Pre-Generated Message IDs', () => {
         mockWorld,
         assistantMessage.content,
         mockAgent.id,
-        preGeneratedId
+        preGeneratedId,
+        mockWorld.currentChatId
       );
 
       // Verify consistency
@@ -257,7 +259,7 @@ describe('Pre-Generated Message IDs', () => {
           resolve();
         });
 
-        publishMessageWithId(mockWorld, 'Test', 'sender', testId);
+        publishMessageWithId(mockWorld, 'Test', 'sender', testId, mockWorld.currentChatId);
 
         // Event should be received synchronously
         expect(eventReceived).toBe(true);
@@ -278,7 +280,7 @@ describe('Pre-Generated Message IDs', () => {
         expect(event.messageId).toBe(testId);
       });
 
-      publishMessageWithId(mockWorld, 'Test', 'sender', testId);
+      publishMessageWithId(mockWorld, 'Test', 'sender', testId, mockWorld.currentChatId);
 
       expect(subscriber1Called).toBe(true);
       expect(subscriber2Called).toBe(true);
@@ -291,7 +293,7 @@ describe('Pre-Generated Message IDs', () => {
       } as any;
 
       expect(() => publishMessage(worldWithoutChat, 'Test', 'sender')).toThrow(
-        'publishMessage: chatId is required for message events.'
+        'publishMessage: explicit chatId is required.'
       );
     });
 
@@ -302,7 +304,7 @@ describe('Pre-Generated Message IDs', () => {
       } as any;
 
       expect(() => publishMessageWithId(worldWithoutChat, 'Test', 'sender', 'msg-1')).toThrow(
-        'publishMessageWithId: chatId is required for message events.'
+        'publishMessageWithId: explicit chatId is required.'
       );
     });
   });

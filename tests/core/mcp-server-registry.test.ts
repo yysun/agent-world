@@ -463,6 +463,62 @@ describe('mcp-server-registry behavior', () => {
     }
   });
 
+  it('does not emit retry status when explicit chatId is missing', async () => {
+    vi.useFakeTimers();
+    try {
+      const callTool = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('ECONNRESET: socket hang up'))
+        .mockResolvedValueOnce({
+          content: [{ type: 'text', text: 'retried-ok' }],
+        });
+
+      const clientRef = {
+        current: {
+          listTools: vi.fn().mockResolvedValue({
+            tools: [{
+              name: 'lookup',
+              description: 'Lookup',
+              inputSchema: {
+                type: 'object',
+                properties: { query: { type: 'string' } },
+                required: ['query'],
+              },
+            }],
+          }),
+          callTool,
+        },
+        reconnecting: null,
+      } as any;
+
+      const reconnectClient = vi.fn().mockResolvedValue(undefined);
+      const aiTools = await mcpToolsToAiTools(
+        clientRef,
+        { name: 'demo', transport: 'stdio', command: 'node' } as any,
+        reconnectClient,
+      );
+
+      const world = {
+        id: 'world-1',
+        currentChatId: 'chat-1',
+        eventEmitter: { emit: vi.fn() },
+      } as any;
+
+      const pending = aiTools.demo_lookup.execute(
+        { query: 'hello' },
+        'seq-1',
+        'parent-1',
+        { world, worldId: 'world-1', agentId: 'agent-1' },
+      );
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await expect(pending).resolves.toBe('retried-ok');
+      expect(world.eventEmitter.emit).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('maps transport retry exhaustion to deterministic MCP retry-exhausted error', async () => {
     vi.useFakeTimers();
     try {

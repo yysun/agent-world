@@ -12,6 +12,8 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-03-06: Heartbeat job starts now require explicit `chatId`; workspace load no longer auto-starts heartbeat jobs from persisted world state.
+ * - 2026-03-06: Removed runtime queue-resume fallback to persisted `currentChatId`; Electron now resumes chat queues only for explicitly selected sessions.
  * - 2026-03-04: Extended `sendChatMessage` IPC response with queue metadata (`queueStatus`, `queueRetryCount`) for queue-failure visibility.
  * - 2026-02-28: `message:edit` now resolves and passes the active subscribed world into core edit resubmission so edited turns publish on the same realtime emitter the renderer listens to.
  * - 2026-02-26: Added env-derived renderer logging config endpoint and replaced session/message console traces with categorized injected logger calls.
@@ -173,8 +175,8 @@ interface MainIpcHandlerFactoryDependencies {
   GitHubWorldImportError: new (...args: any[]) => GitHubWorldImportErrorLike;
   stageGitHubWorldFromShorthand: (shorthand: string) => Promise<GitHubWorldImportStagedResult>;
   heartbeatManager: {
-    startJob: (world: any) => void;
-    restartJob: (world: any) => void;
+    startJob: (world: any, chatId: string) => void;
+    restartJob: (world: any, chatId: string) => void;
     pauseJob: (worldId: string) => void;
     resumeJob: (worldId: string) => void;
     stopJob: (worldId: string) => void;
@@ -330,20 +332,9 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
   async function startHeartbeatJobsForWorkspace(worlds: any[]): Promise<void> {
     const worldList = Array.isArray(worlds) ? worlds : [];
     for (const world of worldList) {
-      if (world?.heartbeatEnabled !== true) {
-        heartbeatManager.stopJob(String(world?.id || ''));
-        continue;
-      }
-
       const worldId = String(world?.id || '').trim();
       if (!worldId) continue;
-
-      try {
-        const runtimeWorld = await ensureWorldSubscribed(worldId);
-        heartbeatManager.restartJob(runtimeWorld as any);
-      } catch {
-        // Keep workspace loading resilient even if one world cannot subscribe.
-      }
+      heartbeatManager.stopJob(worldId);
     }
   }
 
@@ -392,13 +383,8 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
         };
       }
 
-      // Ensure runtime is subscribed and active chat queue processing is resumed
-      // when loading a world that already contains queued messages.
-      const subscribedWorld = await ensureWorldSubscribed(world.id) as { currentChatId?: string } | null;
-      const activeChatId = String(subscribedWorld?.currentChatId || world.currentChatId || '').trim();
-      if (activeChatId) {
-        await resumeChatQueue(world.id, activeChatId);
-      }
+      // Ensure runtime is subscribed, but leave queue resumption to explicit session selection.
+      await ensureWorldSubscribed(world.id);
 
       const chats = await listChats(world.id);
       const sessions = await serializeChatsWithMessageCounts(world.id, chats, getMemory);
@@ -632,8 +618,13 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
 
     const refreshWarning = await refreshWorldSubscription(worldId);
     try {
-      const runtimeWorld = await ensureWorldSubscribed(worldId);
-      heartbeatManager.restartJob(runtimeWorld as any);
+      const targetChatId = String(payload?.chatId || '').trim();
+      if (updated.heartbeatEnabled === true && targetChatId) {
+        const runtimeWorld = await ensureWorldSubscribed(worldId);
+        heartbeatManager.restartJob(runtimeWorld as any, targetChatId);
+      } else {
+        heartbeatManager.stopJob(worldId);
+      }
     } catch {
       // If subscription cannot be resolved, heartbeat runtime state will be reconciled on next workspace load.
     }
@@ -791,11 +782,15 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
   async function runHeartbeatJob(payload: any) {
     await ensureCoreReady();
     const worldId = String(payload?.worldId || '').trim();
+    const chatId = String(payload?.chatId || '').trim();
     if (!worldId) {
       throw new Error('World ID is required.');
     }
+    if (!chatId) {
+      throw new Error('Chat ID is required.');
+    }
     const runtimeWorld = await ensureWorldSubscribed(worldId);
-    heartbeatManager.restartJob(runtimeWorld as any);
+    heartbeatManager.restartJob(runtimeWorld as any, chatId);
     return { ok: true };
   }
 
@@ -1310,7 +1305,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
 
     {
       const restoredWorld = await restoreChat(worldId, chatId);
-      if (!restoredWorld || restoredWorld.currentChatId !== chatId) {
+      if (!restoredWorld || !restoredWorld.chats?.has?.(chatId)) {
         throw new Error(`Chat not found: ${chatId}`);
       }
     }
@@ -1341,7 +1336,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!newContent) throw new Error('New content is required.');
 
     const restoredWorld = await restoreChat(worldId, chatId);
-    if (!restoredWorld || restoredWorld.currentChatId !== chatId) {
+    if (!restoredWorld || !restoredWorld.chats?.has?.(chatId)) {
       throw new Error(`404 Chat not found: ${chatId}`);
     }
 

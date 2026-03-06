@@ -63,16 +63,12 @@ describe('Concurrent Chat Session Isolation', () => {
       expect(events[0].type).toBe('llm-chunk');
     });
 
-    test('publishSSE should default to world.currentChatId when chatId not provided', () => {
-      const events: WorldSSEEvent[] = [];
-      mockWorld.eventEmitter.on('sse', (event: WorldSSEEvent) => {
-        events.push(event);
-      });
-
-      publishSSE(mockWorld, { agentName: 'agent-1', type: 'llm-chunk', content: 'Hello' });
-
-      expect(events).toHaveLength(1);
-      expect(events[0].chatId).toBe('chat-A'); // world.currentChatId
+    test('publishSSE should require explicit chatId', () => {
+      expect(() => publishSSE(mockWorld, {
+        agentName: 'agent-1',
+        type: 'llm-chunk',
+        content: 'Hello',
+      })).toThrow('publishSSE: explicit chatId is required.');
     });
 
     test('multiple SSE events should route to their respective chatIds', () => {
@@ -181,44 +177,29 @@ describe('Concurrent Chat Session Isolation', () => {
       expect(events[0].messageId).toBe('msg-1');
     });
 
-    test('message events should use world.currentChatId as default', () => {
-      const events: any[] = [];
-      mockWorld.eventEmitter.on('message', (event) => {
-        events.push(event);
-      });
-
-      // Without explicit chatId, should use world.currentChatId
-      publishMessageWithId(mockWorld, 'Test message', 'agent-1', 'msg-2');
-
-      expect(events).toHaveLength(1);
-      expect(events[0].chatId).toBe('chat-A'); // world.currentChatId
+    test('message events should require explicit chatId', () => {
+      expect(() => publishMessageWithId(mockWorld, 'Test message', 'agent-1', 'msg-2')).toThrow(
+        'publishMessageWithId: explicit chatId is required.'
+      );
     });
   });
 
   describe('Error Handling for Concurrent Sessions', () => {
-    test('null chatId in SSE should be preserved', () => {
-      const events: WorldSSEEvent[] = [];
-      mockWorld.eventEmitter.on('sse', (event: WorldSSEEvent) => {
-        events.push(event);
-      });
-
-      // Some events may not be chat-specific
-      publishSSE(mockWorld, { agentName: 'system', type: 'system', content: 'Global event', chatId: null });
-
-      expect(events).toHaveLength(1);
-      expect(events[0].chatId).toBeNull();
+    test('null chatId in SSE should be rejected', () => {
+      expect(() => publishSSE(mockWorld, {
+        agentName: 'system',
+        type: 'system',
+        content: 'Global event',
+        chatId: null,
+      })).toThrow('publishSSE: explicit chatId is required.');
     });
 
-    test('undefined chatId falls back to world.currentChatId', () => {
-      const events: WorldSSEEvent[] = [];
-      mockWorld.eventEmitter.on('sse', (event: WorldSSEEvent) => {
-        events.push(event);
-      });
-
-      publishSSE(mockWorld, { agentName: 'agent-1', type: 'llm-chunk', content: 'test' });
-
-      expect(events).toHaveLength(1);
-      expect(events[0].chatId).toBe('chat-A'); // Defaults to world.currentChatId
+    test('undefined chatId is rejected', () => {
+      expect(() => publishSSE(mockWorld, {
+        agentName: 'agent-1',
+        type: 'llm-chunk',
+        content: 'test',
+      })).toThrow('publishSSE: explicit chatId is required.');
     });
   });
 });

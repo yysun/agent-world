@@ -45,6 +45,7 @@
  * - Event history preserved across different storage backends
  *
  * Recent Changes:
+ * - 2026-03-06: Removed runtime message/export fallback to `world.currentChatId`; CLI execution now requires explicit selected chat state.
  * - 2026-03-04: Added queue metadata (`messageId`, `queueStatus`, `queueRetryCount`) to successful message-send CLI results for queue error visibility.
  */
 
@@ -109,6 +110,7 @@ export interface CLIResponse {
 export interface CLIContext {
   currentWorldName?: string;
   currentWorld?: World | null;
+  selectedChatId?: string | null;
 }
 
 export type PromptFunction = (question: string, options?: string[]) => Promise<string>;
@@ -154,7 +156,13 @@ const boldRed = (text: string) => `\x1b[1m\x1b[31m${text}\x1b[0m`;
  */
 export async function displayChatMessages(worldId: string, chatId?: string | null): Promise<void> {
   try {
-    const messages = await getMemory(worldId, chatId);
+    const resolvedChatId = String(chatId || '').trim();
+    if (!resolvedChatId) {
+      console.log(gray('\n  No active chat selected.\n'));
+      return;
+    }
+
+    const messages = await getMemory(worldId, resolvedChatId);
 
     if (!messages || messages.length === 0) {
       console.log(gray('\n  No messages in current chat.\n'));
@@ -2099,7 +2107,7 @@ export async function processCLICommand(
         const worldError = requireWorldOrError(world, command);
         if (worldError) return worldError;
 
-        const chatId = collectedParams.chatId || world!.currentChatId;
+        const chatId = collectedParams.chatId || context.selectedChatId;
         if (!chatId) {
           cliResponse = {
             success: false,
@@ -2153,11 +2161,13 @@ export async function processCLICommand(
 export async function processCLIInput(
   input: string,
   world: World | null,
-  sender: string = 'human'
+  sender: string = 'human',
+  selectedChatId: string | null = null
 ): Promise<CLIResponse> {
   const context: CLIContext = {
     currentWorld: world,
-    currentWorldName: world?.name
+    currentWorldName: world?.name,
+    selectedChatId,
   };
 
   // Simple prompt function for CLI
@@ -2204,7 +2214,7 @@ export async function processCLIInput(
   }
 
   try {
-    const currentChatId = String((world as any)?.currentChatId || '').trim();
+    const currentChatId = String(selectedChatId || '').trim();
     if (!currentChatId) {
       return {
         success: false,
@@ -2214,7 +2224,7 @@ export async function processCLIInput(
     }
 
     const restoredWorld = await restoreChat(world.id, currentChatId);
-    if (!restoredWorld || restoredWorld.currentChatId !== currentChatId) {
+    if (!restoredWorld || !restoredWorld.chats?.has?.(currentChatId)) {
       return {
         success: false,
         message: `Cannot send message - chat not found: ${currentChatId}`,

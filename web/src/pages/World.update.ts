@@ -16,6 +16,9 @@
  * - Message editing with core-managed backend integration (single edit request)
  * - Memory-only message streaming for agent→agent messages saved without response
  *
+ * Recent Changes:
+ * - 2026-03-06: Removed runtime fallback to backend `currentChatId` from send/stop/event filtering; active chat actions now require explicit UI session selection.
+ *
  * Message Edit Feature (Core-Driven):
  * - Uses backend messageId (server-generated) for message identification
  * - Single-phase edit: PUT /worlds/:worldName/messages/:messageId with chatId + newContent
@@ -711,7 +714,7 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
   const contentPayload = envelope && 'content' in envelope ? envelope.content : data;
   const structuredPayload =
     contentPayload && typeof contentPayload === 'object' ? contentPayload : null;
-  const activeChatId = state.currentChat?.id || state.world?.currentChatId || null;
+  const activeChatId = state.currentChat?.id || null;
   const scopedSystemChatIdRaw =
     structuredPayload && 'chatId' in structuredPayload
       ? (structuredPayload as Record<string, unknown>).chatId
@@ -764,7 +767,7 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
   // Handle specific system events
   if (eventType === 'chat-title-updated') {
     // Refresh current chat context to update chat list/title without switching sessions.
-    const activeChatId = newState.currentChat?.id || newState.world?.currentChatId || undefined;
+    const activeChatId = newState.currentChat?.id || undefined;
     const updates = initWorld(newState, newState.worldName, activeChatId);
     for await (const update of updates) {
       const mergedMessages = preserveTransientMessagesAcrossRefresh(
@@ -782,7 +785,7 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
 
   if (eventType === 'agent-created') {
     // Re-fetch world to pick up the new agent in the agents list.
-    const activeChatId = newState.currentChat?.id || newState.world?.currentChatId || undefined;
+    const activeChatId = newState.currentChat?.id || undefined;
     const updates = initWorld(newState, newState.worldName, activeChatId);
     for await (const update of updates) {
       const mergedMessages = preserveTransientMessagesAcrossRefresh(
@@ -804,7 +807,7 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
 const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any): T => {
 
   const messageData = data || {};
-  const activeChatId = state.currentChat?.id || state.world?.currentChatId || null;
+  const activeChatId = state.currentChat?.id || null;
   const incomingChatId = messageData.chatId ?? null;
 
   if (activeChatId && (!incomingChatId || incomingChatId !== activeChatId)) {
@@ -1040,10 +1043,15 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     };
 
     try {
+      const activeChatId = state.currentChat?.id || null;
+      if (!activeChatId) {
+        return InputDomain.createSendErrorState(newState, 'Select a chat session before sending a message.');
+      }
+
       // Send the message via SSE stream
       await sendChatMessage(state.worldName, prepared.text, {
         sender: 'HUMAN',
-        chatId: state.currentChat?.id || state.world?.currentChatId || undefined
+        chatId: activeChatId
       });
 
       // Note: isWaiting is controlled by world events (pending count), not send/stream events
@@ -1095,7 +1103,7 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   },
 
   'stop-message-processing': async function* (state: WorldComponentState): AsyncGenerator<WorldComponentState> {
-    const chatId = state.currentChat?.id || state.world?.currentChatId || null;
+    const chatId = state.currentChat?.id || null;
     if (!chatId) {
       yield {
         ...state,
@@ -1215,7 +1223,7 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
       };
 
       if (prompt?.metadata?.refreshAfterDismiss) {
-        const activeChatId = state.currentChat?.id || state.world?.currentChatId || undefined;
+        const activeChatId = state.currentChat?.id || undefined;
         const updates = initWorld(state, state.worldName, activeChatId);
         for await (const update of updates) {
           const mergedMessages = preserveTransientMessagesAcrossRefresh(

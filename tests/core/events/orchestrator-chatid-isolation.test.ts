@@ -31,6 +31,12 @@ const mocks = vi.hoisted(() => ({
   publishMessage: vi.fn(),
   continueLLMAfterToolExecution: vi.fn(async () => undefined),
   handleTextResponse: vi.fn(async () => undefined),
+  loggerCalls: [] as Array<{
+    category: string;
+    level: 'trace' | 'debug' | 'info' | 'warn' | 'error';
+    message: unknown;
+    data: any;
+  }>,
 }));
 
 vi.mock('../../../core/storage/storage-factory.js', () => ({
@@ -70,6 +76,16 @@ vi.mock('../../../core/events/publishers.js', () => ({
 vi.mock('../../../core/events/memory-manager.js', () => ({
   handleTextResponse: mocks.handleTextResponse,
   continueLLMAfterToolExecution: mocks.continueLLMAfterToolExecution,
+}));
+
+vi.mock('../../../core/logger.js', () => ({
+  createCategoryLogger: (category: string) => ({
+    trace: (message: unknown, data?: unknown) => mocks.loggerCalls.push({ category, level: 'trace', message, data }),
+    debug: (message: unknown, data?: unknown) => mocks.loggerCalls.push({ category, level: 'debug', message, data }),
+    info: (message: unknown, data?: unknown) => mocks.loggerCalls.push({ category, level: 'info', message, data }),
+    warn: (message: unknown, data?: unknown) => mocks.loggerCalls.push({ category, level: 'warn', message, data }),
+    error: (message: unknown, data?: unknown) => mocks.loggerCalls.push({ category, level: 'error', message, data }),
+  }),
 }));
 
 function createWorld(): World {
@@ -118,6 +134,7 @@ describe('processAgentMessage chat isolation', () => {
     mocks.prepareMessagesForLLM.mockResolvedValue([]);
     mocks.continueLLMAfterToolExecution.mockResolvedValue(undefined);
     mocks.handleTextResponse.mockResolvedValue(undefined);
+    mocks.loggerCalls.length = 0;
   });
 
   it('publishes tool-execution event with explicit chatId argument', async () => {
@@ -161,5 +178,51 @@ describe('processAgentMessage chat isolation', () => {
       }),
       'chat-1',
     );
+  });
+
+  it('logs tool execution failures with world/chat scope', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    mocks.generateAgentResponse.mockResolvedValueOnce({
+      response: {
+        type: 'tool_calls',
+        content: 'Calling tool: demo_tool',
+        tool_calls: [{
+          id: 'tool-call-err-1',
+          type: 'function',
+          function: {
+            name: 'demo_tool',
+            arguments: '{}',
+          },
+        }],
+      },
+      messageId: 'assistant-tool-msg-err-1',
+    });
+
+    mocks.getMCPToolsForWorld.mockResolvedValue({
+      demo_tool: {
+        execute: vi.fn(async () => {
+          throw new Error('tool exploded');
+        }),
+      },
+    });
+
+    const { processAgentMessage } = await import('../../../core/events/orchestrator.js');
+    await processAgentMessage(world, agent, createMessageEvent('chat-1'));
+
+    const scopedLog = mocks.loggerCalls.find((call) =>
+      call.category === 'agent'
+      && call.level === 'error'
+      && call.message === 'Tool execution error'
+    );
+
+    expect(scopedLog?.data).toMatchObject({
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      agentId: 'agent-a',
+      toolCallId: 'tool-call-err-1',
+      error: 'tool exploded',
+    });
   });
 });

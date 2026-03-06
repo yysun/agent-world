@@ -202,13 +202,15 @@ interface FunctionCall {
  * @param world - World context for event publishing
  * @param agent - Agent making the calls
  * @param messageId - Message ID for tracking
+ * @param chatId - Explicit chat scope for tool-error event publication
  * @returns Object with validCalls array and toolResults array for invalid calls
  */
 export function filterAndHandleEmptyNamedFunctionCalls(
   functionCalls: FunctionCall[],
   world: World,
   agent: Agent,
-  messageId: string
+  messageId: string,
+  chatId: string
 ): { validCalls: FunctionCall[]; toolResults: ChatMessage[] } {
   const validCalls: FunctionCall[] = [];
   const toolResults: ChatMessage[] = [];
@@ -232,6 +234,7 @@ export function filterAndHandleEmptyNamedFunctionCalls(
           agentName: agent.id || agent.name || 'unknown',
           type: 'tool-error',
           messageId,
+          chatId,
           toolExecution: {
             toolName,
             toolCallId,

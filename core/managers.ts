@@ -25,6 +25,8 @@
  * - Error log persistence with 100-entry retention policy
  *
  * Recent Changes:
+ * - 2026-03-06: Moved chat-selection runtime control flow onto explicit/persisted chat helpers; manager logic no longer relies on `world.currentChatId` as live runtime state.
+ * - 2026-03-06: Removed runtime `world.currentChatId` fallback from exported chat-memory helpers; callers now need explicit chat scope.
  * - 2026-03-05: Added chat-scoped per-second queue retry system-status emissions (elapsed/remaining seconds + attempts used/remaining) with cleanup on retry dispatch/error transitions.
  * - 2026-03-05: Switched queue retry/timeout constants to shared reliability config.
  * - 2026-03-04: Queue/chat flows now request chat-aware runtime selection via `getActiveSubscribedWorld(worldId, chatId)` to reduce stale-runtime dispatch.
@@ -182,7 +184,6 @@ type QueueAgentStatusSnapshot = {
   messageListenerCount: number;
   worldListenerCount: number;
   sseListenerCount: number;
-  currentChatId: string | null;
   mainAgent: string | null;
   resolvedMainAgentId: string | null;
   paragraphMentions: string[];
@@ -403,7 +404,6 @@ function collectQueueAgentStatus(
     messageListenerCount,
     worldListenerCount,
     sseListenerCount,
-    currentChatId: String(world.currentChatId || '').trim() || null,
     mainAgent: String(world.mainAgent || '').trim() || null,
     resolvedMainAgentId,
     paragraphMentions,
@@ -1367,6 +1367,33 @@ export async function updateWorld(worldId: string, updates: UpdateWorldParams): 
   return getWorld(resolvedWorldId);
 }
 
+async function getPersistedCurrentChatId(worldId: string): Promise<string | null> {
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  const worldData = await storageWrappers!.loadWorld(resolvedWorldId);
+  const chatId = String(worldData?.currentChatId || '').trim();
+  return chatId || null;
+}
+
+async function setPersistedCurrentChatId(worldId: string, chatId: string | null): Promise<void> {
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  const worldData = await storageWrappers!.loadWorld(resolvedWorldId);
+  if (!worldData) {
+    return;
+  }
+
+  const normalizedChatId = String(chatId || '').trim() || null;
+  const existingChatId = String(worldData.currentChatId || '').trim() || null;
+  if (existingChatId === normalizedChatId) {
+    return;
+  }
+
+  await storageWrappers!.saveWorld({
+    ...worldData,
+    currentChatId: normalizedChatId,
+    lastUpdated: new Date(),
+  });
+}
+
 /**
  * Set the raw .env-style variables text for a world
  */
@@ -1837,7 +1864,8 @@ export async function newChat(worldId: string): Promise<World | null> {
   if (existingChat) {
     const messages = await storageWrappers!.getMemory(resolvedWorldId, existingChat.id);
     if (messages.length === 0) {
-      return await updateWorld(resolvedWorldId, { currentChatId: existingChat.id });
+      await setPersistedCurrentChatId(resolvedWorldId, existingChat.id);
+      return await getWorld(resolvedWorldId);
     }
     // If chat has messages, fall through to create a new one
   }
@@ -1846,7 +1874,8 @@ export async function newChat(worldId: string): Promise<World | null> {
     name: NEW_CHAT_TITLE,
     captureChat: false
   });
-  return await updateWorld(resolvedWorldId, { currentChatId: chatData.id });
+  await setPersistedCurrentChatId(resolvedWorldId, chatData.id);
+  return await getWorld(resolvedWorldId);
 }
 
 /**
@@ -1922,13 +1951,9 @@ export async function branchChatFromMessage(
   const cutoffTimestamp = toEpochMillis(targetMessage?.createdAt);
 
   const updatedWorld = await newChat(resolvedWorldId);
-  if (!updatedWorld || !updatedWorld.currentChatId) {
+  const newChatId = await getPersistedCurrentChatId(resolvedWorldId);
+  if (!updatedWorld || !newChatId) {
     throw new Error('Failed to create branch chat.');
-  }
-
-  const newChatId = String(updatedWorld.currentChatId || '').trim();
-  if (!newChatId) {
-    throw new Error('Failed to resolve new chat ID for branch.');
   }
 
   let copiedMessageCount = 0;
@@ -2038,13 +2063,10 @@ export async function deleteChat(worldId: string, chatId: string): Promise<boole
   const deletedMemoryCount = await storageWrappers!.deleteMemoryByChatId(resolvedWorldId, chatId);
   logger.debug('Deleted memory items for chat', { worldId, resolvedWorldId, chatId, deletedMemoryCount });
 
-  // Get the world to check if this was the current chat
+  const persistedCurrentChatId = await getPersistedCurrentChatId(resolvedWorldId);
+  // Get the world to update in-memory chat cache only
   const world = await getWorld(resolvedWorldId);
-  let shouldSetNewCurrentChat = false;
-
-  if (world && world.currentChatId === chatId) {
-    shouldSetNewCurrentChat = true;
-  }
+  const shouldSetNewCurrentChat = persistedCurrentChatId === chatId;
 
   // Then delete the chat itself
   const chatDeleted = await storageWrappers!.deleteChatData(resolvedWorldId, chatId);
@@ -2062,7 +2084,7 @@ export async function deleteChat(worldId: string, chatId: string): Promise<boole
       const latestChat = remainingChats.sort((a, b) =>
         new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
       )[0];
-      await updateWorld(resolvedWorldId, { currentChatId: latestChat.id });
+      await setPersistedCurrentChatId(resolvedWorldId, latestChat.id);
     } else {
       // No chats left, create a new one
       logger.debug('No chats remaining after deletion, creating new chat');
@@ -2085,6 +2107,7 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
   });
 
   let world = await getWorld(resolvedWorldId);
+  const persistedCurrentChatId = await getPersistedCurrentChatId(resolvedWorldId);
   if (!world) {
     loggerRestore.debug('Restore chat aborted: world missing', {
       worldId: resolvedWorldId,
@@ -2093,7 +2116,7 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
     return null;
   }
 
-  if (world.currentChatId === chatId) {
+  if (persistedCurrentChatId === chatId) {
     loggerRestore.debug('Restore chat detected already-current chat', {
       worldId: world.id,
       chatId,
@@ -2140,7 +2163,7 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
   }
 
   // Auto-pause the old chat's queue when switching away (FR-8 safety)
-  const previousChatId = world.currentChatId;
+  const previousChatId = persistedCurrentChatId;
   if (previousChatId && previousChatId !== chatId) {
     pausedQueues.add(`${resolvedWorldId}:${previousChatId}`);
     loggerRestore.debug('Auto-paused queue for previous chat on switch', {
@@ -2152,12 +2175,11 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
 
   loggerRestore.debug('Restore chat switching current chat', {
     worldId: resolvedWorldId,
-    fromChatId: world.currentChatId || null,
+    fromChatId: previousChatId,
     toChatId: chatId,
   });
-  world = await updateWorld(resolvedWorldId, {
-    currentChatId: chatId
-  });
+  await setPersistedCurrentChatId(resolvedWorldId, chatId);
+  world = await getWorld(resolvedWorldId);
   if (world) {
     await syncRuntimeAgentMemoryFromStorage(world, resolvedWorldId);
     loggerRestore.debug('Restore chat memory sync complete', {
@@ -2193,7 +2215,7 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
   loggerRestore.debug('Restore chat completed', {
     worldId: resolvedWorldId,
     requestedChatId: chatId,
-    restoredCurrentChatId: world?.currentChatId || null,
+    restoredCurrentChatId: await getPersistedCurrentChatId(resolvedWorldId),
     elapsedMs: Date.now() - restoreStartedAt,
   });
   return world;
@@ -2205,7 +2227,7 @@ export async function activateChatWithSnapshot(worldId: string, chatId: string):
     return null;
   }
 
-  const resolvedChatId = String(chatId || world.currentChatId || '').trim();
+  const resolvedChatId = String(chatId || '').trim();
   if (!resolvedChatId) {
     return null;
   }
@@ -2233,7 +2255,7 @@ export async function activateChatWithSnapshot(worldId: string, chatId: string):
   };
 }
 
-export async function getMemory(worldId: string, chatId?: string | null): Promise<AgentMessage[] | null> {
+export async function getMemory(worldId: string, chatId: string): Promise<AgentMessage[] | null> {
   await ensureInitialization();
   const resolvedWorldId = await getResolvedWorldId(worldId);
 
@@ -2242,7 +2264,10 @@ export async function getMemory(worldId: string, chatId?: string | null): Promis
     return null;
   }
 
-  const resolvedChatId = chatId || world.currentChatId;
+  const resolvedChatId = String(chatId || '').trim();
+  if (!resolvedChatId) {
+    throw new Error('getMemory: chatId is required.');
+  }
   const memory = await storageWrappers!.getMemory(resolvedWorldId, resolvedChatId);
 
   // Auto-repair legacy memories so downstream clients can rely on messageId without UI fallbacks.

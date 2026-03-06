@@ -1094,15 +1094,14 @@ describe('restoreChat queue matrix (consolidated)', () => {
     expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith('a-stalled', 'sending');
   });
 
-  it('Q4 switch to B and enqueue while A is sending remains chat-isolated', async () => {
-    const { managers, storageWrappers, publishMessageWithId, runtimeWorld } = await setupQueueManagersForMatrix({
+  it('Q4 switch to B and enqueue while A is sending remains chat-isolated without runtime current-chat mutation', async () => {
+    const { managers, storageWrappers, publishMessageWithId } = await setupQueueManagersForMatrix({
       currentChatId: 'chat-a',
       queuesByChat: {
         'chat-a': [createMatrixQueueMessage('a-sending', 'chat-a', 'sending', 'A sending')],
       },
     });
 
-    runtimeWorld.currentChatId = 'chat-b';
     await managers.restoreChat('world-1', 'chat-b');
     await managers.addToQueue('world-1', 'chat-b', 'B fresh', 'human', {
       preassignedMessageId: 'b-fresh',

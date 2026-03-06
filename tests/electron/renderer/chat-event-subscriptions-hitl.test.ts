@@ -46,7 +46,6 @@ describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
           },
         },
       },
-      'chat-fallback'
     );
 
     expect(queue).toHaveLength(1);
@@ -83,7 +82,6 @@ describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
           },
         },
       },
-      'chat-fallback'
     );
 
     const replayed = enqueueHitlPromptFromToolEvent(
@@ -105,14 +103,13 @@ describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
           },
         },
       },
-      'chat-fallback'
     );
 
     expect(replayed).toHaveLength(1);
     expect(replayed[0]?.message).toBe('First payload');
   });
 
-  it('uses fallback chat id when tool payload is unscoped', () => {
+  it('ignores unscoped tool-progress prompts without explicit chatId', () => {
     const queue = enqueueHitlPromptFromToolEvent(
       [],
       {
@@ -129,10 +126,9 @@ describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
           },
         },
       },
-      'chat-fallback'
     );
 
-    expect(queue[0]?.chatId).toBe('chat-fallback');
+    expect(queue).toEqual([]);
   });
 
   it('ignores non-hitl and malformed tool events', () => {
@@ -149,13 +145,13 @@ describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
 
     const nonHitl = enqueueHitlPromptFromToolEvent(baseQueue, {
       tool: { eventType: 'tool-result' }
-    }, 'chat-1');
+    });
     const malformed = enqueueHitlPromptFromToolEvent(baseQueue, {
       tool: {
         eventType: 'tool-progress',
         metadata: { hitlPrompt: { requestId: '', options: [] } },
       }
-    }, 'chat-1');
+    });
 
     expect(nonHitl).toEqual(baseQueue);
     expect(malformed).toEqual(baseQueue);
@@ -178,7 +174,6 @@ describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
             },
           },
         },
-        fallbackChatId: 'chat-1' as string | null,
       },
       {
         payload: {
@@ -195,13 +190,12 @@ describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
             },
           },
         },
-        fallbackChatId: 'chat-1' as string | null,
       },
     ];
 
     let queue: any[] = [];
     for (const entry of events) {
-      queue = enqueueHitlPromptFromToolEvent(queue, entry.payload, entry.fallbackChatId);
+      queue = enqueueHitlPromptFromToolEvent(queue, entry.payload);
     }
 
     expect(queue).toHaveLength(2);

@@ -26,7 +26,6 @@ describe('forwardSessionSystemEvent', () => {
 
     forwardSessionSystemEvent({
       loadedWorldId: 'world-1',
-      selectedSessionId: 'chat-1',
       refreshSessions,
       onSessionSystemEvent,
       systemEvent: {
@@ -60,13 +59,36 @@ describe('forwardSessionSystemEvent', () => {
 
     forwardSessionSystemEvent({
       loadedWorldId: null,
-      selectedSessionId: 'chat-1',
       refreshSessions,
       onSessionSystemEvent,
       systemEvent: {
         chatId: 'chat-2',
         eventType: 'chat-title-updated',
         messageId: 'sys-ignored',
+        createdAt: '2026-03-06T00:00:00.000Z',
+        content: {
+          eventType: 'chat-title-updated',
+          title: 'Ignored',
+        },
+      },
+    });
+
+    expect(refreshSessions).not.toHaveBeenCalled();
+    expect(onSessionSystemEvent).not.toHaveBeenCalled();
+  });
+
+  it('ignores unscoped system events', () => {
+    const refreshSessions = vi.fn(async () => { });
+    const onSessionSystemEvent = vi.fn();
+
+    forwardSessionSystemEvent({
+      loadedWorldId: 'world-1',
+      refreshSessions,
+      onSessionSystemEvent,
+      systemEvent: {
+        chatId: null,
+        eventType: 'chat-title-updated',
+        messageId: 'sys-unscoped',
         createdAt: '2026-03-06T00:00:00.000Z',
         content: {
           eventType: 'chat-title-updated',

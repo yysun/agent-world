@@ -60,7 +60,8 @@ describe('Event Persistence Integration', () => {
       agentName: 'test-agent',
       type: 'start',
       messageId: 'msg-sse-123',
-      content: 'Starting generation'
+      content: 'Starting generation',
+      chatId: world!.currentChatId
     });
 
     // Query for SSE events
@@ -86,6 +87,7 @@ describe('Event Persistence Integration', () => {
       agentName: 'test-agent',
       type: 'tool-start',
       messageId: 'msg-tool-456',
+      chatId: world!.currentChatId,
       toolExecution: {
         toolName: 'test-tool',
         toolCallId: 'call-123',
@@ -113,7 +115,7 @@ describe('Event Persistence Integration', () => {
     const world = await getTestWorld();
 
     // Emit system event
-    publishEvent(world!, 'system', { message: 'System initialized', type: 'info' });
+    publishEvent(world!, 'system', { message: 'System initialized', type: 'info' }, world!.currentChatId);
 
     // Give a small delay for async persistence
     await new Promise(resolve => setTimeout(resolve, 10));
@@ -181,9 +183,9 @@ describe('Event Persistence Integration', () => {
 
     // Emit mix of event types
     publishMessage(world!, 'Message 1', 'user-1', world!.currentChatId);
-    publishSSE(world!, { agentName: 'agent', type: 'start', messageId: 'sse-1' });
+    publishSSE(world!, { agentName: 'agent', type: 'start', messageId: 'sse-1', chatId: world!.currentChatId });
     publishMessage(world!, 'Message 2', 'user-1', world!.currentChatId);
-    publishSSE(world!, { agentName: 'agent', type: 'end', messageId: 'sse-2' });
+    publishSSE(world!, { agentName: 'agent', type: 'end', messageId: 'sse-2', chatId: world!.currentChatId });
 
     await new Promise(resolve => setTimeout(resolve, 10));
 
@@ -326,16 +328,16 @@ describe('Event Persistence Integration', () => {
     expect(events).toBeDefined();
   });
 
-  // ChatId defaults tests
-  describe('ChatId Defaults', () => {
-    test('SSE start/end events default to world.currentChatId', async () => {
+  describe('Explicit ChatId', () => {
+    test('SSE start/end events persist with explicit chatId', async () => {
       const world = await getTestWorld();
       const chatId = world!.currentChatId!;
 
       publishSSE(world!, {
         agentName: 'agent',
         type: 'start',
-        messageId: 'sse-default-chatid'
+        messageId: 'sse-default-chatid',
+        chatId,
       });
 
       const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId(), chatId, { types: ['sse'] });
@@ -345,7 +347,7 @@ describe('Event Persistence Integration', () => {
       expect(sseEvent!.chatId).toBe(chatId);
     });
 
-    test('Tool events default to world.currentChatId', async () => {
+    test('Tool events persist with explicit chatId', async () => {
       const world = await getTestWorld();
       const chatId = world!.currentChatId!;
 
@@ -353,6 +355,7 @@ describe('Event Persistence Integration', () => {
         agentName: 'agent',
         type: 'tool-result',
         messageId: 'tool-default-chatid',
+        chatId,
         toolExecution: { toolName: 'test', toolCallId: 'call-1', result: {} }
       });
 
@@ -363,11 +366,11 @@ describe('Event Persistence Integration', () => {
       expect(toolEvent!.chatId).toBe(chatId);
     });
 
-    test('System events default to world.currentChatId', async () => {
+    test('System events persist with explicit chatId', async () => {
       const world = await getTestWorld();
       const chatId = world!.currentChatId!;
 
-      publishEvent(world!, 'system', 'test-message');
+      publishEvent(world!, 'system', 'test-message', chatId);
 
       const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId(), chatId, { types: ['system'] });
 
@@ -375,24 +378,16 @@ describe('Event Persistence Integration', () => {
       expect(events[0].chatId).toBe(chatId);
     });
 
-    test('Events with null currentChatId persist as null', async () => {
+    test('Tool events reject missing explicit chatId', async () => {
       const world = await getTestWorld();
       world!.currentChatId = null;
 
-      // Only tool-result events are persisted (not tool-start)
-      publishToolEvent(world!, {
+      expect(() => publishToolEvent(world!, {
         agentName: 'agent',
         type: 'tool-result',
         messageId: 'tool-null-chatid',
         toolExecution: { toolName: 'test', toolCallId: 'call-1', result: 'Success' }
-      });
-
-      const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId(), null);
-
-      const toolEvent = events.find((e: any) => e.id === 'tool-null-chatid-tool-tool-result');
-
-      expect(toolEvent).toBeDefined();
-      expect(toolEvent!.chatId).toBeNull();
+      })).toThrow('publishToolEvent: explicit chatId is required.');
     });
   });
 
@@ -404,6 +399,7 @@ describe('Event Persistence Integration', () => {
         agentName: 'test-agent',
         type: 'tool-start',
         messageId: 'msg-metadata-test',
+        chatId: world!.currentChatId,
         toolExecution: {
           toolName: 'test-tool',
           toolCallId: 'call-123',
@@ -433,6 +429,7 @@ describe('Event Persistence Integration', () => {
         agentName: 'test-agent',
         type: 'tool-start',
         messageId: undefined as any,
+        chatId: world!.currentChatId,
         toolExecution: {
           toolName: 'test-tool',
           toolCallId: 'call-456'
@@ -461,6 +458,7 @@ describe('Event Persistence Integration', () => {
         agentName: undefined as any,
         type: 'tool-result',
         messageId: 'msg-no-agent',
+        chatId: world!.currentChatId,
         toolExecution: {
           toolName: 'test-tool',
           toolCallId: 'call-789',
@@ -489,6 +487,7 @@ describe('Event Persistence Integration', () => {
         agentName: 'test-agent',
         type: 'tool-result',
         messageId: 'msg-result-test',
+        chatId: world!.currentChatId,
         toolExecution: {
           toolName: 'test-tool',
           toolCallId: 'call-result',
@@ -519,6 +518,7 @@ describe('Event Persistence Integration', () => {
         agentName: 'test-agent',
         type: 'tool-start',
         messageId: 'msg-defaults-test',
+        chatId: world!.currentChatId,
         toolExecution: {
           toolName: 'test-tool',
           toolCallId: 'call-defaults'

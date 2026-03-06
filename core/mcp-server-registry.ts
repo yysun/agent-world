@@ -10,6 +10,9 @@
  * - LOG_MCP_TOOLS=debug - Tool discovery and caching
  * - LOG_MCP_EXECUTION=debug - Tool execution and results
  * - LOG_MCP=debug - Enable all MCP logs
+ *
+ * Recent Changes:
+ * - 2026-03-06: Removed `world.currentChatId` fallback from retry-status routing; MCP retry status emits only when `context.chatId` is explicit.
  * 
  * What you'll see:
  * - Server lifecycle: start, stop, ready, shutdown
@@ -467,11 +470,10 @@ async function resolveRetryStatusWorld(context?: ToolExecutionContext): Promise<
   }
 }
 
-function resolveRetryStatusChatId(context: ToolExecutionContext | undefined, world: World | null): string | null {
+function resolveRetryStatusChatId(context: ToolExecutionContext | undefined, _world: World | null): string | null {
   const fromContext = typeof context?.chatId === 'string' ? context.chatId.trim() : '';
   if (fromContext) return fromContext;
-  const fromWorld = typeof world?.currentChatId === 'string' ? world.currentChatId.trim() : '';
-  return fromWorld || null;
+  return null;
 }
 
 function buildMCPRetryStatusContent(params: {
@@ -1102,7 +1104,9 @@ export async function mcpToolsToAiTools(
       execute: async (args: any, sequenceId?: string, parentToolCall?: string, context?: ToolExecutionContext) => {
         const startTime = performance.now();
         const executionId = `${serverName}-${t.name}-${Date.now()}`;
-        const chatId = context?.chatId ?? context?.world?.currentChatId ?? null;
+        const chatId = typeof context?.chatId === 'string' && context.chatId.trim()
+          ? context.chatId.trim()
+          : null;
         const worldId = context?.worldId ?? context?.world?.id ?? null;
         const agentId = context?.agentId ?? null;
 

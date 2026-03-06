@@ -20,6 +20,7 @@
  * - utils.ts, logger.ts
  *
  * Changes:
+ * - 2026-03-06: Removed `world.currentChatId` fallback from world-message title scheduling; chat-scoped handlers now require explicit `event.chatId`.
  * - 2026-03-03: Removed private title-scheduling logic (moved to title-scheduler.ts Layer 4).
  *   subscribeWorldToMessages and setupWorldActivityListener are now idempotent wrappers that
  *   short-circuit when setupEventPersistence has already registered a combined handler.
@@ -198,7 +199,7 @@ export function subscribeWorldToMessages(world: World): () => void {
   }
 
   const unsubscribe = subscribeToMessages(world, async (event: WorldMessageEvent) => {
-    const targetChatId = event.chatId ?? world.currentChatId ?? null;
+    const targetChatId = typeof event.chatId === 'string' ? event.chatId.trim() : '';
     if (!targetChatId) return;
     if (!isHumanSender(event.sender)) return;
 

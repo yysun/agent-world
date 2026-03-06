@@ -11,6 +11,7 @@
  * - Uses dependency injection for window lookup and world subscription API.
  *
  * Recent Changes:
+ * - 2026-03-06: Enforced explicit chat-scoped realtime forwarding for SSE/tool/activity/system/HITL replay paths; removed subscription-chat fallback rebinding.
  * - 2026-02-26: Replaced realtime console traces/warnings/errors with categorized injected logger calls.
  * - 2026-02-25: Added runtime pending-HITL replay on chat subscription so prompts created before renderer listener attach are re-delivered deterministically.
  * - 2026-02-24: Switched HITL restore dispatch to persisted message reconstruction (`getMemory` + request/response pairing helper).
@@ -261,9 +262,10 @@ export function createRealtimeEventsRuntime(
 
     const sseHandler = (event: any) => {
       const eventChatId = event?.chatId ? String(event.chatId) : null;
+      if (!eventChatId) return;
       if (chatId && eventChatId !== chatId) return;
       sendRealtimeEventToRenderer({
-        ...serializeRealtimeSSEEvent(worldId, eventChatId || chatId, event),
+        ...serializeRealtimeSSEEvent(worldId, eventChatId, event),
         subscriptionId
       });
     };
@@ -275,31 +277,30 @@ export function createRealtimeEventsRuntime(
       }
       const eventChatId = event?.chatId ? String(event.chatId) : null;
       if (eventType.startsWith('tool-')) {
-        // Tool events: strict chatId filtering
+        if (!eventChatId) return;
         if (chatId && eventChatId !== chatId) return;
         sendRealtimeEventToRenderer({
-          ...serializeRealtimeToolEvent(worldId, eventChatId || chatId, event),
+          ...serializeRealtimeToolEvent(worldId, eventChatId, event),
           subscriptionId
         });
         return;
       }
 
-      // Activity events (response-start, response-end, idle) are world-level
-      // and typically carry no chatId. Only filter out events that explicitly
-      // belong to a different chat; allow unscoped events through.
-      if (chatId && eventChatId && eventChatId !== chatId) return;
+      if (!eventChatId) return;
+      if (chatId && eventChatId !== chatId) return;
 
       sendRealtimeEventToRenderer({
-        ...serializeRealtimeActivityEvent(worldId, eventChatId || chatId, event),
+        ...serializeRealtimeActivityEvent(worldId, eventChatId, event),
         subscriptionId
       });
     };
 
     const systemHandler = (event: any) => {
       const eventChatId = event?.chatId ? String(event.chatId) : null;
+      if (!eventChatId) return;
       if (chatId && eventChatId !== chatId) return;
       sendRealtimeEventToRenderer({
-        ...serializeRealtimeSystemEvent(worldId, eventChatId || chatId, event),
+        ...serializeRealtimeSystemEvent(worldId, eventChatId, event),
         subscriptionId
       });
     };
@@ -352,17 +353,22 @@ export function createRealtimeEventsRuntime(
             continue;
           }
 
+          const pendingChatId = typeof pending?.chatId === 'string' ? pending.chatId.trim() : '';
+          if (!pendingChatId) {
+            continue;
+          }
+
           sendRealtimeEventToRenderer({
-            ...serializeRealtimeToolEvent(worldId, pending?.chatId || chatId, {
+            ...serializeRealtimeToolEvent(worldId, pendingChatId, {
               type: 'tool-progress',
-              chatId: pending?.chatId || chatId,
+              chatId: pendingChatId,
               toolExecution: {
                 toolName,
                 toolCallId,
                 metadata: {
                   hitlPrompt: {
                     ...prompt,
-                    chatId: pending?.chatId || chatId,
+                    chatId: pendingChatId,
                   },
                 },
               },
@@ -404,17 +410,22 @@ export function createRealtimeEventsRuntime(
             continue;
           }
 
+          const pendingChatId = typeof pending?.chatId === 'string' ? pending.chatId.trim() : '';
+          if (!pendingChatId) {
+            continue;
+          }
+
           sendRealtimeEventToRenderer({
-            ...serializeRealtimeToolEvent(worldId, pending?.chatId || chatId, {
+            ...serializeRealtimeToolEvent(worldId, pendingChatId, {
               type: 'tool-progress',
-              chatId: pending?.chatId || chatId,
+              chatId: pendingChatId,
               toolExecution: {
                 toolName,
                 toolCallId,
                 metadata: {
                   hitlPrompt: {
                     ...prompt,
-                    chatId: pending?.chatId || chatId,
+                    chatId: pendingChatId,
                   },
                 },
               },

@@ -12,6 +12,7 @@
  * - Emits events synchronously through world-scoped EventEmitter channels
  *
  * Recent Changes:
+ * - 2026-03-06: Required explicit `chatId` for message/system/SSE/tool publication; removed `world.currentChatId` fallback from event emitters.
  * - 2026-02-13: Added optional explicit `chatId` override for `publishEvent` to preserve session context across async flows.
  * - 2026-02-13: Added chat-scoped tool-event propagation (`chatId`) so realtime tool updates remain session-isolated.
  * - 2026-02-11: Fixed publishSSE to include toolName and stream fields for tool-stream events
@@ -57,24 +58,20 @@ export function normalizeSender(sender: string): string {
 }
 
 function resolveRequiredChatId(
-  world: World,
   chatId: string | null | undefined,
-  callsite: 'publishMessage' | 'publishMessageWithId'
+  callsite: 'publishEvent' | 'publishMessage' | 'publishMessageWithId' | 'publishSSE' | 'publishToolEvent'
 ) {
   const explicitChatId = typeof chatId === 'string' ? chatId.trim() : '';
   if (explicitChatId) return explicitChatId;
 
-  const currentChatId = typeof world?.currentChatId === 'string' ? world.currentChatId.trim() : '';
-  if (currentChatId) return currentChatId;
-
-  throw new Error(`${callsite}: chatId is required for message events.`);
+  throw new Error(`${callsite}: explicit chatId is required.`);
 }
 
 /**
  * Publish event to a specific channel using World.eventEmitter
  */
-export function publishEvent(world: World, type: string, content: any, chatId?: string | null): void {
-  const targetChatId = chatId !== undefined ? chatId : (world.currentChatId || null);
+export function publishEvent(world: World, type: string, content: any, chatId: string): void {
+  const targetChatId = resolveRequiredChatId(chatId, 'publishEvent');
   const event: WorldSystemEvent = {
     content,
     timestamp: new Date(),
@@ -89,12 +86,12 @@ export function publishEvent(world: World, type: string, content: any, chatId?: 
  * Parses enhanced string protocol and automatically prepends @mention if agentId detected
  * Returns the messageEvent so callers can access the generated messageId
  * 
- * @param chatId - Optional chat ID. If not provided, uses world.currentChatId
+ * @param chatId - Explicit chat ID for concurrency-safe routing
  * @param replyToMessageId - Optional parent message ID for threading
  */
-export function publishMessage(world: World, content: string, sender: string, chatId?: string | null, replyToMessageId?: string): WorldMessageEvent {
+export function publishMessage(world: World, content: string, sender: string, chatId: string, replyToMessageId?: string): WorldMessageEvent {
   const messageId = generateId();
-  const targetChatId = resolveRequiredChatId(world, chatId, 'publishMessage');
+  const targetChatId = resolveRequiredChatId(chatId, 'publishMessage');
   const normalizedSender = normalizeSender(sender);
 
   loggerMemory.debug('[publishMessage] ENTRY', {
@@ -183,11 +180,11 @@ export function publishMessage(world: World, content: string, sender: string, ch
  * Message publishing with pre-generated messageId
  * Used when messageId needs to be known before publishing (e.g., for agent responses)
  * 
- * @param chatId - Optional chat ID. If not provided, uses world.currentChatId
+ * @param chatId - Explicit chat ID for concurrency-safe routing
  * @param replyToMessageId - Optional parent message ID for threading
  */
-export function publishMessageWithId(world: World, content: string, sender: string, messageId: string, chatId?: string | null, replyToMessageId?: string): WorldMessageEvent {
-  const targetChatId = resolveRequiredChatId(world, chatId, 'publishMessageWithId');
+export function publishMessageWithId(world: World, content: string, sender: string, messageId: string, chatId: string, replyToMessageId?: string): WorldMessageEvent {
+  const targetChatId = resolveRequiredChatId(chatId, 'publishMessageWithId');
   const normalizedSender = normalizeSender(sender);
   const messageEvent: WorldMessageEvent = {
     content,
@@ -241,14 +238,15 @@ export function subscribeToMessages(
 /**
  * SSE events using World.eventEmitter (for LLM streaming)
  */
-export function publishSSE(world: World, data: Partial<WorldSSEEvent>): void {
+export function publishSSE(world: World, data: Partial<WorldSSEEvent> & { chatId: string }): void {
+  const targetChatId = resolveRequiredChatId(data.chatId, 'publishSSE');
   const sseEvent: WorldSSEEvent = {
     agentName: data.agentName!,
     type: data.type!,
     content: data.content,
     error: data.error,
     messageId: data.messageId || generateId(),
-    chatId: data.chatId !== undefined ? data.chatId : (world.currentChatId ?? null),
+    chatId: targetChatId,
     usage: data.usage,
     logEvent: data.logEvent,
     tool_calls: data.tool_calls,
@@ -261,12 +259,13 @@ export function publishSSE(world: World, data: Partial<WorldSSEEvent>): void {
 /**
  * Tool events using World.eventEmitter (for agent behavioral events)
  */
-export function publishToolEvent(world: World, data: Partial<WorldToolEvent>): void {
+export function publishToolEvent(world: World, data: Partial<WorldToolEvent> & { chatId: string }): void {
+  const targetChatId = resolveRequiredChatId(data.chatId, 'publishToolEvent');
   const toolEvent: WorldToolEvent = {
     agentName: data.agentName!,
     type: data.type!,
     messageId: data.messageId || generateId(),
-    chatId: data.chatId !== undefined ? data.chatId : (world.currentChatId ?? null),
+    chatId: targetChatId,
     toolExecution: data.toolExecution!
   };
   world.eventEmitter.emit('world', toolEvent);

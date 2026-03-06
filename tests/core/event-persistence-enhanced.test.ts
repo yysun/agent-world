@@ -3,11 +3,12 @@
  * Key features:
  * - Verifies persisted metadata for human, agent, mention, and tool-call messages
  * - Verifies recipient/memory flags and delivery ownership metadata
- * - Verifies null chat behavior and owner/delivery consistency
+ * - Verifies missing chat rejection and owner/delivery consistency
  * Implementation notes:
  * - Uses in-memory event storage with async event-emitter persistence hooks
  * - Uses direct WorldMessageEvent emission to exercise metadata derivation
  * Recent changes:
+ * - 2026-03-06: Updated coverage to require explicit chatId on published message events.
  * - Removed legacy manual-intervention metadata scenario coverage
  */
 
@@ -74,7 +75,7 @@ describe('Enhanced Event Persistence', () => {
   });
 
   it('should persist human message with all agents in ownerAgentIds', async () => {
-    publishMessage(world, 'Hello everyone', 'human');
+    publishMessage(world, 'Hello everyone', 'human', 'chat-1');
 
     // Wait for async persistence
     await new Promise(resolve => setTimeout(resolve, 50));
@@ -268,30 +269,15 @@ describe('Enhanced Event Persistence', () => {
     expect(stored.meta.isMemoryOnly).toBe(true);
   });
 
-  it('should handle null chatId correctly', async () => {
+  it('should reject published messages without explicit chatId', async () => {
     world.currentChatId = null;
-
-    const messageEvent: WorldMessageEvent = {
-      content: 'Message without chat',
-      sender: 'human',
-      messageId: 'msg-6',
-      timestamp: new Date(),
-      chatId: null
-    };
-
-    world.eventEmitter.emit('message', messageEvent);
-    await new Promise(resolve => setTimeout(resolve, 50));
-
-    const events = await world.eventStorage.getEventsByWorldAndChat(world.id, null);
-    const stored = events.find((e: StoredEvent) => e.id === 'msg-6');
-
-    expect(stored).toBeDefined();
-    expect(stored.chatId).toBeNull();
-    expect(stored.meta.chatId).toBeNull();
+    expect(() => publishMessage(world, 'Message without chat', 'human')).toThrow(
+      'publishMessage: explicit chatId is required.'
+    );
   });
 
   it('should calculate deliveredToAgents same as ownerAgentIds', async () => {
-    publishMessage(world, 'Test message', 'human');
+    publishMessage(world, 'Test message', 'human', 'chat-1');
 
     await new Promise(resolve => setTimeout(resolve, 50));
 

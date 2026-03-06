@@ -5,6 +5,7 @@
  * Supports world/agent/chat management with optimized serialization and error handling.
  *
  * Changes:
+ * - 2026-03-06: Removed runtime `world.currentChatId` fallback from message send routes; chat-scoped sends now require explicit `chatId`.
  * - 2026-03-06: Added `/tool-artifact` for stable, restorable adopted-tool preview URLs limited to approved world working directories and registered skill roots.
  * - 2026-03-06: Hardened `POST /worlds/:worldName/hitl/respond` for restart-safe validation: when the runtime pending map lacks the request entry but it exists in persisted messages, trigger `activateChatWithSnapshot` to seed the runtime map and return an actionable error.
  * - 2026-03-04: Added queue metadata fields to non-streaming `/messages` success responses (`queueMessageId`, `queueStatus`, `queueRetryCount`) to expose queue terminal/error state.
@@ -372,7 +373,7 @@ const ChatMessageSchema = z.object({
   message: z.string().min(1),
   sender: z.string().default("human"),
   stream: z.boolean().optional().default(true),
-  chatId: z.string().min(1).optional(),
+  chatId: z.string().min(1),
   messages: z.array(z.any()).optional()
 });
 
@@ -781,7 +782,7 @@ async function handleNonStreamingChat(
   worldName: string,
   message: string,
   sender: string,
-  chatId?: string
+  chatId: string
 ): Promise<void> {
   disableStreaming();
   let subscription: any = null;
@@ -900,7 +901,7 @@ async function handleNonStreamingChat(
         listeners.set(EventType.SSE, sseListener);
 
         // Queue-backed user ingress: enqueue then trigger event-driven processing.
-        const queued = await enqueueAndProcessUserMessage(world.id, chatId || world.currentChatId || '', message, sender, world);
+        const queued = await enqueueAndProcessUserMessage(world.id, chatId, message, sender, world);
         queuedMessageId = queued?.messageId || null;
         queuedStatus = queued?.status || null;
         queuedRetryCount = typeof queued?.retryCount === 'number' ? queued.retryCount : null;
@@ -967,7 +968,7 @@ async function handleStreamingChat(
   worldName: string,
   message: string,
   sender: string,
-  chatId?: string
+  chatId: string
 ): Promise<void> {
   // Subscribe to world to get the world instance
   const subscription = await subscribeWorld(worldName, { isOpen: true });
@@ -1000,7 +1001,7 @@ async function handleStreamingChat(
 
   try {
     // Queue-backed user ingress: enqueue then trigger event-driven processing.
-    await enqueueAndProcessUserMessage(world.id, chatId || world.currentChatId || '', message, sender, world);
+    await enqueueAndProcessUserMessage(world.id, chatId, message, sender, world);
   } catch (error) {
     sseHandler.sendSSE({
       type: 'error',

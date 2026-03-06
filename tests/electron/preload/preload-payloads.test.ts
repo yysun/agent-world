@@ -13,6 +13,7 @@
  * - Keeps expectations aligned with main-process payload contracts.
  *
  * Recent Changes:
+ * - 2026-03-06: Added heartbeat payload coverage to ensure omitted chat IDs are not serialized as empty strings.
  * - 2026-02-16: Added `toBranchSessionPayload` coverage for session branch-from-message invoke payloads.
  * - 2026-02-14: Added `toHitlResponsePayload` coverage for HITL option-response invoke payloads.
  * - 2026-02-12: Moved into layer-based tests/electron subfolder and updated module import paths.
@@ -23,6 +24,7 @@ import { describe, expect, it } from 'vitest';
 import {
   toAgentPayload,
   toBranchSessionPayload,
+  toHeartbeatJobPayload,
   toHitlResponsePayload,
   toMessageDeletePayload,
   toSubscribePayload,
@@ -39,6 +41,14 @@ describe('preload payload helpers', () => {
 
   it('normalizes world/chat payload identifiers', () => {
     expect(toWorldChatPayload(10, 20)).toEqual({ worldId: '10', chatId: '20' });
+  });
+
+  it('omits heartbeat chat identifiers when none are provided', () => {
+    expect(toHeartbeatJobPayload('world-1')).toEqual({ worldId: 'world-1' });
+    expect(toHeartbeatJobPayload('world-1', 'chat-1')).toEqual({
+      worldId: 'world-1',
+      chatId: 'chat-1'
+    });
   });
 
   it('merges world + payload objects', () => {

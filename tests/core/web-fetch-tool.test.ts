@@ -185,6 +185,23 @@ describe('web_fetch tool', () => {
     expect(mockRequestWorldOption).toHaveBeenCalledTimes(1);
   });
 
+  it('does not infer chatId from world context for localhost approval', async () => {
+    const tool = createWebFetchToolDefinition();
+    const result = await tool.execute(
+      { url: 'http://127.0.0.1:8080' },
+      undefined,
+      undefined,
+      {
+        world: { id: 'world-1', currentChatId: 'chat-1' } as any,
+        toolCallId: 'tc-3',
+        agentName: 'agent-1',
+      },
+    );
+
+    expect(String(result)).toContain('Error: web_fetch failed - blocked_target: local/private access approval requires an explicit chatId');
+    expect(mockRequestWorldOption).not.toHaveBeenCalled();
+  });
+
   it('maps request timeout aborts to deterministic timeout_error category', async () => {
     vi.useFakeTimers();
     try {

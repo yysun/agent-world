@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-03-06: Scoped the right-side logs panel to the active world/chat and limited Clear to the visible scoped entries.
  * - 2026-03-06: Preserved error-kind selected-chat system statuses until replaced or context changes; non-error statuses still auto-expire.
  * - 2026-03-06: Added selected-chat system-event status-bar overlays for title updates, timeout notices, and retry tracking.
  * - 2026-03-05: Moved `MessageQueuePanel` into a dedicated pre-composer slot so queue items render above the composer input.
@@ -123,6 +124,12 @@ import {
   retainSessionSystemStatusForContext,
   type SessionSystemStatusEntry,
 } from './domain/session-system-status';
+import {
+  clearPanelLogsForScope,
+  filterPanelLogsForScope,
+  normalizeUnifiedLogEntry,
+  type UnifiedLogEntry,
+} from './domain/panel-log-scope';
 
 type WorkspaceState = {
   workspacePath: string | null;
@@ -153,49 +160,10 @@ type HitlPrompt = {
   };
 };
 
-type UnifiedLogProcess = 'main' | 'renderer';
-
-type UnifiedLogEntry = {
-  id: string;
-  process: UnifiedLogProcess;
-  level: string;
-  category: string;
-  message: string;
-  timestamp: string;
-  data?: unknown;
-};
-
 const MAX_LOG_PANEL_ENTRIES = 600;
 
 function normalizeAgentKey(value: unknown): string {
   return String(value || '').trim().toLowerCase();
-}
-
-function createLogEntryId() {
-  return `panel-log-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
-function normalizeLogProcess(value: unknown): UnifiedLogProcess {
-  return String(value || '').trim().toLowerCase() === 'renderer' ? 'renderer' : 'main';
-}
-
-function normalizeUnifiedLogEntry(entry: {
-  process?: unknown;
-  level?: unknown;
-  category?: unknown;
-  message?: unknown;
-  timestamp?: unknown;
-  data?: unknown;
-}): UnifiedLogEntry {
-  return {
-    id: createLogEntryId(),
-    process: normalizeLogProcess(entry?.process),
-    level: String(entry?.level || '').trim().toLowerCase() || 'info',
-    category: String(entry?.category || '').trim() || 'runtime',
-    message: String(entry?.message || '').trim() || '(empty log message)',
-    timestamp: String(entry?.timestamp || '').trim() || new Date().toISOString(),
-    ...(entry?.data !== undefined ? { data: entry.data } : {}),
-  };
 }
 
 export default function App() {
@@ -320,6 +288,8 @@ export default function App() {
     message?: unknown;
     timestamp?: unknown;
     data?: unknown;
+    worldId?: unknown;
+    chatId?: unknown;
   }) => {
     const nextEntry = normalizeUnifiedLogEntry(incoming);
     setPanelLogs((existing) => {
@@ -334,10 +304,6 @@ export default function App() {
   const onMainProcessLogEvent = useCallback((entry: MainProcessLogEntry) => {
     appendUnifiedLogEntry(entry);
   }, [appendUnifiedLogEntry]);
-
-  const onClearPanelLogs = useCallback(() => {
-    setPanelLogs([]);
-  }, []);
 
   useEffect(() => {
     const unsubscribe = rendererLogger.subscribe((entry: RendererLogEntry) => {
@@ -384,6 +350,7 @@ export default function App() {
     getDefaultWorldForm,
     getWorldFormFromWorld,
     selectedProjectPath,
+    getSelectedSessionId: () => selectedSessionIdRef.current,
   });
 
   const {
@@ -413,6 +380,12 @@ export default function App() {
   // Sync ref so async callbacks (refreshMessages, edit/delete follow-up) always
   // read the latest selected chat without needing it in their dependency arrays.
   selectedSessionIdRef.current = selectedSessionId;
+
+  const scopedPanelLogs = filterPanelLogsForScope(panelLogs, loadedWorld?.id || null, selectedSessionId);
+
+  const onClearPanelLogs = useCallback(() => {
+    setPanelLogs((existing) => clearPanelLogsForScope(existing, loadedWorld?.id || null, selectedSessionId));
+  }, [loadedWorld?.id, selectedSessionId]);
 
   const {
     streamingStateRef,
@@ -1306,7 +1279,7 @@ export default function App() {
     creatingWorld,
     setCreatingWorld,
     onImportWorld,
-    panelLogs,
+    panelLogs: scopedPanelLogs,
     onClearPanelLogs,
   });
 

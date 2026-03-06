@@ -715,8 +715,7 @@ export async function streamAgentResponse(
   }
 
   const normalizedChatId = typeof chatId === 'string' ? chatId.trim() : '';
-  const fallbackChatId = typeof world?.currentChatId === 'string' ? world.currentChatId.trim() : '';
-  const resolvedChatId = normalizedChatId || fallbackChatId || null;
+  const resolvedChatId = normalizedChatId || null;
   if (!resolvedChatId) {
     throw new Error(`streamAgentResponse: chatId is required for agent ${agent.id}`);
   }
@@ -928,7 +927,13 @@ async function executeStreamAgentResponse(
       chatId
     });
 
-    loggerStreaming.error(`LLM: Error during streaming response for agent=${agent.id}, world=${world.id}, messageId=${messageId}, error=${(error as Error).message}`);
+    loggerStreaming.error('LLM: Error during streaming response', {
+      agentId: agent.id,
+      worldId: world.id,
+      chatId,
+      messageId,
+      error: error instanceof Error ? error.message : String(error)
+    });
 
     throw error;
   }
@@ -951,8 +956,10 @@ export async function generateAgentResponse(
   }
 
   const normalizedChatId = typeof chatId === 'string' ? chatId.trim() : '';
-  const fallbackChatId = typeof world?.currentChatId === 'string' ? world.currentChatId.trim() : '';
-  const resolvedChatId = normalizedChatId || fallbackChatId || null;
+  const resolvedChatId = normalizedChatId || null;
+  if (!resolvedChatId) {
+    throw new Error(`generateAgentResponse: chatId is required for agent ${agent.id}`);
+  }
 
   // Queue the LLM call to ensure serialized execution
   return llmQueue.add(agent.id, world.id, resolvedChatId, async (queueAbortSignal) => {
@@ -1167,7 +1174,13 @@ async function executeGenerateAgentResponse(
       throw new Error(`LLM call canceled for agent ${agent.id}`);
     }
 
-    loggerGeneration.error(`LLM: Error during non-streaming response for agent=${agent.id}, world=${world.id}, error=${(error as Error).message}`);
+    loggerGeneration.error('LLM: Error during non-streaming response', {
+      agentId: agent.id,
+      worldId: world.id,
+      chatId,
+      messageId,
+      error: error instanceof Error ? error.message : String(error)
+    });
     throw error;
   }
 }

@@ -174,7 +174,7 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
       resubmissionStatus: 'success',
       newMessageId: 'new-msg-1'
     }));
-    const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1' }));
+    const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1', chats: new Map([['chat-1', { id: 'chat-1' }]]) }));
     const subscribedWorld = { id: 'world-1', eventEmitter: {} };
     const ensureWorldSubscribed = vi.fn(async () => subscribedWorld);
     const getMemory = vi.fn(async () => ([
@@ -216,7 +216,7 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
     const subscribedWorld = { id: 'world-1', eventEmitter: {} };
     const ensureWorldSubscribed = vi.fn(async () => subscribedWorld);
     const refreshWorldSubscription = vi.fn(async () => 'refresh failed');
-    const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1' }));
+    const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1', chats: new Map([['chat-1', { id: 'chat-1' }]]) }));
     const getMemory = vi.fn(async () => ([
       { messageId: 'msg-1', role: 'user', chatId: 'chat-1' }
     ]));
@@ -341,7 +341,7 @@ describe('createMainIpcHandlers.listSkillRegistry', () => {
 
 describe('createMainIpcHandlers.sendChatMessage', () => {
   it('rejects sending when chatId is missing', async () => {
-    const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1' }));
+    const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1', chats: new Map([['chat-1', { id: 'chat-1' }]]) }));
     const enqueueAndProcessUserMessage = vi.fn();
     const ensureWorldSubscribed = vi.fn(async () => ({ id: 'world-1' }));
 
@@ -388,7 +388,7 @@ describe('createMainIpcHandlers.sendChatMessage', () => {
 
   it('applies provided skill settings payload to env before publishing', async () => {
     const ensureWorldSubscribed = vi.fn(async () => ({ id: 'world-1' }));
-    const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1' }));
+    const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1', chats: new Map([['chat-1', { id: 'chat-1' }]]) }));
     const enqueueAndProcessUserMessage = vi.fn(async () => ({
       messageId: 'queued-msg-1',
       sender: 'human',
@@ -458,7 +458,7 @@ describe('createMainIpcHandlers.sendChatMessage', () => {
 });
 
 describe('createMainIpcHandlers.loadSpecificWorld', () => {
-  it('subscribes runtime and resumes active chat queue when loading a world', async () => {
+  it('subscribes runtime without resuming a queue from persisted currentChatId', async () => {
     const world = {
       id: 'world-1',
       name: 'World 1',
@@ -489,7 +489,7 @@ describe('createMainIpcHandlers.loadSpecificWorld', () => {
     expect(result).toMatchObject({ success: true });
     expect(getWorld).toHaveBeenCalledWith('world-1');
     expect(ensureWorldSubscribed).toHaveBeenCalledWith('world-1');
-    expect(resumeChatQueue).toHaveBeenCalledWith('world-1', 'chat-7');
+    expect(resumeChatQueue).not.toHaveBeenCalled();
   });
 });
 
@@ -517,7 +517,7 @@ describe('createMainIpcHandlers.selectWorldSession', () => {
 });
 
 describe('createMainIpcHandlers.updateWorkspaceWorld heartbeat mapping', () => {
-  it('maps heartbeat fields and restarts heartbeat job with subscribed world', async () => {
+  it('maps heartbeat fields and restarts heartbeat job with subscribed world and explicit chatId', async () => {
     const updateWorld = vi.fn(async () => ({
       id: 'world-1',
       name: 'World 1',
@@ -549,6 +549,7 @@ describe('createMainIpcHandlers.updateWorkspaceWorld heartbeat mapping', () => {
 
     await handlers.updateWorkspaceWorld({
       worldId: 'world-1',
+      chatId: 'chat-9',
       heartbeatEnabled: true,
       heartbeatInterval: ' */5 * * * * ',
       heartbeatPrompt: 'tick',
@@ -561,6 +562,46 @@ describe('createMainIpcHandlers.updateWorkspaceWorld heartbeat mapping', () => {
     }));
     expect(refreshWorldSubscription).toHaveBeenCalledWith('world-1');
     expect(ensureWorldSubscribed).toHaveBeenCalledWith('world-1');
-    expect(heartbeatManager.restartJob).toHaveBeenCalledWith(runtimeWorld);
+    expect(heartbeatManager.restartJob).toHaveBeenCalledWith(runtimeWorld, 'chat-9');
+  });
+
+  it('stops heartbeat runtime when heartbeat config updates without explicit chatId', async () => {
+    const updateWorld = vi.fn(async () => ({
+      id: 'world-1',
+      name: 'World 1',
+      description: '',
+      turnLimit: 5,
+      heartbeatEnabled: true,
+      heartbeatInterval: '*/5 * * * *',
+      heartbeatPrompt: 'tick',
+    }));
+    const refreshWorldSubscription = vi.fn(async () => null);
+    const ensureWorldSubscribed = vi.fn(async () => ({ id: 'world-1' }));
+    const heartbeatManager = {
+      startJob: vi.fn(),
+      restartJob: vi.fn(),
+      pauseJob: vi.fn(),
+      resumeJob: vi.fn(),
+      stopJob: vi.fn(),
+      stopAll: vi.fn(),
+      listJobs: vi.fn(() => []),
+    };
+
+    const { handlers } = await createHandlers({
+      updateWorld,
+      refreshWorldSubscription,
+      ensureWorldSubscribed,
+      heartbeatManager,
+    });
+
+    await handlers.updateWorkspaceWorld({
+      worldId: 'world-1',
+      heartbeatEnabled: true,
+      heartbeatInterval: '*/5 * * * *',
+      heartbeatPrompt: 'tick',
+    });
+
+    expect(heartbeatManager.restartJob).not.toHaveBeenCalled();
+    expect(heartbeatManager.stopJob).toHaveBeenCalledWith('world-1');
   });
 });

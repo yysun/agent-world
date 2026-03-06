@@ -1,15 +1,15 @@
 /**
- * Event ChatId Defaults Test Suite
- * 
- * Comprehensive tests verifying that all world events (SSE, tool, system) default
- * their chatId to world.currentChatId when persisted to storage.
+ * Event ChatId Requirements Test Suite
+ *
+ * Comprehensive tests verifying that chat-scoped world events require and preserve
+ * explicit `chatId` values when persisted to storage.
  * 
  * Features tested:
- * - SSE events inherit world.currentChatId
- * - Tool events inherit world.currentChatId
- * - System events inherit world.currentChatId
- * - Message events use explicit chatId
- * - Events can still be explicitly set to null chatId
+ * - SSE events preserve explicit chatId
+ * - Tool events preserve explicit chatId
+ * - System events preserve explicit chatId
+ * - Message events require explicit chatId
+ * - Missing chatId is rejected instead of silently falling back
  * - Querying events by chatId returns all event types
  * 
  * Implementation: Tests both memory and SQLite storage backends
@@ -25,7 +25,7 @@ import type { World } from '../../core/types.js';
 import type { StoredEvent } from '../../core/storage/eventStorage/types.js';
 import { setupTestWorld } from '../helpers/world-test-setup.js';
 
-describe('Event ChatId Defaults', () => {
+describe('Event ChatId Requirements', () => {
   const { worldId, getWorld } = setupTestWorld({
     name: 'event-chatid-test',
     description: 'Testing event chatId defaults',
@@ -33,7 +33,7 @@ describe('Event ChatId Defaults', () => {
   });
 
   describe('SSE Events', () => {
-    test('should default chatId to world.currentChatId', async () => {
+    test('should preserve explicit chatId', async () => {
       const world = await getWorld();
       expect(world).toBeTruthy();
       expect(world!.currentChatId).toBeTruthy();
@@ -44,7 +44,8 @@ describe('Event ChatId Defaults', () => {
         agentName: 'test-agent',
         type: 'start',
         messageId: 'sse-chatid-1',
-        content: 'Starting generation'
+        content: 'Starting generation',
+        chatId,
       });
 
       // Allow persistence to complete
@@ -74,7 +75,8 @@ describe('Event ChatId Defaults', () => {
         agentName: 'agent1',
         type: 'start',
         messageId: 'sse-chat1',
-        content: 'Chat 1 content'
+        content: 'Chat 1 content',
+        chatId: chat1Id,
       });
 
       // Update chat name to prevent reuse by newChat
@@ -91,7 +93,8 @@ describe('Event ChatId Defaults', () => {
         agentName: 'agent2',
         type: 'end',
         messageId: 'sse-chat2',
-        content: 'Chat 2 content'
+        content: 'Chat 2 content',
+        chatId: chat2Id,
       });
 
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -124,7 +127,7 @@ describe('Event ChatId Defaults', () => {
   });
 
   describe('Tool Events', () => {
-    test('should default chatId to world.currentChatId', async () => {
+    test('should preserve explicit chatId', async () => {
       const world = await getWorld();
       expect(world).toBeTruthy();
       expect(world!.currentChatId).toBeTruthy();
@@ -135,6 +138,7 @@ describe('Event ChatId Defaults', () => {
         agentName: 'test-agent',
         type: 'tool-result',
         messageId: 'tool-chatid-1',
+        chatId,
         toolExecution: {
           toolName: 'testTool',
           toolCallId: 'call-123',
@@ -168,6 +172,7 @@ describe('Event ChatId Defaults', () => {
         agentName: 'agent1',
         type: 'tool-start',
         messageId: 'tool-chat1',
+        chatId: chat1Id,
         toolExecution: {
           toolName: 'searchTool',
           toolCallId: 'call-1'
@@ -187,6 +192,7 @@ describe('Event ChatId Defaults', () => {
         agentName: 'agent2',
         type: 'tool-start',
         messageId: 'tool-chat2',
+        chatId: chat2Id,
         toolExecution: {
           toolName: 'analyzeTool',
           toolCallId: 'call-2'
@@ -215,14 +221,14 @@ describe('Event ChatId Defaults', () => {
   });
 
   describe('System Events', () => {
-    test('should default chatId to world.currentChatId', async () => {
+    test('should preserve explicit chatId', async () => {
       const world = await getWorld();
       expect(world).toBeTruthy();
       expect(world!.currentChatId).toBeTruthy();
       const chatId = world!.currentChatId!;
 
       // Emit system event
-      publishEvent(world!, 'system', { message: 'System notification', type: 'info' });
+      publishEvent(world!, 'system', { message: 'System notification', type: 'info' }, chatId);
 
       await new Promise(resolve => setTimeout(resolve, 100));
 
@@ -245,13 +251,13 @@ describe('Event ChatId Defaults', () => {
       const chat1Id = world!.currentChatId!;
 
       // System event in first chat
-      publishEvent(world!, 'system', 'Chat 1 initialized');
+      publishEvent(world!, 'system', 'Chat 1 initialized', chat1Id);
 
       world = await newChat(worldId());
       const chat2Id = world!.currentChatId!;
 
       // System event in second chat
-      publishEvent(world!, 'system', 'Chat 2 initialized');
+      publishEvent(world!, 'system', 'Chat 2 initialized', chat2Id);
 
       await new Promise(resolve => setTimeout(resolve, 100));
 
@@ -299,25 +305,12 @@ describe('Event ChatId Defaults', () => {
       expect(msgEvent!.chatId).toBe(chatId);
     });
 
-    test('should default to world.currentChatId when chatId not provided', async () => {
+    test('should reject message events when chatId is not provided', async () => {
       const world = await getWorld();
       expect(world).toBeTruthy();
-      const chatId = world!.currentChatId!;
-
-      // Emit message without explicit chatId
-      const messageEvent = publishMessage(world!, 'Test message', 'human');
-
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      const events = await world!.eventStorage!.getEventsByWorldAndChat(
-        worldId(),
-        chatId,
-        { types: ['message'] }
+      expect(() => publishMessage(world!, 'Test message', 'human')).toThrow(
+        'publishMessage: explicit chatId is required.'
       );
-
-      const msgEvent = events.find((e: StoredEvent) => e.id === messageEvent.messageId);
-      expect(msgEvent).toBeDefined();
-      expect(msgEvent!.chatId).toBe(chatId);
     });
   });
 
@@ -328,19 +321,21 @@ describe('Event ChatId Defaults', () => {
       const chatId = world!.currentChatId!;
 
       // Emit various event types
-      publishMessage(world!, 'User message', 'human');
+      publishMessage(world!, 'User message', 'human', chatId);
       publishSSE(world!, {
         agentName: 'agent',
         type: 'start',
-        messageId: 'sse-mixed'
+        messageId: 'sse-mixed',
+        chatId,
       });
       publishToolEvent(world!, {
         agentName: 'agent',
         type: 'tool-start',
         messageId: 'tool-mixed',
+        chatId,
         toolExecution: { toolName: 'test', toolCallId: 'call-1' }
       });
-      publishEvent(world!, 'system', 'System message');
+      publishEvent(world!, 'system', 'System message', chatId);
 
       await new Promise(resolve => setTimeout(resolve, 100));
 
@@ -371,10 +366,10 @@ describe('Event ChatId Defaults', () => {
       const chatId = world!.currentChatId!;
 
       // Emit multiple events
-      publishMessage(world!, 'Message 1', 'human');
-      publishMessage(world!, 'Message 2', 'human');
-      publishSSE(world!, { agentName: 'agent', type: 'start', messageId: 'sse-1' });
-      publishSSE(world!, { agentName: 'agent', type: 'end', messageId: 'sse-2' });
+      publishMessage(world!, 'Message 1', 'human', chatId);
+      publishMessage(world!, 'Message 2', 'human', chatId);
+      publishSSE(world!, { agentName: 'agent', type: 'start', messageId: 'sse-1', chatId });
+      publishSSE(world!, { agentName: 'agent', type: 'end', messageId: 'sse-2', chatId });
 
       await new Promise(resolve => setTimeout(resolve, 100));
 
@@ -400,39 +395,23 @@ describe('Event ChatId Defaults', () => {
   });
 
   describe('Edge Cases', () => {
-    test('should handle world with no currentChatId (session mode off)', async () => {
+    test('should reject chat-scoped events when explicit chatId is missing', async () => {
       const world = await getWorld();
       expect(world).toBeTruthy();
 
-      // Manually clear currentChatId to simulate session mode OFF
       world!.currentChatId = null;
-
-      // Emit events
-      publishSSE(world!, { agentName: 'agent', type: 'end', messageId: 'sse-no-chat' });
-      publishToolEvent(world!, {
+      expect(() => publishSSE(world!, { agentName: 'agent', type: 'end', messageId: 'sse-no-chat' })).toThrow(
+        'publishSSE: explicit chatId is required.'
+      );
+      expect(() => publishToolEvent(world!, {
         agentName: 'agent',
         type: 'tool-start',
         messageId: 'tool-no-chat',
         toolExecution: { toolName: 'test', toolCallId: 'call-1' }
-      });
-      publishEvent(world!, 'system', 'No chat context');
-
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Query events with null chatId
-      const events = await world!.eventStorage!.getEventsByWorldAndChat(
-        worldId(),
-        null
+      })).toThrow('publishToolEvent: explicit chatId is required.');
+      expect(() => publishEvent(world!, 'system', 'No chat context')).toThrow(
+        'publishEvent: explicit chatId is required.'
       );
-
-      // Should find events with null chatId
-      const sseEvent = events.find((e: StoredEvent) => e.id === 'sse-no-chat-sse-end');
-      const toolEvent = events.find((e: StoredEvent) => e.id === 'tool-no-chat-tool-tool-start');
-
-      expect(sseEvent).toBeDefined();
-      expect(sseEvent!.chatId).toBeNull();
-      expect(toolEvent).toBeDefined();
-      expect(toolEvent!.chatId).toBeNull();
     });
 
     test('should handle rapid chat switching', async () => {
@@ -440,18 +419,18 @@ describe('Event ChatId Defaults', () => {
       expect(world).toBeTruthy();
       const chat1Id = world!.currentChatId!;
 
-      publishMessage(world!, 'Message in chat 1', 'human');
+      publishMessage(world!, 'Message in chat 1', 'human', chat1Id);
 
       // Switch to new chat
       world = await newChat(worldId());
       const chat2Id = world!.currentChatId!;
 
-      publishMessage(world!, 'Message in chat 2', 'human');
+      publishMessage(world!, 'Message in chat 2', 'human', chat2Id);
 
       // Switch back to chat 1
       world!.currentChatId = chat1Id;
 
-      publishMessage(world!, 'Another message in chat 1', 'human');
+      publishMessage(world!, 'Another message in chat 1', 'human', chat1Id);
 
       await new Promise(resolve => setTimeout(resolve, 100));
 

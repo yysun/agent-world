@@ -400,7 +400,7 @@ describe('createRealtimeEventsRuntime', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('forwards world-level activity events (no chatId) to chat-scoped subscriptions', async () => {
+  it('ignores activity events without explicit chatId', async () => {
     const send = vi.fn();
     const worldSubscription = createWorldSubscription();
 
@@ -421,7 +421,6 @@ describe('createRealtimeEventsRuntime', () => {
       chatId: 'chat-1'
     });
 
-    // Activity events emitted by activity-tracker have no chatId
     worldSubscription.world.eventEmitter.emit('world', {
       type: 'response-start',
       pendingOperations: 1,
@@ -438,31 +437,7 @@ describe('createRealtimeEventsRuntime', () => {
       activeSources: []
     });
 
-    expect(send).toHaveBeenCalledTimes(2);
-    expect(send).toHaveBeenCalledWith(
-      'chat:event',
-      expect.objectContaining({
-        type: 'activity',
-        subscriptionId: 'sub-activity',
-        worldId: 'world-1',
-        activity: expect.objectContaining({
-          eventType: 'response-start',
-          pendingOperations: 1
-        })
-      })
-    );
-    expect(send).toHaveBeenCalledWith(
-      'chat:event',
-      expect.objectContaining({
-        type: 'activity',
-        subscriptionId: 'sub-activity',
-        worldId: 'world-1',
-        activity: expect.objectContaining({
-          eventType: 'idle',
-          pendingOperations: 0
-        })
-      })
-    );
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('filters out activity events explicitly scoped to a different chat', async () => {

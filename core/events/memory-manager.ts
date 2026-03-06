@@ -20,6 +20,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-03-06: Required explicit chat scope in memory-save/continuation/assistant-response paths; removed `world.currentChatId` fallback from agent event routing.
  * - 2026-03-06: Normalized shell continuation parse/validation/policy failures through explicit canonical shell failure reasons and updated continuation comments to reflect bounded-preview tool persistence.
  * - 2026-03-06: Collapsed shell continuation result-mode selection to one bounded-preview mode and normalized persisted shell tool failures through the canonical shell-result formatter.
  * - 2026-02-28: Added canonical `message.publish` logs for assistant publish events in direct and continuation response paths.
@@ -1002,13 +1003,15 @@ export async function saveIncomingMessageToMemory(
 
     // Derive chatId from the message event for concurrency-safe processing
     // This ensures messages stay bound to their originating session
-    const targetChatId = messageEvent.chatId ?? world.currentChatId ?? null;
+    const targetChatId = typeof messageEvent.chatId === 'string' ? messageEvent.chatId.trim() : '';
 
     if (!targetChatId) {
-      loggerMemory.warn('Saving message without chatId', {
+      loggerMemory.error('Saving message without explicit chatId', {
+        worldId: world.id,
         agentId: agent.id,
         messageId: messageEvent.messageId
       });
+      return;
     }
 
     // Parse message content to detect enhanced format (e.g., tool results)
@@ -1075,7 +1078,10 @@ export async function continueLLMAfterToolExecution(
     preloadedSkillIds?: string[];
   }
 ): Promise<void> {
-  const continuationChatId = chatId !== undefined ? chatId : world.currentChatId ?? null;
+  const continuationChatId = typeof chatId === 'string' ? chatId.trim() : '';
+  if (!continuationChatId) {
+    throw new Error(`continueLLMAfterToolExecution: explicit chatId is required for agent ${agent.id}`);
+  }
   const targetChatId = continuationChatId;
   const continuationRunId = String(options?.continuationRunId || '').trim() || generateId();
   const continuationScopeKey = getContinuationScopeKey(world.id, agent.id, continuationChatId);
@@ -1095,7 +1101,7 @@ export async function continueLLMAfterToolExecution(
     return;
   }
 
-  const completeActivity = beginWorldActivity(world, `agent:${agent.id}`, targetChatId ?? undefined);
+  const completeActivity = beginWorldActivity(world, `agent:${agent.id}`, targetChatId);
   const loadedSkillsForRun = getLoadedSkillsForContinuationRun(continuationRunId);
   const shellCommandResultsForRun = getShellCommandResultsForContinuationRun(continuationRunId);
   for (const preloadedSkillId of options?.preloadedSkillIds || []) {
@@ -1163,7 +1169,6 @@ export async function continueLLMAfterToolExecution(
     loggerAgent.debug('Continuing LLM execution with tool result in memory', {
       agentId: agent.id,
       targetChatId,
-      worldCurrentChatId: world.currentChatId,
       totalMemoryLength: agent.memory.length,
       currentChatLength: currentChatMessages.length,
       lastFewMessages: currentChatMessages.slice(-5).map(m => ({
@@ -1222,6 +1227,8 @@ export async function continueLLMAfterToolExecution(
       await storage.saveAgent(world.id, agent);
     } catch (error) {
       loggerAgent.error('Failed to save agent after LLM call increment', {
+        worldId: world.id,
+        chatId: targetChatId,
         agentId: agent.id,
         error: error instanceof Error ? error.message : error
       });
@@ -1467,7 +1474,10 @@ export async function continueLLMAfterToolExecution(
           await storage.saveAgent(world.id, agent);
         } catch (error) {
           loggerMemory.error('Failed to save malformed continuation tool error context', {
+            worldId: world.id,
+            chatId: targetChatId,
             agentId: agent.id,
+            toolCallId,
             error: error instanceof Error ? error.message : String(error),
           });
         }
@@ -1542,7 +1552,10 @@ export async function continueLLMAfterToolExecution(
         await storage.saveAgent(world.id, agent);
       } catch (error) {
         loggerMemory.error('Failed to save assistant tool_call message during continuation', {
+          worldId: world.id,
+          chatId: targetChatId,
           agentId: agent.id,
+          toolCallId: toolCall.id,
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -1881,7 +1894,10 @@ export async function continueLLMAfterToolExecution(
         await storage.saveAgent(world.id, agent);
       } catch (error) {
         loggerMemory.error('Failed to save continuation tool result to memory', {
+          worldId: world.id,
+          chatId: targetChatId,
           agentId: agent.id,
+          toolCallId: toolCall.id,
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -1975,7 +1991,10 @@ export async function continueLLMAfterToolExecution(
       });
     } catch (error) {
       loggerMemory.error('Failed to save agent response after tool execution', {
+        worldId: world.id,
+        chatId: targetChatId,
         agentId: agent.id,
+        messageId,
         error: error instanceof Error ? error.message : String(error)
       });
     }
@@ -2016,6 +2035,8 @@ export async function continueLLMAfterToolExecution(
     }
 
     loggerAgent.error('Failed to continue LLM after tool execution', {
+      worldId: world.id,
+      chatId: targetChatId,
       agentId: agent.id,
       error: error instanceof Error ? error.message : error
     });
@@ -2039,7 +2060,7 @@ export async function continueLLMAfterToolExecution(
 
 /**
  * Handle text response from LLM (extracted for clarity)
- * @param chatId - Explicit chat ID for concurrency-safe processing. If not provided, uses messageEvent.chatId or world.currentChatId.
+ * @param chatId - Explicit chat ID for concurrency-safe processing. When omitted, `messageEvent.chatId` is used.
  */
 export async function handleTextResponse(
   world: World,
@@ -2049,8 +2070,12 @@ export async function handleTextResponse(
   messageEvent: WorldMessageEvent,
   chatId?: string | null
 ): Promise<void> {
-  // Derive target chatId: explicit parameter > message event > world.currentChatId
-  const targetChatId = chatId !== undefined ? chatId : (messageEvent.chatId ?? world.currentChatId ?? null);
+  const explicitChatId = typeof chatId === 'string' ? chatId.trim() : '';
+  const messageChatId = typeof messageEvent.chatId === 'string' ? messageEvent.chatId.trim() : '';
+  const targetChatId = explicitChatId || messageChatId;
+  if (!targetChatId) {
+    throw new Error(`handleTextResponse: explicit chatId is required for agent ${agent.id}`);
+  }
 
   const sanitizedResponse = removeSelfMentions(responseText, agent.id);
 
@@ -2102,7 +2127,10 @@ export async function handleTextResponse(
     });
   } catch (error) {
     loggerMemory.error('Failed to save agent response', {
+      worldId: world.id,
+      chatId: targetChatId,
       agentId: agent.id,
+      messageId,
       error: error instanceof Error ? error.message : String(error)
     });
   }

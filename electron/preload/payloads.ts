@@ -13,6 +13,7 @@
  * - Main-process handlers remain responsible for hard validation.
  *
  * Recent Changes:
+ * - 2026-03-06: Added heartbeat payload helper that omits `chatId` when none is provided.
  * - 2026-02-16: Added branch-session payload helper (`toBranchSessionPayload`) for session branching from a target message.
  * - 2026-02-20: Enforced options-only HITL payload helpers.
  * - 2026-02-14: Added HITL-response payload helper (`toHitlResponsePayload`) for generic world option prompts.
@@ -23,6 +24,7 @@
 import type {
   AgentPayload,
   BranchSessionFromMessagePayload,
+  HeartbeatJobPayload,
   HitlResponsePayload,
   MessageEditPayload,
   ChatSubscribePayload,
@@ -46,6 +48,17 @@ export function toWorldLastSelectedPayload(worldId: unknown): WorldLastSelectedP
 }
 
 export function toWorldChatPayload(worldId: unknown, chatId: unknown): WorldChatPayload {
+  return {
+    worldId: toId(worldId),
+    chatId: toId(chatId)
+  };
+}
+
+export function toHeartbeatJobPayload(worldId: unknown, chatId?: unknown): HeartbeatJobPayload {
+  if (typeof chatId === 'undefined') {
+    return { worldId: toId(worldId) };
+  }
+
   return {
     worldId: toId(worldId),
     chatId: toId(chatId)

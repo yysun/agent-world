@@ -12,6 +12,9 @@
  *
  * Implementation Notes:
  * - Uses mocked node-cron schedule callback for deterministic tick execution.
+ *
+ * Recent Changes:
+ * - 2026-03-06: Heartbeat start now requires explicit `chatId`; scheduler no longer reads `world.currentChatId`.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -52,7 +55,7 @@ describe('core heartbeat', () => {
       heartbeatPrompt: 'tick',
     };
 
-    const handle = startHeartbeat(world);
+    const handle = startHeartbeat(world, '');
     expect(handle).toBeNull();
     expect(scheduleMock).not.toHaveBeenCalled();
   });
@@ -76,14 +79,13 @@ describe('core heartbeat', () => {
 
     const world: any = {
       id: 'world-1',
-      currentChatId: 'chat-1',
       isProcessing: false,
       heartbeatEnabled: true,
       heartbeatInterval: '*/5 * * * *',
       heartbeatPrompt: 'heartbeat prompt',
     };
 
-    const handle = startHeartbeat(world);
+    const handle = startHeartbeat(world, 'chat-1');
     expect(handle).not.toBeNull();
     expect(typeof tickHandler).toBe('function');
 
@@ -110,7 +112,6 @@ describe('core heartbeat', () => {
 
     const world: any = {
       id: 'world-1',
-      currentChatId: 'chat-1',
       isProcessing: false,
       heartbeatEnabled: true,
       heartbeatInterval: '*/5 * * * *',
@@ -118,9 +119,25 @@ describe('core heartbeat', () => {
       _queuedChatIds: new Set(['chat-1']),
     };
 
-    startHeartbeat(world);
+    startHeartbeat(world, 'chat-1');
     tickHandler?.();
 
     expect(publishMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('does not start heartbeat when explicit chatId is missing', async () => {
+    validateMock.mockReturnValue(true);
+    const { startHeartbeat } = await import('../../core/heartbeat.js');
+
+    const world: any = {
+      id: 'world-1',
+      heartbeatEnabled: true,
+      heartbeatInterval: '*/5 * * * *',
+      heartbeatPrompt: 'tick',
+    };
+
+    const handle = startHeartbeat(world, '');
+    expect(handle).toBeNull();
+    expect(scheduleMock).not.toHaveBeenCalled();
   });
 });

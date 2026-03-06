@@ -15,6 +15,7 @@
  * - Applies timeout and output-size bounds with explicit truncation metadata
  *
  * Recent Changes:
+ * - 2026-03-06: Removed `world.currentChatId` fallback from local/private access approvals; HITL approval now requires explicit `context.chatId`.
  * - 2026-03-05: Added deterministic timeout-error mapping (`timeout_error`) for aborted fetches caused by per-request timeout limits.
  * - 2026-03-05: Switched timeout/output bounds constants to shared reliability config.
  * - 2026-02-28: Initial implementation of fetch-only web retrieval with Turndown conversion and SPA JSON heuristics.
@@ -180,7 +181,7 @@ async function getTargetBlockReason(url: URL): Promise<string | null> {
 async function requestLocalAccessApproval(options: {
   world: World;
   url: URL;
-  chatId: string | null;
+  chatId: string;
   reason: string;
   toolCallId?: string;
   agentName?: string | null;
@@ -370,11 +371,18 @@ async function executeWebFetch(args: WebFetchArgs, context?: WebFetchToolContext
         throw new Error(`blocked_target: ${blockReason}`);
       }
 
+      const chatId = typeof context?.chatId === 'string' && context.chatId.trim()
+        ? context.chatId.trim()
+        : null;
+      if (!chatId) {
+        throw new Error('blocked_target: local/private access approval requires an explicit chatId');
+      }
+
       const approval = await requestLocalAccessApproval({
         world,
         url: target,
         reason: blockReason,
-        chatId: context?.chatId ?? world.currentChatId ?? null,
+        chatId,
         toolCallId: context?.toolCallId,
         agentName: context?.agentName || null,
       });

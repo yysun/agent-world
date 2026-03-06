@@ -18,6 +18,7 @@
  * - Keeps payload format deterministic for stable downstream parsing
  *
  * Recent Changes:
+ * - 2026-03-06: Removed `world.currentChatId` fallback from interactive approval/result scoping; interactive `load_skill` now requires explicit `context.chatId`.
  * - 2026-03-01: Removed minimal-check mode branch so `load_skill` always runs script/reference preflight consistently and keeps script-root execution guidance available.
  * - 2026-03-01: Relaxed execution-directive narration requirements to avoid mandatory pre-tool plan text and reduce token overhead.
  * - 2026-03-01: Added skill-description thread-through and acknowledgment-first execution directive requirements after successful `load_skill`, including unconditional pre-execution plan narration.
@@ -343,8 +344,13 @@ function createSessionApprovalKey(worldId: string, chatId: string | null, skillI
   return `${worldId}::${chatId ?? 'global'}::${skillId}`;
 }
 
+function getExplicitContextChatId(context: LoadSkillToolContext | undefined): string | null {
+  const chatId = typeof context?.chatId === 'string' ? context.chatId.trim() : '';
+  return chatId || null;
+}
+
 function getCurrentTurnMarker(context: LoadSkillToolContext | undefined): string | null {
-  const chatId = context?.chatId ?? context?.world?.currentChatId ?? null;
+  const chatId = getExplicitContextChatId(context);
   const messages = Array.isArray(context?.messages) ? context!.messages : [];
   if (!chatId || messages.length === 0) {
     return null;
@@ -525,11 +531,14 @@ function getRunScopedLoadSkillResultKey(skillId: string, context: LoadSkillToolC
   if (!worldId) {
     return null;
   }
+  const chatId = getExplicitContextChatId(context);
+  if (!chatId) {
+    return null;
+  }
   const turnMarker = getCurrentTurnMarker(context);
   if (!turnMarker) {
     return null;
   }
-  const chatId = context?.chatId ?? context?.world?.currentChatId ?? null;
   return createRunResultKey(worldId, chatId, skillId, turnMarker);
 }
 
@@ -609,7 +618,10 @@ async function persistLoadSkillApprovalPromptMessage(options: {
     },
   };
 
-  const chatId = options.context?.chatId ?? options.context?.world?.currentChatId ?? null;
+  const chatId = getExplicitContextChatId(options.context);
+  if (!chatId) {
+    return;
+  }
   const agentName = String(options.context?.agentName || '').trim() || 'assistant';
   messages.push({
     role: 'assistant',
@@ -658,7 +670,10 @@ async function persistLoadSkillApprovalResolutionMessage(options: {
     return;
   }
 
-  const chatId = options.context?.chatId ?? options.context?.world?.currentChatId ?? null;
+  const chatId = getExplicitContextChatId(options.context);
+  if (!chatId) {
+    return;
+  }
   const agentName = String(options.context?.agentName || '').trim() || 'assistant';
   const payload = {
     requestId: options.resolution.requestId,
@@ -694,10 +709,13 @@ async function requestSkillExecutionApproval(options: {
 }): Promise<boolean> {
   const worldContext = options.context?.world;
   const worldId = String(worldContext?.id || '').trim();
-  const chatId = options.context?.chatId ?? worldContext?.currentChatId ?? null;
+  const chatId = getExplicitContextChatId(options.context);
   const requestId = getLoadSkillApprovalRequestId(options.context, options.skillId);
   if (!worldId || !worldContext) {
     return true;
+  }
+  if (!chatId) {
+    return false;
   }
 
   const sessionApprovalKey = createSessionApprovalKey(worldId, chatId, options.skillId);
@@ -816,7 +834,7 @@ async function executeSkillScripts(options: {
   }
 
   const worldId = String(options.context?.world?.id || '').trim();
-  const chatId = options.context?.chatId ?? options.context?.world?.currentChatId ?? null;
+  const chatId = getExplicitContextChatId(options.context);
   const executionDirectory = options.context?.workingDirectory || options.skillRoot;
 
   if (!worldId || !options.context?.world) {
@@ -1251,6 +1269,16 @@ export function createLoadSkillToolDefinition() {
           const instructionsMarkdown = stripYamlFrontMatter(markdown);
           const skillRoot = path.dirname(sourcePath);
           const scriptPaths = extractReferencedScriptPaths(instructionsMarkdown);
+          if (context?.world && !getExplicitContextChatId(context)) {
+            const result = buildReadErrorResult(
+              requestedSkillId,
+              'Interactive load_skill execution requires an explicit chatId.'
+            );
+            return {
+              result,
+              cacheableForRun: false,
+            };
+          }
           const isApproved = await requestSkillExecutionApproval({
             skillId: requestedSkillId,
             scriptPaths,

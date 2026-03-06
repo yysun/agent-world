@@ -14,6 +14,7 @@
  * - This module does not persist world config changes.
  *
  * Recent Changes:
+ * - 2026-03-06: Heartbeat jobs now require explicit chat scope; jobs no longer infer session routing from world state.
  * - 2026-03-04: Added initial world heartbeat job manager.
  */
 
@@ -50,18 +51,19 @@ interface HeartbeatJobEntry {
   interval: string;
   status: HeartbeatJobStatus;
   world: WorldLike;
+  chatId: string | null;
   handle: HeartbeatHandle | null;
 }
 
 interface HeartbeatManagerDeps {
   isValidCronExpression: (expr: string) => boolean;
-  startHeartbeat: (world: WorldLike) => HeartbeatHandle | null;
+  startHeartbeat: (world: WorldLike, chatId: string) => HeartbeatHandle | null;
   stopHeartbeat: (handle: HeartbeatHandle | null | undefined) => void;
 }
 
 export interface HeartbeatManager {
-  startJob: (world: WorldLike) => void;
-  restartJob: (world: WorldLike) => void;
+  startJob: (world: WorldLike, chatId: string) => void;
+  restartJob: (world: WorldLike, chatId: string) => void;
   pauseJob: (worldId: string) => void;
   resumeJob: (worldId: string) => void;
   stopJob: (worldId: string) => void;
@@ -85,6 +87,11 @@ function isStartableWorld(world: WorldLike, deps: HeartbeatManagerDeps): boolean
   return true;
 }
 
+function normalizeChatId(chatId: string | null | undefined): string | null {
+  const normalized = String(chatId || '').trim();
+  return normalized || null;
+}
+
 export function createHeartbeatManager(deps: HeartbeatManagerDeps): HeartbeatManager {
   const jobs = new Map<string, HeartbeatJobEntry>();
 
@@ -93,28 +100,30 @@ export function createHeartbeatManager(deps: HeartbeatManagerDeps): HeartbeatMan
     entry.handle = null;
   }
 
-  function startJob(world: WorldLike): void {
+  function startJob(world: WorldLike, chatId: string): void {
     const worldId = String(world?.id || '').trim();
     if (!worldId) return;
+    const targetChatId = normalizeChatId(chatId);
 
     const existing = jobs.get(worldId);
     if (existing) {
       stopHandle(existing);
     }
 
-    if (!isStartableWorld(world, deps)) {
+    if (!isStartableWorld(world, deps) || !targetChatId) {
       jobs.set(worldId, {
         worldId,
         worldName: String(world?.name || worldId),
         interval: toInterval(world),
         status: 'stopped',
         world,
+        chatId: targetChatId,
         handle: null,
       });
       return;
     }
 
-    const handle = deps.startHeartbeat(world);
+    const handle = deps.startHeartbeat(world, targetChatId);
     if (!handle) {
       jobs.set(worldId, {
         worldId,
@@ -122,6 +131,7 @@ export function createHeartbeatManager(deps: HeartbeatManagerDeps): HeartbeatMan
         interval: toInterval(world),
         status: 'stopped',
         world,
+        chatId: targetChatId,
         handle: null,
       });
       return;
@@ -133,12 +143,13 @@ export function createHeartbeatManager(deps: HeartbeatManagerDeps): HeartbeatMan
       interval: toInterval(world),
       status: 'running',
       world,
+      chatId: targetChatId,
       handle,
     });
   }
 
-  function restartJob(world: WorldLike): void {
-    startJob(world);
+  function restartJob(world: WorldLike, chatId: string): void {
+    startJob(world, chatId);
   }
 
   function pauseJob(worldId: string): void {
@@ -165,7 +176,11 @@ export function createHeartbeatManager(deps: HeartbeatManagerDeps): HeartbeatMan
     }
 
     // Resume from stopped by re-evaluating latest world config snapshot.
-    startJob(entry.world);
+    if (!entry.chatId) {
+      entry.status = 'stopped';
+      return;
+    }
+    startJob(entry.world, entry.chatId);
   }
 
   function stopJob(worldId: string): void {

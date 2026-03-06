@@ -386,6 +386,23 @@ describe('core/hitl', () => {
       chatId: 'chat-mismatch',
     })).rejects.toThrow("must match toolCallId");
   });
+
+  it('rejects HITL requests without an explicit chatId', async () => {
+    const world = {
+      id: 'world-missing-chat',
+      currentChatId: 'chat-from-world',
+      eventEmitter: new EventEmitter(),
+    } as any;
+
+    await expect(requestWorldOption(world, {
+      title: 'Approval required',
+      message: 'Proceed?',
+      options: [
+        { id: 'yes', label: 'Yes' },
+        { id: 'no', label: 'No' },
+      ],
+    })).rejects.toThrow('explicit chatId');
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -36,6 +36,12 @@ const mocks = vi.hoisted(() => ({
   publishToolEvent: vi.fn(),
   getMCPToolsForWorld: vi.fn(async () => ({})),
   loadSkillExecute: vi.fn(async () => '<skill_context id="find-skills"><instructions># Skill</instructions></skill_context>'),
+  loggerCalls: [] as Array<{
+    category: string;
+    level: 'trace' | 'debug' | 'info' | 'warn' | 'error';
+    message: unknown;
+    data: any;
+  }>,
 }));
 
 vi.mock('../../../core/storage/storage-factory.js', () => ({
@@ -72,6 +78,16 @@ vi.mock('../../../core/events/publishers.js', () => ({
   publishEvent: mocks.publishEvent,
   publishToolEvent: mocks.publishToolEvent,
   isStreamingEnabled: vi.fn().mockReturnValue(false),
+}));
+
+vi.mock('../../../core/logger.js', () => ({
+  createCategoryLogger: (category: string) => ({
+    trace: (message: unknown, data?: unknown) => mocks.loggerCalls.push({ category, level: 'trace', message, data }),
+    debug: (message: unknown, data?: unknown) => mocks.loggerCalls.push({ category, level: 'debug', message, data }),
+    info: (message: unknown, data?: unknown) => mocks.loggerCalls.push({ category, level: 'info', message, data }),
+    warn: (message: unknown, data?: unknown) => mocks.loggerCalls.push({ category, level: 'warn', message, data }),
+    error: (message: unknown, data?: unknown) => mocks.loggerCalls.push({ category, level: 'error', message, data }),
+  }),
 }));
 
 function createWorld(): World {
@@ -166,6 +182,7 @@ describe('memory-manager behavior', () => {
     mocks.loadSkillExecute.mockResolvedValue(
       '<skill_context id="find-skills"><instructions># Skill</instructions></skill_context>'
     );
+    mocks.loggerCalls.length = 0;
   });
 
   it('ignores self-sent messages and skips duplicate incoming message ids', async () => {
@@ -201,11 +218,10 @@ describe('memory-manager behavior', () => {
     expect(mocks.saveAgent).not.toHaveBeenCalled();
   });
 
-  it('uses fallback world chatId for incoming messages and tolerates persistence failure', async () => {
+  it('ignores incoming messages without explicit chatId', async () => {
     const { saveIncomingMessageToMemory } = await import('../../../core/events/memory-manager.js');
     const world = createWorld();
     const agent = createAgent();
-    mocks.saveAgent.mockRejectedValueOnce(new Error('persistence failed'));
 
     await expect(
       saveIncomingMessageToMemory(
@@ -220,9 +236,8 @@ describe('memory-manager behavior', () => {
       )
     ).resolves.toBeUndefined();
 
-    expect(agent.memory).toHaveLength(1);
-    expect(agent.memory[0].chatId).toBe('chat-1');
-    expect(agent.memory[0].messageId).toBe('msg-fallback');
+    expect(agent.memory).toHaveLength(0);
+    expect(mocks.saveAgent).not.toHaveBeenCalled();
   });
 
   it('resets llm call count only for human/world senders', async () => {
@@ -282,6 +297,43 @@ describe('memory-manager behavior', () => {
       'chat-1',
       undefined
     );
+  });
+
+  it('logs continuation tool-result persistence failures with world/chat scope', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    const execute = vi.fn(async () => 'tool-output');
+    mocks.getMCPToolsForWorld.mockResolvedValue({ demo_tool: { execute } });
+    mocks.generateAgentResponse
+      .mockResolvedValueOnce(toolCallResult('assistant-tool-1', 'demo_tool', '{}', 'tool-call-1'))
+      .mockResolvedValueOnce(textResult('assistant-final-1', 'done'));
+
+    let saveCount = 0;
+    mocks.saveAgent.mockImplementation(async () => {
+      saveCount += 1;
+      if (saveCount === 3) {
+        throw new Error('persist tool result failed');
+      }
+      return undefined;
+    });
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    await continueLLMAfterToolExecution(world, agent, 'chat-1');
+
+    const scopedLog = mocks.loggerCalls.find((call) =>
+      call.category === 'memory'
+      && call.level === 'error'
+      && call.message === 'Failed to save continuation tool result to memory'
+    );
+
+    expect(scopedLog?.data).toMatchObject({
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      agentId: 'agent-a',
+      toolCallId: 'tool-call-1',
+      error: 'persist tool result failed',
+    });
   });
 
   it('executes shell_cmd in continuation with minimal llm result mode by default', async () => {

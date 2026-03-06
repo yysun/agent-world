@@ -14,6 +14,7 @@
  * - Work with loaded world without importing (uses external storage path)
  * 
  * Changes:
+ * - 2026-03-06: Routed runtime chat selection through explicit CLI state; removed live listener/send fallback to `world.currentChatId`.
  * - 2026-02-27: Added active-chat event scoping in CLI listeners to prevent cross-chat message/system/SSE/tool leakage.
  * - 2026-02-25: Added fallback shorthand attempt `@awesome-agent-world/<input>` when a provided local path does not exist.
  * - 2026-02-25: Added GitHub shorthand world source import support (`@awesome-agent-world/<world-name>`) with safe remote staging and automatic import mode.
@@ -545,20 +546,17 @@ function attachCLIListeners(
   globalState: GlobalState | null,
   activityMonitor: WorldActivityMonitor,
   statusLine: StatusLineManager | null,
+  getSelectedChatId: () => string | null,
   rl?: readline.Interface
 ): Map<string, (...args: any[]) => void> {
   const listeners = new Map<string, (...args: any[]) => void>();
   let hitlPromptChain: Promise<void> = Promise.resolve();
   const handledHitlRequestIds = new Set<string>();
-  const getActiveChatId = (): string | null => {
-    const value = String(world.currentChatId || '').trim();
-    return value || null;
-  };
   const isChatEventInScope = (
     eventChatId: unknown,
     includeUnscopedWhenScoped: boolean = false
   ): boolean => {
-    const activeChatId = getActiveChatId();
+    const activeChatId = getSelectedChatId();
     if (!activeChatId) {
       return true;
     }
@@ -767,7 +765,8 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
 
       // Attach direct listeners to the world.eventEmitter for pipeline handling
       // Note: Pipeline mode uses non-streaming LLM calls, so SSE events are not needed
-      cliListeners = attachCLIListeners(world, null, null, activityMonitor, null);
+      const selectedChatId = String(world?.currentChatId || '').trim() || null;
+      cliListeners = attachCLIListeners(world, null, null, activityMonitor, null, () => selectedChatId);
     }
 
     // Execute command from --command option
@@ -777,7 +776,12 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
         process.exit(1);
       }
       const snapshot = activityMonitor.captureSnapshot();
-      const result = await processCLIInput(options.command, world, 'human');
+      const result = await processCLIInput(
+        options.command,
+        world,
+        'human',
+        String(world?.currentChatId || '').trim() || null
+      );
       printCLIResult(result);
 
       if (!options.command.startsWith('/') && world) {
@@ -810,7 +814,12 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
         process.exit(1);
       }
       const snapshot = activityMonitor.captureSnapshot();
-      const result = await processCLIInput(messageFromArgs, world, 'human');
+      const result = await processCLIInput(
+        messageFromArgs,
+        world,
+        'human',
+        String(world?.currentChatId || '').trim() || null
+      );
       printCLIResult(result);
 
       try {
@@ -843,7 +852,12 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
           process.exit(1);
         }
         const snapshot = activityMonitor.captureSnapshot();
-        const result = await processCLIInput(input.trim(), world, 'HUMAN');
+        const result = await processCLIInput(
+          input.trim(),
+          world,
+          'HUMAN',
+          String(world?.currentChatId || '').trim() || null
+        );
         printCLIResult(result);
 
         try {
@@ -892,6 +906,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
 interface WorldState {
   subscription: any;
   world: World;
+  selectedChatId: string | null;
 }
 
 function cleanupWorldSubscription(worldState: WorldState | null): void {
@@ -936,9 +951,22 @@ async function handleSubscribe(
 
   // Attach direct listeners to the world.eventEmitter for CLI handling
   // Interactive mode needs all event types including SSE for streaming responses
-  attachCLIListeners(world, streaming, globalState, activityMonitor, statusLine, rl);
+  const worldState: WorldState = {
+    subscription,
+    world,
+    selectedChatId: String(world.currentChatId || '').trim() || null,
+  };
+  attachCLIListeners(
+    world,
+    streaming,
+    globalState,
+    activityMonitor,
+    statusLine,
+    () => worldState.selectedChatId,
+    rl
+  );
 
-  return { subscription, world };
+  return worldState;
 }
 
 // Handle world events with streaming support
@@ -1609,7 +1637,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
 
     // Display current chat messages after Quick Start tips
     if (worldState?.world) {
-      await displayChatMessages(worldState.world.id, worldState.world.currentChatId);
+      await displayChatMessages(worldState.world.id, worldState.selectedChatId);
     }
 
     console.log(); // Empty line before prompt
@@ -1650,7 +1678,12 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       }
 
       try {
-        const result = await processCLIInput(trimmedInput, worldState?.world || null, 'HUMAN');
+        const result = await processCLIInput(
+          trimmedInput,
+          worldState?.world || null,
+          'HUMAN',
+          worldState?.selectedChatId || null
+        );
 
         // Handle exit commands from result (redundant, but keep for safety)
         if (result.data?.exit) {
@@ -1702,7 +1735,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
               console.log(`${gray('Agents:')} ${yellow(String(worldState.world.agents?.size || 0))} ${gray('| Turn Limit:')} ${yellow(String(worldState.world.turnLimit || 'N/A'))}`);
 
               // Display current chat messages
-              await displayChatMessages(worldState.world.id, worldState.world.currentChatId);
+              await displayChatMessages(worldState.world.id, worldState.selectedChatId);
             }
           } catch (err) {
             console.error(error(`Error loading world: ${err instanceof Error ? err.message : 'Unknown error'}`));
@@ -1745,6 +1778,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
               // console.log(boldBlue('Refreshing world state...'));
               const refreshedWorld = await worldState.subscription.refresh(rootPath);
               worldState.world = refreshedWorld;
+              worldState.selectedChatId = selectedChatId;
               console.log(success('World state refreshed'));
             }
           } catch (err) {
@@ -1868,6 +1902,8 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
             // Use the subscription's refresh method to properly destroy old world and create new
             const refreshedWorld = await worldState.subscription.refresh(rootPath);
             worldState.world = refreshedWorld;
+            const refreshedChatId = String((result.data as any)?.currentChatId || refreshedWorld?.currentChatId || '').trim();
+            worldState.selectedChatId = refreshedChatId || worldState.selectedChatId;
 
             console.log(success('World state refreshed'));
           } catch (err) {

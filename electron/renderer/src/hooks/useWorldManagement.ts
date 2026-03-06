@@ -13,6 +13,7 @@
  * - Accepts required collaborators (session/message setters and panel controls) via args.
  *
  * Recent Changes:
+ * - 2026-03-06: Desktop heartbeat world updates now pass explicit selected-session `chatId` when starting runtime jobs.
  * - 2026-02-27: Applied UI-selected project folder as world `working_directory` only during world creation, while keeping load/switch as world-driven mirror; world create/load status now includes cwd.
  * - 2026-02-26: Normalized GitHub shorthand import source for `@awesome-agent-world/<world-name>` to lowercase world segment to prevent case-mismatch path failures.
  * - 2026-02-26: Added optional GitHub shorthand source support to `onImportWorld(source?)` so renderer can trigger `world:import` with `{ source }` payload.
@@ -61,6 +62,7 @@ export function useWorldManagement({
   getDefaultWorldForm,
   getWorldFormFromWorld,
   selectedProjectPath,
+  getSelectedSessionId,
 }) {
   const [loadedWorld, setLoadedWorld] = useState<any>(null);
   const [worldLoadError, setWorldLoadError] = useState<string | null>(null);
@@ -245,7 +247,10 @@ export function useWorldManagement({
 
     setUpdatingWorld(true);
     try {
-      const updated = await api.updateWorld(loadedWorld.id, validation.data);
+      const updated = await api.updateWorld(loadedWorld.id, {
+        ...validation.data,
+        chatId: getSelectedSessionId() || undefined,
+      });
       const warning = getRefreshWarning(updated);
       const updatedWorld = { ...updated };
       delete updatedWorld.refreshWarning;
@@ -265,7 +270,7 @@ export function useWorldManagement({
     } finally {
       setUpdatingWorld(false);
     }
-  }, [api, editingWorld, loadedWorld, setPanelMode, setPanelOpen, setStatusText]);
+  }, [api, editingWorld, getSelectedSessionId, loadedWorld, setPanelMode, setPanelOpen, setStatusText]);
 
   const onDeleteWorld = useCallback(async () => {
     if (!loadedWorld?.id) {

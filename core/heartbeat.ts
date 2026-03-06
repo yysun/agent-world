@@ -14,6 +14,7 @@
  * - Tick publishing uses canonical message flow via `publishMessage`.
  *
  * Recent Changes:
+ * - 2026-03-06: Removed `world.currentChatId` fallback from heartbeat dispatch; scheduled jobs now require explicit `chatId`.
  * - 2026-03-04: Added initial world heartbeat scheduler helpers.
  */
 
@@ -42,22 +43,21 @@ export function isValidCronExpression(expr: string): boolean {
   }
 }
 
-export function startHeartbeat(world: World): HeartbeatHandle | null {
+export function startHeartbeat(world: World, chatId: string): HeartbeatHandle | null {
   const enabled = world?.heartbeatEnabled === true;
   const interval = String(world?.heartbeatInterval || '').trim();
   const prompt = String(world?.heartbeatPrompt || '');
+  const targetChatId = String(chatId || '').trim();
 
-  if (!enabled || !prompt.trim()) return null;
+  if (!enabled || !prompt.trim() || !targetChatId) return null;
   const cron: any = (nodeCron && (nodeCron as any).default) ? (nodeCron as any).default : nodeCron;
   if (!cron || typeof cron.schedule !== 'function') return null;
   if (!isValidCronExpression(interval)) return null;
 
   const task = cron.schedule(interval, () => {
-    const currentChatId = String(world?.currentChatId || '').trim();
     if (world?.isProcessing) return;
-    if (!currentChatId) return;
-    if (isChatProcessing(world, currentChatId) || world._queuedChatIds?.has(currentChatId)) return;
-    publishMessage(world, prompt, 'world', currentChatId);
+    if (isChatProcessing(world, targetChatId) || world._queuedChatIds?.has(targetChatId)) return;
+    publishMessage(world, prompt, 'world', targetChatId);
   });
 
   return { task };

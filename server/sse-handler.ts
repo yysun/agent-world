@@ -397,8 +397,12 @@ export function createSSEHandler(
         return;
       }
 
+      if (!normalizedScopedChatId) {
+        return;
+      }
+
       // Try to read canonical chat memory using public core helper
-      const memory = await getMemory(world.id, normalizedScopedChatId as any || undefined);
+      const memory = await getMemory(world.id, normalizedScopedChatId);
       if (Array.isArray(memory) && memory.length > 0) {
         // Send the most recent user message if the last message is a user message
         const lastMessage = memory[memory.length - 1];
