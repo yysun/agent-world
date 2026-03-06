@@ -5,6 +5,7 @@
  * Supports world/agent/chat management with optimized serialization and error handling.
  *
  * Changes:
+ * - 2026-03-06: Hardened `POST /worlds/:worldName/hitl/respond` for restart-safe validation: when the runtime pending map lacks the request entry but it exists in persisted messages, trigger `activateChatWithSnapshot` to seed the runtime map and return an actionable error.
  * - 2026-03-04: Added queue metadata fields to non-streaming `/messages` success responses (`queueMessageId`, `queueStatus`, `queueRetryCount`) to expose queue terminal/error state.
  * - 2026-02-27: Hardened non-streaming `/messages` event collection with chat-scoped filtering to prevent cross-chat response contamination.
  * - 2026-02-24: Added `hitlPrompts` payload to `POST /worlds/:worldName/setChat/:chatId` responses so web chat switches can render replayed pending HITL prompts.
@@ -82,6 +83,7 @@ import {
   editUserMessage,
   stopMessageProcessing,
   submitWorldHitlResponse,
+  listPendingHitlPromptEventsFromMessages,
   type World,
   type Agent,
   type Chat,
@@ -1132,6 +1134,28 @@ router.post('/worlds/:worldName/hitl/respond', validateWorld, async (req: Reques
       optionId,
       ...(chatId !== undefined ? { chatId } : {}),
     });
+
+    // Restart-safe fallback: if the runtime pending map lacks the entry (e.g. server
+    // restarted before /setChat was called) but the request exists in persisted messages,
+    // trigger chat activation to seed the pending map via the tool-call resume path.
+    // The caller should retry /hitl/respond after receiving the HITL SSE event.
+    if (!result.accepted && result.reason?.includes('No pending HITL request') && chatId) {
+      const memory = await coreGetMemory(worldCtx.id, chatId);
+      if (Array.isArray(memory)) {
+        const surviving = listPendingHitlPromptEventsFromMessages(memory, chatId);
+        const inMessages = surviving.some((item) => item.prompt.requestId === requestId);
+        if (inMessages) {
+          // Trigger restore/resume asynchronously to repopulate the pending map.
+          void activateChatWithSnapshot(worldCtx.id, chatId).catch(() => undefined);
+          res.json({
+            accepted: false,
+            reason: `HITL request '${requestId}' is pending in chat messages but the chat is not yet activated on this server. Call POST /worlds/${req.params.worldName}/setChat/${chatId} to activate, then retry this request.`,
+          });
+          return;
+        }
+      }
+    }
+
     res.json(result);
   } catch (error) {
     loggerChat.error('Error submitting HITL response', {

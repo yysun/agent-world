@@ -8,12 +8,15 @@
  * - Emits tool-progress events with HITL prompt payload metadata
  * - Resolves pending request on submitted user response
  * - Replays unresolved requests deterministically for loaded chat scope
+ * - Message-authoritative read model: pending/resolved state from persisted messages
+ * - Chained live-session HITL: simultaneous requests from different producers
  *
  * Implementation notes:
  * - Uses in-memory EventEmitter world doubles.
  * - No filesystem or network access.
  *
  * Recent changes:
+ * - 2026-03-06: Added message-authoritative HITL read model tests and chained live-session test.
  * - 2026-02-24: Replaced timeout fallback expectations with replay/scoping coverage.
  * - 2026-02-14: Added initial coverage for core HITL option runtime.
  */
@@ -22,6 +25,7 @@ import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   clearHitlStateForTests,
+  listPendingHitlPromptEventsFromMessages,
   replayPendingHitlRequests,
   requestWorldOption,
   submitWorldHitlResponse,
@@ -381,5 +385,235 @@ describe('core/hitl', () => {
       },
       chatId: 'chat-mismatch',
     })).rejects.toThrow("must match toolCallId");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Message-authoritative HITL read model
+// ---------------------------------------------------------------------------
+
+function makeHitlAssistantMessage(toolCallId: string, question: string, options: string[], chatId?: string) {
+  return {
+    role: 'assistant',
+    chatId: chatId || null,
+    tool_calls: [
+      {
+        id: toolCallId,
+        function: {
+          name: 'human_intervention_request',
+          arguments: JSON.stringify({ question, options }),
+        },
+      },
+    ],
+  };
+}
+
+function makeToolResponseMessage(toolCallId: string) {
+  return { role: 'tool', tool_call_id: toolCallId };
+}
+
+describe('listPendingHitlPromptEventsFromMessages (message-authoritative read model)', () => {
+  it('returns pending request when assistant tool-call has no corresponding tool-response', () => {
+    const messages = [
+      makeHitlAssistantMessage('call-1', 'Run scripts?', ['Yes', 'No'], 'chat-a'),
+    ];
+
+    const pending = listPendingHitlPromptEventsFromMessages(messages as any, 'chat-a');
+
+    expect(pending).toHaveLength(1);
+    expect(pending[0].prompt.requestId).toBe('call-1');
+    expect(pending[0].prompt.toolCallId).toBe('call-1');
+    expect(pending[0].chatId).toBe('chat-a');
+    expect(pending[0].prompt.options.map((o) => o.label)).toEqual(['Yes', 'No']);
+  });
+
+  it('returns empty when tool-response message resolves the request', () => {
+    const messages = [
+      makeHitlAssistantMessage('call-resolved', 'Proceed?', ['Yes', 'No'], 'chat-b'),
+      makeToolResponseMessage('call-resolved'),
+    ];
+
+    const pending = listPendingHitlPromptEventsFromMessages(messages as any, 'chat-b');
+
+    expect(pending).toHaveLength(0);
+  });
+
+  it('returns only unresolved requests when some are resolved and some are not', () => {
+    const messages = [
+      makeHitlAssistantMessage('call-r1', 'First?', ['Yes', 'No'], 'chat-c'),
+      makeToolResponseMessage('call-r1'),
+      makeHitlAssistantMessage('call-u1', 'Second?', ['Continue', 'Stop'], 'chat-c'),
+    ];
+
+    const pending = listPendingHitlPromptEventsFromMessages(messages as any, 'chat-c');
+
+    expect(pending).toHaveLength(1);
+    expect(pending[0].prompt.requestId).toBe('call-u1');
+  });
+
+  it('returns multiple unresolved requests in stable creation order', () => {
+    const messages = [
+      makeHitlAssistantMessage('call-m1', 'First?', ['A', 'B'], 'chat-d'),
+      makeHitlAssistantMessage('call-m2', 'Second?', ['C', 'D'], 'chat-d'),
+      makeHitlAssistantMessage('call-m3', 'Third?', ['E', 'F'], 'chat-d'),
+    ];
+
+    const pending = listPendingHitlPromptEventsFromMessages(messages as any, 'chat-d');
+
+    expect(pending.map((p) => p.prompt.requestId)).toEqual(['call-m1', 'call-m2', 'call-m3']);
+  });
+
+  it('isolates pending requests when called with separate chat message arrays', () => {
+    // In real usage, getMemory(worldId, chatId) returns messages scoped to one chat.
+    // The function processes whatever messages are passed — callers scope to chat first.
+    const chatXMessages = [
+      makeHitlAssistantMessage('call-x1', 'Chat X?', ['Yes', 'No'], 'chat-x'),
+    ];
+    const chatYMessages = [
+      makeHitlAssistantMessage('call-y1', 'Chat Y?', ['Yes', 'No'], 'chat-y'),
+    ];
+
+    const pendingX = listPendingHitlPromptEventsFromMessages(chatXMessages as any, 'chat-x');
+    const pendingY = listPendingHitlPromptEventsFromMessages(chatYMessages as any, 'chat-y');
+
+    expect(pendingX.map((p) => p.prompt.requestId)).toEqual(['call-x1']);
+    expect(pendingY.map((p) => p.prompt.requestId)).toEqual(['call-y1']);
+  });
+
+  it('is deterministic: same messages always produce the same pending set', () => {
+    const messages = [
+      makeHitlAssistantMessage('call-det1', 'Q1?', ['Yes', 'No'], 'chat-det'),
+      makeHitlAssistantMessage('call-det2', 'Q2?', ['Continue', 'Abort'], 'chat-det'),
+    ];
+
+    const first = listPendingHitlPromptEventsFromMessages(messages as any, 'chat-det');
+    const second = listPendingHitlPromptEventsFromMessages(messages as any, 'chat-det');
+
+    expect(first.map((p) => p.prompt.requestId)).toEqual(second.map((p) => p.prompt.requestId));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Chained live-session HITL: simultaneous requests from multiple producers
+// ---------------------------------------------------------------------------
+
+describe('chained live-session HITL (skill approval + shell approval simultaneously)', () => {
+  beforeEach(() => {
+    clearHitlStateForTests();
+    vi.useRealTimers();
+  });
+
+  it('handles two simultaneous HITL requests in FIFO order and resolves each independently', async () => {
+    const world = {
+      id: 'world-chain',
+      currentChatId: 'chat-chain',
+      eventEmitter: new EventEmitter(),
+    } as any;
+
+    const emittedIds: string[] = [];
+    world.eventEmitter.on('world', (event: any) => {
+      const requestId = event?.toolExecution?.metadata?.hitlPrompt?.requestId;
+      if (requestId) emittedIds.push(String(requestId));
+    });
+
+    // Simulate skill approval and shell approval pending simultaneously
+    const skillPending = requestWorldOption(world, {
+      requestId: 'skill-approval-1',
+      title: 'Skill approval',
+      message: 'Allow skill execution?',
+      options: [
+        { id: 'yes_in_session', label: 'Yes for this session' },
+        { id: 'no', label: 'No' },
+      ],
+      chatId: 'chat-chain',
+    });
+
+    const shellPending = requestWorldOption(world, {
+      requestId: 'shell-approval-1',
+      title: 'Script approval',
+      message: 'Allow shell command?',
+      options: [
+        { id: 'yes', label: 'Yes once' },
+        { id: 'no', label: 'No' },
+      ],
+      chatId: 'chat-chain',
+    });
+
+    // Both registered and emitted in FIFO order
+    await Promise.resolve();
+    expect(emittedIds).toEqual(['skill-approval-1', 'shell-approval-1']);
+
+    // Replay preserves FIFO order
+    const replayCount = replayPendingHitlRequests(world, 'chat-chain');
+    expect(replayCount).toBe(2);
+    expect(emittedIds.slice(2)).toEqual(['skill-approval-1', 'shell-approval-1']);
+
+    // Resolve skill first
+    const skillResult = submitWorldHitlResponse({
+      worldId: 'world-chain',
+      requestId: 'skill-approval-1',
+      optionId: 'yes_in_session',
+      chatId: 'chat-chain',
+    });
+    expect(skillResult.accepted).toBe(true);
+
+    // Shell still pending
+    const replayAfterSkill = replayPendingHitlRequests(world, 'chat-chain');
+    expect(replayAfterSkill).toBe(1);
+
+    // Resolve shell
+    const shellResult = submitWorldHitlResponse({
+      worldId: 'world-chain',
+      requestId: 'shell-approval-1',
+      optionId: 'yes',
+      chatId: 'chat-chain',
+    });
+    expect(shellResult.accepted).toBe(true);
+
+    // Both resolved
+    const replayAfterBoth = replayPendingHitlRequests(world, 'chat-chain');
+    expect(replayAfterBoth).toBe(0);
+
+    const [skillResolution, shellResolution] = await Promise.all([skillPending, shellPending]);
+    expect(skillResolution).toMatchObject({ requestId: 'skill-approval-1', optionId: 'yes_in_session', source: 'user' });
+    expect(shellResolution).toMatchObject({ requestId: 'shell-approval-1', optionId: 'yes', source: 'user' });
+  });
+
+  it('does not leak pending requests across chat isolation boundaries in chained scenario', async () => {
+    const world = {
+      id: 'world-iso',
+      currentChatId: 'chat-iso-1',
+      eventEmitter: new EventEmitter(),
+    } as any;
+
+    // Request in chat-iso-1
+    requestWorldOption(world, {
+      requestId: 'req-iso-1',
+      title: 'Approval',
+      message: 'Chat 1 approval?',
+      options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }],
+      chatId: 'chat-iso-1',
+    });
+
+    // Request in chat-iso-2 (different chat)
+    requestWorldOption(world, {
+      requestId: 'req-iso-2',
+      title: 'Approval',
+      message: 'Chat 2 approval?',
+      options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }],
+      chatId: 'chat-iso-2',
+    });
+
+    await Promise.resolve();
+
+    const replayChat1 = replayPendingHitlRequests(world, 'chat-iso-1');
+    const replayChat2 = replayPendingHitlRequests(world, 'chat-iso-2');
+
+    // Strict chat isolation: each chat sees only its own pending
+    expect(replayChat1).toBe(1);
+    expect(replayChat2).toBe(1);
+
+    submitWorldHitlResponse({ worldId: 'world-iso', requestId: 'req-iso-1', optionId: 'yes', chatId: 'chat-iso-1' });
+    submitWorldHitlResponse({ worldId: 'world-iso', requestId: 'req-iso-2', optionId: 'no', chatId: 'chat-iso-2' });
   });
 });

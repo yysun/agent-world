@@ -44,6 +44,7 @@
  * - 2026-02-25: `restoreChat` now refreshes runtime agent memory from storage before auto-resume checks so loaded-chat pending tool calls can resume reliably.
  * - 2026-02-25: Added last-message auto-resume during `restoreChat` so pending user-last messages are auto-submitted and pending assistant tool-call-last messages auto-resume tool execution.
  * - 2026-02-25: Added non-blocking pending tool-call resume trigger during `restoreChat` so unresolved persisted tool calls continue after chat load/switch.
+ * - 2026-03-06: `activateChatWithSnapshot` now uses only `listPendingHitlPromptEventsFromMessages` as the authoritative HITL state source, removing the dual-source merge with the runtime pending map.
  * - 2026-02-24: Replays unresolved HITL prompts during `restoreChat` so blocked requests become visible again on chat load.
  * - 2026-02-20: Added `claimAgentCreationSlot` to allow `create_agent` tool to hold the TOCTOU slot before showing approval dialog, preventing duplicate-approval race conditions.
  * - 2026-02-20: Added `createAgent` option `allowWhileWorldProcessing` so approval-gated in-flight tool calls can create agents without disabling default processing guards.
@@ -101,7 +102,7 @@ import { getWorldDir } from './storage/world-storage.js';
 import { getDefaultRootPath } from './storage/storage-factory.js';
 import { NEW_CHAT_TITLE, isDefaultChatTitle } from './chat-constants.js';
 import { hasActiveChatMessageProcessing, stopMessageProcessing } from './message-processing-control.js';
-import { replayPendingHitlRequests, listPendingHitlPromptEvents, listPendingHitlPromptEventsFromMessages, clearPendingHitlRequestsForChat } from './hitl.js';
+import { replayPendingHitlRequests, listPendingHitlPromptEventsFromMessages, clearPendingHitlRequestsForChat } from './hitl.js';
 import { clearChatSkillApprovals, reconstructSkillApprovalsFromMessages } from './load-skill-tool.js';
 import { resumePendingToolCallsForChat } from './events/memory-manager.js';
 
@@ -2146,10 +2147,10 @@ export async function activateChatWithSnapshot(worldId: string, chatId: string):
   const memory = await storageWrappers!.getMemory(world.id, resolvedChatId);
   const safeMemory = Array.isArray(memory) ? memory : [];
 
-  const runtimePending = listPendingHitlPromptEvents(world, resolvedChatId);
-  const hitlPrompts = runtimePending.length > 0
-    ? runtimePending
-    : listPendingHitlPromptEventsFromMessages(safeMemory, resolvedChatId);
+  // Message-authoritative: pending HITL state is derived from persisted messages only.
+  // Runtime pending map serves transport/notification purposes; the snapshot always uses
+  // messages as the single source of truth (AD-1, AD-4).
+  const hitlPrompts = listPendingHitlPromptEventsFromMessages(safeMemory, resolvedChatId);
 
   loggerRestore.debug('Activate chat snapshot assembled', {
     worldId: world.id,
