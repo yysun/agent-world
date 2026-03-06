@@ -14,6 +14,7 @@
  * - Uses deterministic in-memory message fixtures.
  *
  * Summary of Recent Changes:
+ * - 2026-03-06: Added regression coverage for canonical shell validation/policy failure reasons in renderer tool status labels.
  * - 2026-03-01: Added regression coverage to preserve meaningful planning text in merged tool request/result body content.
  * - 2026-02-28: Added regression coverage for tool-body rendering with linked assistant request metadata (`Args` + `Result`).
  * - 2026-02-28: Added regression coverage for tool-name-inclusive status labels.
@@ -76,6 +77,16 @@ describe('message content tool status label', () => {
     });
 
     expect(label).toBe('tool: read_file - done');
+  });
+
+  it('marks canonical approval-denied shell tool results as failed', () => {
+    const label = getToolStatusLabel({
+      role: 'tool',
+      toolName: 'shell_cmd',
+      content: 'status: failed\nexit_code: null\nreason: approval_denied\nstderr_preview:\nrequest was not approved',
+    });
+
+    expect(label).toBe('tool: shell_cmd - failed');
   });
 
   it('renders Args and Result when tool row is linked to assistant tool request metadata', () => {

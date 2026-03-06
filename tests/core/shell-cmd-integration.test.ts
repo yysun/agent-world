@@ -19,6 +19,7 @@
  * - Executes real local shell commands and validates formatted tool output.
  * 
  * Changes:
+ * - 2026-03-06: Updated shell continuation assertions to use the canonical bounded-preview result and verified shell stdout is no longer persisted as a synthetic assistant message after streaming ends.
  * - 2026-02-28: Added risk-gating integration coverage for blocked catastrophic operations and approval-required high-risk commands without HITL context.
  * - 2026-02-21: Added `list_files` bounding/filtering coverage (`maxEntries`, `includePattern`) to prevent oversized tool results from inflating continuation tokens.
  * - 2026-02-21: Added LLM minimal-result mode coverage for `shell_cmd` (status-only result contract).
@@ -463,7 +464,7 @@ describe('shell_cmd integration with worlds', () => {
     expect(result).toContain('Hello from test');
   });
 
-  test('should return status-only shell result in llm minimal mode', async () => {
+  test('should return bounded shell preview result in llm minimal mode', async () => {
     const tools = await getMCPToolsForWorld(worldId());
     const shellCmdTool = tools.shell_cmd;
 
@@ -485,11 +486,12 @@ describe('shell_cmd integration with worlds', () => {
 
     expect(result).toContain('status: success');
     expect(result).toContain('exit_code: 0');
-    expect(result).not.toContain('llm-minimal-mode-output');
+    expect(result).toContain('stdout_preview:');
+    expect(result).toContain('llm-minimal-mode-output');
     expect(result).not.toContain('### Standard Output');
   });
 
-  test('should redact image data-uri stdout in llm smart mode', async () => {
+  test('should redact image data-uri stdout in llm minimal preview mode', async () => {
     const tools = await getMCPToolsForWorld(worldId());
     const shellCmdTool = tools.shell_cmd;
 
@@ -507,7 +509,7 @@ describe('shell_cmd integration with worlds', () => {
         undefined,
         undefined,
         {
-          llmResultMode: 'smart',
+          llmResultMode: 'minimal',
           world: {
             id: worldId(),
             variables: `working_directory=${tempRoot}`
@@ -519,11 +521,12 @@ describe('shell_cmd integration with worlds', () => {
       await rm(tempRoot, { recursive: true, force: true });
     }
 
-    expect(result).toContain('stdout omitted from LLM context');
+    expect(result).toContain('stdout_preview:');
+    expect(result).toContain('omitted from LLM context');
     expect(result).not.toContain('data:image/svg+xml;base64,AAAABBBBCCCCDDDDEEEE');
   });
 
-  test('should stream stdout as assistant message, stream stderr as tool-stream, and persist only finalized stdout', async () => {
+  test('should stream stdout via SSE without persisting a synthetic assistant stdout message', async () => {
     const tools = await getMCPToolsForWorld(worldId());
     const shellCmdTool = tools.shell_cmd;
     const world = await getTestWorld();
@@ -575,9 +578,9 @@ describe('shell_cmd integration with worlds', () => {
     expect(streamEnds.some((event) => event.messageId === stdoutMessageId)).toBe(true);
     expect(toolStreamEvents.some((event) => event.messageId === toolCallId && event.stream === 'stderr')).toBe(true);
 
-    expect(messageEvents.some((event) => event.messageId === stdoutMessageId && event.sender === 'stream-agent')).toBe(true);
+    expect(messageEvents.some((event) => event.messageId === stdoutMessageId && event.sender === 'stream-agent')).toBe(false);
     expect(messageEvents.some((event) => event.messageId === toolCallId)).toBe(false);
-    expect(contextMessages.some((message) => message.messageId === stdoutMessageId && message.role === 'assistant' && message.sender === 'stream-agent')).toBe(true);
+    expect(contextMessages.some((message) => message.messageId === stdoutMessageId && message.role === 'assistant' && message.sender === 'stream-agent')).toBe(false);
     expect(contextMessages.some((message) => message.messageId === toolCallId)).toBe(false);
   });
 

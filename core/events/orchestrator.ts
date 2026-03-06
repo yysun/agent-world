@@ -37,6 +37,8 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-03-06: Updated shell execution persistence to use explicit canonical failure reasons for shell validation/policy failures while keeping bounded-preview continuation output.
+ * - 2026-03-06: Switched shell tool execution to one bounded-preview continuation mode and normalized persisted shell tool failures through the canonical shell-result formatter.
  * - 2026-02-28: Added canonical `turn.trace` diagnostics around per-message processing lifecycle.
  * - 2026-02-27: Passed explicit `chatId` when publishing `tool-execution` system events so event routing never falls back to `world.currentChatId`.
  * - 2026-02-27: Seeded continuation runs with already-loaded `load_skill` IDs from initial tool execution so immediate duplicate `load_skill` calls are suppressed in continuation.
@@ -95,8 +97,7 @@ import {
 import { publishMessage, publishSSE, publishEvent, publishToolEvent, isStreamingEnabled } from './publishers.js';
 import { handleTextResponse } from './memory-manager.js';
 import {
-  executeShellCommand,
-  formatResultForLLM,
+  formatShellToolErrorResultForLLM,
   validateShellDirectoryRequest,
   validateShellCommandScope
 } from '../shell-cmd-tool.js';
@@ -691,13 +692,13 @@ export async function processAgentMessage(
         const { getMCPToolsForWorld } = await import('../mcp-server-registry.js');
         const mcpTools = await getMCPToolsForWorld(world.id);
 
+        let toolArgs: Record<string, any> = {};
         try {
           const toolDef = mcpTools[toolCall.function.name];
           if (!toolDef) {
             throw new Error(`Tool not found: ${toolCall.function.name}`);
           }
 
-          let toolArgs: Record<string, any>;
           const rawArgs = toolCall.function.arguments;
           if (typeof rawArgs === 'string') {
             try {
@@ -789,7 +790,7 @@ export async function processAgentMessage(
             abortSignal: processingHandle?.signal,
             workingDirectory: trustedWorkingDirectory,
             agentName: agent.id,
-            llmResultMode: toolCall.function.name === 'shell_cmd' ? 'smart' : 'verbose'
+            llmResultMode: toolCall.function.name === 'shell_cmd' ? 'minimal' : 'verbose'
           };
 
           const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);
@@ -1007,7 +1008,13 @@ export async function processAgentMessage(
           // Save error as tool result
           const errorMessage: AgentMessage = {
             role: 'tool',
-            content: `Error executing tool: ${error instanceof Error ? error.message : String(error)}`,
+            content: toolCall.function.name === 'shell_cmd'
+              ? formatShellToolErrorResultForLLM({
+                command: toolArgs?.command,
+                parameters: toolArgs?.parameters,
+                error,
+              })
+              : `Error executing tool: ${error instanceof Error ? error.message : String(error)}`,
             tool_call_id: toolCall.id,
             sender: agent.id,
             createdAt: new Date(),

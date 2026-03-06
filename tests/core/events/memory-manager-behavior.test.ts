@@ -15,6 +15,8 @@
  * - No real filesystem, database, or external LLM/tool network calls.
  *
  * Recent changes:
+ * - 2026-03-06: Added coverage for canonical shell approval-denied failure reasons and null exit codes in continuation-persisted tool results.
+ * - 2026-03-06: Updated shell continuation coverage to assert the unified bounded-preview shell result mode across default and skill-script contexts.
  * - 2026-03-01: Added regression coverage that continuation executes `shell_cmd` with `llmResultMode: minimal` by default and upgrades to `smart` for skill-script execution context.
  */
 
@@ -318,7 +320,7 @@ describe('memory-manager behavior', () => {
     );
   });
 
-  it('executes shell_cmd in continuation with smart llm result mode for skill-script context', async () => {
+  it('executes shell_cmd in continuation with minimal llm result mode for skill-script context', async () => {
     const world = createWorld();
     const agent = createAgent();
 
@@ -354,9 +356,38 @@ describe('memory-manager behavior', () => {
       expect.objectContaining({
         chatId: 'chat-1',
         agentName: 'agent-a',
-        llmResultMode: 'smart',
+        llmResultMode: 'minimal',
       })
     );
+  });
+
+  it('persists canonical shell tool error content when shell_cmd execution throws', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    const execute = vi.fn(async () => {
+      throw new Error('approval required for remote_download and request was not approved');
+    });
+    mocks.getMCPToolsForWorld.mockResolvedValue({ shell_cmd: { execute } });
+
+    mocks.generateAgentResponse
+      .mockResolvedValueOnce(toolCallResult('assistant-shell-error-1', 'shell_cmd', '{"command":"curl","parameters":["-O","https://example.com/file"]}', 'tc-shell-error-1'))
+      .mockResolvedValueOnce(textResult('assistant-shell-error-2', 'Recovered after shell error'));
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    await continueLLMAfterToolExecution(world, agent, 'chat-1');
+
+    const shellErrorMessage = agent.memory.find((message) =>
+      message.role === 'tool'
+      && message.tool_call_id === 'tc-shell-error-1'
+    );
+
+    expect(shellErrorMessage?.content).toContain('status: failed');
+    expect(shellErrorMessage?.content).toContain('exit_code: null');
+    expect(shellErrorMessage?.content).toContain('reason: approval_denied');
+    expect(shellErrorMessage?.content).toContain('stderr_preview:');
+    expect(shellErrorMessage?.content).toContain('approval required for remote_download and request was not approved');
+    expect(shellErrorMessage?.content).not.toContain('Error executing tool:');
   });
 
   it('handles unknown tool definitions by publishing tool-error and continuing', async () => {

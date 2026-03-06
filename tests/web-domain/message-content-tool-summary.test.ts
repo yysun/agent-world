@@ -14,6 +14,8 @@
  * - Uses deterministic in-memory fixtures.
  *
  * Recent Changes:
+ * - 2026-03-06: Added JSON-serialized canonical failure coverage so web completed tool cards do not miss failed shell results after reload.
+ * - 2026-03-06: Added regression coverage for canonical shell validation/policy failure reasons in merged web tool cards.
  * - 2026-03-01: Initial test coverage added for one-line tool summary labels.
  */
 
@@ -85,5 +87,56 @@ describe('getToolOneLineSummary', () => {
     });
 
     expect(getToolOneLineSummary(message)).toBe('tool: run_in_terminal +1 more - done');
+  });
+
+  it('returns failed summary when merged canonical tool result carries a validation or approval failure reason', () => {
+    const message = createMessage({
+      role: 'assistant',
+      combinedToolResults: [
+        {
+          id: 'res-approval',
+          type: 'tool',
+          sender: 'a1',
+          content: 'status: failed\nexit_code: null\nreason: approval_denied\nstderr_preview:\nrequest was not approved',
+          createdAt: new Date('2026-03-01T00:00:01.000Z'),
+          role: 'tool',
+          tool_call_id: 'call-1',
+        },
+      ],
+      tool_calls: [
+        { id: 'call-1', type: 'function', function: { name: 'shell_cmd', arguments: '{"command":"curl"}' } },
+      ],
+    });
+
+    expect(getToolOneLineSummary(message)).toBe('tool: shell_cmd - failed');
+  });
+
+  it('returns failed summary when merged canonical tool result is serialized as JSON', () => {
+    const message = createMessage({
+      role: 'assistant',
+      combinedToolResults: [
+        {
+          id: 'res-json-failure',
+          type: 'tool',
+          sender: 'a1',
+          content: JSON.stringify({
+            status: 'failed',
+            exit_code: null,
+            timed_out: false,
+            canceled: false,
+            reason: 'approval_denied',
+            stderr_preview: 'request was not approved',
+          }),
+          createdAt: new Date('2026-03-01T00:00:01.000Z'),
+          role: 'tool',
+          tool_call_id: 'call-1',
+        },
+      ],
+      tool_calls: [
+        { id: 'call-1', type: 'function', function: { name: 'shell_cmd', arguments: '{"command":"curl"}' } },
+      ],
+    });
+
+    expect(getToolOneLineSummary(message)).toBe('tool: shell_cmd - failed');
   });
 });

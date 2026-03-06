@@ -20,6 +20,8 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-03-06: Normalized shell continuation parse/validation/policy failures through explicit canonical shell failure reasons and updated continuation comments to reflect bounded-preview tool persistence.
+ * - 2026-03-06: Collapsed shell continuation result-mode selection to one bounded-preview mode and normalized persisted shell tool failures through the canonical shell-result formatter.
  * - 2026-02-28: Added canonical `message.publish` logs for assistant publish events in direct and continuation response paths.
  * - 2026-02-27: Passed explicit chat scope to continuation system events (`publishEvent`) to prevent fallback routing to `world.currentChatId` during chat switches.
  * - 2026-02-27: Suppress repeated identical `load_skill` tool calls within the same continuation run once a prior same-run load succeeded.
@@ -75,6 +77,7 @@ import { createCategoryLogger } from '../logger.js';
 import { beginWorldActivity } from '../activity-tracker.js';
 import { createStorageWithWrappers } from '../storage/storage-factory.js';
 import { generateAgentResponse } from '../llm-manager.js';
+import { formatShellToolErrorResultForLLM } from '../shell-cmd-tool.js';
 import {
   isMessageProcessingCanceledError,
   throwIfMessageProcessingStopped
@@ -376,86 +379,11 @@ function isSuccessfulLoadSkillResult(toolResult: string): boolean {
   return /<skill_context\b/i.test(normalized) && !/<error>/i.test(normalized);
 }
 
-function hasSuccessfulSkillContextInChat(messages: AgentMessage[], chatId: string | null | undefined): boolean {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message?.chatId !== chatId) {
-      continue;
-    }
-    if (message?.role !== 'tool') {
-      continue;
-    }
-    if (isSuccessfulLoadSkillResult(String(message?.content || ''))) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function isScriptLikeShellCommand(toolArgs: Record<string, any>): boolean {
-  const command = String(toolArgs?.command || '').trim().toLowerCase();
-  const parameters = Array.isArray(toolArgs?.parameters)
-    ? toolArgs.parameters.map((parameter) => String(parameter || '').trim().toLowerCase()).filter(Boolean)
-    : [];
-
-  if (!command) {
-    return false;
-  }
-
-  const scriptHostCommands = new Set([
-    'python',
-    'python3',
-    'node',
-    'bash',
-    'sh',
-    'zsh',
-    'deno',
-    'bun',
-    'ruby',
-    'perl',
-    'php',
-    'pwsh',
-    'powershell',
-    'ts-node',
-    'tsx',
-  ]);
-  const commandBasename = command.split(/[\\/]/).pop() || command;
-  const normalizedCommandBasename = commandBasename.replace(/\.exe$/i, '');
-  const scriptExtensionPattern = /\.(py|sh|bash|zsh|js|mjs|cjs|ts)$/i;
-
-  let effectiveHost = normalizedCommandBasename;
-  let scriptCandidateParameters = parameters;
-
-  // Handle wrappers like: env python scripts/convert.py
-  if ((normalizedCommandBasename === 'env' || normalizedCommandBasename === '/usr/bin/env') && parameters.length > 0) {
-    const wrappedHost = (parameters[0].split(/[\\/]/).pop() || parameters[0]).replace(/\.exe$/i, '');
-    effectiveHost = wrappedHost;
-    scriptCandidateParameters = parameters.slice(1);
-  }
-
-  const isVersionedInterpreterVariant = /^(python|node|deno|bun|ruby|perl|php|pwsh|powershell)\d+(\.\d+)?$/.test(effectiveHost);
-
-  if (scriptHostCommands.has(command) || scriptHostCommands.has(effectiveHost) || isVersionedInterpreterVariant) {
-    return scriptCandidateParameters.some((parameter) => parameter.startsWith('scripts/') || scriptExtensionPattern.test(parameter));
-  }
-
-  return command.startsWith('scripts/') || scriptExtensionPattern.test(command);
-}
-
 function resolveShellContinuationLlmResultMode(options: {
   toolName: string;
-  toolArgs: Record<string, any>;
-  memory: AgentMessage[];
-  chatId: string | null | undefined;
-}): 'minimal' | 'smart' | 'verbose' {
+}): 'minimal' | 'verbose' {
   if (options.toolName !== 'shell_cmd') {
     return 'verbose';
-  }
-
-  const skillContextActive = hasSuccessfulSkillContextInChat(options.memory, options.chatId);
-  const scriptLikeShellCommand = isScriptLikeShellCommand(options.toolArgs);
-  if (skillContextActive && scriptLikeShellCommand) {
-    return 'smart';
   }
 
   return 'minimal';
@@ -578,7 +506,12 @@ export async function resumePendingToolCallsForChat(
         toolCallId: toolCall.id,
         error: parseError instanceof Error ? parseError.message : String(parseError),
       });
-      const errorContent = `Error executing tool: Invalid JSON in tool arguments: ${parseError instanceof Error ? parseError.message : String(parseError)}`;
+      const errorContent = toolCall.function.name === 'shell_cmd'
+        ? formatShellToolErrorResultForLLM({
+          error: `Invalid JSON in tool arguments: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
+          failureReason: 'validation_error',
+        })
+        : `Error executing tool: Invalid JSON in tool arguments: ${parseError instanceof Error ? parseError.message : String(parseError)}`;
       const toolErrorMessage: AgentMessage = {
         role: 'tool',
         content: errorContent,
@@ -615,7 +548,12 @@ export async function resumePendingToolCallsForChat(
         toolName: toolCall.function.name,
         toolCallId: toolCall.id,
       });
-      const errorContent = `Error executing tool: Tool not found: ${toolCall.function.name}`;
+      const errorContent = toolCall.function.name === 'shell_cmd'
+        ? formatShellToolErrorResultForLLM({
+          error: `Tool not found: ${toolCall.function.name}`,
+          failureReason: 'execution_error',
+        })
+        : `Error executing tool: Tool not found: ${toolCall.function.name}`;
       const toolErrorMessage: AgentMessage = {
         role: 'tool',
         content: errorContent,
@@ -690,9 +628,6 @@ export async function resumePendingToolCallsForChat(
         agentName: agent.id,
         llmResultMode: resolveShellContinuationLlmResultMode({
           toolName: toolCall.function.name,
-          toolArgs,
-          memory: agent.memory,
-          chatId,
         }),
       };
 
@@ -764,7 +699,13 @@ export async function resumePendingToolCallsForChat(
         toolCallId: toolCall.id,
         error: toolError instanceof Error ? toolError.message : String(toolError),
       });
-      const errorContent = `Error executing tool: ${toolError instanceof Error ? toolError.message : String(toolError)}`;
+      const errorContent = toolCall.function.name === 'shell_cmd'
+        ? formatShellToolErrorResultForLLM({
+          command: toolArgs?.command,
+          parameters: toolArgs?.parameters,
+          error: toolError,
+        })
+        : `Error executing tool: ${toolError instanceof Error ? toolError.message : String(toolError)}`;
       const toolErrorMessage: AgentMessage = {
         role: 'tool',
         content: errorContent,
@@ -1179,7 +1120,7 @@ export async function continueLLMAfterToolExecution(
     });
 
     // Tool execution already happened before this function was called
-    // The tool result is already in memory with the actual stdout/stderr
+    // The canonical tool result is already in memory with bounded preview fields for shell output
     // Now prepare messages for LLM - loads fresh data from storage
 
     // Prepare messages with system prompt and complete conversation history
@@ -1371,7 +1312,12 @@ export async function continueLLMAfterToolExecution(
           ? firstInvalidToolCall.function.arguments
           : '{}';
         const malformedToolErrorContent = rawToolName
-          ? `Error executing tool: Invalid tool call payload for '${rawToolName}'`
+          ? rawToolName === 'shell_cmd'
+            ? formatShellToolErrorResultForLLM({
+              error: `Invalid tool call payload for '${rawToolName}'`,
+              failureReason: 'validation_error',
+            })
+            : `Error executing tool: Invalid tool call payload for '${rawToolName}'`
           : 'Error executing tool: Invalid tool call payload - empty or missing tool name';
 
         loggerAgent.warn('Continuation returned tool_calls without executable tool; reporting tool error back to LLM context', {
@@ -1565,7 +1511,12 @@ export async function continueLLMAfterToolExecution(
       if (!toolDef) {
         const missingToolResult: AgentMessage = {
           role: 'tool',
-          content: `Error executing tool: Tool not found: ${toolCall.function.name}`,
+          content: toolCall.function.name === 'shell_cmd'
+            ? formatShellToolErrorResultForLLM({
+              error: `Tool not found: ${toolCall.function.name}`,
+              failureReason: 'execution_error',
+            })
+            : `Error executing tool: Tool not found: ${toolCall.function.name}`,
           tool_call_id: toolCall.id,
           sender: agent.id,
           createdAt: new Date(),
@@ -1612,7 +1563,12 @@ export async function continueLLMAfterToolExecution(
       } catch (parseError) {
         const parseErrorResult: AgentMessage = {
           role: 'tool',
-          content: `Error executing tool: Invalid JSON in tool arguments: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
+          content: toolCall.function.name === 'shell_cmd'
+            ? formatShellToolErrorResultForLLM({
+              error: `Invalid JSON in tool arguments: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
+              failureReason: 'validation_error',
+            })
+            : `Error executing tool: Invalid JSON in tool arguments: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
           tool_call_id: toolCall.id,
           sender: agent.id,
           createdAt: new Date(),
@@ -1741,9 +1697,6 @@ export async function continueLLMAfterToolExecution(
           agentName: agent.id,
           llmResultMode: resolveShellContinuationLlmResultMode({
             toolName: toolCall.function.name,
-            toolArgs,
-            memory: agent.memory,
-            chatId: targetChatId,
           }),
         };
 
@@ -1804,7 +1757,13 @@ export async function continueLLMAfterToolExecution(
           },
         });
       } catch (toolError) {
-        const errorContent = `Error executing tool: ${toolError instanceof Error ? toolError.message : String(toolError)}`;
+        const errorContent = toolCall.function.name === 'shell_cmd'
+          ? formatShellToolErrorResultForLLM({
+            command: toolArgs?.command,
+            parameters: toolArgs?.parameters,
+            error: toolError,
+          })
+          : `Error executing tool: ${toolError instanceof Error ? toolError.message : String(toolError)}`;
         const toolErrorMessage: AgentMessage = {
           role: 'tool',
           content: errorContent,

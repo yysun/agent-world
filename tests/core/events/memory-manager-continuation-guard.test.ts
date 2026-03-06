@@ -14,10 +14,11 @@
  * - Avoids any real provider/tool execution and filesystem-backed state.
  *
  * Recent Changes:
+ * - 2026-03-06: Updated shell continuation guard coverage to assert the unified bounded-preview shell result mode instead of the removed `smart` branch.
  * - 2026-03-05: Added bounded empty-follow-up continuation retry coverage for recovery (retry succeeds) and exhaustion (stops after configured max retries).
  * - 2026-03-01: Added coverage that duplicate `shell_cmd` suppression ignores `output_format`/`output_detail` differences and omits those format fields from tool event payloads.
- * - 2026-03-01: Added regression coverage for broader script hosts (`bash`, `node`, and `env <interpreter>`) using smart shell continuation mode when skill context is loaded.
- * - 2026-03-01: Added regression coverage ensuring shell_cmd path-based interpreter commands (for example `.venv/bin/python`) use smart continuation result mode when skill context is already loaded.
+ * - 2026-03-01: Added regression coverage for broader script hosts (`bash`, `node`, and `env <interpreter>`) using script-aware shell continuation mode when skill context is loaded.
+ * - 2026-03-01: Added regression coverage ensuring shell_cmd path-based interpreter commands (for example `.venv/bin/python`) use script-aware continuation result mode when skill context is already loaded.
  * - 2026-03-01: Added coverage to suppress repeated identical `shell_cmd` calls within one continuation run by reusing prior command result.
  * - 2026-02-27: Added regression coverage ensuring continuation system events include explicit chatId scope.
  * - 2026-02-27: Added coverage to suppress repeated identical `load_skill` tool calls within one continuation run.
@@ -429,7 +430,7 @@ describe('continueLLMAfterToolExecution guard', () => {
     expect(dedupedResultEvent.toolExecution.input).not.toHaveProperty('output_detail');
   });
 
-  it('uses smart shell result mode for path-based python script calls when skill context is loaded', async () => {
+  it('uses minimal shell result mode for path-based python script calls when skill context is loaded', async () => {
     mocks.generateAgentResponse
       .mockResolvedValueOnce(
         buildToolCallResponse(
@@ -471,7 +472,7 @@ describe('continueLLMAfterToolExecution guard', () => {
     expect(shellExecute).toHaveBeenCalledTimes(1);
     const shellContext = shellExecute.mock.calls[0]?.[3];
     expect(shellContext).toBeDefined();
-    expect(shellContext.llmResultMode).toBe('smart');
+    expect(shellContext.llmResultMode).toBe('minimal');
     expect(mocks.publishMessageWithId).toHaveBeenCalledTimes(1);
   });
 
@@ -491,7 +492,7 @@ describe('continueLLMAfterToolExecution guard', () => {
       command: 'env',
       parameters: ['python3.11', 'scripts/convert.py'],
     },
-  ])('uses smart shell result mode for generic script host: $label', async ({ command, parameters }) => {
+  ])('uses minimal shell result mode for generic script host: $label', async ({ command, parameters }) => {
     mocks.generateAgentResponse
       .mockResolvedValueOnce(
         buildToolCallResponse(
@@ -533,7 +534,7 @@ describe('continueLLMAfterToolExecution guard', () => {
     expect(shellExecute).toHaveBeenCalledTimes(1);
     const shellContext = shellExecute.mock.calls[0]?.[3];
     expect(shellContext).toBeDefined();
-    expect(shellContext.llmResultMode).toBe('smart');
+    expect(shellContext.llmResultMode).toBe('minimal');
     expect(mocks.publishMessageWithId).toHaveBeenCalledTimes(1);
   });
 

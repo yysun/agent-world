@@ -94,6 +94,7 @@
  * - Queue-based serialization prevents API rate limits and resource conflicts
  *
  * Recent Changes:
+ * - 2026-03-06: Widened queue timeout field typing to `number` so runtime timeout overrides compile cleanly.
  * - 2026-03-05: Added chat-scoped LLM timeout status system events (`taking too long` warning + hard-timeout event), enforced timeout-triggered abort signaling in queue processing, and classified queue timeouts separately from user cancellations.
  * - 2026-03-05: Switched LLM queue timeout defaults to shared reliability config.
  * - 2026-03-04: Azure client creation now maps `agent.model` to Azure deployment name (with config deployment fallback) so world/agent model selection controls deployment URL routing.
@@ -362,7 +363,7 @@ class LLMQueue {
   private processing = false;
   private activeItem: QueuedLLMCall | null = null;
   private maxQueueSize = 100; // Prevent memory issues
-  private processingTimeoutMs = RELIABILITY_CONFIG.llm.processingTimeoutMs; // 15 minute max processing time per call (for long-running tools)
+  private processingTimeoutMs: number = RELIABILITY_CONFIG.llm.processingTimeoutMs; // 15 minute max processing time per call (for long-running tools)
 
   async add<T>(
     agentId: string,

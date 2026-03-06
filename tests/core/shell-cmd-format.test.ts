@@ -8,6 +8,8 @@
  * - Escaping of quotes within parameters
  * 
  * Changes:
+ * - 2026-03-06: Added explicit canonical shell failure-reason coverage for validation and approval-denied terminal paths.
+ * - 2026-03-06: Updated shell LLM-result coverage to assert the canonical bounded-preview contract, including stderr/error normalization.
  * - 2026-02-21: Added minimal shell LLM-result formatting assertions (status + exit semantics, no stdout/stderr transcript body).
  * - 2025-11-11: Initial implementation to test parameter quoting
  */
@@ -16,7 +18,8 @@ import { describe, test, expect } from 'vitest';
 import {
   formatResultForLLM,
   formatMinimalShellResult,
-  formatMinimalShellResultForLLM
+  formatPreviewShellResultForLLM,
+  formatShellToolErrorResultForLLM,
 } from '../../core/shell-cmd-tool.js';
 import type { CommandExecutionResult } from '../../core/shell-cmd-tool.js';
 
@@ -164,13 +167,13 @@ describe('formatResultForLLM', () => {
   });
 });
 
-describe('formatMinimalShellResultForLLM', () => {
-  test('should format success status with exit code only', () => {
+describe('formatPreviewShellResultForLLM', () => {
+  test('should format success status with bounded stdout preview', () => {
     const result: CommandExecutionResult = {
       executionId: 'test-success',
       command: 'echo',
       parameters: ['ok'],
-      stdout: 'hidden from llm',
+      stdout: 'visible to llm',
       stderr: '',
       exitCode: 0,
       signal: null,
@@ -179,16 +182,17 @@ describe('formatMinimalShellResultForLLM', () => {
     };
 
     const minimal = formatMinimalShellResult(result);
-    const text = formatMinimalShellResultForLLM(result);
+    const text = formatPreviewShellResultForLLM(result);
 
     expect(minimal.status).toBe('success');
     expect(minimal.exit_code).toBe(0);
     expect(text).toContain('status: success');
     expect(text).toContain('exit_code: 0');
-    expect(text).not.toContain('hidden from llm');
+    expect(text).toContain('stdout_preview:');
+    expect(text).toContain('visible to llm');
   });
 
-  test('should format failed status with reason for non-zero exit', () => {
+  test('should format failed status with bounded stderr preview', () => {
     const result: CommandExecutionResult = {
       executionId: 'test-fail',
       command: 'ls',
@@ -203,13 +207,53 @@ describe('formatMinimalShellResultForLLM', () => {
     };
 
     const minimal = formatMinimalShellResult(result);
-    const text = formatMinimalShellResultForLLM(result);
+    const text = formatPreviewShellResultForLLM(result);
 
     expect(minimal.status).toBe('failed');
     expect(minimal.reason).toBe('non_zero_exit');
     expect(text).toContain('status: failed');
     expect(text).toContain('exit_code: 2');
     expect(text).toContain('reason: non_zero_exit');
-    expect(text).not.toContain('No such file');
+    expect(text).toContain('stderr_preview:');
+    expect(text).toContain('No such file');
+  });
+
+  test('should fall back to error text for stderr preview when stderr is empty', () => {
+    const result: CommandExecutionResult = {
+      executionId: 'test-validation-fail',
+      command: '<invalid>',
+      parameters: [],
+      stdout: '',
+      stderr: '',
+      exitCode: null,
+      signal: null,
+      error: 'Invalid command: command must be a non-empty string.',
+      failureReason: 'validation_error',
+      executedAt: new Date(),
+      duration: 0
+    };
+
+    const text = formatPreviewShellResultForLLM(result);
+
+    expect(text).toContain('status: failed');
+    expect(text).toContain('exit_code: null');
+    expect(text).toContain('reason: validation_error');
+    expect(text).toContain('stderr_preview:');
+    expect(text).toContain('Invalid command: command must be a non-empty string.');
+  });
+
+  test('should preserve approval-denied failures as canonical shell error results', () => {
+    const text = formatShellToolErrorResultForLLM({
+      command: 'curl',
+      parameters: ['-O', 'https://example.com/file'],
+      error: 'Command not executed: approval required for remote_download and request was not approved (user_denied).',
+      failureReason: 'approval_denied',
+    });
+
+    expect(text).toContain('status: failed');
+    expect(text).toContain('exit_code: null');
+    expect(text).toContain('reason: approval_denied');
+    expect(text).toContain('stderr_preview:');
+    expect(text).toContain('request was not approved');
   });
 });

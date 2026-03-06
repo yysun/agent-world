@@ -13,6 +13,7 @@
  * - Helper functions are intentionally colocated to preserve behavior parity.
  *
  * Recent Changes:
+ * - 2026-03-06: Recognize canonical shell `validation_error` and `approval_denied` tool-result reasons as failed outcomes for renderer card styling.
  * - 2026-03-04: Added optional `fullWidthUserMessage` card-style flag so non-chat user cards can span full width.
  * - 2026-03-04: Added optional `showLeftBorder` card-style flag so alternate world views can hide message left accents.
  * - 2026-02-28: Added tool-message status border helper so completed tool cards use green/red left borders while pending states keep amber.
@@ -406,7 +407,7 @@ function isToolMessageFailure(message) {
     if (recordStatus === 'failed' || recordStatus === 'error') {
       return true;
     }
-    if (reason === 'non_zero_exit' || reason === 'execution_error' || reason === 'timeout' || reason === 'timed_out' || reason === 'canceled' || reason === 'cancelled') {
+    if (reason === 'non_zero_exit' || reason === 'execution_error' || reason === 'validation_error' || reason === 'approval_denied' || reason === 'timeout' || reason === 'timed_out' || reason === 'canceled' || reason === 'cancelled') {
       return true;
     }
     if (parseBoolean(record.timed_out ?? record.timedOut) === true || parseBoolean(record.canceled ?? record.cancelled) === true) {
@@ -420,7 +421,7 @@ function isToolMessageFailure(message) {
   if (/status\s*[:=]\s*failed/i.test(content)) return true;
   if (/timed[_\s-]?out\s*[:=]\s*true/i.test(content)) return true;
   if (/cancel(?:ed|led)\s*[:=]\s*true/i.test(content)) return true;
-  if (/reason\s*[:=]\s*(non_zero_exit|execution_error|timeout|timed_out|canceled|cancelled)/i.test(content)) return true;
+  if (/reason\s*[:=]\s*(non_zero_exit|execution_error|validation_error|approval_denied|timeout|timed_out|canceled|cancelled)/i.test(content)) return true;
 
   const exitCodeMatch = content.match(/exit[_\s-]?code\s*[:=]\s*(-?\d+)/i);
   if (exitCodeMatch?.[1]) {

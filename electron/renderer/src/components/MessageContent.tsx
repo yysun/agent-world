@@ -13,6 +13,7 @@
  * - Helper functions are scoped to this module because only this component uses them.
  *
  * Recent Changes:
+ * - 2026-03-06: Recognize canonical shell `validation_error` and `approval_denied` result reasons as failed tool outcomes in renderer status labels.
  * - 2026-02-28: Added linked tool-request backfill support so tool-result cards render combined `Args` + `Result` even when `tool_calls` live on a separate assistant row.
  * - 2026-02-28: Updated tool status label format to `tool - <name> - <status>` and added optional resolved-name override for history rows missing direct tool metadata.
  * - 2026-02-27: Restored bold user prompt preview above the `<model> ......` pre-chunk wait row on assistant cards.
@@ -140,7 +141,7 @@ function isFailedToolResultContent(content) {
 
     if (status === 'failed' || status === 'error') return true;
     if (timedOut === true || canceled === true) return true;
-    if (reason === 'non_zero_exit' || reason === 'execution_error' || reason === 'timeout' || reason === 'timed_out' || reason === 'canceled' || reason === 'cancelled') {
+    if (reason === 'non_zero_exit' || reason === 'execution_error' || reason === 'validation_error' || reason === 'approval_denied' || reason === 'timeout' || reason === 'timed_out' || reason === 'canceled' || reason === 'cancelled') {
       return true;
     }
     if (exitCode !== null && exitCode !== 0) return true;
@@ -149,7 +150,7 @@ function isFailedToolResultContent(content) {
   if (/status\s*[:=]\s*failed/i.test(text)) return true;
   if (/timed[_\s-]?out\s*[:=]\s*true/i.test(text)) return true;
   if (/cancel(?:ed|led)\s*[:=]\s*true/i.test(text)) return true;
-  if (/reason\s*[:=]\s*(non_zero_exit|execution_error|timeout|timed_out|canceled|cancelled)/i.test(text)) return true;
+  if (/reason\s*[:=]\s*(non_zero_exit|execution_error|validation_error|approval_denied|timeout|timed_out|canceled|cancelled)/i.test(text)) return true;
 
   const exitCodeMatch = text.match(/exit[_\s-]?code\s*[:=]\s*(-?\d+)/i);
   if (exitCodeMatch?.[1]) {

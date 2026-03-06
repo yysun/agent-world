@@ -17,6 +17,8 @@
  * - Keeps helper logic local to this domain module for focused maintenance
  *
  * Recent Changes:
+ * - 2026-03-06: Parse canonical JSON tool-result payloads in web status detection so failed shell results serialized as JSON do not render as `done`.
+ * - 2026-03-06: Treat canonical shell `validation_error` and `approval_denied` tool results as failures in merged web tool cards and completed summaries.
  * - 2026-03-01: Unified tool card headers to single-line summaries (`tool: <name> - <status>`) for web/electron parity.
  * - 2026-03-01: Added renderMergedToolCard for unified tool request+result display with status pill.
  * - 2026-02-21: Switched tool output toggle to an SVG icon button and aligned label typography with regular message text sizing.
@@ -33,10 +35,59 @@ export function isToolResultMessage(message: Message): boolean {
   return message.type === 'tool';
 }
 
+function parseToolResultRecord(text: string): Record<string, unknown> | null {
+  const normalized = String(text || '').trim();
+  if (!normalized) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(normalized);
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseToolResultBoolean(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+  }
+  return null;
+}
+
+function parseToolResultNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value.trim());
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
 function isToolResultFailureText(text: string): boolean {
   const normalized = String(text || '').trim();
   if (!normalized) {
     return false;
+  }
+
+  const record = parseToolResultRecord(normalized);
+  if (record) {
+    const status = String(record.status || '').trim().toLowerCase();
+    const reason = String(record.reason || '').trim().toLowerCase();
+    const timedOut = parseToolResultBoolean(record.timed_out ?? record.timedOut);
+    const canceled = parseToolResultBoolean(record.canceled ?? record.cancelled);
+    const exitCode = parseToolResultNumber(record.exit_code ?? record.exitCode);
+
+    if (status === 'failed' || status === 'error') return true;
+    if (timedOut === true || canceled === true) return true;
+    if (reason === 'non_zero_exit' || reason === 'execution_error' || reason === 'validation_error' || reason === 'approval_denied' || reason === 'timeout' || reason === 'timed_out' || reason === 'canceled' || reason === 'cancelled') {
+      return true;
+    }
+    if (exitCode !== null && exitCode !== 0) return true;
   }
 
   return /^\[error\]/i.test(normalized)
@@ -45,7 +96,7 @@ function isToolResultFailureText(text: string): boolean {
     || /exit[_\s-]?code\s*[:=]\s*-?[1-9]\d*/i.test(normalized)
     || /timed[_\s-]?out\s*[:=]\s*true/i.test(normalized)
     || /cancel(?:ed|led)\s*[:=]\s*true/i.test(normalized)
-    || /reason\s*[:=]\s*(non_zero_exit|execution_error|timeout|timed_out|canceled|cancelled)/i.test(normalized);
+    || /reason\s*[:=]\s*(non_zero_exit|execution_error|validation_error|approval_denied|timeout|timed_out|canceled|cancelled)/i.test(normalized);
 }
 
 function resolveToolDisplayName(message: Message): string {
@@ -124,7 +175,7 @@ function getToolMergedStatus(combinedToolResults: Message[]): 'running' | 'done'
   if (!combinedToolResults || combinedToolResults.length === 0) return 'running';
   const hasFailure = combinedToolResults.some(r => {
     const text = String((r as any)?.text || (r as any)?.content || '');
-    return /^\[error\]/i.test(text) || /^error:/i.test(text) || Boolean((r as any)?.isError);
+    return isToolResultFailureText(text) || Boolean((r as any)?.isError);
   });
   return hasFailure ? 'failed' : 'done';
 }

@@ -27,6 +27,9 @@
  * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - 2026-03-06: Added explicit canonical failure reasons for shell validation/policy failures so approval denials and validation errors no longer masquerade as non-zero exits.
+ * - 2026-03-06: Unified shell continuation output on one bounded-preview result contract, removed `smart`-mode branching, and stopped persisting a synthetic assistant stdout mirror message after shell completion.
+ * - 2026-03-06: Added canonical shell error-result formatting helper so upstream tool persistence can normalize shell failures without falling back to ad hoc error strings.
  * - 2026-03-05: Hardened timeout termination to target process groups/process trees (SIGTERM + SIGKILL fallback) and removed child-process builtin timeout to keep timeout outcomes deterministic in the tool layer.
  * - 2026-03-05: Switched shell timeout grace config to shared reliability config helper.
  * - 2026-03-01: Prevented `./` and `../` parameter tokens from being misclassified as `<skill-id>/<path>` so non-skill shell paths remain unchanged.
@@ -82,7 +85,7 @@ import { createCategoryLogger } from './logger.js';
 import { getShellTimeoutKillGraceMs } from './reliability-config.js';
 import { validateToolParameters } from './tool-utils.js';
 import { requestToolApproval } from './tool-approval.js';
-import { publishMessageWithId, publishSSE } from './events/publishers.js';
+import { publishSSE } from './events/publishers.js';
 import { getDefaultWorkingDirectory, getEnvValueFromText } from './utils.js';
 import { getSkillSourcePath, getSkills } from './skill-registry.js';
 import {
@@ -133,6 +136,7 @@ export interface CommandExecutionResult {
   exitCode: number | null;
   signal: string | null;
   error?: string;
+  failureReason?: ShellFailureReason;
   canceled?: boolean;
   timedOut?: boolean;
   executedAt: Date;
@@ -156,12 +160,29 @@ export interface StructuredCommandExecutionResult {
   stderr_truncated?: boolean;
 }
 
+export type ShellFailureReason =
+  | 'timeout'
+  | 'canceled'
+  | 'non_zero_exit'
+  | 'execution_error'
+  | 'validation_error'
+  | 'approval_denied';
+
 export interface MinimalShellLLMResult {
   status: 'success' | 'failed';
   exit_code: number | null;
   timed_out: boolean;
   canceled: boolean;
-  reason?: 'timeout' | 'canceled' | 'non_zero_exit' | 'execution_error';
+  reason?: ShellFailureReason;
+}
+
+export interface PreviewShellLLMResult extends MinimalShellLLMResult {
+  stdout_preview?: string;
+  stderr_preview?: string;
+  stdout_truncated?: boolean;
+  stderr_truncated?: boolean;
+  stdout_redacted?: boolean;
+  stderr_redacted?: boolean;
 }
 
 export type ShellCommandRiskTier = 'allow' | 'hitl_required' | 'block';
@@ -183,7 +204,36 @@ interface OutputFormattingOptions {
 }
 
 const DEFAULT_MIN_OUTPUT_CHARS = 400;
-const SMART_LLM_MAX_OUTPUT_CHARS = 1200;
+const DEFAULT_LLM_PREVIEW_OUTPUT_CHARS = 1200;
+
+function inferShellFailureReason(errorMessage: string): ShellFailureReason | undefined {
+  const normalized = String(errorMessage || '').trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (
+    normalized.includes('approval required')
+    || normalized.includes('request was not approved')
+    || normalized.includes('command not executed:')
+  ) {
+    return 'approval_denied';
+  }
+
+  if (
+    normalized.includes('invalid command')
+    || normalized.includes('invalid json in tool arguments')
+    || normalized.includes('invalid tool call payload')
+    || normalized.includes('working directory mismatch')
+    || normalized.includes('outside world working directory')
+    || normalized.includes('blocked dangerous operation')
+    || normalized.includes('cannot be executed')
+  ) {
+    return 'validation_error';
+  }
+
+  return undefined;
+}
 
 function buildOutputSnippet(content: string, maxOutputChars: number): OutputSnippet {
   if (!content) {
@@ -1642,13 +1692,16 @@ export function formatMinimalShellResult(
 ): MinimalShellLLMResult {
   const timedOut = Boolean(result.timedOut || result.error?.includes('timed out'));
   const canceled = Boolean(result.canceled || result.error?.toLowerCase().includes('canceled'));
-  const failed = timedOut || canceled || result.exitCode !== 0 || Boolean(result.error);
+  const inferredFailureReason = result.failureReason || inferShellFailureReason(String(result.error || ''));
+  const failed = timedOut || canceled || result.exitCode !== 0 || Boolean(result.error) || Boolean(inferredFailureReason);
 
-  let reason: MinimalShellLLMResult['reason'];
+  let reason: ShellFailureReason | undefined;
   if (timedOut) {
     reason = 'timeout';
   } else if (canceled) {
     reason = 'canceled';
+  } else if (inferredFailureReason) {
+    reason = inferredFailureReason;
   } else if (result.exitCode !== null && result.exitCode !== 0) {
     reason = 'non_zero_exit';
   } else if (result.error) {
@@ -1665,46 +1718,125 @@ export function formatMinimalShellResult(
 }
 
 export function formatMinimalShellResultForLLM(result: CommandExecutionResult): string {
-  const minimal = formatMinimalShellResult(result);
-  const lines = [
-    `status: ${minimal.status}`,
-    `exit_code: ${minimal.exit_code === null ? 'null' : String(minimal.exit_code)}`,
-    `timed_out: ${minimal.timed_out ? 'true' : 'false'}`,
-    `canceled: ${minimal.canceled ? 'true' : 'false'}`
-  ];
-
-  if (minimal.reason) {
-    lines.push(`reason: ${minimal.reason}`);
-  }
-
-  return lines.join('\n');
+  return formatPreviewShellResultForLLM(result);
 }
 
 function containsImageDataUri(text: string): boolean {
   return /data:image\/[a-z0-9.+-]+;base64,/i.test(String(text || ''));
 }
 
-function formatSmartShellResultForLLM(result: CommandExecutionResult): string {
-  const isSuccess = result.exitCode === 0 && !result.timedOut && !result.canceled && !result.error;
-  if (!isSuccess) {
-    return result.stderr || result.error || `(exit code ${result.exitCode ?? 'null'}, no stderr)`;
+function buildLLMPreviewField(content: string, maxOutputChars: number): {
+  text: string;
+  truncated: boolean;
+  redacted: boolean;
+} {
+  const normalized = String(content || '');
+  if (!normalized) {
+    return { text: '', truncated: false, redacted: false };
   }
 
-  const stdout = String(result.stdout || '');
-  if (!stdout) {
-    return '(exit code 0, no output)';
+  if (containsImageDataUri(normalized)) {
+    return {
+      text: `omitted from LLM context (contains image data URI output; ${normalized.length} chars).`,
+      truncated: false,
+      redacted: true,
+    };
   }
 
-  if (containsImageDataUri(stdout)) {
-    return `stdout omitted from LLM context (contains image data URI output; ${stdout.length} chars).`;
+  const snippet = buildOutputSnippet(normalized, maxOutputChars);
+  return {
+    text: snippet.text,
+    truncated: snippet.truncated,
+    redacted: false,
+  };
+}
+
+export function formatPreviewShellResult(
+  result: CommandExecutionResult,
+  options: { maxOutputChars?: number } = {}
+): PreviewShellLLMResult {
+  const minimal = formatMinimalShellResult(result);
+  const maxOutputChars = options.maxOutputChars ?? DEFAULT_LLM_PREVIEW_OUTPUT_CHARS;
+  const stderrSource = String(result.stderr || result.error || '');
+  const stdoutPreview = buildLLMPreviewField(result.stdout, maxOutputChars);
+  const stderrPreview = buildLLMPreviewField(stderrSource, maxOutputChars);
+
+  return {
+    ...minimal,
+    ...(stdoutPreview.text ? { stdout_preview: stdoutPreview.text } : {}),
+    ...(stderrPreview.text ? { stderr_preview: stderrPreview.text } : {}),
+    ...(stdoutPreview.truncated ? { stdout_truncated: true } : {}),
+    ...(stderrPreview.truncated ? { stderr_truncated: true } : {}),
+    ...(stdoutPreview.redacted ? { stdout_redacted: true } : {}),
+    ...(stderrPreview.redacted ? { stderr_redacted: true } : {}),
+  };
+}
+
+export function formatPreviewShellResultForLLM(
+  result: CommandExecutionResult,
+  options: { maxOutputChars?: number } = {}
+): string {
+  const preview = formatPreviewShellResult(result, options);
+  const lines = [
+    `status: ${preview.status}`,
+    `exit_code: ${preview.exit_code === null ? 'null' : String(preview.exit_code)}`,
+    `timed_out: ${preview.timed_out ? 'true' : 'false'}`,
+    `canceled: ${preview.canceled ? 'true' : 'false'}`
+  ];
+
+  if (preview.reason) {
+    lines.push(`reason: ${preview.reason}`);
+  }
+  if (preview.stdout_preview) {
+    lines.push('stdout_preview:');
+    lines.push(preview.stdout_preview);
+  }
+  if (preview.stdout_truncated) {
+    lines.push('stdout_truncated: true');
+  }
+  if (preview.stdout_redacted) {
+    lines.push('stdout_redacted: true');
+  }
+  if (preview.stderr_preview) {
+    lines.push('stderr_preview:');
+    lines.push(preview.stderr_preview);
+  }
+  if (preview.stderr_truncated) {
+    lines.push('stderr_truncated: true');
+  }
+  if (preview.stderr_redacted) {
+    lines.push('stderr_redacted: true');
   }
 
-  if (stdout.length > SMART_LLM_MAX_OUTPUT_CHARS) {
-    const preview = stdout.slice(0, SMART_LLM_MAX_OUTPUT_CHARS);
-    return `${preview}\n...(truncated ${stdout.length - SMART_LLM_MAX_OUTPUT_CHARS} chars)`;
-  }
+  return lines.join('\n');
+}
 
-  return stdout;
+export function formatShellToolErrorResultForLLM(options: {
+  command?: unknown;
+  parameters?: unknown;
+  error: unknown;
+  failureReason?: ShellFailureReason;
+}): string {
+  const errorMessage = options.error instanceof Error ? options.error.message : String(options.error);
+  const parameters = Array.isArray(options.parameters)
+    ? options.parameters.map((parameter) => String(parameter))
+    : [];
+
+  return formatPreviewShellResultForLLM({
+    executionId: 'shell-tool-error',
+    command: typeof options.command === 'string' && options.command.trim()
+      ? options.command
+      : '<shell_cmd>',
+    parameters,
+    stdout: '',
+    stderr: errorMessage,
+    exitCode: null,
+    signal: null,
+    error: errorMessage,
+    failureReason: options.failureReason || inferShellFailureReason(errorMessage) || 'execution_error',
+    executedAt: new Date(),
+    duration: 0,
+  });
 }
 
 /**
@@ -1876,9 +2008,9 @@ export function createShellCmdToolDefinition() {
         required: ['command']
       };
 
-      const llmResultMode = context?.llmResultMode === 'minimal' ? 'minimal'
-        : context?.llmResultMode === 'smart' ? 'smart'
-          : 'verbose';
+      const llmResultMode = typeof context?.llmResultMode === 'string'
+        ? context.llmResultMode === 'verbose' ? 'verbose' : 'minimal'
+        : 'verbose';
 
       const validation = validateToolParameters(args, toolSchema, 'shell_cmd');
       if (!validation.valid) {
@@ -1886,9 +2018,10 @@ export function createShellCmdToolDefinition() {
           executionId: 'validation-error',
           command: args?.command || '<invalid>',
           parameters: [],
-          exitCode: 1,
+          exitCode: null,
           signal: null,
           error: validation.error,
+          failureReason: 'validation_error',
           stdout: '',
           stderr: '',
           executedAt: new Date(),
@@ -1896,11 +2029,10 @@ export function createShellCmdToolDefinition() {
         };
 
         if (llmResultMode === 'minimal') {
-          return formatMinimalShellResultForLLM(validationResult);
-        }
-
-        if (llmResultMode === 'smart') {
-          return validationResult.stderr || validationResult.error || '(validation error, no details)';
+          if (validation.correctedArgs?.output_format === 'json') {
+            return JSON.stringify(formatPreviewShellResult(validationResult), null, 2);
+          }
+          return formatPreviewShellResultForLLM(validationResult);
         }
 
         return formatResultForLLM(validationResult);
@@ -2055,7 +2187,7 @@ export function createShellCmdToolDefinition() {
         throw new DOMException('Shell command execution canceled by user', 'AbortError');
       }
 
-      // Emit SSE end and persist finalized stdout as an assistant message
+      // Emit SSE end only. Durable completion state now comes from the final tool result.
       if (hasToolStreamContext && stdoutMessageId && stdoutStartEmitted) {
         publishSSE(world, {
           type: 'end',
@@ -2064,30 +2196,13 @@ export function createShellCmdToolDefinition() {
           agentName: streamAgentName,
           chatId
         });
-        if (result.stdout) {
-          publishMessageWithId(world, result.stdout, streamAgentName, stdoutMessageId, chatId);
-          const ctxMessages = context?.messages;
-          if (Array.isArray(ctxMessages)) {
-            ctxMessages.push({
-              role: 'assistant',
-              sender: streamAgentName,
-              content: result.stdout,
-              messageId: stdoutMessageId,
-              chatId
-            });
-          }
-        }
       }
 
       if (llmResultMode === 'minimal') {
         if (outputFormat === 'json') {
-          return JSON.stringify(formatMinimalShellResult(result), null, 2);
+          return JSON.stringify(formatPreviewShellResult(result), null, 2);
         }
-        return formatMinimalShellResultForLLM(result);
-      }
-
-      if (llmResultMode === 'smart') {
-        return formatSmartShellResultForLLM(result);
+        return formatPreviewShellResultForLLM(result);
       }
 
       const validatedArtifactPaths = Array.isArray(artifactPaths)
