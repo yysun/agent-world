@@ -13,6 +13,7 @@
  * - Accepts state setters/callbacks via dependency injection.
  *
  * Recent Changes:
+ * - 2026-03-06: Ref-ified callback dependencies (onSessionSystemEvent, refreshSessions, resetActivityRuntimeState, onMainLogEvent, setHitlPromptQueue) so subscription effects only re-run on data-identity changes (world/session switch), not callback identity changes.
  * - 2026-03-06: Added app-level selected-chat system-event callback wiring for status-bar visibility while preserving title-refresh side effects.
  * - 2026-02-27: Global log listener now routes events only to logs-panel ingestion; chat message list is no longer mutated for realtime log events.
  * - 2026-02-27: Added app-level main log callback wiring so global log events can feed the logs panel independently of chat message rendering.
@@ -211,15 +212,28 @@ export function useChatEventSubscriptions({
   const pendingHitlEventsRef = useRef<any[]>([]);
   const pendingHitlFlushTimerRef = useRef<number | null>(null);
 
+  // Stable refs for callback-type dependencies so subscription effects never
+  // re-run solely because a callback identity changed between renders.
+  const onMainLogEventRef = useRef(onMainLogEvent);
+  onMainLogEventRef.current = onMainLogEvent;
+  const onSessionSystemEventRef = useRef(onSessionSystemEvent);
+  onSessionSystemEventRef.current = onSessionSystemEvent;
+  const refreshSessionsRef = useRef(refreshSessions);
+  refreshSessionsRef.current = refreshSessions;
+  const resetActivityRef = useRef(resetActivityRuntimeState);
+  resetActivityRef.current = resetActivityRuntimeState;
+  const setHitlPromptQueueRef = useRef(setHitlPromptQueue);
+  setHitlPromptQueueRef.current = setHitlPromptQueue;
+
   useEffect(() => {
     const removeListener = api.onChatEvent(createGlobalLogEventHandler({
-      onMainLogEvent,
+      onMainLogEvent: (entry) => onMainLogEventRef.current?.(entry),
     }));
 
     return () => {
       removeListener();
     };
-  }, [api, onMainLogEvent]);
+  }, [api]);
 
   const loadedWorldId = loadedWorld?.id;
 
@@ -243,8 +257,8 @@ export function useChatEventSubscriptions({
       onSessionSystemEvent: (systemEvent) => {
         forwardSessionSystemEvent({
           loadedWorldId,
-          refreshSessions,
-          onSessionSystemEvent,
+          refreshSessions: refreshSessionsRef.current,
+          onSessionSystemEvent: onSessionSystemEventRef.current,
           systemEvent,
         });
       }
@@ -272,7 +286,7 @@ export function useChatEventSubscriptions({
             eventCount: batch.length,
             subscriptionId
           });
-          setHitlPromptQueue((existing) => {
+          setHitlPromptQueueRef.current((existing) => {
             let queue = existing;
             for (const entry of batch) {
               queue = enqueueHitlPromptFromToolEvent(queue, entry);
@@ -306,17 +320,13 @@ export function useChatEventSubscriptions({
         pendingHitlFlushTimerRef.current = null;
       }
       pendingHitlEventsRef.current = [];
-      resetActivityRuntimeState();
+      resetActivityRef.current();
     };
   }, [
     api,
     chatSubscriptionCounter,
     loadedWorldId,
-    onSessionSystemEvent,
-    refreshSessions,
-    resetActivityRuntimeState,
     selectedSessionId,
-    setHitlPromptQueue,
     setMessages,
     streamingStateRef,
   ]);

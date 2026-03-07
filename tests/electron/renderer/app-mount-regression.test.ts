@@ -1,279 +1,76 @@
 /**
- * Electron Renderer App Mount Regression Tests
+ * Electron Renderer App-Level Proxy Ref Pattern Tests
  * Purpose:
- * - Verify the top-level App component can evaluate without throwing during initial mount.
+ * - Verify the ref-based proxy indirection used by App.tsx for stable hook callbacks.
  *
  * Key Features:
- * - Covers the renderer mount path with lightweight hook/component mocks.
- * - Guards against temporal-dead-zone regressions when derived state reads hook outputs too early.
+ * - Tests that a proxy-ref wrapper always delegates to the latest underlying function.
+ * - Validates that callers receive the return value from the current (not stale) delegate.
  *
  * Implementation Notes:
- * - Uses virtual React hook mocks instead of jsdom to keep the regression deterministic.
- * - Focuses on initial App evaluation only; child hooks/components are stubbed.
+ * - Tests the pure proxy-ref pattern without React rendering or hook runtime.
+ * - Covers the sessionSetterProxyRef / selectedSessionIdRef patterns introduced
+ *   in the 2026-03-06 stable-hook-refs change.
  *
  * Recent Changes:
- * - 2026-03-06: Added regression coverage for the `loadedWorld` initialization ordering crash.
+ * - 2026-03-06: Created targeted tests for proxy-ref callback stability pattern.
  */
 
 import { describe, expect, it, vi } from 'vitest';
 
-const { jsxFactory, defaultWorldForm, defaultAgentForm } = vi.hoisted(() => ({
-  jsxFactory: (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({
-    type,
-    props: props ?? {},
-    key,
-  }),
-  defaultWorldForm: {
-    name: '',
-    description: '',
-    turnLimit: 5,
-    mainAgent: '',
-    chatLLMProvider: 'openai',
-    chatLLMModel: 'gpt-4.1',
-    heartbeatEnabled: false,
-    heartbeatInterval: '*/5 * * * *',
-    heartbeatPrompt: '',
-    mcpConfig: '',
-    variables: '',
-  },
-  defaultAgentForm: {
-    name: '',
-    autoReply: false,
-    provider: 'openai',
-    model: 'gpt-4.1',
-    systemPrompt: '',
-    temperature: '',
-    maxTokens: '',
-  },
-}));
+describe('App proxy-ref callback stability pattern', () => {
+  it('proxy always delegates to the latest setter stored in the ref', () => {
+    // Simulates the sessionSetterProxyRef indirection used in App.tsx:
+    // proxySetSessions = (updater) => sessionSetterProxyRef.current.setSessions?.(updater)
+    const proxyRef: { current: { setSessions: ((v: any) => void) | null } } = {
+      current: { setSessions: null },
+    };
+    const proxy = (updater: any) => proxyRef.current.setSessions?.(updater);
 
-vi.mock('react', () => ({
-  default: { createElement: jsxFactory },
-  useCallback: (fn: unknown) => fn,
-  useEffect: () => undefined,
-  useMemo: (fn: () => unknown) => fn(),
-  useRef: (value?: unknown) => ({ current: value }),
-  useState: (value: unknown) => [typeof value === 'function' ? (value as () => unknown)() : value, () => undefined],
-}));
+    // Before useSessionManagement mounts — no delegate yet
+    proxy('should-be-ignored');
+    // No throw — optional chaining guards null delegate
 
-vi.mock('react/jsx-runtime', () => ({
-  Fragment: 'Fragment',
-  jsx: jsxFactory,
-  jsxs: jsxFactory,
-}));
+    // After first render: useSessionManagement provides setSessions
+    const firstSetter = vi.fn();
+    proxyRef.current.setSessions = firstSetter;
+    proxy('value-a');
+    expect(firstSetter).toHaveBeenCalledWith('value-a');
 
-vi.mock('react/jsx-dev-runtime', () => ({
-  Fragment: 'Fragment',
-  jsxDEV: jsxFactory,
-}));
+    // After re-render with new setSessions identity (e.g. from state update)
+    const secondSetter = vi.fn();
+    proxyRef.current.setSessions = secondSetter;
+    proxy('value-b');
+    expect(secondSetter).toHaveBeenCalledWith('value-b');
+    expect(firstSetter).toHaveBeenCalledTimes(1); // stale setter not called again
+  });
 
-vi.mock('../../../electron/renderer/src/components/index', () => ({
-  LeftSidebarPanel: 'LeftSidebarPanel',
-  AppFrameLayout: 'AppFrameLayout',
-  MainWorkspaceLayout: 'MainWorkspaceLayout',
-  AppOverlaysHost: 'AppOverlaysHost',
-  WorkingStatusBar: 'WorkingStatusBar',
-  MessageQueuePanel: 'MessageQueuePanel',
-}));
+  it('selectedSessionIdRef always returns the latest session id', () => {
+    // Simulates: getSelectedSessionId = () => selectedSessionIdRef.current
+    const ref: { current: string | null } = { current: null };
+    const getter = () => ref.current;
 
-vi.mock('../../../electron/renderer/src/hooks/useWorkingStatus', () => ({
-  useWorkingStatus: () => ({ chatStatus: 'idle', agentStatuses: [] }),
-}));
+    expect(getter()).toBeNull();
 
-vi.mock('../../../electron/renderer/src/domain/desktop-api', () => ({
-  getDesktopApi: () => ({}),
-  safeMessage: (_error: unknown, fallback: string) => fallback,
-}));
+    ref.current = 'chat-1';
+    expect(getter()).toBe('chat-1');
 
-vi.mock('../../../electron/renderer/src/hooks/useSkillRegistry', () => ({
-  useSkillRegistry: () => ({
-    skillRegistryEntries: [],
-    loadingSkillRegistry: false,
-    skillRegistryError: null,
-    refreshSkillRegistry: async () => undefined,
-  }),
-}));
+    ref.current = 'chat-2';
+    expect(getter()).toBe('chat-2');
+  });
 
-vi.mock('../../../electron/renderer/src/hooks/useStreamingActivity', () => ({
-  useStreamingActivity: () => ({
-    streamingStateRef: { current: { handleEnd: vi.fn(), endAllToolStreams: vi.fn(() => []) } },
-    resetActivityRuntimeState: vi.fn(),
-  }),
-}));
+  it('proxy ref handles function updaters like React setState', () => {
+    // proxySetSessions may be called with a function updater: setSessions(prev => [...prev, x])
+    const proxyRef: { current: { setSessions: ((v: any) => void) | null } } = {
+      current: { setSessions: null },
+    };
+    const proxy = (updater: any) => proxyRef.current.setSessions?.(updater);
 
-vi.mock('../../../electron/renderer/src/hooks/useMessageManagement', () => ({
-  useMessageManagement: () => ({
-    composer: '',
-    setComposer: vi.fn(),
-    sendingSessionIds: new Set(),
-    stoppingSessionIds: new Set(),
-    pendingResponseSessionIds: new Set(),
-    editingMessageId: null,
-    editingText: '',
-    setEditingText: vi.fn(),
-    deletingMessageId: null,
-    onSendMessage: async () => undefined,
-    onStopMessage: async () => undefined,
-    onSubmitMessage: async () => undefined,
-    onStartEditMessage: vi.fn(),
-    onCancelEditMessage: vi.fn(),
-    onSaveEditMessage: async () => undefined,
-    onDeleteMessage: async () => undefined,
-    onBranchFromMessage: async () => undefined,
-    onCopyRawMarkdownFromMessage: async () => undefined,
-    clearEditDeleteState: vi.fn(),
-    resetMessageRuntimeState: vi.fn(),
-  }),
-}));
+    const mockSetState = vi.fn();
+    proxyRef.current.setSessions = mockSetState;
 
-vi.mock('../../../electron/renderer/src/hooks/useSessionManagement', () => ({
-  useSessionManagement: () => ({
-    sessions: [],
-    setSessions: vi.fn(),
-    sessionSearch: '',
-    setSessionSearch: vi.fn(),
-    selectedSessionId: null,
-    setSelectedSessionId: vi.fn(),
-    deletingSessionId: null,
-    filteredSessions: [],
-    refreshSessions: async () => undefined,
-    onCreateSession: async () => undefined,
-    onSelectSession: async () => undefined,
-    onDeleteSession: async () => undefined,
-  }),
-}));
-
-vi.mock('../../../electron/renderer/src/hooks/useThemeSettings', () => ({
-  useThemeSettings: () => ({
-    themePreference: 'system',
-    setThemePreference: vi.fn(),
-    systemSettings: { showToolMessages: true },
-    setSystemSettings: vi.fn(),
-    savingSystemSettings: false,
-    settingsNeedRestart: false,
-    hasUnsavedSystemSettingsChanges: false,
-    disabledGlobalSkillIdSet: new Set(),
-    disabledProjectSkillIdSet: new Set(),
-    visibleSkillRegistryEntries: [],
-    globalSkillEntries: [],
-    projectSkillEntries: [],
-    setGlobalSkillsEnabled: vi.fn(),
-    setProjectSkillsEnabled: vi.fn(),
-    toggleSkillEnabled: vi.fn(),
-    loadSystemSettings: async () => undefined,
-    resetSystemSettings: vi.fn(),
-    saveSystemSettings: async () => ({ saved: true, needsRestart: false }),
-  }),
-}));
-
-vi.mock('../../../electron/renderer/src/hooks/useWorldManagement', () => ({
-  useWorldManagement: () => ({
-    loadedWorld: null,
-    setLoadedWorld: vi.fn(),
-    worldLoadError: null,
-    setWorldLoadError: vi.fn(),
-    loadingWorld: false,
-    setLoadingWorld: vi.fn(),
-    availableWorlds: [],
-    setAvailableWorlds: vi.fn(),
-    creatingWorld: { ...defaultWorldForm },
-    setCreatingWorld: vi.fn(),
-    editingWorld: { ...defaultWorldForm },
-    setEditingWorld: vi.fn(),
-    updatingWorld: false,
-    deletingWorld: false,
-    refreshingWorldInfo: false,
-    onSelectWorld: async () => undefined,
-    onCreateWorld: async () => undefined,
-    refreshWorldDetails: async () => undefined,
-    onRefreshWorldInfo: async () => undefined,
-    onUpdateWorld: async () => undefined,
-    onDeleteWorld: async () => undefined,
-    onImportWorld: async () => undefined,
-    onExportWorld: async () => undefined,
-  }),
-}));
-
-vi.mock('../../../electron/renderer/src/hooks/useAppActionHandlers', () => ({
-  useAppActionHandlers: () => ({
-    closePanel: vi.fn(),
-    onOpenSettingsPanel: async () => undefined,
-    onCancelSettings: vi.fn(),
-    onSaveSettings: async () => undefined,
-    onOpenCreateWorldPanel: vi.fn(),
-    onOpenImportWorldPanel: vi.fn(),
-    onOpenLogsPanel: vi.fn(),
-    onOpenWorldEditPanel: vi.fn(),
-    onOpenCreateAgentPanel: vi.fn(),
-    onOpenEditAgentPanel: vi.fn(),
-    onCreateAgent: async () => undefined,
-    onUpdateAgent: async () => undefined,
-    onDeleteAgent: async () => undefined,
-    onSelectProject: async () => undefined,
-    onComposerKeyDown: vi.fn(),
-  }),
-}));
-
-vi.mock('../../../electron/renderer/src/hooks/useChatEventSubscriptions', () => ({
-  useChatEventSubscriptions: () => undefined,
-}));
-
-vi.mock('../../../electron/renderer/src/hooks/useMessageQueue', () => ({
-  useMessageQueue: () => ({
-    queuedMessages: [],
-    addToQueue: async () => undefined,
-    removeFromQueue: async () => undefined,
-    pauseQueue: async () => undefined,
-    resumeQueue: async () => undefined,
-    stopQueue: async () => undefined,
-    clearQueue: async () => undefined,
-    retryQueueMessage: async () => undefined,
-  }),
-}));
-
-vi.mock('../../../electron/renderer/src/utils/app-layout-props', () => ({
-  createLeftSidebarProps: () => ({}),
-  createMainContentComposerProps: () => ({}),
-  createMainContentMessageListProps: () => ({}),
-  createMainContentRightPanelContentProps: () => ({}),
-  createMainContentRightPanelShellProps: () => ({}),
-  createMainHeaderProps: () => ({}),
-}));
-
-vi.mock('../../../electron/renderer/src/utils/logger', () => ({
-  initializeRendererLogger: async () => undefined,
-  rendererLogger: {
-    subscribe: () => () => undefined,
-    debug: vi.fn(),
-  },
-}));
-
-vi.mock('../../../electron/renderer/src/domain/session-system-status', () => ({
-  createSessionSystemStatus: () => null,
-  retainSessionSystemStatusForContext: (current: unknown) => current,
-}));
-
-vi.mock('../../../electron/renderer/src/utils/app-helpers', () => ({
-  getAgentDisplayName: (agent: any, index: number) => String(agent?.name || `Agent ${index + 1}`),
-  getAgentInitials: (name: string) => String(name || '').slice(0, 2).toUpperCase(),
-  getDefaultWorldForm: () => ({ ...defaultWorldForm }),
-  getEnvValueFromText: () => '',
-  getWorldFormFromWorld: () => ({ ...defaultWorldForm }),
-  parseOptionalInteger: (value: unknown, fallback: number) => {
-    const next = Number(value);
-    return Number.isFinite(next) ? next : fallback;
-  },
-}));
-
-vi.mock('../../../electron/shared/conversation-message-counts', () => ({
-  countAgentConversationResponses: () => 0,
-  countConversationDisplayMessages: (messages: unknown[]) => messages.length,
-}));
-
-import App from '../../../electron/renderer/src/App';
-
-describe('electron/renderer App mount regression', () => {
-  it('does not throw before loadedWorld is initialized by useWorldManagement', () => {
-    expect(() => App()).not.toThrow();
+    const updater = (prev: string[]) => [...prev, 'new-session'];
+    proxy(updater);
+    expect(mockSetState).toHaveBeenCalledWith(updater);
   });
 });

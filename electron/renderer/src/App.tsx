@@ -314,6 +314,17 @@ export default function App() {
     };
   }, [appendUnifiedLogEntry]);
 
+  // Stable callback proxies — identity never changes because refs are stable.
+  const proxySetSessions = useCallback(
+    (updater: any) => sessionSetterProxyRef.current.setSessions?.(updater), []
+  );
+  const proxySetSelectedSessionId = useCallback(
+    (updater: any) => sessionSetterProxyRef.current.setSelectedSessionId?.(updater), []
+  );
+  const getSelectedSessionId = useCallback(
+    () => selectedSessionIdRef.current, []
+  );
+
   const {
     loadedWorld,
     setLoadedWorld,
@@ -341,8 +352,8 @@ export default function App() {
   } = useWorldManagement({
     api,
     setStatusText,
-    setSessions: (updater: any) => sessionSetterProxyRef.current.setSessions?.(updater),
-    setSelectedSessionId: (updater: any) => sessionSetterProxyRef.current.setSelectedSessionId?.(updater),
+    setSessions: proxySetSessions,
+    setSelectedSessionId: proxySetSelectedSessionId,
     setMessages,
     setSelectedAgentId,
     setPanelOpen,
@@ -350,7 +361,7 @@ export default function App() {
     getDefaultWorldForm,
     getWorldFormFromWorld,
     selectedProjectPath,
-    getSelectedSessionId: () => selectedSessionIdRef.current,
+    getSelectedSessionId,
   });
 
   const {
@@ -708,6 +719,7 @@ export default function App() {
     hasActiveHitlPrompt,
     setHitlPromptQueue,
     setSubmittingHitlRequestId,
+    messageRefreshCounter,
   });
 
   const initialize = useCallback(async () => {

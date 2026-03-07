@@ -697,16 +697,10 @@ export default function MessageListPanel({
       <div
         className={baseContainerClassName}
       >
-        {shouldShowLoading ? (
-          selectedSession ? (
-            <section className="w-full max-w-[680px] rounded-xl bg-card/40 px-6 py-5">
-              <p className="text-sm text-muted-foreground">Loading messages...</p>
-            </section>
-          ) : (
-            <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-              Select a session from the left column.
-            </div>
-          )
+        {shouldShowLoading && !selectedSession ? (
+          <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+            Select a session from the left column.
+          </div>
         ) : shouldShowWelcome ? (
           selectedSession ? (
             <section className="w-full max-w-[680px] rounded-xl bg-card/60 px-6 py-5">

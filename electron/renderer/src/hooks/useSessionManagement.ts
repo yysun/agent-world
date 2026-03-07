@@ -13,9 +13,12 @@
  * - Integrates with shared loading/message state via injected setters.
  *
  * Recent Changes:
+ * - 2026-03-06: Remove immediate setMessages([]) and dead prefetch IIFE from onSelectSession to
+ *   eliminate welcome-card and loading-card flicker. Messages stay visible until refreshMessages
+ *   (triggered by useEffect in App.tsx) replaces them; the refresh guard already handles concurrent
+ *   switches correctly.
  * - 2026-02-26: Replaced session-switch console traces with categorized renderer logger output controlled by env-derived log config.
  * - 2026-02-26: Remove transient error/log artifacts immediately on session switch start so stale failures do not linger during history prefetch.
- * - 2026-02-25: Added history-first session-switch prefetch from persisted memory and detailed renderer logs for session select/restore diagnostics.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 3 custom hook migration.
  */
 
@@ -109,31 +112,7 @@ export function useSessionManagement({
       previousChatId: previousSessionId || null
     });
     messageRefreshCounter.current += 1;
-    const prefetchRefreshId = messageRefreshCounter.current;
-    // Clear the full previous transcript immediately so stale rows are never
-    // actionable while the new chat's history loads (AD-2).
-    setMessages([]);
     setSelectedSessionId(chatId);
-
-    void (async () => {
-      try {
-        const history = await api.getMessages(loadedWorldId, chatId);
-        // Discard if a later chat switch started after this prefetch (AD-6).
-        if (prefetchRefreshId !== messageRefreshCounter.current) return;
-        rendererLogger.debug('electron.renderer.session', 'Session history prefetched', {
-          worldId: loadedWorldId,
-          chatId,
-          messageCount: Array.isArray(history) ? history.length : 0
-        });
-        setMessages(Array.isArray(history) ? history : []);
-      } catch (prefetchError) {
-        rendererLogger.warn('electron.renderer.session', 'Session history prefetch failed', {
-          worldId: loadedWorldId,
-          chatId,
-          error: safeMessage(prefetchError, 'unknown')
-        });
-      }
-    })();
 
     try {
       const result = await api.selectSession(loadedWorldId, chatId);
@@ -158,7 +137,7 @@ export function useSessionManagement({
       });
       setStatusText(safeMessage(error, 'Failed to select session.'), 'error');
     }
-  }, [api, loadedWorldId, messageRefreshCounter, selectedSessionId, setMessages, setStatusText]);
+  }, [api, loadedWorldId, messageRefreshCounter, selectedSessionId, setStatusText]);
 
   const onDeleteSession = useCallback(async (chatId, event) => {
     event.stopPropagation();

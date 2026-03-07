@@ -13,6 +13,9 @@
  * - Keeps branch/session refresh semantics aligned with the existing desktop IPC flows.
  *
  * Recent Changes:
+ * - 2026-03-07: Accept messageRefreshCounter ref and increment it in onSaveEditMessage before
+ *   api.editMessage to invalidate any concurrent in-flight refreshMessages call triggered by
+ *   a prior chat switch, preventing the resolved history from overwriting streaming messages (AD-8).
  * - 2026-02-27: Updated submit stop-mode detection to also follow status-registry `working` state so stop remains available when pending markers are absent.
  * - 2026-02-26: Replaced edit-backup localStorage warning console traces with categorized renderer logger output controlled by env-derived log config.
  * - 2026-02-26: Set chat-scoped sending state during edit-save submission so the inline working indicator appears immediately (web parity) and clears in `finally`.
@@ -59,6 +62,7 @@ export function useMessageManagement({
   hasActiveHitlPrompt = false,
   setHitlPromptQueue,
   setSubmittingHitlRequestId,
+  messageRefreshCounter,
 }) {
   const [composer, setComposer] = useState('');
   const [sendingSessionIds, setSendingSessionIds] = useState<Set<string>>(new Set());
@@ -315,6 +319,13 @@ export function useMessageManagement({
     });
     setSendingSessionIds((prev) => new Set([...prev, targetChatId]));
 
+    // Invalidate any in-flight refreshMessages triggered by a prior chat switch.
+    // Without this, a concurrent refreshMessages resolving after the edit starts will
+    // call setMessages(history) and overwrite the streaming agent response (AD-8).
+    if (messageRefreshCounter) {
+      messageRefreshCounter.current += 1;
+    }
+
     try {
       const editResult = await api.editMessage(loadedWorldId, message.messageId, editedText, targetChatId);
 
@@ -380,6 +391,7 @@ export function useMessageManagement({
     api,
     editingText,
     loadedWorldId,
+    messageRefreshCounter,
     refreshMessages,
     resolveMessageTargetChatId,
     selectedSessionIdRef,
