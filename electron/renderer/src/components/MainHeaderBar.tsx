@@ -14,6 +14,7 @@
  * - Preserves existing drag/no-drag region behavior for Electron title area.
  *
  * Recent Changes:
+ * - 2026-03-06: Clicking the session title in the header now copies the chat/session ID to the clipboard.
  * - 2026-03-04: Grid submenu now dismisses on option select and is left-aligned to the Grid icon button.
  * - 2026-03-04: Replaced grid layout dropdown with a submenu anchored under the Grid icon.
  * - 2026-03-04: Replaced grid layout cycle button with dropdown options (`1+2`, `2+1`, `2+2`) while keeping icon view-mode buttons.
@@ -25,6 +26,8 @@
  * - 2026-02-20: Added refresh button next to the settings gear to reload world agents.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component decomposition.
  */
+
+import { useState } from 'react';
 
 function normalizeMainAgentValue(value: unknown): string {
   return String(value || '').trim().toLowerCase();
@@ -63,6 +66,16 @@ export default function MainHeaderBar({
   noDragRegionStyle,
 }) {
   const normalizedWorldViewMode = String(worldViewMode || 'chat').trim().toLowerCase();
+  const [sessionIdCopied, setSessionIdCopied] = useState(false);
+
+  function handleCopySessionId() {
+    if (!selectedSession?.id) return;
+    navigator.clipboard.writeText(selectedSession.id).then(() => {
+      setSessionIdCopied(true);
+      setTimeout(() => setSessionIdCopied(false), 1500);
+    });
+  }
+
   const iconButtonClassName = (active: boolean) => `flex h-7 w-7 items-center justify-center rounded transition-colors ${active
     ? 'bg-primary text-primary-foreground'
     : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
@@ -107,8 +120,13 @@ export default function MainHeaderBar({
           <div className="text-sm font-semibold text-foreground">
             {selectedWorld ? selectedWorld.name : 'No world selected'}
           </div>
-          <div className="text-xs text-muted-foreground">
-            {selectedSession ? `${selectedSession.name}` : 'Select a session to start chatting'}
+          <div
+            className={`text-xs ${selectedSession ? 'cursor-pointer hover:text-foreground' : ''} ${sessionIdCopied ? 'text-green-500' : 'text-muted-foreground'}`}
+            onClick={selectedSession ? handleCopySessionId : undefined}
+            title={selectedSession ? (sessionIdCopied ? 'Copied!' : `Click to copy chat ID: ${selectedSession.id}`) : undefined}
+            style={selectedSession ? noDragRegionStyle : undefined}
+          >
+            {sessionIdCopied ? 'ID copied!' : (selectedSession ? `${selectedSession.name}` : 'Select a session to start chatting')}
           </div>
         </div>
       </div>
