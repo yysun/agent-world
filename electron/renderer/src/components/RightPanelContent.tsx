@@ -134,6 +134,7 @@ export default function RightPanelContent({
   onImportWorld,
   panelLogs,
   onClearPanelLogs,
+  onEditSkill,
 }) {
   const [importSourceType, setImportSourceType] = useState('local');
   const [githubImportSource, setGithubImportSource] = useState('@awesome-agent-world/');
@@ -411,13 +412,26 @@ export default function RightPanelContent({
                     <div className="ml-1 space-y-0.5">
                       {globalSkillEntries.length > 0 ? (
                         globalSkillEntries.map((entry) => (
-                          <SettingsSkillSwitch
-                            key={`global-${entry.skillId}`}
-                            label={entry.skillId}
-                            checked={!disabledGlobalSkillIdSet.has(entry.skillId)}
-                            onClick={() => toggleSkillEnabled('global', entry.skillId)}
-                            disabled={savingSystemSettings}
-                          />
+                          <div key={`global-${entry.skillId}`} className="group flex items-center">
+                            <div className="flex-1 min-w-0">
+                              <SettingsSkillSwitch
+                                label={entry.skillId}
+                                checked={!disabledGlobalSkillIdSet.has(entry.skillId)}
+                                onClick={() => toggleSkillEnabled('global', entry.skillId)}
+                                disabled={savingSystemSettings}
+                              />
+                            </div>
+                            {typeof onEditSkill === 'function' ? (
+                              <button
+                                type="button"
+                                aria-label={`Edit skill ${entry.skillId}`}
+                                onClick={() => onEditSkill(entry)}
+                                className="ml-1 flex-none rounded p-0.5 text-sidebar-foreground/30 opacity-0 transition-opacity hover:text-sidebar-foreground/80 group-hover:opacity-100"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                              </button>
+                            ) : null}
+                          </div>
                         ))
                       ) : (
                         <p className="px-1 py-1 text-[11px] text-sidebar-foreground/50">No global skills discovered.</p>
@@ -435,13 +449,26 @@ export default function RightPanelContent({
                     <div className="ml-1 space-y-0.5">
                       {projectSkillEntries.length > 0 ? (
                         projectSkillEntries.map((entry) => (
-                          <SettingsSkillSwitch
-                            key={`project-${entry.skillId}`}
-                            label={entry.skillId}
-                            checked={!disabledProjectSkillIdSet.has(entry.skillId)}
-                            onClick={() => toggleSkillEnabled('project', entry.skillId)}
-                            disabled={savingSystemSettings}
-                          />
+                          <div key={`project-${entry.skillId}`} className="group flex items-center">
+                            <div className="flex-1 min-w-0">
+                              <SettingsSkillSwitch
+                                label={entry.skillId}
+                                checked={!disabledProjectSkillIdSet.has(entry.skillId)}
+                                onClick={() => toggleSkillEnabled('project', entry.skillId)}
+                                disabled={savingSystemSettings}
+                              />
+                            </div>
+                            {typeof onEditSkill === 'function' ? (
+                              <button
+                                type="button"
+                                aria-label={`Edit skill ${entry.skillId}`}
+                                onClick={() => onEditSkill(entry)}
+                                className="ml-1 flex-none rounded p-0.5 text-sidebar-foreground/30 opacity-0 transition-opacity hover:text-sidebar-foreground/80 group-hover:opacity-100"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                              </button>
+                            ) : null}
+                          </div>
                         ))
                       ) : (
                         <p className="px-1 py-1 text-[11px] text-sidebar-foreground/50">No project skills discovered.</p>

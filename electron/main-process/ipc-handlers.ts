@@ -12,6 +12,7 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-03-08: Added `readSkillContent` and `saveSkillContent` IPC handlers for reading/writing SKILL.md content from the renderer skill editor.
  * - 2026-03-06: Heartbeat job starts now require explicit `chatId`; workspace load no longer auto-starts heartbeat jobs from persisted world state.
  * - 2026-03-06: Removed runtime queue-resume fallback to persisted `currentChatId`; Electron now resumes chat queues only for explicitly selected sessions.
  * - 2026-03-04: Extended `sendChatMessage` IPC response with queue metadata (`queueStatus`, `queueRetryCount`) for queue-failure visibility.
@@ -136,6 +137,7 @@ interface MainIpcHandlerFactoryDependencies {
   listChats: (worldId: string) => Promise<any[]>;
   listWorlds: () => Promise<any[]>;
   getSkillSourceScope: (skillId: string) => 'global' | 'project' | undefined;
+  getSkillSourcePath: (skillId: string) => string | undefined;
   getSkillsForSystemPrompt: (options?: {
     includeGlobal?: boolean;
     includeProject?: boolean;
@@ -224,6 +226,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     listChats,
     listWorlds,
     getSkillSourceScope,
+    getSkillSourcePath,
     getSkillsForSystemPrompt,
     syncSkills,
     newChat,
@@ -1495,6 +1498,25 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     return retryQueueMessage(worldId, messageId, chatId);
   }
 
+  async function readSkillContent(payload: unknown) {
+    await ensureCoreReady();
+    const skillId = String((payload as any)?.skillId || '').trim();
+    if (!skillId) throw new Error('Skill ID is required.');
+    const skillPath = getSkillSourcePath(skillId);
+    if (!skillPath) throw new Error(`Skill not found in registry: ${skillId}`);
+    return fs.promises.readFile(skillPath, 'utf8');
+  }
+
+  async function saveSkillContent(payload: unknown) {
+    await ensureCoreReady();
+    const skillId = String((payload as any)?.skillId || '').trim();
+    const content = String((payload as any)?.content ?? '');
+    if (!skillId) throw new Error('Skill ID is required.');
+    const skillPath = getSkillSourcePath(skillId);
+    if (!skillPath) throw new Error(`Skill not found in registry: ${skillId}`);
+    await fs.promises.writeFile(skillPath, content, 'utf8');
+  }
+
   return {
     loadWorldsFromWorkspace,
     loadSpecificWorld,
@@ -1535,6 +1557,8 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     resumeChatQueue: resumeChatQueueHandler,
     stopChatQueue: stopChatQueueHandler,
     clearChatQueue: clearChatQueueHandler,
-    retryQueueMessage: retryQueueMessageHandler
+    retryQueueMessage: retryQueueMessageHandler,
+    readSkillContent,
+    saveSkillContent
   };
 }

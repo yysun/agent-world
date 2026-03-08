@@ -15,6 +15,7 @@
  * - Runtime validation remains in main-process handlers for behavior parity.
  *
  * Recent Changes:
+ * - 2026-03-08: Added `skill:readContent` and `skill:saveContent` invoke contracts for skill SKILL.md read/write flows.
  * - 2026-02-26: Added `logging:getConfig` invoke contract and typed renderer logging config payload for env-controlled categorized renderer logs.
  * - 2026-02-25: Extended `world:import` contract with optional source payload for path/shorthand imports.
  * - 2026-02-19: Added `world:export` invoke contract for desktop world save/export flows aligned with CLI storage options.
@@ -78,7 +79,9 @@ export const DESKTOP_INVOKE_CHANNELS = {
   QUEUE_PAUSE: 'queue:pause',
   QUEUE_RESUME: 'queue:resume',
   QUEUE_STOP: 'queue:stop',
-  QUEUE_RETRY: 'queue:retry'
+  QUEUE_RETRY: 'queue:retry',
+  SKILL_READ_CONTENT: 'skill:readContent',
+  SKILL_SAVE_CONTENT: 'skill:saveContent'
 } as const;
 
 export type DesktopInvokeChannel =
@@ -190,6 +193,15 @@ export interface SkillListFilterPayload {
   projectPath?: string;
 }
 
+export interface SkillContentPayload {
+  skillId: string;
+}
+
+export interface SkillSavePayload {
+  skillId: string;
+  content: string;
+}
+
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 
 export interface RendererLoggingConfig {
@@ -248,4 +260,6 @@ export interface DesktopApi {
   resumeChatQueue: (worldId: string, chatId: string) => Promise<unknown>;
   stopChatQueue: (worldId: string, chatId: string) => Promise<unknown>;
   retryQueueMessage: (worldId: string, messageId: string, chatId: string) => Promise<unknown>;
+  readSkillContent: (skillId: string) => Promise<string>;
+  saveSkillContent: (skillId: string, content: string) => Promise<void>;
 }

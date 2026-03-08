@@ -130,6 +130,7 @@ const {
   getMemory,
   getWorld,
   getSkillSourceScope,
+  getSkillSourcePath,
   getSkillsForSystemPrompt,
   listChats,
   listWorlds,
@@ -252,6 +253,7 @@ const ipcHandlers = createMainIpcHandlers({
   listChats,
   listWorlds,
   getSkillSourceScope,
+  getSkillSourcePath,
   getSkillsForSystemPrompt,
   syncSkills,
   newChat,
@@ -344,7 +346,9 @@ function registerIpcHandlers() {
     pauseChatQueue: ipcHandlers.pauseChatQueue,
     resumeChatQueue: ipcHandlers.resumeChatQueue,
     stopChatQueue: ipcHandlers.stopChatQueue,
-    retryQueueMessage: ipcHandlers.retryQueueMessage
+    retryQueueMessage: ipcHandlers.retryQueueMessage,
+    readSkillContent: ipcHandlers.readSkillContent,
+    saveSkillContent: ipcHandlers.saveSkillContent
   });
   registerIpcRoutes(ipcMain, routes);
 }

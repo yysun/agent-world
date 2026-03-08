@@ -56,6 +56,7 @@ import {
   AppOverlaysHost,
   WorkingStatusBar,
   MessageQueuePanel,
+  SkillEditor,
 } from './components/index';
 import { useWorkingStatus } from './hooks/useWorkingStatus';
 import { getDesktopApi, safeMessage } from './domain/desktop-api';
@@ -216,6 +217,12 @@ export default function App() {
   const [worldGridLayoutChoiceId, setWorldGridLayoutChoiceId] = useState<WorldGridLayoutChoiceId>('1+2');
   const [isGridLayoutSubmenuOpen, setIsGridLayoutSubmenuOpen] = useState(false);
   const hasActiveHitlPrompt = hitlPromptQueue.length > 0;
+
+  // Skill editor state
+  const [editorMode, setEditorMode] = useState<'none' | 'skill'>('none');
+  const [editingSkillEntry, setEditingSkillEntry] = useState<{ skillId: string; description: string; sourceScope: string } | null>(null);
+  const [editingSkillContent, setEditingSkillContent] = useState('');
+  const [savingSkillContent, setSavingSkillContent] = useState(false);
 
   const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [notification, setNotification] = useState<{ text: string; kind: 'error' | 'success' | 'info' } | null>(null);
@@ -1058,6 +1065,39 @@ export default function App() {
     refreshSkillRegistry,
   });
 
+  const onOpenSkillEditor = useCallback(async (entry: { skillId: string; description: string; sourceScope: string }) => {
+    const skillId = String(entry?.skillId || '').trim();
+    if (!skillId) return;
+    try {
+      const content = await api.readSkillContent(skillId);
+      setEditingSkillEntry(entry);
+      setEditingSkillContent(typeof content === 'string' ? content : '');
+      setEditorMode('skill');
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to load skill content.'), 'error');
+    }
+  }, [api, setStatusText]);
+
+  const onCloseSkillEditor = useCallback(() => {
+    setEditorMode('none');
+    setEditingSkillEntry(null);
+    setEditingSkillContent('');
+  }, []);
+
+  const onSaveSkillContent = useCallback(async () => {
+    const skillId = String(editingSkillEntry?.skillId || '').trim();
+    if (!skillId) return;
+    setSavingSkillContent(true);
+    try {
+      await api.saveSkillContent(skillId, editingSkillContent);
+      setStatusText('Skill saved.', 'success');
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to save skill content.'), 'error');
+    } finally {
+      setSavingSkillContent(false);
+    }
+  }, [api, editingSkillContent, editingSkillEntry, setStatusText]);
+
   const agentStatusInput = useMemo(
     () => worldAgents.map((a: any) => ({ id: String(a.id || ''), name: String(a.name || '') })),
     [worldAgents]
@@ -1295,6 +1335,7 @@ export default function App() {
     onImportWorld,
     panelLogs: scopedPanelLogs,
     onClearPanelLogs,
+    onEditSkill: onOpenSkillEditor,
   });
 
   const leftSidebarProps = createLeftSidebarProps({
@@ -1375,6 +1416,18 @@ export default function App() {
             rightPanelShellProps: mainContentRightPanelShellProps,
             rightPanelContentProps: mainContentRightPanelContentProps,
           }}
+          editorContent={
+            editorMode === 'skill' && editingSkillEntry ? (
+              <SkillEditor
+                skillId={editingSkillEntry.skillId}
+                content={editingSkillContent}
+                onContentChange={setEditingSkillContent}
+                onBack={onCloseSkillEditor}
+                onSave={onSaveSkillContent}
+                saving={savingSkillContent}
+              />
+            ) : undefined
+          }
           queuePanel={(
             queuedMessages.length > 0 ? (
               <MessageQueuePanel

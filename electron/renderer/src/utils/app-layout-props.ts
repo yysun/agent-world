@@ -140,6 +140,7 @@ export function createMainContentRightPanelContentProps<T extends PropBag>(input
     onImportWorld: input.onImportWorld,
     panelLogs: input.panelLogs,
     onClearPanelLogs: input.onClearPanelLogs,
+    onEditSkill: input.onEditSkill,
   };
 }
 

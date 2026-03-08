@@ -97,6 +97,7 @@ export {
   getSkillsForSystemPrompt,
   getSkill,
   getSkillSourceScope,
+  getSkillSourcePath,
   clearSkillsForTests,
   type SkillRegistryEntry,
   type SkillSourceScope,

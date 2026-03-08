@@ -85,6 +85,8 @@ export interface MainIpcHandlers {
   resumeChatQueue: (payload: unknown) => Promise<unknown> | unknown;
   stopChatQueue: (payload: unknown) => Promise<unknown> | unknown;
   retryQueueMessage: (payload: unknown) => Promise<unknown> | unknown;
+  readSkillContent: (payload: unknown) => Promise<unknown> | unknown;
+  saveSkillContent: (payload: unknown) => Promise<unknown> | unknown;
 }
 
 export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
@@ -196,6 +198,8 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
     { channel: DESKTOP_INVOKE_CHANNELS.QUEUE_PAUSE, handler: async (_event, payload) => handlers.pauseChatQueue(payload) },
     { channel: DESKTOP_INVOKE_CHANNELS.QUEUE_RESUME, handler: async (_event, payload) => handlers.resumeChatQueue(payload) },
     { channel: DESKTOP_INVOKE_CHANNELS.QUEUE_STOP, handler: async (_event, payload) => handlers.stopChatQueue(payload) },
-    { channel: DESKTOP_INVOKE_CHANNELS.QUEUE_RETRY, handler: async (_event, payload) => handlers.retryQueueMessage(payload) }
+    { channel: DESKTOP_INVOKE_CHANNELS.QUEUE_RETRY, handler: async (_event, payload) => handlers.retryQueueMessage(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.SKILL_READ_CONTENT, handler: async (_event, payload) => handlers.readSkillContent(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.SKILL_SAVE_CONTENT, handler: async (_event, payload) => handlers.saveSkillContent(payload) }
   ];
 }

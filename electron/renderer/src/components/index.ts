@@ -6,6 +6,7 @@
  * - Clean module organization
  *
  * Recent Changes:
+ * - 2026-03-08: Added exports for `BaseEditor`, `EditorChatPane`, and `SkillEditor`.
  * - 2026-02-14: Added exports for `PromptEditorModal` and `WorldConfigEditorModal`.
  * - 2026-02-14: Added exports for `WorldInfoCard`, `ComposerBar`, and `AgentFormFields`.
  * - 2026-02-10: Initial implementation with streaming indicators
@@ -28,6 +29,9 @@ export { default as MessageListPanel } from './MessageListPanel';
 export { default as RightPanelContent } from './RightPanelContent';
 export { default as WorkingStatusBar } from './WorkingStatusBar';
 export { default as EditorModalsHost } from './EditorModalsHost';
+export { default as BaseEditor } from './BaseEditor';
+export { default as EditorChatPane } from './EditorChatPane';
+export { default as SkillEditor } from './SkillEditor';
 export { default as LeftSidebarPanel } from './LeftSidebarPanel';
 export { default as MainHeaderBar } from './MainHeaderBar';
 export { default as RightPanelShell } from './RightPanelShell';

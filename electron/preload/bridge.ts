@@ -274,7 +274,11 @@ export function createDesktopApi(ipcRendererLike: IpcRendererLike = ipcRenderer)
     stopChatQueue: (worldId, chatId) =>
       invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.QUEUE_STOP, toWorldChatPayload(worldId, chatId)),
     retryQueueMessage: (worldId, messageId, chatId) =>
-      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.QUEUE_RETRY, { worldId, messageId, chatId })
+      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.QUEUE_RETRY, { worldId, messageId, chatId }),
+    readSkillContent: (skillId) =>
+      invokeDesktopChannel<string>(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.SKILL_READ_CONTENT, { skillId }),
+    saveSkillContent: (skillId, content) =>
+      invokeDesktopChannel<void>(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.SKILL_SAVE_CONTENT, { skillId, content })
   };
 }
 

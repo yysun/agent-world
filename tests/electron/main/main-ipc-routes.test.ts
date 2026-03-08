@@ -11,6 +11,7 @@
  * - Tests route build + registration helpers together.
  *
  * Recent Changes:
+ * - 2026-03-08: Updated canonical channel list and last-route assertion for skill:readContent and skill:saveContent.
  * - 2026-02-26: Added channel/order/payload assertions for `logging:getConfig` route wiring.
  * - 2026-02-26: Added payload assertion for `world:import` route wiring with optional `source` input.
  * - 2026-02-19: Added channel/order/payload assertions for `world:export` route wiring.
@@ -75,7 +76,9 @@ function createHandlerMocks() {
     pauseChatQueue: vi.fn(async () => ({ success: true })),
     resumeChatQueue: vi.fn(async () => ({ success: true })),
     stopChatQueue: vi.fn(async () => ({ success: true })),
-    retryQueueMessage: vi.fn(async () => ({ success: true }))
+    retryQueueMessage: vi.fn(async () => ({ success: true })),
+    readSkillContent: vi.fn(async () => '# skill content'),
+    saveSkillContent: vi.fn(async () => undefined)
   };
 }
 
@@ -132,7 +135,9 @@ describe('buildMainIpcRoutes', () => {
       'queue:pause',
       'queue:resume',
       'queue:stop',
-      'queue:retry'
+      'queue:retry',
+      'skill:readContent',
+      'skill:saveContent'
     ]);
   });
 
@@ -216,7 +221,7 @@ describe('registerIpcRoutes', () => {
     );
     expect(ipcMainLike.handle).toHaveBeenNthCalledWith(
       routes.length,
-      'queue:retry',
+      'skill:saveContent',
       expect.any(Function)
     );
   });
