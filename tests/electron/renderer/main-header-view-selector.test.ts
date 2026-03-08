@@ -20,25 +20,20 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-const jsxFactory = (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({
-  type,
-  props: props ?? {},
-  key,
-});
-
 vi.mock('react', () => ({
-  default: { createElement: jsxFactory },
+  default: { createElement: (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({ type, props: props ?? {}, key }) },
+  useState: (initial: unknown) => [initial, () => {}],
 }));
 
 vi.mock('react/jsx-runtime', () => ({
   Fragment: 'Fragment',
-  jsx: jsxFactory,
-  jsxs: jsxFactory,
+  jsx: (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({ type, props: props ?? {}, key }),
+  jsxs: (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({ type, props: props ?? {}, key }),
 }));
 
 vi.mock('react/jsx-dev-runtime', () => ({
   Fragment: 'Fragment',
-  jsxDEV: jsxFactory,
+  jsxDEV: (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({ type, props: props ?? {}, key }),
 }));
 
 import MainHeaderBar from '../../../electron/renderer/src/components/MainHeaderBar';

@@ -16,26 +16,21 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-const jsxFactory = (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({
-  type,
-  props: props ?? {},
-  key,
-});
-
 vi.mock('react', () => ({
-  default: { createElement: jsxFactory },
-}), { virtual: true });
+  default: { createElement: (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({ type, props: props ?? {}, key }) },
+  useState: (initial: unknown) => [initial, () => {}],
+}));
 
 vi.mock('react/jsx-runtime', () => ({
   Fragment: 'Fragment',
-  jsx: jsxFactory,
-  jsxs: jsxFactory,
-}), { virtual: true });
+  jsx: (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({ type, props: props ?? {}, key }),
+  jsxs: (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({ type, props: props ?? {}, key }),
+}));
 
 vi.mock('react/jsx-dev-runtime', () => ({
   Fragment: 'Fragment',
-  jsxDEV: jsxFactory,
-}), { virtual: true });
+  jsxDEV: (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({ type, props: props ?? {}, key }),
+}));
 
 import QueueMessageItem from '../../../electron/renderer/src/components/QueueMessageItem';
 import type { QueuedMessageEntry } from '../../../electron/renderer/src/hooks/useMessageQueue';

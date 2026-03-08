@@ -71,11 +71,15 @@ export default defineConfig({
     reporters: ['verbose']
   },
 
-  // Path resolution
+  // Path resolution — array form ensures specific aliases take priority over shorter prefixes
   resolve: {
-    alias: {
+    alias: [
+      { find: 'react/jsx-dev-runtime', replacement: new URL('./electron/node_modules/react/jsx-dev-runtime.js', import.meta.url).pathname },
+      { find: 'react/jsx-runtime', replacement: new URL('./electron/node_modules/react/jsx-runtime.js', import.meta.url).pathname },
+      // Unify react resolution so vi.mock('react') intercepts electron workspace imports
+      { find: 'react', replacement: new URL('./electron/node_modules/react/index.js', import.meta.url).pathname },
       // Mock sqlite3 module
-      'sqlite3': new URL('./tests/__mocks__/sqlite3.js', import.meta.url).pathname
-    }
+      { find: 'sqlite3', replacement: new URL('./tests/__mocks__/sqlite3.js', import.meta.url).pathname },
+    ]
   }
 });
