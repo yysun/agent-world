@@ -16,6 +16,7 @@
  *
  * Recent Changes:
  * - 2026-03-08: Initial implementation as part of editor skill-editor feature.
+ * - 2026-03-08: Match textarea font to PromptEditorModal (removed font-mono).
  */
 
 import React from 'react';
@@ -78,7 +79,7 @@ export default function SkillEditor({
   return (
     <BaseEditor toolbar={toolbar} chatPaneContext={skillId}>
       <textarea
-        className="h-full w-full resize-none bg-background p-4 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+        className="h-full w-full resize-none bg-background p-4 text-xs leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none"
         value={content}
         onChange={(e) => onContentChange(e.target.value)}
         disabled={saving}
