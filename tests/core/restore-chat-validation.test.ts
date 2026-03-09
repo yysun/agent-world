@@ -175,7 +175,13 @@ describe('restoreChat validation', () => {
           createdAt: new Date('2026-02-24T10:00:00Z')
         }
       ]),
-      saveWorld: vi.fn().mockResolvedValue(undefined)
+      saveWorld: vi.fn().mockResolvedValue(undefined),
+      // Queue storage: message is not yet in queue → should be enqueued on restore
+      addQueuedMessage: vi.fn().mockResolvedValue(undefined),
+      getQueuedMessages: vi.fn().mockResolvedValue([]),
+      updateMessageQueueStatus: vi.fn().mockResolvedValue(undefined),
+      incrementQueueMessageRetry: vi.fn().mockResolvedValue(1),
+      removeQueuedMessage: vi.fn().mockResolvedValue(undefined),
     };
 
     mockStorageFactory(storageWrappers);
@@ -198,15 +204,6 @@ describe('restoreChat validation', () => {
       };
     });
 
-    const publishMessageWithId = vi.fn();
-    vi.doMock('../../core/events/index.js', async () => {
-      const actual = await vi.importActual<typeof import('../../core/events/index.js')>('../../core/events/index.js');
-      return {
-        ...actual,
-        publishMessageWithId,
-      };
-    });
-
     const managers = await import('../../core/managers.js');
     const restored = await managers.restoreChat('world-1', 'chat-2');
     expect(restored).not.toBeNull();
@@ -214,14 +211,14 @@ describe('restoreChat validation', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(replayPendingHitlRequests).toHaveBeenCalledTimes(1);
-    expect(publishMessageWithId).toHaveBeenCalledTimes(1);
-    expect(publishMessageWithId).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'world-1' }),
-      'Continue this pending request',
-      'human',
-      'user-last-1',
+    // Message is routed through the queue system (not published directly)
+    expect(storageWrappers.addQueuedMessage).toHaveBeenCalledTimes(1);
+    expect(storageWrappers.addQueuedMessage).toHaveBeenCalledWith(
+      'world-1',
       'chat-2',
-      undefined
+      'user-last-1',
+      'Continue this pending request',
+      'human'
     );
     expect(resumePendingToolCallsForChat).not.toHaveBeenCalled();
   });

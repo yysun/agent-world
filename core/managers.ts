@@ -43,6 +43,7 @@
  *   - Queue fallback timeout is now configurable and defaults to 5 seconds.
  * - 2026-03-04: Added dedicated `message.queue` category logging for queue dispatch/retry/fallback lifecycle diagnostics.
  * - 2026-02-28: Added edit-resubmission title rollback so failed edits cannot leave previously titled chats stuck at `New Chat`.
+ * - 2026-03-09: Added SSE terminal-state guard in `triggerPendingLastMessageResume` to prevent infinite auto-resume loops when the last SSE event for the chat is already terminal (error/end) and post-dates the last user message event.
  * - 2026-02-26: Consolidated `restoreChat` and restore auto-resume tracing under categorized core loggers (`chat.restore`, `chat.restore.resume`) with structured metadata (removed direct `console.log` traces).
  * - 2026-02-25: Added comprehensive restore/resume trace logging in `restoreChat` to verify chat-switch ordering, memory sync completion, and auto-resume trigger timing.
  * - 2026-02-25: `restoreChat` now refreshes runtime agent memory from storage before auto-resume checks so loaded-chat pending tool calls can resume reliably.
@@ -957,26 +958,61 @@ function triggerPendingUserMessageResume(world: World, chatId: string, userMessa
 
   void (async () => {
     try {
-      const { publishMessageWithId } = await import('./events/index.js');
-      loggerRestoreResume.debug('Submitting pending user-last message after chat restore', {
-        worldId: world.id,
-        chatId,
-        messageId: userMessage.messageId,
-      });
-      publishMessageWithId(
-        world,
-        userMessage.content,
-        sender,
-        userMessage.messageId!,
-        chatId,
-        userMessage.replyToMessageId
-      );
+      // Prefer queue-based routing so that if processing fails the error is
+      // surfaced as a message card on screen rather than silently dropped.
+      // Fall back to direct publish only when queue storage is unavailable.
+      let queueStorage: QueueStorageOperations | null = null;
+      try {
+        queueStorage = getQueueStorageOrThrow('triggerPendingUserMessageResume');
+      } catch {
+        // Queue storage not configured — will fall back to direct publish below.
+      }
 
-      loggerRestoreResume.debug('Auto-submitted pending user-last message after chat restore', {
-        worldId: world.id,
-        chatId,
-        messageId: userMessage.messageId,
-      });
+      if (queueStorage) {
+        const existingMessages = await queueStorage.getQueuedMessages(world.id, chatId);
+        const alreadyQueued = existingMessages?.some(
+          (m: QueuedMessage) => m.messageId === userMessage.messageId!
+        );
+        if (!alreadyQueued) {
+          await queueStorage.addQueuedMessage(world.id, chatId, userMessage.messageId!, content, sender);
+          loggerRestoreResume.debug('Enqueued pending user-last message for queue processing after chat restore', {
+            worldId: world.id,
+            chatId,
+            messageId: userMessage.messageId,
+          });
+          // Trigger dispatch for the newly enqueued message.
+          // Do not use recoverStaleSending: the message is fresh 'queued', not stale.
+          triggerPendingQueueResume(world, chatId);
+        } else {
+          // Message is already in queue (queued/sending/error/cancelled).
+          // Let the existing queue state stand — restoreChat's own
+          // triggerPendingQueueResume handles stale 'sending' recovery.
+          // Re-triggering here would reset 'error' state rows during stale
+          // recovery and cause infinite retry loops.
+          loggerRestoreResume.debug('Pending user-last message already in queue; skipping auto-dispatch', {
+            worldId: world.id,
+            chatId,
+            messageId: userMessage.messageId,
+            existingStatus: existingMessages?.find((m: QueuedMessage) => m.messageId === userMessage.messageId!)?.status,
+          });
+        }
+      } else {
+        // Fallback path: direct publish (queue storage not configured).
+        const { publishMessageWithId } = await import('./events/index.js');
+        loggerRestoreResume.debug('Submitting pending user-last message after chat restore (no queue storage)', {
+          worldId: world.id,
+          chatId,
+          messageId: userMessage.messageId,
+        });
+        publishMessageWithId(
+          world,
+          userMessage.content,
+          sender,
+          userMessage.messageId!,
+          chatId,
+          userMessage.replyToMessageId
+        );
+      }
     } catch (error) {
       loggerRestoreResume.warn('Failed to auto-submit pending user-last message after chat restore', {
         worldId: world.id,

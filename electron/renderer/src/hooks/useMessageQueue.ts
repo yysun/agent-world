@@ -9,14 +9,19 @@
  * Key Features:
  * - Clears queue display on session switch.
  * - Reloads queue when messages change (detects when queued items are consumed).
+ * - Polls queue status every 2 seconds while items are actively processing.
  * - Exposes all queue control actions bound to the active world+chat context.
  *
  * Implementation Notes:
  * - Processing loops are NOT in the renderer; core drives queue advancement.
  * - This hook is purely display + control via IPC.
+ *
+ * Recent Changes:
+ * - 2026-03-09: Added automatic polling while queue items are in 'queued' or 'sending' status
+ *   so the panel reflects status transitions (e.g., sending → error) in near-real-time.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface QueuedMessageEntry {
   id: number;
@@ -70,6 +75,23 @@ export function useMessageQueue({
     if (messagesVersion === undefined) return;
     void loadQueue();
   }, [messagesVersion, loadQueue]);
+
+  // Poll while items are actively processing (queued or sending)
+  const hasActiveItems = queuedMessages.some(
+    (m) => m.status === 'queued' || m.status === 'sending'
+  );
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (hasActiveItems) {
+      pollRef.current = setInterval(() => void loadQueue(), 2000);
+    }
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, [hasActiveItems, loadQueue]);
 
   const addToQueue = useCallback(async (content: string, sender?: string) => {
     const worldId = String(loadedWorldId || '').trim();
