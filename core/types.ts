@@ -450,6 +450,10 @@ export interface StorageAPI {
   cancelQueuedMessages?(worldId: string, chatId: string): Promise<number>;
   recoverSendingMessages?(): Promise<number>;
   deleteQueueForChat?(worldId: string, chatId: string): Promise<number>;
+
+  // Edit error log operations (optional — falls back to NoOp when unavailable)
+  saveEditErrors?(worldId: string, errors: EditErrorLog[]): Promise<void>;
+  loadEditErrors?(worldId: string): Promise<EditErrorLog[]>;
 }
 
 export type QueueMessageStatus = 'queued' | 'sending' | 'error' | 'cancelled';

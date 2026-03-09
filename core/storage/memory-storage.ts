@@ -51,7 +51,8 @@ import type {
   Chat,
   UpdateChatParams,
   WorldChat,
-  AgentMessage
+  AgentMessage,
+  EditErrorLog,
 } from '../types.js';
 import { validateAgentMessageIds } from './validation.js';
 import { createCategoryLogger } from '../logger.js';
@@ -120,6 +121,7 @@ export class MemoryStorage implements StorageAPI {
   private chats = new Map<string, Map<string, Chat>>(); // worldId -> chatId -> Chat
   private worldChats = new Map<string, Map<string, WorldChat>>(); // worldId -> chatId -> WorldChat
   private archivedMemory = new Map<string, Map<string, AgentMessage[]>>(); // worldId -> agentId -> archived messages
+  private editErrors = new Map<string, EditErrorLog[]>(); // worldId -> EditErrorLog[]
 
   // World operations
   async saveWorld(worldData: World): Promise<void> {
@@ -486,12 +488,21 @@ export class MemoryStorage implements StorageAPI {
   /**
    * Clear all stored data - useful for test cleanup
    */
+  async saveEditErrors(worldId: string, errors: EditErrorLog[]): Promise<void> {
+    this.editErrors.set(worldId, [...errors]);
+  }
+
+  async loadEditErrors(worldId: string): Promise<EditErrorLog[]> {
+    return this.editErrors.get(worldId) ?? [];
+  }
+
   async clear(): Promise<void> {
     this.worlds.clear();
     this.agents.clear();
     this.chats.clear();
     this.worldChats.clear();
     this.archivedMemory.clear();
+    this.editErrors.clear();
   }
 
   /**

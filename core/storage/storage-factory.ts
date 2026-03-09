@@ -460,7 +460,17 @@ export function createStorageWrappers(storageInstance: StorageAPI | null): Stora
     async deleteQueueForChat(worldId: string, chatId: string) {
       if (!storageInstance || !('deleteQueueForChat' in storageInstance)) return 0;
       return (storageInstance as any).deleteQueueForChat(worldId, chatId);
-    }
+    },
+
+    async saveEditErrors(worldId: string, errors: import('../types.js').EditErrorLog[]) {
+      if (!storageInstance || !('saveEditErrors' in storageInstance)) return;
+      return (storageInstance as any).saveEditErrors(worldId, errors);
+    },
+
+    async loadEditErrors(worldId: string) {
+      if (!storageInstance || !('loadEditErrors' in storageInstance)) return [];
+      return (storageInstance as any).loadEditErrors(worldId) ?? [];
+    },
   };
 
   // Expose eventStorage if it exists on the storage instance
