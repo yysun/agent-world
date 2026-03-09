@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-03-06: Added renderer bridge bootstrap fallback UI so missing preload APIs show an explicit startup error instead of a blank screen.
  * - 2026-03-06: Scoped the right-side logs panel to the active world/chat and limited Clear to the visible scoped entries.
  * - 2026-03-06: Preserved error-kind selected-chat system statuses until replaced or context changes; non-error statuses still auto-expire.
  * - 2026-03-06: Added selected-chat system-event status-bar overlays for title updates, timeout notices, and retry tracking.
@@ -59,7 +60,7 @@ import {
   SkillEditor,
 } from './components/index';
 import { useWorkingStatus } from './hooks/useWorkingStatus';
-import { getDesktopApi, safeMessage } from './domain/desktop-api';
+import { readDesktopApi, safeMessage } from './domain/desktop-api';
 import { useSkillRegistry } from './hooks/useSkillRegistry';
 import { useStreamingActivity } from './hooks/useStreamingActivity';
 import { useMessageManagement } from './hooks/useMessageManagement';
@@ -131,6 +132,7 @@ import {
   normalizeUnifiedLogEntry,
   type UnifiedLogEntry,
 } from './domain/panel-log-scope';
+import type { DesktopApi } from './types/desktop-api';
 
 type WorkspaceState = {
   workspacePath: string | null;
@@ -162,13 +164,40 @@ type HitlPrompt = {
 };
 
 const MAX_LOG_PANEL_ENTRIES = 600;
+const DESKTOP_API_BOOTSTRAP_RETRY_LIMIT = 20;
+const DESKTOP_API_BOOTSTRAP_RETRY_MS = 100;
 
 function normalizeAgentKey(value: unknown): string {
   return String(value || '').trim().toLowerCase();
 }
 
-export default function App() {
-  const api = useMemo(() => getDesktopApi(), []);
+function BridgeUnavailableScreen({ timedOut }: { timedOut: boolean }) {
+  return (
+    <div
+      style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '32px',
+        background: '#f7f5f2',
+        color: '#1f1a17',
+        fontFamily: 'system-ui, sans-serif',
+      }}
+    >
+      <div style={{ maxWidth: '520px', textAlign: 'center' }}>
+        <h1 style={{ margin: '0 0 12px', fontSize: '24px' }}>Agent World</h1>
+        <p style={{ margin: 0, fontSize: '15px', lineHeight: 1.5 }}>
+          {timedOut
+            ? 'Desktop API bridge is unavailable. Restart the app. If the issue persists, rebuild and relaunch Electron.'
+            : 'Starting desktop runtime...'}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function AppContent({ api }: { api: DesktopApi }) {
   const chatSubscriptionCounter = useRef(0);
   const messageRefreshCounter = useRef(0);
   // Always reflects the latest selectedSessionId so async callbacks can read the
@@ -1468,4 +1497,42 @@ export default function App() {
       )}
     />
   );
+}
+
+export default function App() {
+  const [api, setApi] = useState<DesktopApi | null>(() => readDesktopApi());
+  const [bridgeTimedOut, setBridgeTimedOut] = useState(false);
+
+  useEffect(() => {
+    if (api || typeof window === 'undefined') {
+      return;
+    }
+
+    let attempts = 0;
+    const intervalId = window.setInterval(() => {
+      const nextApi = readDesktopApi();
+      if (nextApi) {
+        setApi(nextApi);
+        setBridgeTimedOut(false);
+        window.clearInterval(intervalId);
+        return;
+      }
+
+      attempts += 1;
+      if (attempts >= DESKTOP_API_BOOTSTRAP_RETRY_LIMIT) {
+        setBridgeTimedOut(true);
+        window.clearInterval(intervalId);
+      }
+    }, DESKTOP_API_BOOTSTRAP_RETRY_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [api]);
+
+  if (!api) {
+    return <BridgeUnavailableScreen timedOut={bridgeTimedOut} />;
+  }
+
+  return <AppContent api={api} />;
 }

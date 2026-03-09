@@ -11,12 +11,13 @@
  * - Restores original window value after each test.
  *
  * Recent Changes:
+ * - 2026-03-06: Added bridge-bootstrap coverage for `readDesktopApi()` so renderer startup can avoid blank-screen crashes when preload is unavailable.
  * - 2026-02-12: Moved into layer-based tests/electron subfolder and updated module import paths.
  * - 2026-02-12: Added Phase 5 tests for extracted desktop API domain helpers.
- */
+*/
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { getDesktopApi, safeMessage } from '../../../electron/renderer/src/domain/desktop-api';
+import { getDesktopApi, readDesktopApi, safeMessage } from '../../../electron/renderer/src/domain/desktop-api';
 
 const globalWindow = ((globalThis as any).window ||= {});
 const originalApi = globalWindow.agentWorldDesktop;
@@ -26,6 +27,11 @@ afterEach(() => {
 });
 
 describe('desktop-api domain helpers', () => {
+  it('returns null when desktop bridge is unavailable during bootstrap', () => {
+    globalWindow.agentWorldDesktop = undefined;
+    expect(readDesktopApi()).toBeNull();
+  });
+
   it('throws when desktop bridge is unavailable', () => {
     globalWindow.agentWorldDesktop = undefined;
     expect(() => getDesktopApi()).toThrow('Desktop API bridge is unavailable.');

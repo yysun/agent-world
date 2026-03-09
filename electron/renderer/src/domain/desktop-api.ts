@@ -13,6 +13,7 @@
  * - Compatibility fallback keeps older preload bridges usable.
  *
  * Recent Changes:
+ * - 2026-03-06: Added `readDesktopApi()` so renderer bootstrap can show a bridge error instead of crashing to a blank screen.
  * - 2026-02-12: Extracted desktop bridge access and error normalization from App orchestration.
  * - 2026-02-17: Migrated module from JS to TS and bound helpers to typed DesktopApi contract.
  */
@@ -23,10 +24,13 @@ type DesktopApiWithCompat = DesktopApi & {
   deleteSession?: DesktopApi['deleteChat'];
 };
 
-export function getDesktopApi(): DesktopApi {
+export function readDesktopApi(): DesktopApi | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
   const api = window.agentWorldDesktop;
   if (!api) {
-    throw new Error('Desktop API bridge is unavailable.');
+    return null;
   }
 
   const nextApi: DesktopApiWithCompat = { ...api };
@@ -47,6 +51,14 @@ export function getDesktopApi(): DesktopApi {
   }
 
   return nextApi;
+}
+
+export function getDesktopApi(): DesktopApi {
+  const api = readDesktopApi();
+  if (!api) {
+    throw new Error('Desktop API bridge is unavailable.');
+  }
+  return api;
 }
 
 export function safeMessage(error: unknown, fallback: string): string {
