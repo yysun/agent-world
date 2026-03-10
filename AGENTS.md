@@ -49,6 +49,9 @@ These rules override all other testing instructions unless the user explicitly o
 
 1. **Keep web app and Electron separated.**
    - Do not create cross-app shared modules between the web app and the Electron app.
+2. **Keep Electron-specific UI/runtime rules in `electron/AGENTS.md`.**
+   - Lift only genuinely cross-app queue/restore/tool/HITL lifecycle rules into this root doc.
+   - Renderer hook, optimistic transcript, refresh merge, and Electron IPC subscription rules remain in `electron/AGENTS.md`.
 
 ---
 
@@ -86,6 +89,40 @@ These rules apply to any change touching `core/events.ts`, `core/managers.ts`, `
 7. **Test event-path changes at boundaries.**
    - Add targeted unit tests for event sequencing/shape changes.
    - For API transport/runtime path updates, run `npm run integration` per project policy.
+
+8. **Queue is the only automatic resume authority for user turns.**
+   - Persisted chat memory may rebuild transcript state, but it must never directly resend or enqueue a user turn.
+   - Automatic resume is limited to queue-owned `queued` rows and recoverable interrupted `sending` rows.
+   - `error` and `cancelled` rows must not auto-resume.
+
+9. **Queue APIs are user-turn-only.**
+   - Only human/user-authored turns may enter `message_queue`.
+   - Assistant/tool/system/non-user messages must use immediate dispatch and must not create queue rows.
+
+10. **Failed user turns do not auto-retry.**
+   - Queue dispatch/runtime failures must transition to durable explicit recovery state.
+   - Retry is an explicit user action; do not reintroduce automatic backoff replay for failed user turns.
+
+11. **Restore/edit flows must not replay replaced or superseded turns.**
+   - Edit/delete restore paths must suppress restore-time auto-resume.
+   - Stale `sending` rows must move to durable `error` when terminal SSE, a newer message, or a persisted pending HITL boundary shows the turn should not resume.
+
+12. **Tool/HITL state remains part of the owning user turn lifecycle.**
+   - A user turn is not complete just because assistant text or `tool-start` was emitted.
+   - Tool calls, `load_skill`, approval prompts, and continuation after approval are part of the same turn lifecycle.
+
+13. **Pending HITL/approval state must be reconstructable from persisted messages.**
+   - Process-local runtime maps are not sufficient.
+   - Persisted approval prompts and responses must keep stable `chatId`, `requestId`, `toolCallId`, and relevant metadata so restore/replay can recover the same pending state.
+
+14. **Every persisted `tool-start` must reach a terminal partner or explicit durable wait/recovery artifact.**
+   - Acceptable follow-ups are `tool-result`, `tool-error`, a durable pending HITL/approval artifact, or explicit durable failed-turn recovery state.
+   - A raw `tool-start` with no terminal partner and no durable wait/recovery artifact is a bug.
+
+15. **Durable failed-turn artifacts must have stable identity and cleanup semantics.**
+   - Persist at most one canonical durable failed-turn artifact per turn when possible.
+   - Failed-turn artifacts should keep a stable link to the triggering user turn whenever the schema allows it.
+   - Edit/delete trim must remove post-cutoff and orphaned failed-turn/tool/HITL artifacts for the removed tail.
 
 ---
 
