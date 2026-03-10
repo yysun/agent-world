@@ -15,28 +15,28 @@
  * - Uses mocked manager dispatch API; no real storage/LLM runtime access.
  *
  * Recent Changes:
+ * - 2026-03-10: Updated coverage for split queue-only user dispatch and explicit immediate non-user dispatch.
  * - 2026-03-04: Added regression coverage ensuring runtime routing does not fall back to `world.currentChatId`.
  * - 2026-03-04: Initial unit coverage for built-in send_message tool.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSendMessageToolDefinition } from '../../core/send-message-tool.js';
-import { enqueueAndProcessUserMessage } from '../../core/managers.js';
+import { dispatchImmediateChatMessage, enqueueAndProcessUserTurn } from '../../core/managers.js';
 import { wrapToolWithValidation } from '../../core/tool-utils.js';
 
 vi.mock('../../core/managers.js', () => ({
-  enqueueAndProcessUserMessage: vi.fn(async (_worldId: string, _chatId: string, _content: string, sender: string) => {
-    if (sender === 'human') {
-      return {
-        messageId: 'queued-msg-1',
-        status: 'queued',
-      };
-    }
-    return null;
-  }),
+  enqueueAndProcessUserTurn: vi.fn(async () => ({
+    messageId: 'queued-msg-1',
+    status: 'queued',
+  })),
+  dispatchImmediateChatMessage: vi.fn(async () => ({
+    messageId: 'immediate-msg-1',
+  })),
 }));
 
-const mockedEnqueueAndProcessUserMessage = vi.mocked(enqueueAndProcessUserMessage);
+const mockedEnqueueAndProcessUserTurn = vi.mocked(enqueueAndProcessUserTurn);
+const mockedDispatchImmediateChatMessage = vi.mocked(dispatchImmediateChatMessage);
 
 function buildWrappedSendMessageTool() {
   const tool = createSendMessageToolDefinition();
@@ -64,7 +64,8 @@ describe('core/send-message-tool', () => {
       dispatched: 0,
       failed: 0,
     });
-    expect(mockedEnqueueAndProcessUserMessage).not.toHaveBeenCalled();
+    expect(mockedEnqueueAndProcessUserTurn).not.toHaveBeenCalled();
+    expect(mockedDispatchImmediateChatMessage).not.toHaveBeenCalled();
   });
 
   it('returns chat context error when trusted runtime chatId is missing even if world has currentChatId', async () => {
@@ -89,13 +90,13 @@ describe('core/send-message-tool', () => {
       dispatched: 0,
       failed: 0,
     });
-    expect(mockedEnqueueAndProcessUserMessage).not.toHaveBeenCalled();
+    expect(mockedEnqueueAndProcessUserTurn).not.toHaveBeenCalled();
+    expect(mockedDispatchImmediateChatMessage).not.toHaveBeenCalled();
   });
 
   it('dispatches message array in order and supports shorthand/object entries', async () => {
-    mockedEnqueueAndProcessUserMessage
-      .mockResolvedValueOnce({ messageId: 'queued-1', status: 'queued' } as any)
-      .mockResolvedValueOnce(null as any);
+    mockedEnqueueAndProcessUserTurn.mockResolvedValueOnce({ messageId: 'queued-1', status: 'queued' } as any);
+    mockedDispatchImmediateChatMessage.mockResolvedValueOnce({ messageId: 'immediate-2' } as any);
 
     const tool = buildWrappedSendMessageTool();
     const result = await tool.execute(
@@ -113,7 +114,7 @@ describe('core/send-message-tool', () => {
       },
     );
 
-    expect(mockedEnqueueAndProcessUserMessage).toHaveBeenNthCalledWith(
+    expect(mockedEnqueueAndProcessUserTurn).toHaveBeenNthCalledWith(
       1,
       'world-1',
       'chat-1',
@@ -122,8 +123,8 @@ describe('core/send-message-tool', () => {
       expect.any(Object),
       { source: 'direct' },
     );
-    expect(mockedEnqueueAndProcessUserMessage).toHaveBeenNthCalledWith(
-      2,
+    expect(mockedDispatchImmediateChatMessage).toHaveBeenNthCalledWith(
+      1,
       'world-1',
       'chat-1',
       'Second message',
@@ -153,7 +154,7 @@ describe('core/send-message-tool', () => {
       index: 1,
       status: 'dispatched',
       dispatchMode: 'immediate',
-      messageId: null,
+      messageId: 'immediate-2',
     });
     expect(payload).not.toHaveProperty('sent');
   });
@@ -181,7 +182,7 @@ describe('core/send-message-tool', () => {
       },
     );
 
-    expect(mockedEnqueueAndProcessUserMessage).toHaveBeenCalledWith(
+    expect(mockedEnqueueAndProcessUserTurn).toHaveBeenCalledWith(
       'trusted-world',
       'trusted-chat',
       'Route safely',
@@ -214,6 +215,7 @@ describe('core/send-message-tool', () => {
       code: 'validation_error',
       requested: 0,
     });
-    expect(mockedEnqueueAndProcessUserMessage).not.toHaveBeenCalled();
+    expect(mockedEnqueueAndProcessUserTurn).not.toHaveBeenCalled();
+    expect(mockedDispatchImmediateChatMessage).not.toHaveBeenCalled();
   });
 });

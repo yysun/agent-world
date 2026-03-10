@@ -25,7 +25,7 @@ vi.mock('../../core/index.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../core/index.js')>();
   return {
     ...actual,
-    enqueueAndProcessUserMessage: vi.fn(),
+    enqueueAndProcessUserTurn: vi.fn(),
     restoreChat: vi.fn(async (worldId: string, chatId: string) => ({
       id: worldId,
       chats: new Map([[chatId, { id: chatId }]])
@@ -34,7 +34,7 @@ vi.mock('../../core/index.js', async (importOriginal) => {
 });
 
 import { processCLIInput } from '../../cli/commands.js';
-import { enqueueAndProcessUserMessage, restoreChat } from '../../core/index.js';
+import { enqueueAndProcessUserTurn, restoreChat } from '../../core/index.js';
 
 describe('processCLIInput message sending', () => {
   beforeEach(() => {
@@ -52,7 +52,7 @@ describe('processCLIInput message sending', () => {
     expect(result.success).toBe(false);
     expect(result.message).toContain('no active chat session');
     expect(restoreChat).not.toHaveBeenCalled();
-    expect(enqueueAndProcessUserMessage).not.toHaveBeenCalled();
+    expect(enqueueAndProcessUserTurn).not.toHaveBeenCalled();
   });
 
   it('rejects plain message when active chat cannot be restored', async () => {
@@ -68,11 +68,11 @@ describe('processCLIInput message sending', () => {
     expect(result.success).toBe(false);
     expect(result.message).toContain('chat not found: chat-missing');
     expect(restoreChat).toHaveBeenCalledWith('world-1', 'chat-missing');
-    expect(enqueueAndProcessUserMessage).not.toHaveBeenCalled();
+    expect(enqueueAndProcessUserTurn).not.toHaveBeenCalled();
   });
 
   it('publishes plain message with explicit active chat binding', async () => {
-    vi.mocked(enqueueAndProcessUserMessage).mockResolvedValueOnce({
+    vi.mocked(enqueueAndProcessUserTurn).mockResolvedValueOnce({
       messageId: 'queued-msg-1',
       status: 'queued',
       retryCount: 0,
@@ -87,7 +87,7 @@ describe('processCLIInput message sending', () => {
 
     expect(result.success).toBe(true);
     expect(restoreChat).toHaveBeenCalledWith('world-1', 'chat-1');
-    expect(enqueueAndProcessUserMessage).toHaveBeenCalledWith(
+    expect(enqueueAndProcessUserTurn).toHaveBeenCalledWith(
       'world-1',
       'chat-1',
       'hello',

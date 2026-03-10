@@ -28,6 +28,7 @@
  *   (can occur due to retries, multiple listeners, or error recovery)
  * 
  * Changes:
+ * - 2026-03-10: Added optional targeted event deletion by event ID for trim/edit cleanup without wiping an entire chat history.
  * - 2025-11-09: CRITICAL FIX - Let AUTOINCREMENT handle seq, don't set manually (was causing INSERT failures)
  * - 2025-11-03: Added INSERT OR IGNORE to handle duplicate event IDs gracefully
  * - 2025-11-06: Removed event_sequences table, use MAX(seq) + 1 for auto-increment
@@ -95,6 +96,7 @@ export async function createSQLiteEventStorage(db: Database): Promise<EventStora
     saveEvents: (events: StoredEvent[]) => saveEvents(ctx, events),
     getEventsByWorldAndChat: (worldId: string, chatId: string | null, options?: GetEventsOptions) =>
       getEventsByWorldAndChat(ctx, worldId, chatId, options),
+    deleteEventsByIds: (ids: string[]) => deleteEventsByIds(ctx, ids),
     deleteEventsByWorldAndChat: (worldId: string, chatId: string | null) =>
       deleteEventsByWorldAndChat(ctx, worldId, chatId),
     deleteEventsByWorld: (worldId: string) => deleteEventsByWorld(ctx, worldId),
@@ -289,6 +291,27 @@ async function getEventsByWorldAndChat(
     meta: row.meta ? JSON.parse(row.meta) : undefined,
     createdAt: new Date(row.created_at)
   }));
+}
+
+/**
+ * Delete specific events by ID.
+ */
+async function deleteEventsByIds(
+  ctx: SQLiteEventStorageContext,
+  ids: string[]
+): Promise<number> {
+  await ensureInitialized(ctx);
+
+  const normalizedIds = Array.isArray(ids)
+    ? ids.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+  if (normalizedIds.length === 0) {
+    return 0;
+  }
+
+  const placeholders = normalizedIds.map(() => '?').join(', ');
+  const result = await dbRun(ctx.db, `DELETE FROM events WHERE id IN (${placeholders})`, ...normalizedIds);
+  return (result as any).changes || 0;
 }
 
 /**

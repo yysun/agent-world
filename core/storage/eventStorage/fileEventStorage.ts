@@ -28,6 +28,7 @@
  * - Deleting a chat file removes all events for that chat
  * 
  * Changes:
+ * - 2026-03-10: Added optional targeted event deletion by event ID for trim/edit cleanup without wiping an entire chat history.
  * - 2026-02-08: Fixed write lock queueing bug that allowed concurrent writes after first waiter
  * - 2026-02-08: Switched event file writes to atomic temp-file + rename to avoid partial read/write races
  * - 2026-02-08: Added recovery for valid JSON arrays with trailing corruption bytes and auto-rewrite repair
@@ -62,6 +63,11 @@ function getEventFilePath(baseDir: string, worldId: string, chatId: string | nul
  */
 function getWorldEventsDir(baseDir: string, worldId: string): string {
   return path.join(baseDir, worldId, 'events');
+}
+
+function parseChatIdFromFilename(filename: string): string | null {
+  const basename = path.basename(filename, '.json');
+  return basename === 'null' ? null : basename;
 }
 
 /**
@@ -465,6 +471,71 @@ export class FileEventStorage implements EventStorage {
     this.seqCounters.delete(key);
 
     return count;
+  }
+
+  /**
+   * Delete specific events by ID across all persisted chat files.
+   */
+  async deleteEventsByIds(ids: string[]): Promise<number> {
+    const normalizedIds = new Set(
+      Array.isArray(ids)
+        ? ids.map((id) => String(id || '').trim()).filter(Boolean)
+        : []
+    );
+    if (normalizedIds.size === 0) {
+      return 0;
+    }
+
+    let deletedCount = 0;
+
+    try {
+      const worldDirs = await fs.readdir(this.baseDir, { withFileTypes: true });
+      for (const worldDir of worldDirs) {
+        if (!worldDir.isDirectory()) {
+          continue;
+        }
+
+        const eventsDir = getWorldEventsDir(this.baseDir, worldDir.name);
+        if (!existsSync(eventsDir)) {
+          continue;
+        }
+
+        const files = await fs.readdir(eventsDir);
+        for (const file of files) {
+          if (!file.endsWith('.json')) {
+            continue;
+          }
+
+          const filePath = path.join(eventsDir, file);
+          const events = await readEventsFromFile(filePath);
+          const remainingEvents = events.filter((event) => !normalizedIds.has(String(event.id || '').trim()));
+          const removedFromFile = events.length - remainingEvents.length;
+          if (removedFromFile === 0) {
+            continue;
+          }
+
+          deletedCount += removedFromFile;
+          if (remainingEvents.length === 0) {
+            await fs.unlink(filePath);
+            continue;
+          }
+
+          await writeEventsToFile(filePath, remainingEvents);
+          const chatId = parseChatIdFromFilename(file);
+          const key = this.getContextKey(worldDir.name, chatId);
+          const latestSeq = remainingEvents.reduce((max, event) => Math.max(max, event.seq ?? 0), 0);
+          if (latestSeq > 0) {
+            this.seqCounters.set(key, latestSeq);
+          } else {
+            this.seqCounters.delete(key);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[FileEventStorage] Error deleting events by IDs:', error);
+    }
+
+    return deletedCount;
   }
 
   /**

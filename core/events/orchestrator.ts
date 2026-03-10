@@ -37,6 +37,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-03-10: Publish one persisted chat-scoped `system` error event on terminal agent-turn failure so the transcript can retain a durable failure message across reloads.
  * - 2026-03-06: Required explicit `messageEvent.chatId` for agent-turn processing; removed `world.currentChatId` fallback from agent activity and turn-limit routing.
  * - 2026-03-06: Updated shell execution persistence to use explicit canonical failure reasons for shell validation/policy failures while keeping bounded-preview continuation output.
  * - 2026-03-06: Switched shell tool execution to one bounded-preview continuation mode and normalized persisted shell tool failures through the canonical shell-result formatter.
@@ -1146,6 +1147,12 @@ export async function processAgentMessage(
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined
     });
+    publishEvent(world, 'system', {
+      type: 'error',
+      eventType: 'error',
+      agentName: agent.id,
+      message: `Error processing agent message: ${error instanceof Error ? error.message : String(error)}. | agent=${agent.id}`,
+    }, targetChatId);
     throw error;
   } finally {
     loggerTurnTrace.debug('Turn processing completed', {

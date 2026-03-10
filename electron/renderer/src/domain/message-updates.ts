@@ -13,6 +13,8 @@
  * - Messages without canonical `messageId` are ignored by upsert logic.
  *
  * Recent Changes:
+ * - 2026-03-10: Delegated generic chat-tail trim semantics to core and kept the renderer wrapper for transcript-specific usage.
+ * - 2026-03-10: Added persisted `system` error-event to transcript conversion/replay helpers so failed-turn diagnostics can survive restart without replaying raw logs.
  * - 2026-03-06: Restored selected-chat error log rows to the transcript while keeping non-error logs panel-only.
  * - 2026-02-26: Added reusable transient-error helpers for log suppression, redundant-error cleanup, and chat-scoped transient error clearing.
  * - 2026-02-26: Added structured error-detail extraction for error log messages to avoid raw object output and improve inline indicator parity.
@@ -20,6 +22,8 @@
  * - 2026-02-12: Extracted message upsert/log conversion helpers from App orchestration.
  * - 2026-02-17: Migrated module from JS to TS with explicit message shape contracts.
  */
+
+import { trimChatItemsFromCutoff } from '../../../../core/message-cutoff.js';
 
 export interface MessageLike {
   id?: string;
@@ -336,6 +340,136 @@ export function clearChatTransientErrors(
   });
 
   return next.length === existingMessages.length ? existingMessages : next;
+}
+
+function extractSystemEventText(content: unknown): string {
+  if (typeof content === 'string') {
+    return content.trim();
+  }
+
+  const record = content && typeof content === 'object' ? content as Record<string, unknown> : null;
+  if (!record) {
+    return '';
+  }
+
+  if (typeof record.message === 'string' && record.message.trim()) {
+    return record.message.trim();
+  }
+
+  if (typeof record.title === 'string' && record.title.trim()) {
+    return record.title.trim();
+  }
+
+  return '';
+}
+
+function isSystemErrorContent(eventType: unknown, content: unknown): boolean {
+  const normalizedEventType = String(eventType || '').trim().toLowerCase();
+  const record = content && typeof content === 'object' ? content as Record<string, unknown> : null;
+  const explicitType = String(record?.type || '').trim().toLowerCase();
+  const text = extractSystemEventText(content).toLowerCase();
+
+  return explicitType === 'error'
+    || normalizedEventType === 'error'
+    || text.startsWith('[error]')
+    || text.includes('timed out')
+    || text.includes('retry exhausted');
+}
+
+export function createSystemErrorMessage(event: {
+  messageId?: string | null;
+  createdAt?: string | null;
+  chatId?: string | null;
+  eventType?: string | null;
+  content?: unknown;
+}): MessageLike | null {
+  const messageId = String(event?.messageId || '').trim();
+  const chatId = String(event?.chatId || '').trim();
+  const text = extractSystemEventText(event?.content);
+  if (!messageId || !chatId || !text || !isSystemErrorContent(event?.eventType, event?.content)) {
+    return null;
+  }
+
+  return {
+    id: messageId,
+    messageId,
+    sender: 'system',
+    role: 'system',
+    type: 'system',
+    content: text,
+    text,
+    createdAt: event?.createdAt || new Date().toISOString(),
+    chatId,
+    systemEvent: {
+      eventType: String(event?.eventType || '').trim() || 'error',
+      kind: 'error',
+      content: event?.content,
+    },
+  };
+}
+
+export function mergeStoredSystemErrorEvents(
+  existingMessages: MessageLike[],
+  storedEvents: Array<Record<string, unknown>>,
+  chatId: string | null,
+): MessageLike[] {
+  const normalizedChatId = String(chatId || '').trim() || null;
+  if (!normalizedChatId || !Array.isArray(storedEvents) || storedEvents.length === 0) {
+    return existingMessages;
+  }
+
+  return storedEvents.reduce((messages, event) => {
+    if (String(event?.type || '').trim().toLowerCase() !== 'system') {
+      return messages;
+    }
+
+    const eventChatId = String(event?.chatId || '').trim() || null;
+    if (eventChatId !== normalizedChatId) {
+      return messages;
+    }
+
+    const systemMessage = createSystemErrorMessage({
+      messageId: String(event?.id || '').trim() || String(event?.messageId || '').trim(),
+      createdAt: typeof event?.createdAt === 'string' ? event.createdAt : null,
+      chatId: eventChatId,
+      eventType: String((event?.payload as Record<string, unknown> | null)?.eventType || (event?.payload as Record<string, unknown> | null)?.type || '').trim(),
+      content: event?.payload,
+    });
+    if (!systemMessage) {
+      return messages;
+    }
+
+    return upsertMessageList(messages, systemMessage);
+  }, existingMessages);
+}
+
+export function preserveLiveSystemErrorMessages(
+  refreshedMessages: MessageLike[],
+  liveMessages: MessageLike[],
+  chatId: string | null,
+): MessageLike[] {
+  const normalizedChatId = String(chatId || '').trim() || null;
+  if (!normalizedChatId || !Array.isArray(liveMessages) || liveMessages.length === 0) {
+    return refreshedMessages;
+  }
+
+  return liveMessages.reduce((messages, message) => {
+    const messageChatId = String(message?.chatId || '').trim() || null;
+    const messageKind = String(message?.systemEvent?.kind || '').trim().toLowerCase();
+    if (messageChatId !== normalizedChatId || messageKind !== 'error') {
+      return messages;
+    }
+
+    return upsertMessageList(messages, message);
+  }, refreshedMessages);
+}
+
+export function trimChatMessagesFromCutoff(
+  existingMessages: MessageLike[],
+  messageId: string,
+  chatId: string | null,
+): MessageLike[] {
+  return trimChatItemsFromCutoff(existingMessages, messageId, chatId);
 }
 
 export function upsertMessageList(existingMessages: MessageLike[], incomingMessage: MessageLike): MessageLike[] {

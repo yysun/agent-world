@@ -67,6 +67,8 @@ vi.mock('../../core/index.js', () => {
     editUserMessage: editUserMessageMock,
     stopMessageProcessing: stopMessageProcessingMock,
     submitWorldHitlResponse: submitWorldHitlResponseMock,
+    enqueueAndProcessUserTurn: vi.fn(),
+    dispatchImmediateChatMessage: vi.fn(),
     subscribeWorld: vi.fn(),
     ClientConnection: vi.fn(),
     LLMProvider: {

@@ -12,10 +12,12 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-03-10: Switched `sendChatMessage` to the queue-only `enqueueAndProcessUserTurn` core API.
  * - 2026-03-08: Added `readSkillContent` and `saveSkillContent` IPC handlers for reading/writing SKILL.md content from the renderer skill editor.
  * - 2026-03-06: Heartbeat job starts now require explicit `chatId`; workspace load no longer auto-starts heartbeat jobs from persisted world state.
  * - 2026-03-06: Removed runtime queue-resume fallback to persisted `currentChatId`; Electron now resumes chat queues only for explicitly selected sessions.
  * - 2026-03-04: Extended `sendChatMessage` IPC response with queue metadata (`queueStatus`, `queueRetryCount`) for queue-failure visibility.
+ * - 2026-03-10: Suppressed restore-time auto-resume during edit/delete message mutations so failed user-last turns cannot replay before storage mutation.
  * - 2026-02-28: `message:edit` now resolves and passes the active subscribed world into core edit resubmission so edited turns publish on the same realtime emitter the renderer listens to.
  * - 2026-02-26: Added env-derived renderer logging config endpoint and replaced session/message console traces with categorized injected logger calls.
  * - 2026-02-25: Added optional `world:import` source support for GitHub shorthand (`@awesome-agent-world/<world-name>`) via secure temp staging.
@@ -150,14 +152,14 @@ interface MainIpcHandlerFactoryDependencies {
   }) => Promise<any> | any;
   newChat: (worldId: string) => Promise<any>;
   branchChatFromMessage: (worldId: string, sourceChatId: string, messageId: string) => Promise<any>;
-  enqueueAndProcessUserMessage: (worldId: string, chatId: string, content: string, sender: string, targetWorld?: any) => Promise<any>;
+  enqueueAndProcessUserTurn: (worldId: string, chatId: string, content: string, sender: string, targetWorld?: any) => Promise<any>;
   submitWorldHitlResponse: (params: { worldId: string; requestId: string; optionId: string; chatId?: string | null }) => {
     accepted: boolean;
     reason?: string;
   };
   stopMessageProcessing: (worldId: string, chatId: string) => Promise<any> | any;
   activateChatWithSnapshot: (worldId: string, chatId: string) => Promise<{ world: any; chatId: string; hitlPrompts: any[] } | null>;
-  restoreChat: (worldId: string, chatId: string) => Promise<any>;
+  restoreChat: (worldId: string, chatId: string, options?: { suppressAutoResume?: boolean }) => Promise<any>;
   updateWorld: (worldId: string, updates: Record<string, unknown>) => Promise<any>;
   editUserMessage: (worldId: string, messageId: string, newContent: string, chatId: string, targetWorld?: any) => Promise<any>;
   removeMessagesFrom: (worldId: string, messageId: string, chatId: string) => Promise<any>;
@@ -231,7 +233,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     syncSkills,
     newChat,
     branchChatFromMessage,
-    enqueueAndProcessUserMessage,
+    enqueueAndProcessUserTurn,
     submitWorldHitlResponse,
     stopMessageProcessing,
     activateChatWithSnapshot,
@@ -1315,7 +1317,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
 
     if (!world) throw new Error(`World not found: ${worldId}`);
 
-    const queued = await enqueueAndProcessUserMessage(worldId, chatId, content, sender, world);
+    const queued = await enqueueAndProcessUserTurn(worldId, chatId, content, sender, world);
     return {
       messageId: queued?.messageId || null,
       sender,
@@ -1338,7 +1340,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!chatId) throw new Error('Chat ID is required.');
     if (!newContent) throw new Error('New content is required.');
 
-    const restoredWorld = await restoreChat(worldId, chatId);
+    const restoredWorld = await restoreChat(worldId, chatId, { suppressAutoResume: true });
     if (!restoredWorld || !restoredWorld.chats?.has?.(chatId)) {
       throw new Error(`404 Chat not found: ${chatId}`);
     }
@@ -1356,6 +1358,11 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!worldId) throw new Error('World ID is required.');
     if (!messageId) throw new Error('Message ID is required.');
     if (!chatId) throw new Error('Chat ID is required.');
+
+    const restoredWorld = await restoreChat(worldId, chatId, { suppressAutoResume: true });
+    if (!restoredWorld || !restoredWorld.chats?.has?.(chatId)) {
+      throw new Error(`404 Chat not found: ${chatId}`);
+    }
 
     const result = await removeMessagesFrom(worldId, messageId, chatId);
     const refreshWarning = await refreshWorldSubscription(worldId);

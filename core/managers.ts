@@ -16,8 +16,9 @@
  * API: World (create/get/update/delete/list), Agent (create/get/update/delete/list/updateMemory/clearMemory),
  * Chat (newChat/listChats/deleteChat/restoreChat),
  * re-exports: migrateMessageIds, removeMessagesFrom, editUserMessage, logEditError, getEditErrors,
- *             addToQueue, enqueueAndProcessUserMessage, getQueueMessages, pauseChatQueue, resumeChatQueue,
- *             stopChatQueue, clearChatQueue, retryQueueMessage, recoverQueueSendingMessages
+ *             addToQueue, enqueueAndProcessUserTurn, dispatchImmediateChatMessage, getQueueMessages,
+ *             pauseChatQueue, resumeChatQueue, stopChatQueue, clearChatQueue, retryQueueMessage,
+ *             recoverQueueSendingMessages
  *
  * Implementation Details:
  * - Ensures all agent messages include agentId for proper export functionality
@@ -25,6 +26,9 @@
  * - Automatic agent identification for message source tracking
  *
  * Recent Changes:
+ * - 2026-03-10: Renamed queue-backed ingress to `enqueueAndProcessUserTurn` and split non-user immediate dispatch into `dispatchImmediateChatMessage`.
+ * - 2026-03-10: Removed restore-time user-last resend from persisted chat memory; queue-owned rows are now the only automatic resume authority.
+ * - 2026-03-10: Added `restoreChat(..., { suppressAutoResume: true })` support for edit/delete mutation flows so failed last-turn messages are not replayed before mutation.
  * - 2026-03-09: God-module decomposition — extracted queue management (queue-manager.ts),
  *   message edit/migration logic (message-edit-manager.ts), and storage singleton +
  *   identifier resolution (storage-init.ts) into focused sub-modules. managers.ts reduced
@@ -98,7 +102,6 @@ import {
 } from './storage-init.js';
 import {
   triggerPendingQueueResume,
-  triggerPendingUserMessageResume,
   autoPauseQueueForChat,
   clearQueuePauseForChat,
 } from './queue-manager.js';
@@ -130,6 +133,10 @@ export type ChatActivationSnapshot = {
   chatId: string;
   memory: AgentMessage[];
   hitlPrompts: Array<{ chatId: string | null; prompt: Record<string, unknown> }>;
+};
+
+export type RestoreChatOptions = {
+  suppressAutoResume?: boolean;
 };
 
 function triggerPendingToolCallResume(world: World, chatId: string, targetAssistantMessageId?: string): void {
@@ -206,7 +213,7 @@ function hasPendingToolCallsOnLastAssistantMessage(lastMessage: AgentMessage, ch
   return false;
 }
 
-function triggerPendingLastMessageResume(world: World, chatId: string): void {
+function triggerPendingToolCallResumeFromLastMessage(world: World, chatId: string): void {
   if (!chatId) {
     return;
   }
@@ -219,26 +226,18 @@ function triggerPendingLastMessageResume(world: World, chatId: string): void {
       }
 
       const lastMessage = chatMemory[chatMemory.length - 1];
-      if (lastMessage.role === 'user') {
-        loggerRestoreResume.debug('Detected pending user-last message during chat-restore inspection', {
-          worldId: world.id,
-          chatId,
-          messageId: lastMessage.messageId || null,
-        });
-        triggerPendingUserMessageResume(world, chatId, lastMessage);
+      if (!hasPendingToolCallsOnLastAssistantMessage(lastMessage, chatMemory)) {
         return;
       }
 
-      if (hasPendingToolCallsOnLastAssistantMessage(lastMessage, chatMemory)) {
-        loggerRestoreResume.debug('Detected pending tool-call-last message during chat-restore inspection', {
-          worldId: world.id,
-          chatId,
-          messageId: lastMessage.messageId || null,
-        });
-        triggerPendingToolCallResume(world, chatId, lastMessage.messageId);
-      }
+      loggerRestoreResume.debug('Detected pending tool-call-last message during chat-restore inspection', {
+        worldId: world.id,
+        chatId,
+        messageId: lastMessage.messageId || null,
+      });
+      triggerPendingToolCallResume(world, chatId, lastMessage.messageId);
     } catch (error) {
-      loggerRestoreResume.warn('Failed to inspect last message for chat-restore auto-resume', {
+      loggerRestoreResume.warn('Failed to inspect last message for pending tool-call resume during chat restore', {
         worldId: world.id,
         chatId,
         error: error instanceof Error ? error.message : String(error),
@@ -1109,7 +1108,12 @@ export async function deleteChat(worldId: string, chatId: string): Promise<boole
   return chatDeleted;
 }
 
-async function activateChatResources(world: World, resolvedWorldId: string, chatId: string): Promise<void> {
+async function activateChatResources(
+  world: World,
+  resolvedWorldId: string,
+  chatId: string,
+  options?: RestoreChatOptions
+): Promise<void> {
   await syncRuntimeAgentMemoryFromStorage(world, resolvedWorldId);
   loggerRestore.debug('Restore chat memory sync complete', { worldId: world.id, chatId });
   const memoryForApprovals = await storageWrappers!.getMemory(resolvedWorldId, chatId);
@@ -1119,12 +1123,19 @@ async function activateChatResources(world: World, resolvedWorldId: string, chat
   const runtimeWorld = getActiveSubscribedWorld(resolvedWorldId, chatId) || world;
   replayPendingHitlRequests(runtimeWorld, chatId);
   loggerRestore.debug('Restore chat pending HITL replay triggered', { worldId: world.id, chatId });
-  triggerPendingLastMessageResume(runtimeWorld, chatId);
+  if (options?.suppressAutoResume === true) {
+    loggerRestore.debug('Restore chat auto-resume suppressed for mutation flow', {
+      worldId: world.id,
+      chatId,
+    });
+    return;
+  }
+  triggerPendingToolCallResumeFromLastMessage(runtimeWorld, chatId);
   clearQueuePauseForChat(runtimeWorld.id, chatId);
   triggerPendingQueueResume(runtimeWorld, chatId, { recoverStaleSending: true });
 }
 
-export async function restoreChat(worldId: string, chatId: string): Promise<World | null> {
+export async function restoreChat(worldId: string, chatId: string, options?: RestoreChatOptions): Promise<World | null> {
   await ensureInitialization();
   const resolvedWorldId = await getResolvedWorldId(worldId);
   const restoreStartedAt = Date.now();
@@ -1150,7 +1161,7 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
       chatId,
       action: 'sync-memory+resume',
     });
-    await activateChatResources(world, resolvedWorldId, chatId);
+    await activateChatResources(world, resolvedWorldId, chatId, options);
     loggerRestore.debug('Restore chat resume inspection triggered', {
       worldId: world.id,
       chatId,
@@ -1192,7 +1203,7 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
   await setPersistedCurrentChatId(resolvedWorldId, chatId);
   world = await getWorld(resolvedWorldId);
   if (world) {
-    await activateChatResources(world, resolvedWorldId, chatId);
+    await activateChatResources(world, resolvedWorldId, chatId, options);
     loggerRestore.debug('Restore chat resume inspection triggered', {
       worldId: world.id,
       chatId,
@@ -1280,5 +1291,4 @@ export async function getMemory(worldId: string, chatId: string): Promise<AgentM
 
 // Re-exports from extracted modules
 export { migrateMessageIds, removeMessagesFrom, editUserMessage, logEditError, getEditErrors } from './message-edit-manager.js';
-export { addToQueue, recoverQueueSendingMessages, enqueueAndProcessUserMessage, getQueueMessages, removeFromQueue, pauseChatQueue, resumeChatQueue, stopChatQueue, clearChatQueue, retryQueueMessage } from './queue-manager.js';
-
+export { addToQueue, recoverQueueSendingMessages, enqueueAndProcessUserTurn, dispatchImmediateChatMessage, getQueueMessages, removeFromQueue, pauseChatQueue, resumeChatQueue, stopChatQueue, clearChatQueue, retryQueueMessage } from './queue-manager.js';

@@ -13,10 +13,10 @@
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
+ * - 2026-03-10: Structured selected-chat `system` error events now also create transcript rows, while non-error system events remain status-bar-only.
+ * - 2026-03-10: Reverted log-event transcript injection so realtime logs stay in the diagnostics panel only.
  * - 2026-03-06: Enforced explicit chat-scoped handling for SSE/tool/activity events; removed selected-session fallback rebinding.
  * - 2026-03-06: Preserved `worldId` / `chatId` on global main-process log callbacks for scoped logs-panel filtering.
- * - 2026-03-06: Restored selected-chat error log rows into the transcript while keeping full log ingestion in the diagnostics panel.
- * - 2026-02-27: Stopped injecting realtime `type='log'` events into chat message timelines; logs are routed to the dedicated logs panel stream only.
  * - 2026-02-27: Added unified main-process log callback support so logs are available in the right-panel diagnostics view even when no chat is selected.
  * - 2026-02-26: Suppressed redundant error-level log rows when equivalent stream errors are already shown inline on message cards.
  * - 2026-02-24: Removed ActivityRefs/activityStateRef and syncActiveStreamCount —
@@ -40,8 +40,7 @@
  */
 
 import {
-  createLogMessage,
-  shouldSuppressLogForExistingStreamError,
+  createSystemErrorMessage,
   upsertMessageList,
   type MessageLike
 } from './message-updates';
@@ -252,25 +251,6 @@ export function createChatSubscriptionEventHandler({
     }
 
     if (payload.type === 'log') {
-      const logEvent = payload.logEvent as Record<string, unknown> | undefined;
-      if (!logEvent) return;
-
-      const logLevel = String(logEvent.level || '').trim().toLowerCase();
-      if (logLevel !== 'error') {
-        return;
-      }
-
-      const logChatId = String(payload.chatId || logEvent.chatId || '').trim() || null;
-      if (selectedSessionId && logChatId !== selectedSessionId) return;
-
-      setMessages((existing) => {
-        if (shouldSuppressLogForExistingStreamError(existing, logEvent)) {
-          return existing;
-        }
-
-        return upsertMessageList(existing, createLogMessage(logEvent, logChatId));
-      });
-
       return;
     }
 
@@ -497,6 +477,17 @@ export function createChatSubscriptionEventHandler({
 
       const systemChatId = String(payload.chatId || systemPayload.chatId || '').trim() || null;
       if (selectedSessionId && systemChatId !== selectedSessionId) return;
+
+      const systemMessage = createSystemErrorMessage({
+        messageId: systemPayload.messageId ? String(systemPayload.messageId) : null,
+        createdAt: systemPayload.createdAt ? String(systemPayload.createdAt) : null,
+        chatId: systemChatId,
+        eventType: systemPayload.eventType ? String(systemPayload.eventType) : null,
+        content: systemPayload.content,
+      });
+      if (systemMessage) {
+        setMessages((existing) => upsertMessageList(existing, systemMessage));
+      }
 
       if (typeof onSessionSystemEvent === 'function') {
         onSessionSystemEvent({

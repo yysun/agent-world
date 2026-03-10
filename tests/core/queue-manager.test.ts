@@ -7,7 +7,8 @@
  * Key features covered:
  * - pauseChatQueue / resumeChatQueue state transitions
  * - addToQueue happy path with cache update
- * - enqueueAndProcessUserMessage non-user sender uses direct publish path
+ * - `enqueueAndProcessUserTurn` is queue-only for user senders
+ * - `dispatchImmediateChatMessage` bypasses queue for non-user senders
  *
  * Implementation Notes:
  * - Uses in-memory stub storage with queue operations mocked via vi.fn().
@@ -46,7 +47,8 @@ import {
   pauseChatQueue,
   resumeChatQueue,
   addToQueue,
-  enqueueAndProcessUserMessage,
+  enqueueAndProcessUserTurn,
+  dispatchImmediateChatMessage,
   getQueueMessages,
 } from '../../core/queue-manager.js';
 import { overrideStorageForTests } from '../../core/storage-init.js';
@@ -177,30 +179,35 @@ describe('queue-manager', () => {
     });
   });
 
-  describe('enqueueAndProcessUserMessage', () => {
-    it('uses direct publish (not queue) for non-user sender', async () => {
+  describe('dispatch boundaries', () => {
+    it('uses immediate publish (not queue) for non-user sender', async () => {
       const { publishMessage } = await import('../../core/events/index.js');
       const worldId = 'world-q';
       const chatId = 'chat-agent';
 
-      const result = await enqueueAndProcessUserMessage(worldId, chatId, 'agent says hi', 'agent-1');
+      const result = await dispatchImmediateChatMessage(worldId, chatId, 'agent says hi', 'agent-1');
 
       expect(publishMessage).toHaveBeenCalled();
-      // Non-user paths should return null (not a QueuedMessage)
-      expect(result).toBeNull();
+      expect(result?.messageId).toBe('pub-msg-1');
     });
 
     it('enqueues for human sender', async () => {
       const worldId = 'world-q';
       const chatId = 'chat-human';
 
-      const result = await enqueueAndProcessUserMessage(worldId, chatId, 'user message', 'human', null, {
+      const result = await enqueueAndProcessUserTurn(worldId, chatId, 'user message', 'human', null, {
         preassignedMessageId: 'pre-id-1',
       });
 
       expect(result).not.toBeNull();
       expect(result?.messageId).toBe('pre-id-1');
       expect(result?.status).toBe('queued');
+    });
+
+    it('rejects non-user sender on the queue-only user API', async () => {
+      await expect(
+        enqueueAndProcessUserTurn('world-q', 'chat-agent', 'agent says hi', 'agent-1')
+      ).rejects.toThrow('not a queue-eligible user sender');
     });
   });
 });

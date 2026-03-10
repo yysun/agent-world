@@ -21,6 +21,7 @@
  * - Complete chat lifecycle management with parent-child relationships
  * - Cross-agent memory aggregation for world-level contexts
  * - Data integrity through cascade deletion
+ * - In-memory queue row persistence for user-turn queue workflows in tests
  * - Runtime property exclusion: eventEmitter, agents, chats, eventStorage are not persisted
  * 
  * Changes:
@@ -53,6 +54,8 @@ import type {
   WorldChat,
   AgentMessage,
   EditErrorLog,
+  QueueMessageStatus,
+  QueuedMessage,
 } from '../types.js';
 import { validateAgentMessageIds } from './validation.js';
 import { createCategoryLogger } from '../logger.js';
@@ -122,6 +125,8 @@ export class MemoryStorage implements StorageAPI {
   private worldChats = new Map<string, Map<string, WorldChat>>(); // worldId -> chatId -> WorldChat
   private archivedMemory = new Map<string, Map<string, AgentMessage[]>>(); // worldId -> agentId -> archived messages
   private editErrors = new Map<string, EditErrorLog[]>(); // worldId -> EditErrorLog[]
+  private queuedMessages = new Map<string, Map<string, QueuedMessage[]>>(); // worldId -> chatId -> QueuedMessage[]
+  private nextQueueRowId = 1;
 
   // World operations
   async saveWorld(worldData: World): Promise<void> {
@@ -157,6 +162,7 @@ export class MemoryStorage implements StorageAPI {
       this.chats.delete(worldId);
       this.worldChats.delete(worldId);
       this.archivedMemory.delete(worldId);
+      this.queuedMessages.delete(worldId);
     }
     return deleted;
   }
@@ -381,8 +387,157 @@ export class MemoryStorage implements StorageAPI {
 
       // Clean up memory associated with this chat
       await this.deleteMemoryByChatId(worldId, chatId);
+      await this.deleteQueueForChat?.(worldId, chatId);
     }
     return deleted;
+  }
+
+  // Queue operations
+  async getQueuedMessages(worldId: string, chatId: string): Promise<QueuedMessage[]> {
+    const worldQueueRows = this.queuedMessages.get(worldId);
+    if (!worldQueueRows) return [];
+
+    const queuedRows = worldQueueRows.get(chatId) || [];
+    return deepClone(queuedRows);
+  }
+
+  async addQueuedMessage(
+    worldId: string,
+    chatId: string,
+    messageId: string,
+    content: string,
+    sender: string
+  ): Promise<void> {
+    if (!this.queuedMessages.has(worldId)) {
+      this.queuedMessages.set(worldId, new Map());
+    }
+
+    const worldQueueRows = this.queuedMessages.get(worldId)!;
+    const queuedRows = worldQueueRows.get(chatId) || [];
+    const timestamp = new Date().toISOString();
+    queuedRows.push({
+      id: this.nextQueueRowId++,
+      worldId,
+      chatId,
+      messageId,
+      content,
+      sender,
+      status: 'queued',
+      retryCount: 0,
+      createdAt: timestamp,
+    });
+    worldQueueRows.set(chatId, deepClone(queuedRows));
+  }
+
+  async updateMessageQueueStatus(messageId: string, status: QueueMessageStatus): Promise<void> {
+    for (const [worldId, worldQueueRows] of this.queuedMessages.entries()) {
+      for (const [chatId, queuedRows] of worldQueueRows.entries()) {
+        const updatedRows = queuedRows.map((row) => (
+          row.messageId === messageId ? { ...row, status } : row
+        ));
+        worldQueueRows.set(chatId, deepClone(updatedRows));
+      }
+      this.queuedMessages.set(worldId, worldQueueRows);
+    }
+  }
+
+  async incrementQueueMessageRetry(messageId: string): Promise<number> {
+    let nextRetryCount = 0;
+
+    for (const [worldId, worldQueueRows] of this.queuedMessages.entries()) {
+      for (const [chatId, queuedRows] of worldQueueRows.entries()) {
+        const updatedRows = queuedRows.map((row) => {
+          if (row.messageId !== messageId) {
+            return row;
+          }
+          nextRetryCount = row.retryCount + 1;
+          return {
+            ...row,
+            retryCount: nextRetryCount,
+          };
+        });
+        worldQueueRows.set(chatId, deepClone(updatedRows));
+      }
+      this.queuedMessages.set(worldId, worldQueueRows);
+    }
+
+    return nextRetryCount;
+  }
+
+  async removeQueuedMessage(messageId: string): Promise<void> {
+    for (const [worldId, worldQueueRows] of this.queuedMessages.entries()) {
+      for (const [chatId, queuedRows] of worldQueueRows.entries()) {
+        worldQueueRows.set(
+          chatId,
+          deepClone(queuedRows.filter((row) => row.messageId !== messageId))
+        );
+      }
+      this.queuedMessages.set(worldId, worldQueueRows);
+    }
+  }
+
+  async resetQueueMessageForRetry(messageId: string): Promise<void> {
+    for (const [worldId, worldQueueRows] of this.queuedMessages.entries()) {
+      for (const [chatId, queuedRows] of worldQueueRows.entries()) {
+        const updatedRows = queuedRows.map((row) => (
+          row.messageId === messageId
+            ? { ...row, status: 'queued' as const, retryCount: 0 }
+            : row
+        ));
+        worldQueueRows.set(chatId, deepClone(updatedRows));
+      }
+      this.queuedMessages.set(worldId, worldQueueRows);
+    }
+  }
+
+  async cancelQueuedMessages(worldId: string, chatId: string): Promise<number> {
+    const worldQueueRows = this.queuedMessages.get(worldId);
+    if (!worldQueueRows) return 0;
+
+    const queuedRows = worldQueueRows.get(chatId) || [];
+    let cancelledCount = 0;
+    const updatedRows = queuedRows.map((row) => {
+      if (row.status === 'queued' || row.status === 'sending') {
+        cancelledCount += 1;
+        return { ...row, status: 'cancelled' as const };
+      }
+      return row;
+    });
+
+    worldQueueRows.set(chatId, deepClone(updatedRows));
+    return cancelledCount;
+  }
+
+  async recoverSendingMessages(): Promise<number> {
+    let recoveredCount = 0;
+
+    for (const [worldId, worldQueueRows] of this.queuedMessages.entries()) {
+      for (const [chatId, queuedRows] of worldQueueRows.entries()) {
+        const updatedRows = queuedRows.map((row) => {
+          if (row.status !== 'sending') {
+            return row;
+          }
+          recoveredCount += 1;
+          return { ...row, status: 'queued' as const };
+        });
+        worldQueueRows.set(chatId, deepClone(updatedRows));
+      }
+      this.queuedMessages.set(worldId, worldQueueRows);
+    }
+
+    return recoveredCount;
+  }
+
+  async deleteQueueForChat(worldId: string, chatId: string): Promise<number> {
+    const worldQueueRows = this.queuedMessages.get(worldId);
+    if (!worldQueueRows) return 0;
+
+    const deletedCount = (worldQueueRows.get(chatId) || []).length;
+    worldQueueRows.delete(chatId);
+    if (worldQueueRows.size === 0) {
+      this.queuedMessages.delete(worldId);
+    }
+    return deletedCount;
   }
 
   async listChats(worldId: string): Promise<Chat[]> {
@@ -503,6 +658,8 @@ export class MemoryStorage implements StorageAPI {
     this.worldChats.clear();
     this.archivedMemory.clear();
     this.editErrors.clear();
+    this.queuedMessages.clear();
+    this.nextQueueRowId = 1;
   }
 
   /**
@@ -514,11 +671,13 @@ export class MemoryStorage implements StorageAPI {
     totalChats: number;
     totalWorldChats: number;
     totalArchivedMemory: number;
+    totalQueuedMessages: number;
   } {
     let totalAgents = 0;
     let totalChats = 0;
     let totalWorldChats = 0;
     let totalArchivedMemory = 0;
+    let totalQueuedMessages = 0;
 
     for (const worldAgents of this.agents.values()) {
       totalAgents += worldAgents.size;
@@ -536,12 +695,19 @@ export class MemoryStorage implements StorageAPI {
       totalArchivedMemory += worldMemory.size;
     }
 
+    for (const worldQueueRows of this.queuedMessages.values()) {
+      for (const queuedRows of worldQueueRows.values()) {
+        totalQueuedMessages += queuedRows.length;
+      }
+    }
+
     return {
       worlds: this.worlds.size,
       totalAgents,
       totalChats,
       totalWorldChats,
-      totalArchivedMemory
+      totalArchivedMemory,
+      totalQueuedMessages,
     };
   }
 }

@@ -249,6 +249,22 @@ describe('extracted message utils', () => {
     expect(className).not.toContain('w-[80%]');
   });
 
+  it('renders structured system error transcript rows with a red left border', () => {
+    const message = {
+      messageId: 'sys-err-1',
+      role: 'system',
+      sender: 'system',
+      type: 'system',
+      systemEvent: {
+        kind: 'error',
+        eventType: 'error',
+      },
+    };
+
+    const className = getMessageCardClassName(message, new Map(), [message], 0);
+    expect(className).toContain('border-l-red-500/70');
+  });
+
   it('hides assistant human-intervention tool-call placeholders from renderable rows', () => {
     const hitlToolCallMessage = {
       messageId: 'msg-hitl-1',

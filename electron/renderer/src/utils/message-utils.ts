@@ -13,6 +13,7 @@
  * - Helper functions are intentionally colocated to preserve behavior parity.
  *
  * Recent Changes:
+ * - 2026-03-10: Added a red left border for structured `system` error transcript rows so durable failed-turn diagnostics are visually distinct from neutral system notices.
  * - 2026-03-06: Restored error-level realtime log rows as renderable transcript entries while keeping non-error logs in the diagnostics panel only.
  * - 2026-03-06: Unwrap persisted tool execution envelopes when deriving tool success/failure card styling after reload.
  * - 2026-03-06: Recognize canonical shell `validation_error` and `approval_denied` tool-result reasons as failed outcomes for renderer card styling.
@@ -522,6 +523,7 @@ export function getMessageCardClassName(message, messagesById, messages, current
   const isUser = isHumanMessage(message);
   const isTool = isToolRelatedMessage(message);
   const isSystem = role === 'system' || message?.type === 'log' || Boolean(message?.logEvent);
+  const isSystemError = String(message?.systemEvent?.kind || '').trim().toLowerCase() === 'error';
   const isCrossAgent = isCrossAgentAssistantMessage(message, messagesById, messages, currentIndex);
   const normalizedOptions = (options || {}) as {
     isToolCallPending?: boolean;
@@ -539,11 +541,11 @@ export function getMessageCardClassName(message, messagesById, messages, current
       ? 'w-full border-l-sidebar-border bg-sidebar-accent'
       : 'ml-auto w-[80%] border-l-sidebar-border bg-sidebar-accent')
     : isTool
-      ? `ml-auto w-[92%] ${getToolMessageBorderClassName(message, isToolCallPending)}`
+        ? `ml-auto w-[92%] ${getToolMessageBorderClassName(message, isToolCallPending)}`
       : isCrossAgent
         ? 'ml-auto w-[92%] border-l-violet-500/50'
         : isSystem
-          ? 'mr-auto w-[90%] border-l-border bg-muted/40'
+          ? `mr-auto w-[90%] ${isSystemError ? 'border-l-red-500/70 bg-muted/40' : 'border-l-border bg-muted/40'}`
           : 'ml-auto w-[92%] border-l-sky-500/40';
 
   return `group relative rounded-lg p-3 ${showLeftBorder ? 'border-l' : ''} ${roleClassName}`;

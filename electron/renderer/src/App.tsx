@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-03-10: Rehydrate persisted selected-chat system error events into the transcript on chat refresh so failed-turn diagnostics survive restart without moving raw logs out of the logs panel.
  * - 2026-03-06: Added renderer bridge bootstrap fallback UI so missing preload APIs show an explicit startup error instead of a blank screen.
  * - 2026-03-06: Scoped the right-side logs panel to the active world/chat and limited Clear to the visible scoped entries.
  * - 2026-03-06: Preserved error-kind selected-chat system statuses until replaced or context changes; non-error statuses still auto-expire.
@@ -111,6 +112,7 @@ import {
   createMainHeaderProps,
 } from './utils/app-layout-props';
 import { initializeRendererLogger, rendererLogger, type RendererLogEntry } from './utils/logger';
+import { mergeStoredSystemErrorEvents, preserveLiveSystemErrorMessages } from './domain/message-updates';
 import {
   normalizeWorldGridLayoutChoiceId,
   normalizeWorldViewMode,
@@ -205,6 +207,7 @@ function AppContent({ api }: { api: DesktopApi }) {
   const selectedSessionIdRef = useRef<string | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const messagesRef = useRef<any[]>([]);
   const previousMessageCountRef = useRef(0);
   const sessionSetterProxyRef = useRef<SetterProxy>({
     setSessions: null,
@@ -638,6 +641,7 @@ function AppContent({ api }: { api: DesktopApi }) {
     }
     return index;
   }, [messages]);
+  messagesRef.current = messages;
 
   const refreshMessages = useCallback(async (worldId: string | null | undefined, sessionId: string | null | undefined) => {
     const refreshId = ++messageRefreshCounter.current;
@@ -660,7 +664,20 @@ function AppContent({ api }: { api: DesktopApi }) {
           resolvedChatId: String((activation as any)?.chatId || '').trim() || null
         });
       }
-      const nextMessages = (await api.getMessages(worldId, sessionId)) as any[];
+      const [nextMessages, storedEvents] = await Promise.all([
+        api.getMessages(worldId, sessionId),
+        api.getChatEvents(worldId, sessionId),
+      ]);
+      const mergedMessages = mergeStoredSystemErrorEvents(
+        Array.isArray(nextMessages) ? nextMessages : [],
+        Array.isArray(storedEvents) ? storedEvents as Array<Record<string, unknown>> : [],
+        sessionId,
+      );
+      const nextVisibleMessages = preserveLiveSystemErrorMessages(
+        mergedMessages,
+        messagesRef.current,
+        sessionId,
+      );
       // Discard if a later refresh started or the target chat is no longer selected.
       if (!shouldApplyChatRefresh({
         refreshId,
@@ -668,7 +685,7 @@ function AppContent({ api }: { api: DesktopApi }) {
         targetChatId: sessionId,
         selectedChatId: selectedSessionIdRef.current,
       })) return;
-      setMessages(nextMessages);
+      setMessages(nextVisibleMessages);
     } catch (error) {
       if (refreshId !== messageRefreshCounter.current) return;
       setStatusText(safeMessage(error, 'Failed to load messages.'), 'error');

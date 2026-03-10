@@ -2,6 +2,9 @@
  * Memory Storage Tests
  *
  * Tests for the in-memory storage implementation used in non-Node environments.
+ *
+ * Recent Changes:
+ * - 2026-03-10: Added queue persistence coverage so queue-backed edit/send paths work against the in-memory backend.
  */
 import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createMemoryStorage } from '../../../core/storage/memory-storage.js';
@@ -107,6 +110,64 @@ describe('Memory Storage', () => {
       expect(worlds).toHaveLength(2);
       expect(worlds.map(w => w.id)).toContain('world-1');
       expect(worlds.map(w => w.id)).toContain('world-2');
+    });
+  });
+
+  describe('Queue Operations', () => {
+    it('persists, updates, retries, and removes queued messages in memory', async () => {
+      await storage.addQueuedMessage?.('test-world', 'chat-1', 'msg-1', 'hello', 'human');
+
+      expect(await storage.getQueuedMessages?.('test-world', 'chat-1')).toEqual([
+        expect.objectContaining({
+          worldId: 'test-world',
+          chatId: 'chat-1',
+          messageId: 'msg-1',
+          content: 'hello',
+          sender: 'human',
+          status: 'queued',
+          retryCount: 0,
+        }),
+      ]);
+
+      await storage.updateMessageQueueStatus?.('msg-1', 'sending');
+      expect((await storage.getQueuedMessages?.('test-world', 'chat-1'))?.[0]).toEqual(
+        expect.objectContaining({ status: 'sending' })
+      );
+
+      expect(await storage.incrementQueueMessageRetry?.('msg-1')).toBe(1);
+      expect((await storage.getQueuedMessages?.('test-world', 'chat-1'))?.[0]).toEqual(
+        expect.objectContaining({ retryCount: 1 })
+      );
+
+      await storage.resetQueueMessageForRetry?.('msg-1');
+      expect((await storage.getQueuedMessages?.('test-world', 'chat-1'))?.[0]).toEqual(
+        expect.objectContaining({ status: 'queued', retryCount: 0 })
+      );
+
+      await storage.removeQueuedMessage?.('msg-1');
+      expect(await storage.getQueuedMessages?.('test-world', 'chat-1')).toEqual([]);
+    });
+
+    it('recovers sending rows and cleans chat queue state on delete', async () => {
+      await storage.addQueuedMessage?.('test-world', 'chat-1', 'msg-1', 'hello', 'human');
+      await storage.addQueuedMessage?.('test-world', 'chat-1', 'msg-2', 'again', 'human');
+      await storage.updateMessageQueueStatus?.('msg-1', 'sending');
+      await storage.updateMessageQueueStatus?.('msg-2', 'queued');
+
+      expect(await storage.recoverSendingMessages?.()).toBe(1);
+      expect((await storage.getQueuedMessages?.('test-world', 'chat-1'))?.map((row) => row.status)).toEqual([
+        'queued',
+        'queued',
+      ]);
+
+      expect(await storage.cancelQueuedMessages?.('test-world', 'chat-1')).toBe(2);
+      expect((await storage.getQueuedMessages?.('test-world', 'chat-1'))?.map((row) => row.status)).toEqual([
+        'cancelled',
+        'cancelled',
+      ]);
+
+      expect(await storage.deleteQueueForChat?.('test-world', 'chat-1')).toBe(2);
+      expect(await storage.getQueuedMessages?.('test-world', 'chat-1')).toEqual([]);
     });
   });
 

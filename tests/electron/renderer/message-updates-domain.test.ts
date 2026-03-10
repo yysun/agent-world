@@ -20,13 +20,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   clearChatTransientErrors,
+  createSystemErrorMessage,
   createOptimisticUserMessage,
   createLogMessage,
   getMessageTimestamp,
+  mergeStoredSystemErrorEvents,
+  preserveLiveSystemErrorMessages,
   reconcileOptimisticUserMessage,
   removeRedundantErrorLogMessages,
   removeOptimisticUserMessage,
   shouldSuppressLogForExistingStreamError,
+  trimChatMessagesFromCutoff,
   upsertMessageList
 } from '../../../electron/renderer/src/domain/message-updates';
 
@@ -156,6 +160,147 @@ describe('message-updates domain helpers', () => {
     const next = clearChatTransientErrors(existing, 'chat-1');
     expect(next).toHaveLength(1);
     expect(next[0].messageId).toBe('assistant-ok');
+  });
+
+  it('creates a transcript message for structured system error events', () => {
+    const message = createSystemErrorMessage({
+      messageId: 'sys-1',
+      createdAt: '2026-03-10T03:18:01.000Z',
+      chatId: 'chat-1',
+      eventType: 'error',
+      content: {
+        type: 'error',
+        message: 'Agent failed to process the turn.',
+        agentName: 'gpt5',
+      },
+    });
+
+    expect(message).toMatchObject({
+      messageId: 'sys-1',
+      role: 'system',
+      type: 'system',
+      chatId: 'chat-1',
+      content: 'Agent failed to process the turn.',
+      systemEvent: {
+        kind: 'error',
+      },
+    });
+  });
+
+  it('merges stored chat-scoped system error events back into restored messages', () => {
+    const existing = [{
+      messageId: 'user-1',
+      role: 'user',
+      sender: 'human',
+      chatId: 'chat-1',
+      content: 'hello',
+      createdAt: '2026-03-10T03:18:00.000Z',
+    }];
+
+    const next = mergeStoredSystemErrorEvents(existing, [{
+      id: 'sys-1',
+      type: 'system',
+      chatId: 'chat-1',
+      createdAt: '2026-03-10T03:18:01.000Z',
+      payload: {
+        type: 'error',
+        eventType: 'error',
+        message: 'Agent failed to process the turn.',
+        agentName: 'gpt5',
+      },
+    }], 'chat-1');
+
+    expect(next.map((message) => message.messageId)).toEqual(['user-1', 'sys-1']);
+    expect(next[1]).toMatchObject({
+      role: 'system',
+      type: 'system',
+      chatId: 'chat-1',
+    });
+  });
+
+  it('ignores non-error system events when restoring transcript error rows', () => {
+    const existing = [{
+      messageId: 'user-1',
+      role: 'user',
+      sender: 'human',
+      chatId: 'chat-1',
+      content: 'hello',
+      createdAt: '2026-03-10T03:18:00.000Z',
+    }];
+
+    const next = mergeStoredSystemErrorEvents(existing, [{
+      id: 'sys-title',
+      type: 'system',
+      chatId: 'chat-1',
+      createdAt: '2026-03-10T03:18:01.000Z',
+      payload: {
+        eventType: 'chat-title-updated',
+        title: 'New title',
+      },
+    }], 'chat-1');
+
+    expect(next).toEqual(existing);
+  });
+
+  it('preserves live system error messages across a stale refresh result', () => {
+    const refreshed = [{
+      messageId: 'user-1',
+      role: 'user',
+      sender: 'human',
+      chatId: 'chat-1',
+      content: 'hello',
+      createdAt: '2026-03-10T03:18:00.000Z',
+    }];
+
+    const live = [{
+      messageId: 'sys-live-1',
+      role: 'system',
+      sender: 'system',
+      type: 'system',
+      chatId: 'chat-1',
+      content: 'Error processing agent message: provider missing.',
+      createdAt: '2026-03-10T03:18:01.000Z',
+      systemEvent: {
+        kind: 'error',
+        eventType: 'error',
+      },
+    }];
+
+    const next = preserveLiveSystemErrorMessages(refreshed, live, 'chat-1');
+    expect(next.map((message) => message.messageId)).toEqual(['user-1', 'sys-live-1']);
+  });
+
+  it('trims the edited chat tail including structured system error rows', () => {
+    const existing = [{
+      messageId: 'user-1',
+      role: 'user',
+      sender: 'human',
+      chatId: 'chat-1',
+      content: 'first',
+      createdAt: '2026-03-10T03:18:00.000Z',
+    }, {
+      messageId: 'user-2',
+      role: 'user',
+      sender: 'human',
+      chatId: 'chat-1',
+      content: 'edit me',
+      createdAt: '2026-03-10T03:18:01.000Z',
+    }, {
+      messageId: 'sys-err-1',
+      role: 'system',
+      sender: 'system',
+      type: 'system',
+      chatId: 'chat-1',
+      content: 'Provider missing.',
+      createdAt: '2026-03-10T03:18:02.000Z',
+      systemEvent: {
+        kind: 'error',
+        eventType: 'error',
+      },
+    }];
+
+    const next = trimChatMessagesFromCutoff(existing, 'user-2', 'chat-1');
+    expect(next.map((message) => message.messageId)).toEqual(['user-1']);
   });
 
   it('creates optimistic user messages with pending metadata', () => {

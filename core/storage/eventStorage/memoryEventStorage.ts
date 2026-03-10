@@ -21,6 +21,7 @@
  * - Checks for duplicate IDs before insertion (matches SQLite INSERT OR IGNORE behavior)
  * 
  * Changes:
+ * - 2026-03-10: Added optional targeted event deletion by event ID for trim/edit cleanup without wiping an entire chat history.
  * - 2025-11-03: Added duplicate event ID detection to prevent constraint violations
  */
 
@@ -172,6 +173,45 @@ export class MemoryEventStorage implements EventStorage {
 
     // Return deep clones to prevent external mutations
     return filtered.map(e => deepClone(e));
+  }
+
+  /**
+   * Delete specific events by ID across all world/chat contexts.
+   */
+  async deleteEventsByIds(ids: string[]): Promise<number> {
+    const normalizedIds = new Set(
+      Array.isArray(ids)
+        ? ids.map((id) => String(id || '').trim()).filter(Boolean)
+        : []
+    );
+    if (normalizedIds.size === 0) {
+      return 0;
+    }
+
+    let deletedCount = 0;
+    for (const [key, eventsArray] of this.events.entries()) {
+      const remainingEvents = eventsArray.filter((event) => !normalizedIds.has(String(event.id || '').trim()));
+      deletedCount += eventsArray.length - remainingEvents.length;
+      if (remainingEvents.length === eventsArray.length) {
+        continue;
+      }
+
+      if (remainingEvents.length === 0) {
+        this.events.delete(key);
+        this.seqCounters.delete(key);
+        continue;
+      }
+
+      this.events.set(key, remainingEvents);
+      const latestSeq = remainingEvents.reduce((max, event) => Math.max(max, event.seq ?? 0), 0);
+      if (latestSeq > 0) {
+        this.seqCounters.set(key, latestSeq);
+      } else {
+        this.seqCounters.delete(key);
+      }
+    }
+
+    return deletedCount;
   }
 
   /**

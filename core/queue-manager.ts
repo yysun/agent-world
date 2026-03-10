@@ -5,12 +5,11 @@
  *
  * Key features:
  * - Per-chat FIFO queue with pause/resume/stop/clear lifecycle
- * - Exponential-backoff retry with bounded attempt count
+ * - Explicit-recovery failure handling for user-authored turns
  * - Responder preflight: checks eligible agents before marking a row 'sending';
  *   performs a single runtime refresh attempt when no responders are found
- * - No-response timeout fallback: escalates to retry/error if no response-start
+ * - No-response timeout fallback: escalates to durable error if no response-start
  *   event arrives within QUEUE_NO_RESPONSE_FALLBACK_MS
- * - Per-second SSE status emissions during retry wait periods
  * - World-advance event listener chaining: next queue item is triggered when the
  *   current chat's processing goes idle
  * - Startup recovery: stale 'sending' rows are reset on module init
@@ -23,13 +22,14 @@
  * - All other dependencies (events/index.js, storage-init.ts, etc.) are static.
  *
  * Recent Changes:
+ * - 2026-03-10: Split queue-backed user submission from immediate non-user dispatch; queue APIs are now user-turn-only by contract.
+ * - 2026-03-10: Removed memory-based restore resend and automatic queue backoff replay for failed user turns.
  * - 2026-03-09: Extracted from managers.ts as part of god-module decomposition.
  *   - triggerPendingUserMessageResume moved here (uses queue infrastructure).
  *   - autoPauseQueueForChat / clearQueuePauseForChat exported for managers.ts use.
  */
 import { storageWrappers, ensureInitialization, getResolvedWorldId } from './storage-init.js';
 import { RELIABILITY_CONFIG } from './reliability-config.js';
-import { startChatScopedWaitStatusEmitter, type WaitStatusEmitterHandle } from './reliability-runtime.js';
 import { createCategoryLogger } from './logger.js';
 import * as utils from './utils.js';
 import { hasActiveChatMessageProcessing } from './message-processing-control.js';
@@ -41,11 +41,10 @@ import {
 } from './events/index.js';
 import { nanoid } from 'nanoid';
 import type {
-  World, Agent, QueuedMessage, StorageAPI,
+  World, Agent, QueuedMessage, StorageAPI, WorldMessageEvent,
 } from './types.js';
 
 const loggerQueue = createCategoryLogger('message.queue');
-const loggerRestoreResume = createCategoryLogger('chat.restore.resume');
 
 // ─── Queue management state ──────────────────────────────────────────────────
 // keyed by `${worldId}:${chatId}`
@@ -55,10 +54,6 @@ const queueListenerActive = new Set<string>();
 const queueAdvanceListeners = new Map<string, (payload: any) => void>();
 const queueResponderRefreshAttempted = new Set<string>();
 const QUEUE_NO_RESPONSE_FALLBACK_MS = RELIABILITY_CONFIG.queue.noResponseFallbackMs;
-const QUEUE_MAX_RETRY_ATTEMPTS = RELIABILITY_CONFIG.queue.maxRetryAttempts;
-
-// keyed by `${worldId}:${chatId}` (same as queueKey)
-const inFlightUserResumeKeys = new Set<string>();
 
 type QueueDispatchState = {
   messageId: string;
@@ -66,11 +61,6 @@ type QueueDispatchState = {
   dispatchedAt: number;
 };
 const queueDispatchStateByChat = new Map<string, QueueDispatchState>();
-
-type QueueRetryStatusHandle = {
-  emitter: WaitStatusEmitterHandle;
-};
-const queueRetryStatusHandles = new Map<string, QueueRetryStatusHandle>();
 
 type QueueAgentStatusSnapshot = {
   queueChatId: string;
@@ -108,48 +98,6 @@ function getQueueKey(worldId: string, chatId: string): string {
 
 function getQueueMessageKey(worldId: string, chatId: string, messageId: string): string {
   return `${worldId}:${chatId}:${messageId}`;
-}
-
-function clearQueueRetryStatusEmitter(worldId: string, chatId: string, messageId: string): void {
-  const retryStatusKey = getQueueMessageKey(worldId, chatId, messageId);
-  const handle = queueRetryStatusHandles.get(retryStatusKey);
-  if (!handle) return;
-  handle.emitter.stop();
-  queueRetryStatusHandles.delete(retryStatusKey);
-}
-
-function startQueueRetryStatusEmitter(
-  world: World,
-  chatId: string,
-  messageId: string,
-  retry: {
-    reason: string;
-    attempt: number;
-    maxAttempts: number;
-    delayMs: number;
-  }
-): void {
-  const scopedChatId = String(chatId || '').trim();
-  if (!scopedChatId) return;
-
-  clearQueueRetryStatusEmitter(world.id, scopedChatId, messageId);
-
-  const emitter = startChatScopedWaitStatusEmitter({
-    world,
-    chatId: scopedChatId,
-    phase: 'queue_retry',
-    reason: retry.reason,
-    durationMs: retry.delayMs,
-    attempt: retry.attempt,
-    maxAttempts: retry.maxAttempts,
-    contentBuilder: (snapshot) => {
-      return `Queue retry scheduled (${retry.reason}): attempt ${snapshot.attempt}/${snapshot.maxAttempts}, remaining attempts ${snapshot.attemptsRemaining ?? 0}, elapsed ${snapshot.elapsedSeconds}s, next retry in ${snapshot.remainingSeconds ?? 0}s.`;
-    },
-  });
-
-  queueRetryStatusHandles.set(getQueueMessageKey(world.id, scopedChatId, messageId), {
-    emitter,
-  });
 }
 
 function clearQueueResponderRefreshAttempt(worldId: string, chatId: string, messageId: string): void {
@@ -365,6 +313,74 @@ async function runQueueResponderPreflight(
   return { ready: false, agentStatus, refreshed: true };
 }
 
+type StaleSendingRecoveryDecision =
+  | { action: 'recover'; reason: string }
+  | { action: 'mark-error'; reason: string };
+
+async function resolveStaleSendingRecoveryDecision(
+  world: World,
+  chatId: string,
+  messageId: string,
+): Promise<StaleSendingRecoveryDecision> {
+  const eventStorage = world.eventStorage;
+  if (!eventStorage || typeof eventStorage.getEventsByWorldAndChat !== 'function') {
+    return {
+      action: 'recover',
+      reason: 'no-event-storage',
+    };
+  }
+
+  const latestMessageEvents = await eventStorage.getEventsByWorldAndChat(world.id, chatId, {
+    types: ['message'],
+    order: 'desc',
+    limit: 1,
+  });
+  const latestMessageEvent = latestMessageEvents[0] ?? null;
+  if (!latestMessageEvent || typeof latestMessageEvent.seq !== 'number') {
+    return {
+      action: 'recover',
+      reason: 'message-event-missing',
+    };
+  }
+
+  if (String(latestMessageEvent.id || '').trim() !== messageId) {
+    return {
+      action: 'mark-error',
+      reason: `superseded-by-message:${String(latestMessageEvent.id || '').trim() || 'unknown'}`,
+    };
+  }
+
+  const latestSseEvents = await eventStorage.getEventsByWorldAndChat(world.id, chatId, {
+    types: ['sse'],
+    order: 'desc',
+    limit: 1,
+  });
+  const latestPostMessageSse = latestSseEvents[0] ?? null;
+  if (
+    !latestPostMessageSse
+    || typeof latestPostMessageSse.seq !== 'number'
+    || latestPostMessageSse.seq <= latestMessageEvent.seq
+  ) {
+    return {
+      action: 'recover',
+      reason: 'no-post-message-sse',
+    };
+  }
+
+  const latestSseType = String(latestPostMessageSse.payload?.type || '').trim().toLowerCase();
+  if (latestSseType === 'error' || latestSseType === 'end') {
+    return {
+      action: 'mark-error',
+      reason: `terminal-sse:${latestSseType}`,
+    };
+  }
+
+  return {
+    action: 'recover',
+    reason: latestSseType === 'start' ? 'interrupted-after-start' : `non-terminal-sse:${latestSseType || 'unknown'}`,
+  };
+}
+
 async function handleQueueDispatchFailure(
   world: World,
   chatId: string,
@@ -374,7 +390,6 @@ async function handleQueueDispatchFailure(
 ): Promise<void> {
   const queueKey = getQueueKey(world.id, chatId);
   clearQueueResponderRefreshAttempt(world.id, chatId, messageId);
-  clearQueueRetryStatusEmitter(world.id, chatId, messageId);
   queueDispatchStateByChat.delete(queueKey);
   detachQueueAdvanceListener(world, chatId);
   const agentStatus = collectQueueAgentStatus(
@@ -400,65 +415,9 @@ async function handleQueueDispatchFailure(
 
   try {
     const newRetryCount = await queueStorage.incrementQueueMessageRetry(messageId);
-    if (newRetryCount < QUEUE_MAX_RETRY_ATTEMPTS) {
-      await queueStorage.updateMessageQueueStatus(messageId, 'queued');
-      // Re-add to queued cache: this message is waiting for retry dispatch
-      if (!world._queuedChatIds) world._queuedChatIds = new Set();
-      world._queuedChatIds.add(chatId);
-      const delayMs = Math.pow(2, newRetryCount - 1) * RELIABILITY_CONFIG.queue.retryBaseDelayMs;
-      startQueueRetryStatusEmitter(world, chatId, messageId, {
-        reason,
-        attempt: newRetryCount,
-        maxAttempts: QUEUE_MAX_RETRY_ATTEMPTS,
-        delayMs,
-      });
-      loggerQueue.warn('Queue dispatch failed; message re-queued for retry', {
-        worldId: world.id,
-        chatId,
-        messageId,
-        reason,
-        retryCount: newRetryCount,
-        nextAttemptInMs: delayMs,
-        agentStatus,
-      });
-      setTimeout(() => {
-        void (async () => {
-          clearQueueRetryStatusEmitter(world.id, chatId, messageId);
-          try {
-            const { getActiveSubscribedWorld } = await import('./subscription.js');
-            const runtimeWorld =
-              getActiveSubscribedWorld(world.id, chatId) ||
-              await (async () => {
-                const { getWorld } = await import('./managers.js');
-                return getWorld(world.id);
-              })();
-            if (!runtimeWorld) {
-              loggerQueue.warn('Queue retry skipped: world unavailable', {
-                worldId: world.id,
-                chatId,
-                messageId,
-                reason,
-              });
-              return;
-            }
-            triggerPendingQueueResume(runtimeWorld, chatId);
-          } catch (resolveError) {
-            loggerQueue.warn('Queue retry failed to resolve runtime world', {
-              worldId: world.id,
-              chatId,
-              messageId,
-              reason,
-              error: resolveError instanceof Error ? resolveError.message : String(resolveError),
-            });
-          }
-        })();
-      }, delayMs);
-      return;
-    }
-
     await queueStorage.updateMessageQueueStatus(messageId, 'error');
-    clearQueueRetryStatusEmitter(world.id, chatId, messageId);
-    loggerQueue.warn('Queue message reached max retries, marked error', {
+    world._queuedChatIds?.delete(chatId);
+    loggerQueue.warn('Queue dispatch failed; message marked error for explicit recovery', {
       worldId: world.id,
       chatId,
       messageId,
@@ -467,7 +426,6 @@ async function handleQueueDispatchFailure(
       agentStatus,
     });
   } catch (retryErr) {
-    clearQueueRetryStatusEmitter(world.id, chatId, messageId);
     loggerQueue.error('Failed to handle queue dispatch retry transition', {
       worldId: world.id,
       chatId,
@@ -546,7 +504,7 @@ function attachQueueAdvanceListener(world: World, chatId: string): void {
 /**
  * Guardrail for worlds/chats where a queued human message is published but no
  * responder starts processing. In that case no world idle/response-end event is
- * emitted, so we transition the queue row through retry/error handling.
+ * emitted, so we transition the queue row to explicit recovery error state.
  */
 function scheduleQueueNoResponseFallback(world: World, chatId: string, messageId: string): void {
   setTimeout(() => {
@@ -575,7 +533,7 @@ function scheduleQueueNoResponseFallback(world: World, chatId: string, messageId
           content: sendingMessage.content,
           sender: sendingMessage.sender,
         });
-        loggerQueue.warn('Queue fallback escalated message to retry/error after no responder start', {
+        loggerQueue.warn('Queue fallback marked message error after no responder start', {
           worldId: world.id,
           chatId,
           messageId,
@@ -643,7 +601,7 @@ export function triggerPendingQueueResume(
         : [];
 
       if (staleSendingMessages.length > 0) {
-        loggerQueue.warn('Detected stale sending queue messages during resume; resetting to queued', {
+        loggerQueue.warn('Detected stale sending queue messages during resume; evaluating recovery state', {
           worldId: world.id,
           chatId,
           count: staleSendingMessages.length,
@@ -651,7 +609,25 @@ export function triggerPendingQueueResume(
         });
 
         for (const staleMessage of staleSendingMessages) {
+          const decision = await resolveStaleSendingRecoveryDecision(world, chatId, staleMessage.messageId);
+          if (decision.action === 'mark-error') {
+            await queueStorage.updateMessageQueueStatus(staleMessage.messageId, 'error');
+            loggerQueue.debug('Marked stale sending queue message error during resume', {
+              worldId: world.id,
+              chatId,
+              messageId: staleMessage.messageId,
+              reason: decision.reason,
+            });
+            continue;
+          }
+
           await queueStorage.updateMessageQueueStatus(staleMessage.messageId, 'queued');
+          loggerQueue.debug('Recovered stale sending queue message back to queued during resume', {
+            worldId: world.id,
+            chatId,
+            messageId: staleMessage.messageId,
+            reason: decision.reason,
+          });
         }
 
         messages = await queueStorage.getQueuedMessages(world.id, chatId);
@@ -674,7 +650,7 @@ export function triggerPendingQueueResume(
           content: nextMessage.content,
           sender: nextMessage.sender,
         });
-        loggerQueue.warn('Queue dispatch blocked: no eligible responders after preflight refresh; moved to retry/error flow', {
+        loggerQueue.warn('Queue dispatch blocked: no eligible responders after preflight refresh; moved to explicit recovery error state', {
           worldId: world.id,
           chatId,
           messageId: nextMessage.messageId,
@@ -736,97 +712,6 @@ export function triggerPendingQueueResume(
 }
 
 /**
- * Trigger resume of a pending user-last message after chat restore.
- * Uses queue-backed routing when queue storage is available; falls back to
- * direct publish otherwise.
- */
-export function triggerPendingUserMessageResume(world: World, chatId: string, userMessage: { messageId?: string; content: string | unknown; sender?: string; replyToMessageId?: string }): void {
-  if (!chatId || !userMessage.messageId) {
-    return;
-  }
-
-  if (hasActiveChatMessageProcessing(world.id, chatId)) {
-    return;
-  }
-
-  const content = typeof userMessage.content === 'string' ? userMessage.content.trim() : '';
-  if (!content) {
-    return;
-  }
-
-  const sender = typeof userMessage.sender === 'string' && userMessage.sender.trim()
-    ? userMessage.sender
-    : 'human';
-
-  const resumeKey = `${world.id}:${chatId}:${userMessage.messageId}`;
-  if (inFlightUserResumeKeys.has(resumeKey)) {
-    return;
-  }
-
-  inFlightUserResumeKeys.add(resumeKey);
-
-  void (async () => {
-    try {
-      // Prefer queue-based routing so that if processing fails the error is
-      // surfaced as a message card on screen rather than silently dropped.
-      // Fall back to direct publish only when queue storage is unavailable.
-      let queueStorage: QueueStorageOperations | null = null;
-      try {
-        queueStorage = getQueueStorageOrThrow('triggerPendingUserMessageResume');
-      } catch {
-        // Queue storage not configured — will fall back to direct publish below.
-      }
-
-      if (queueStorage) {
-        const existingMessages = await queueStorage.getQueuedMessages(world.id, chatId);
-        const alreadyQueued = existingMessages?.some(
-          (m: QueuedMessage) => m.messageId === userMessage.messageId!
-        );
-        if (!alreadyQueued) {
-          await queueStorage.addQueuedMessage(world.id, chatId, userMessage.messageId!, content, sender);
-          loggerRestoreResume.debug('Enqueued pending user-last message for queue processing after chat restore', {
-            worldId: world.id,
-            chatId,
-            messageId: userMessage.messageId,
-          });
-        } else {
-          loggerRestoreResume.debug('Pending user-last message already in queue; triggering queue resume only', {
-            worldId: world.id,
-            chatId,
-            messageId: userMessage.messageId,
-          });
-        }
-        triggerPendingQueueResume(world, chatId, { recoverStaleSending: true });
-      } else {
-        // Fallback path: direct publish (queue storage not configured).
-        loggerRestoreResume.debug('Submitting pending user-last message after chat restore (no queue storage)', {
-          worldId: world.id,
-          chatId,
-          messageId: userMessage.messageId,
-        });
-        publishMessageWithId(
-          world,
-          content,
-          sender,
-          userMessage.messageId!,
-          chatId,
-          userMessage.replyToMessageId
-        );
-      }
-    } catch (error) {
-      loggerRestoreResume.warn('Failed to auto-submit pending user-last message after chat restore', {
-        worldId: world.id,
-        chatId,
-        messageId: userMessage.messageId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      inFlightUserResumeKeys.delete(resumeKey);
-    }
-  })();
-}
-
-/**
  * Synchronously add the old chat's queue to the paused set on chat switch.
  * Called by managers.ts restoreChat.
  */
@@ -846,6 +731,23 @@ export function clearQueuePauseForChat(worldId: string, chatId: string): void {
 function isUserQueueSender(sender: string): boolean {
   const normalized = String(sender || '').trim().toLowerCase();
   return normalized === 'human' || normalized.startsWith('user');
+}
+
+async function resolveRuntimeWorldForChat(
+  worldId: string,
+  chatId: string,
+  targetWorld?: World | null,
+): Promise<World | null> {
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  const { getActiveSubscribedWorld } = await import('./subscription.js');
+  return (
+    getActiveSubscribedWorld(resolvedWorldId, chatId) ||
+    targetWorld ||
+    await (async () => {
+      const { getWorld } = await import('./managers.js');
+      return getWorld(resolvedWorldId);
+    })()
+  );
 }
 
 // ─── Public Queue API ─────────────────────────────────────────────────────────
@@ -908,11 +810,42 @@ export async function recoverQueueSendingMessages(): Promise<number> {
 }
 
 /**
- * External user-send ingress helper.
- * Keeps queue-backed dispatch semantics for user messages while preserving
- * immediate internal publish behavior for assistant/tool/system paths.
+ * Immediate dispatch helper for non-user chat messages.
  */
-export async function enqueueAndProcessUserMessage(
+export async function dispatchImmediateChatMessage(
+  worldId: string,
+  chatId: string,
+  content: string,
+  sender: string,
+  targetWorld?: World | null,
+  options?: {
+    source?: 'direct' | 'queue' | 'retry';
+    preassignedMessageId?: string;
+  }
+): Promise<WorldMessageEvent> {
+  const targetChatId = String(chatId || '').trim();
+  if (!targetChatId) {
+    throw new Error('dispatchImmediateChatMessage: chatId is required for immediate dispatch.');
+  }
+
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  const runtimeWorld = await resolveRuntimeWorldForChat(resolvedWorldId, targetChatId, targetWorld);
+  if (!runtimeWorld) {
+    throw new Error(`dispatchImmediateChatMessage: world not found for immediate dispatch (${resolvedWorldId}).`);
+  }
+
+  const forcedMessageId = String(options?.preassignedMessageId || '').trim();
+  if (forcedMessageId) {
+    return publishMessageWithId(runtimeWorld, content, sender, forcedMessageId, targetChatId);
+  }
+  return publishMessage(runtimeWorld, content, sender, targetChatId);
+}
+
+/**
+ * External user-send ingress helper.
+ * Queue-backed submission is restricted to user-authored turns only.
+ */
+export async function enqueueAndProcessUserTurn(
   worldId: string,
   chatId: string,
   content: string,
@@ -925,29 +858,10 @@ export async function enqueueAndProcessUserMessage(
 ): Promise<QueuedMessage | null> {
   const targetChatId = String(chatId || '').trim();
   if (!targetChatId) {
-    throw new Error('enqueueAndProcessUserMessage: chatId is required for user message dispatch.');
+    throw new Error('enqueueAndProcessUserTurn: chatId is required for user message dispatch.');
   }
-
   if (!isUserQueueSender(sender)) {
-    const resolvedWorldId = await getResolvedWorldId(worldId);
-    const { getActiveSubscribedWorld } = await import('./subscription.js');
-    const runtimeWorld =
-      getActiveSubscribedWorld(resolvedWorldId, targetChatId) ||
-      targetWorld ||
-      await (async () => {
-        const { getWorld } = await import('./managers.js');
-        return getWorld(resolvedWorldId);
-      })();
-    if (!runtimeWorld) {
-      throw new Error(`enqueueAndProcessUserMessage: world not found for immediate dispatch (${resolvedWorldId}).`);
-    }
-    const forcedMessageId = String(options?.preassignedMessageId || '').trim();
-    if (forcedMessageId) {
-      publishMessageWithId(runtimeWorld, content, sender, forcedMessageId, targetChatId);
-    } else {
-      publishMessage(runtimeWorld, content, sender, targetChatId);
-    }
-    return null;
+    throw new Error(`enqueueAndProcessUserTurn: sender '${sender}' is not a queue-eligible user sender.`);
   }
 
   return addToQueue(worldId, targetChatId, content, sender, {

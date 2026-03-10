@@ -13,6 +13,7 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-03-10: Keep edit/delete action chrome visible on the latest failed user turn when only diagnostic error rows follow it.
  * - 2026-03-04: Board agent lanes now stretch to full available height with per-lane internal scrolling.
  * - 2026-03-04: Board view now renders per-agent vertical lanes in a horizontal lane strip.
  * - 2026-03-04: Hid non-chat section title labels (`Latest User Message`, `Board`, `Grid`, `Canvas`) per updated UI requirements.
@@ -103,6 +104,54 @@ export function getLatestUserMessageEntry(userMessages: Array<{ message: any; in
     return null;
   }
   return userMessages[userMessages.length - 1] || null;
+}
+
+function isDiagnosticErrorMessage(message: any): boolean {
+  const logLevel = String(message?.logEvent?.level || '').trim().toLowerCase();
+  if (logLevel === 'error') {
+    return true;
+  }
+
+  const systemKind = String(message?.systemEvent?.kind || '').trim().toLowerCase();
+  if (systemKind === 'error') {
+    return true;
+  }
+
+  const messageType = String(message?.type || '').trim().toLowerCase();
+  if (message?.hasError === true || messageType === 'error') {
+    return true;
+  }
+
+  return false;
+}
+
+export function shouldForceHumanMessageActionsVisible(messages: any[], messageIndex: number): boolean {
+  if (!Array.isArray(messages) || messageIndex < 0 || messageIndex >= messages.length) {
+    return false;
+  }
+
+  const currentMessage = messages[messageIndex];
+  if (!isHumanMessage(currentMessage)) {
+    return false;
+  }
+
+  const laterMessages = messages.slice(messageIndex + 1).filter((message) => {
+    return isRenderableMessageEntry(message);
+  });
+  if (laterMessages.length === 0) {
+    return false;
+  }
+
+  let sawDiagnosticError = false;
+  for (const message of laterMessages) {
+    if (isDiagnosticErrorMessage(message)) {
+      sawDiagnosticError = true;
+      continue;
+    }
+    return false;
+  }
+
+  return sawDiagnosticError;
 }
 
 function collectToolCallIds(message) {
@@ -484,6 +533,7 @@ export default function MessageListPanel({
     const messageAvatar = resolveMessageAvatar(message, worldAgentsById, worldAgentsByName);
     const isHuman = isHumanMessage(message);
     const isPendingOptimisticUserMessage = isHuman && message?.optimisticUserPending === true;
+    const shouldForceUserActionsVisible = isHuman && shouldForceHumanMessageActionsVisible(sourceMessages, messageIndex);
     const messageRole = String(message?.role || '').toLowerCase();
     const isNarratedAssistantToolCall = isNarratedAssistantToolCallMessage(message);
     const isToolMessage = isToolRelatedMessage(message) && !isNarratedAssistantToolCall;
@@ -623,7 +673,7 @@ export default function MessageListPanel({
           )}
 
           {isHumanMessage(message) && message.messageId && !isPendingOptimisticUserMessage && editingMessageId !== getMessageIdentity(message) ? (
-            <div className="absolute bottom-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className={`absolute bottom-2 right-2 flex items-center gap-1 transition-opacity ${shouldForceUserActionsVisible ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
               <button
                 type="button"
                 onClick={() => onStartEditMessage(message)}

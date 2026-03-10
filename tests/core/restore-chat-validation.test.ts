@@ -150,7 +150,7 @@ describe('restoreChat validation', () => {
     expect(publishMessageWithId).not.toHaveBeenCalled();
   });
 
-  it('auto-submits pending user-last message when restoring a chat', async () => {
+  it('does not auto-submit a persisted user-last message when restoring a chat without queue ownership', async () => {
     vi.resetModules();
 
     const persistedWorld = createPersistedWorld('chat-1');
@@ -176,7 +176,7 @@ describe('restoreChat validation', () => {
         }
       ]),
       saveWorld: vi.fn().mockResolvedValue(undefined),
-      // Queue storage: message is not yet in queue → should be enqueued on restore
+      // Queue storage exists but there is no queue-owned row for this persisted message.
       addQueuedMessage: vi.fn().mockResolvedValue(undefined),
       getQueuedMessages: vi.fn().mockResolvedValue([]),
       updateMessageQueueStatus: vi.fn().mockResolvedValue(undefined),
@@ -211,15 +211,8 @@ describe('restoreChat validation', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(replayPendingHitlRequests).toHaveBeenCalledTimes(1);
-    // Message is routed through the queue system (not published directly)
-    expect(storageWrappers.addQueuedMessage).toHaveBeenCalledTimes(1);
-    expect(storageWrappers.addQueuedMessage).toHaveBeenCalledWith(
-      'world-1',
-      'chat-2',
-      'user-last-1',
-      'Continue this pending request',
-      'human'
-    );
+    expect(storageWrappers.addQueuedMessage).not.toHaveBeenCalled();
+    expect(storageWrappers.updateMessageQueueStatus).not.toHaveBeenCalled();
     expect(resumePendingToolCallsForChat).not.toHaveBeenCalled();
   });
 
@@ -306,7 +299,7 @@ describe('restoreChat validation', () => {
     expect(listPendingHitlPromptEventsFromMessages).toHaveBeenCalledWith(memoryRows, 'chat-2');
   });
 
-  it('retries queued chat message when restore-triggered publish fails', async () => {
+  it('marks queued chat message error when restore-triggered publish fails', async () => {
     vi.resetModules();
 
     const persistedWorld = createPersistedWorld('chat-1');
@@ -381,7 +374,7 @@ describe('restoreChat validation', () => {
 
     expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith('q-1', 'sending');
     expect(storageWrappers.incrementQueueMessageRetry).toHaveBeenCalledWith('q-1');
-    expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith('q-1', 'queued');
+    expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith('q-1', 'error');
   });
 
   it('resets stale sending row before processing restored chat queue', async () => {
@@ -1136,17 +1129,17 @@ describe('restoreChat queue matrix (consolidated)', () => {
 });
 
 describe('managers queue branch coverage', () => {
-  it('throws when enqueueAndProcessUserMessage is called without chatId', async () => {
+  it('throws when enqueueAndProcessUserTurn is called without chatId', async () => {
     const { managers } = await setupQueueManagersForMatrix();
     await expect(
-      managers.enqueueAndProcessUserMessage('world-1', '', 'hello', 'human')
+      managers.enqueueAndProcessUserTurn('world-1', '', 'hello', 'human')
     ).rejects.toThrow('chatId is required');
   });
 
   it('uses immediate publishMessage for non-user sender without preassigned message id', async () => {
     const { managers, publishMessage, publishMessageWithId, runtimeWorld } = await setupQueueManagersForMatrix();
     await managers.recoverQueueSendingMessages();
-    await managers.enqueueAndProcessUserMessage('world-1', 'chat-a', 'system note', 'system', runtimeWorld);
+    await managers.dispatchImmediateChatMessage('world-1', 'chat-a', 'system note', 'system', runtimeWorld);
 
     expect(publishMessage).toHaveBeenCalledWith(runtimeWorld, 'system note', 'system', 'chat-a');
     expect(publishMessageWithId).not.toHaveBeenCalled();
@@ -1156,7 +1149,7 @@ describe('managers queue branch coverage', () => {
     const { managers } = await setupQueueManagersForMatrix({ worldExists: false });
     await managers.recoverQueueSendingMessages();
     await expect(
-      managers.enqueueAndProcessUserMessage('world-1', 'chat-a', 'system note', 'system', null)
+      managers.dispatchImmediateChatMessage('world-1', 'chat-a', 'system note', 'system', null)
     ).rejects.toThrow('world not found for immediate dispatch');
   });
 
@@ -1271,7 +1264,7 @@ describe('managers queue branch coverage', () => {
     expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith('q-max-retry', 'error');
   });
 
-  it('resolves latest active runtime world before retry dispatch', async () => {
+  it('does not auto-retry a failed queue dispatch on a later runtime world', async () => {
     vi.useFakeTimers();
     try {
       vi.resetModules();
@@ -1402,40 +1395,27 @@ describe('managers queue branch coverage', () => {
         queuedMessageId,
         'chat-a',
       );
-      expect(publishMessageWithId).toHaveBeenNthCalledWith(
-        2,
-        freshWorld,
-        'retry me',
-        'human',
-        queuedMessageId,
-        'chat-a',
-      );
+      expect(publishMessageWithId).toHaveBeenCalledTimes(1);
       expect(storageWrappers.incrementQueueMessageRetry).toHaveBeenCalledWith(queuedMessageId);
-      expect(getActiveSubscribedWorld).toHaveBeenCalledWith('world-1', 'chat-a');
-      expect(staleEmitSpy).toHaveBeenCalledWith(
+      expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith(queuedMessageId, 'error');
+      expect(getActiveSubscribedWorld).toHaveBeenCalledTimes(1);
+      expect(freshEmitSpy).not.toHaveBeenCalledWith(
+        'system',
+        expect.anything(),
+      );
+      expect(staleEmitSpy).not.toHaveBeenCalledWith(
         'system',
         expect.objectContaining({
           chatId: 'chat-a',
           content: expect.stringContaining('attempt 1/3'),
         }),
       );
-      expect(staleEmitSpy).toHaveBeenCalledWith(
-        'system',
-        expect.objectContaining({
-          chatId: 'chat-a',
-          content: expect.stringContaining('remaining attempts 2'),
-        }),
-      );
-      expect(freshEmitSpy).not.toHaveBeenCalledWith(
-        'system',
-        expect.anything(),
-      );
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('applies exponential backoff schedule for subsequent queue retry attempts', async () => {
+  it('does not schedule exponential backoff retry after a queue dispatch failure', async () => {
     vi.useFakeTimers();
     try {
       vi.resetModules();
@@ -1543,8 +1523,9 @@ describe('managers queue branch coverage', () => {
 
       await vi.advanceTimersByTimeAsync(1000);
       await vi.advanceTimersByTimeAsync(0);
-      expect(publishMessageWithId).toHaveBeenCalledTimes(2);
+      expect(publishMessageWithId).toHaveBeenCalledTimes(1);
       expect(storageWrappers.incrementQueueMessageRetry).toHaveBeenCalledWith(queuedMessageId);
+      expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith(queuedMessageId, 'error');
     } finally {
       vi.useRealTimers();
     }
@@ -1600,7 +1581,7 @@ describe('managers queue branch coverage', () => {
     ).rejects.toThrow('queue storage backend missing required operations');
   });
 
-  it('routes preflight no-responder failures through retry flow after one refresh attempt', async () => {
+  it('routes preflight no-responder failures to explicit recovery error state after one refresh attempt', async () => {
     const { managers, storageWrappers, publishMessageWithId } = await setupQueueManagersForMatrix({
       currentChatId: 'chat-a',
       runtimeAgents: [],
@@ -1615,7 +1596,7 @@ describe('managers queue branch coverage', () => {
 
     expect(storageWrappers.listAgents).toHaveBeenCalledWith('world-1');
     expect(storageWrappers.incrementQueueMessageRetry).toHaveBeenCalledWith('q-no-responder-preflight');
-    expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith('q-no-responder-preflight', 'queued');
+    expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith('q-no-responder-preflight', 'error');
     expect(publishMessageWithId).not.toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
@@ -1661,7 +1642,7 @@ describe('managers queue branch coverage', () => {
     );
   });
 
-  it('requeues sending row when processing does not start despite responder presence', async () => {
+  it('marks sending row error when processing does not start despite responder presence', async () => {
     vi.useFakeTimers();
     try {
       const { managers, storageWrappers, publishMessageWithId } = await setupQueueManagersForMatrix({
@@ -1696,7 +1677,7 @@ describe('managers queue branch coverage', () => {
         'chat-a',
       );
       expect(storageWrappers.incrementQueueMessageRetry).toHaveBeenCalledWith('q-has-responder');
-      expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith('q-has-responder', 'queued');
+      expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith('q-has-responder', 'error');
       expect(storageWrappers.getQueuedMessages).toHaveBeenCalledWith('world-1', 'chat-a');
     } finally {
       vi.useRealTimers();
@@ -1875,7 +1856,7 @@ describe('managers queue branch coverage', () => {
 
       const fallbackLog = capturedLogs.find((logEvent) => {
         return String(logEvent?.category || '').toLowerCase() === 'message.queue' &&
-          String(logEvent?.message || '').includes('Queue fallback escalated message to retry/error after no responder start');
+          String(logEvent?.message || '').includes('Queue fallback marked message error after no responder start');
       });
 
       expect(fallbackLog).toBeTruthy();
@@ -1896,7 +1877,7 @@ describe('managers queue branch coverage', () => {
   });
 });
 
-describe('enqueueAndProcessUserMessage (merged queue user-only dispatch)', () => {
+describe('dispatchImmediateChatMessage / enqueueAndProcessUserTurn', () => {
   it('does not enqueue non-user sender messages and publishes immediately', async () => {
     const { managers, publishMessageWithId, runtimeWorld } = await setupQueueManagersForMatrix({
       currentChatId: 'chat-a',
@@ -1904,7 +1885,7 @@ describe('enqueueAndProcessUserMessage (merged queue user-only dispatch)', () =>
 
     const preassignedMessageId = `immediate-${Date.now()}`;
     await managers.recoverQueueSendingMessages();
-    const result = await managers.enqueueAndProcessUserMessage(
+    await managers.dispatchImmediateChatMessage(
       'world-1',
       'chat-a',
       'system broadcast',
@@ -1913,7 +1894,6 @@ describe('enqueueAndProcessUserMessage (merged queue user-only dispatch)', () =>
       { preassignedMessageId }
     );
 
-    expect(result).toBeNull();
     expect(publishMessageWithId).toHaveBeenCalledWith(
       runtimeWorld,
       'system broadcast',
@@ -1924,5 +1904,23 @@ describe('enqueueAndProcessUserMessage (merged queue user-only dispatch)', () =>
 
     const queue = await managers.getQueueMessages('world-1', 'chat-a');
     expect(queue).toEqual([]);
+  });
+
+  it('enqueues queue-eligible user senders via the queue-only API', async () => {
+    const { managers } = await setupQueueManagersForMatrix({
+      currentChatId: 'chat-a',
+    });
+
+    await managers.recoverQueueSendingMessages();
+    const result = await managers.enqueueAndProcessUserTurn(
+      'world-1',
+      'chat-a',
+      'human queued message',
+      'human',
+    );
+
+    expect(result?.status).toBe('queued');
+    const queue = await managers.getQueueMessages('world-1', 'chat-a');
+    expect(queue).toHaveLength(1);
   });
 });

@@ -13,6 +13,7 @@
  * - Keeps execution in-memory and deterministic.
  *
  * Recent Changes:
+ * - 2026-03-10: Added coverage that terminal agent-turn failures publish one chat-scoped persisted `system` error event.
  * - 2026-02-27: Added coverage for explicit `chatId` routing on `tool-execution` publish events.
  */
 
@@ -224,5 +225,28 @@ describe('processAgentMessage chat isolation', () => {
       toolCallId: 'tool-call-err-1',
       error: 'tool exploded',
     });
+  });
+
+  it('publishes one chat-scoped system error event when agent turn processing fails terminally', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    mocks.generateAgentResponse.mockRejectedValueOnce(new Error('provider missing'));
+
+    const { processAgentMessage } = await import('../../../core/events/orchestrator.js');
+
+    await expect(processAgentMessage(world, agent, createMessageEvent('chat-1'))).rejects.toThrow('provider missing');
+
+    expect(mocks.publishEvent).toHaveBeenCalledWith(
+      world,
+      'system',
+      expect.objectContaining({
+        type: 'error',
+        eventType: 'error',
+        agentName: 'agent-a',
+        message: expect.stringContaining('provider missing'),
+      }),
+      'chat-1',
+    );
   });
 });

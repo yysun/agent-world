@@ -31,6 +31,7 @@
  * - Internal utilities: initializeLogger, getCategoryLogLevel
  *
  * Recent Changes:
+ * - 2026-03-10: Renamed queue-backed ingress to `enqueueAndProcessUserTurn` and exported explicit `dispatchImmediateChatMessage` for non-user sends.
  * - 2026-02-20: Enforced options-only HITL exports by removing input-mode helpers from public core surface.
  * - 2026-02-14: Exported generic HITL option request/response APIs for world-scoped user approval flows.
  * - 2026-02-14: Exported `waitForInitialSkillSync` to allow callers to await startup skill-registry auto-sync completion.
@@ -58,7 +59,8 @@ export {
   logEditError,
   getEditErrors,
   addToQueue,
-  enqueueAndProcessUserMessage,
+  enqueueAndProcessUserTurn,
+  dispatchImmediateChatMessage,
   recoverQueueSendingMessages,
   getQueueMessages,
   removeFromQueue,

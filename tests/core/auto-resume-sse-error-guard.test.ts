@@ -1,28 +1,24 @@
 /**
- * Unit Tests: auto-resume queue-routing on chat restore
+ * Unit Tests: restore-time queue-owned auto-resume guardrails
  *
  * Purpose:
- * - Ensure `triggerPendingLastMessageResume` always routes a user-last message
- *   through the queue system (addQueuedMessage + triggerPendingQueueResume) so
- *   that processing failures are surfaced as error cards on screen.
- * - Loop prevention is handled by queue dedup: if the messageId is already in
- *   the queue (any status including 'error'), it is not re-added, preventing
- *   infinite retry loops on permanently-failing chats.
+ * - Ensure restore-time auto-resume is queue-only.
+ * - Ensure terminal SSE after a queue-owned user turn suppresses interrupted-flight recovery.
+ * - Ensure mutation flows can restore chat state without triggering auto-resume.
  *
  * Key Features:
- * - On first restore with a user-last message not yet in queue → message is enqueued.
- * - If message is already in queue (e.g., status 'error' from a prior failure) →
- *   not added again, queue resume is still triggered (will no-op for error rows).
- * - Falls back to direct publish only when queue storage is unavailable.
+ * - A queued user turn resumes through queue dispatch on restore.
+ * - A queue-owned failed user turn does not auto-resume.
+ * - A stale sending row with terminal SSE is marked error instead of replayed.
+ * - `restoreChat(..., { suppressAutoResume: true })` skips auto-resume entirely.
  *
  * Implementation Notes:
- * - Tests exercise `restoreChat` which calls `triggerPendingLastMessageResume` internally.
+ * - Tests exercise `restoreChat`, which now delegates automatic recovery to queue state only.
  * - Uses `vi.doMock` + `vi.resetModules()` pattern for full module isolation.
- * - Verifies `addQueuedMessage` call as the observable outcome.
+ * - Verifies queue status updates and publish calls as observable outcomes.
  *
  * Recent Changes:
- * - 2026-03-09: Initial implementation for the SSE terminal-state guard.
- * - 2026-03-09: Removed SSE guard; queue dedup now prevents infinite retry loops.
+ * - 2026-03-10: Removed memory-based restore resend and narrowed auto-resume to queue-owned recovery only.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -44,7 +40,6 @@ function mockStorageFactory(storageWrappers: Record<string, any>): void {
     getDefaultRootPath: vi.fn().mockReturnValue('/test/data'),
   }));
 }
-
 
 function buildBaseStorageWrappers(eventStorageOverrides: Record<string, any> = {}) {
   return {
@@ -68,7 +63,6 @@ function buildBaseStorageWrappers(eventStorageOverrides: Record<string, any> = {
       },
     ]),
     saveWorld: vi.fn().mockResolvedValue(undefined),
-    // Queue storage: default to empty queue (message not yet enqueued)
     addQueuedMessage: vi.fn().mockResolvedValue(undefined),
     getQueuedMessages: vi.fn().mockResolvedValue([]),
     updateMessageQueueStatus: vi.fn().mockResolvedValue(undefined),
@@ -85,6 +79,36 @@ function buildBaseStorageWrappers(eventStorageOverrides: Record<string, any> = {
       ...eventStorageOverrides,
     },
   };
+}
+
+function createStoredEvent(seq: number, type: string, id: string, payload: Record<string, unknown>) {
+  return {
+    seq,
+    id,
+    worldId: 'world-1',
+    chatId: 'chat-2',
+    type,
+    payload,
+    createdAt: new Date(`2026-01-01T10:00:${String(seq).padStart(2, '0')}Z`),
+  };
+}
+
+function createLatestEventQueryMock(eventsByType: {
+  message?: unknown[];
+  sse?: unknown[];
+} = {}) {
+  return vi.fn().mockImplementation(async (_worldId: string, _chatId: string, options?: { types?: string[] }) => {
+    const requestedType = options?.types?.[0];
+    if (requestedType === 'message') {
+      return eventsByType.message ?? [];
+    }
+
+    if (requestedType === 'sse') {
+      return eventsByType.sse ?? [];
+    }
+
+    return [];
+  });
 }
 
 async function setupCommonMocks() {
@@ -109,33 +133,10 @@ async function setupCommonMocks() {
   return { publishMessageWithId };
 }
 
-describe('auto-resume queue routing on chat restore', () => {
-  it('enqueues user-last message even when last SSE was an error (prior failure visible on screen)', async () => {
+describe('restore-time queue-owned auto-resume guardrails', () => {
+  it('does not auto-resume a queue-owned failed turn during restore', async () => {
     vi.resetModules();
 
-    // Last message at seq 90, last SSE error at seq 100 → previously the SSE guard
-    // would block; now the message is routed through the queue so the error is shown.
-    const storageWrappers = buildBaseStorageWrappers();
-    mockStorageFactory(storageWrappers);
-
-    await setupCommonMocks();
-    const managers = await import('../../core/managers.js');
-
-    const restored = await managers.restoreChat('world-1', 'chat-2');
-    expect(restored).not.toBeNull();
-
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(storageWrappers.addQueuedMessage).toHaveBeenCalledOnce();
-    expect(storageWrappers.addQueuedMessage).toHaveBeenCalledWith(
-      'world-1', 'chat-2', 'user-last-1', 'hi', 'human'
-    );
-  });
-
-  it('does not re-add message that is already in queue (prevents infinite retry loop)', async () => {
-    vi.resetModules();
-
-    // Message already exists in queue with 'error' status (prior failure)
     const storageWrappers = buildBaseStorageWrappers();
     storageWrappers.getQueuedMessages = vi.fn().mockResolvedValue([
       {
@@ -151,7 +152,7 @@ describe('auto-resume queue routing on chat restore', () => {
     ]);
     mockStorageFactory(storageWrappers);
 
-    await setupCommonMocks();
+    const { publishMessageWithId } = await setupCommonMocks();
     const managers = await import('../../core/managers.js');
 
     const restored = await managers.restoreChat('world-1', 'chat-2');
@@ -159,101 +160,27 @@ describe('auto-resume queue routing on chat restore', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    // Already in queue → should NOT be added again
     expect(storageWrappers.addQueuedMessage).not.toHaveBeenCalled();
-    // Should NOT trigger a new dispatch (no status transition to 'sending')
     expect(storageWrappers.updateMessageQueueStatus).not.toHaveBeenCalled();
+    expect(publishMessageWithId).not.toHaveBeenCalled();
   });
 
-  it('enqueues user-last message when stream was interrupted mid-flight (SSE start with no end)', async () => {
+  it('resumes a queued user turn through queue dispatch on restore', async () => {
     vi.resetModules();
 
     const storageWrappers = buildBaseStorageWrappers();
-    mockStorageFactory(storageWrappers);
-
-    await setupCommonMocks();
-    const managers = await import('../../core/managers.js');
-
-    const restored = await managers.restoreChat('world-1', 'chat-2');
-    expect(restored).not.toBeNull();
-
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(storageWrappers.addQueuedMessage).toHaveBeenCalledOnce();
-    expect(storageWrappers.addQueuedMessage).toHaveBeenCalledWith(
-      'world-1', 'chat-2', 'user-last-1', 'hi', 'human'
-    );
-  });
-
-  it('enqueues user-last message when no prior processing has occurred', async () => {
-    vi.resetModules();
-
-    const storageWrappers = buildBaseStorageWrappers();
-    mockStorageFactory(storageWrappers);
-
-    await setupCommonMocks();
-    const managers = await import('../../core/managers.js');
-
-    const restored = await managers.restoreChat('world-1', 'chat-2');
-    expect(restored).not.toBeNull();
-
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(storageWrappers.addQueuedMessage).toHaveBeenCalledOnce();
-    expect(storageWrappers.addQueuedMessage).toHaveBeenCalledWith(
-      'world-1', 'chat-2', 'user-last-1', 'hi', 'human'
-    );
-  });
-
-  it('enqueues new user message even when a prior SSE error exists for an older message', async () => {
-    vi.resetModules();
-
-    // A prior SSE error exists but the message in memory is not yet in queue
-    // (e.g., user sent a new message after the old error was cleared)
-    const storageWrappers = buildBaseStorageWrappers();
-    mockStorageFactory(storageWrappers);
-
-    await setupCommonMocks();
-    const managers = await import('../../core/managers.js');
-
-    const restored = await managers.restoreChat('world-1', 'chat-2');
-    expect(restored).not.toBeNull();
-
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(storageWrappers.addQueuedMessage).toHaveBeenCalledOnce();
-    expect(storageWrappers.addQueuedMessage).toHaveBeenCalledWith(
-      'world-1', 'chat-2', 'user-last-1', 'hi', 'human'
-    );
-  });
-
-  it('falls back to direct publish when queue storage is not configured', async () => {
-    vi.resetModules();
-
-    // No queue storage methods → falls back to direct publishMessageWithId
-    const storageWrappers = {
-      loadWorld: vi.fn().mockResolvedValue(createPersistedWorld('chat-1')),
-      listAgents: vi.fn().mockResolvedValue([
-        { id: 'agent-1', name: 'Agent 1', type: 'assistant', provider: 'openai', model: 'gpt-4o-mini', llmCallCount: 0, autoReply: true, status: 'active', memory: [] },
-      ]),
-      listChats: vi.fn().mockResolvedValue([
-        { id: 'chat-1', name: 'Chat 1', messageCount: 0 },
-        { id: 'chat-2', name: 'Chat 2', messageCount: 0 },
-      ]),
-      loadChatData: vi.fn().mockResolvedValue({ id: 'chat-2', name: 'Chat 2', messageCount: 0 }),
-      getMemory: vi.fn().mockResolvedValue([
-        {
-          role: 'user',
-          content: 'hi',
-          sender: 'human',
-          messageId: 'user-last-1',
-          chatId: 'chat-2',
-          createdAt: new Date(),
-        },
-      ]),
-      saveWorld: vi.fn().mockResolvedValue(undefined),
-      // No queue storage methods → forces fallback path
-    };
+    storageWrappers.getQueuedMessages = vi.fn().mockResolvedValue([
+      {
+        messageId: 'user-last-1',
+        chatId: 'chat-2',
+        content: 'hi',
+        sender: 'human',
+        status: 'queued',
+        retryCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ]);
     mockStorageFactory(storageWrappers);
 
     const { publishMessageWithId } = await setupCommonMocks();
@@ -264,6 +191,153 @@ describe('auto-resume queue routing on chat restore', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(publishMessageWithId).toHaveBeenCalledOnce();
+    expect(storageWrappers.addQueuedMessage).not.toHaveBeenCalled();
+    expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith('user-last-1', 'sending');
+    expect(publishMessageWithId).toHaveBeenCalledWith(
+      expect.any(Object),
+      'hi',
+      'human',
+      'user-last-1',
+      'chat-2',
+    );
+  });
+
+  it('marks a stale sending row error when terminal SSE post-dates it', async () => {
+    vi.resetModules();
+
+    const storageWrappers = buildBaseStorageWrappers({
+      getEventsByWorldAndChat: createLatestEventQueryMock({
+        message: [
+          createStoredEvent(1, 'message', 'user-last-1', { content: 'hi', sender: 'human', role: 'user' }),
+        ],
+        sse: [
+          createStoredEvent(2, 'sse', 'sse-error-1', { type: 'error', error: 'provider missing' }),
+        ],
+      }),
+    });
+    storageWrappers.getQueuedMessages = vi.fn()
+      .mockResolvedValueOnce([
+        {
+          messageId: 'user-last-1',
+          chatId: 'chat-2',
+          content: 'hi',
+          sender: 'human',
+          status: 'sending',
+          retryCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          messageId: 'user-last-1',
+          chatId: 'chat-2',
+          content: 'hi',
+          sender: 'human',
+          status: 'error',
+          retryCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ]);
+    mockStorageFactory(storageWrappers);
+
+    const { publishMessageWithId } = await setupCommonMocks();
+    const managers = await import('../../core/managers.js');
+
+    const restored = await managers.restoreChat('world-1', 'chat-2');
+    expect(restored).not.toBeNull();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith('user-last-1', 'error');
+    expect(publishMessageWithId).not.toHaveBeenCalled();
+  });
+
+  it('marks a stale sending row error when a newer message supersedes it', async () => {
+    vi.resetModules();
+
+    const storageWrappers = buildBaseStorageWrappers({
+      getEventsByWorldAndChat: createLatestEventQueryMock({
+        message: [
+          createStoredEvent(3, 'message', 'newer-user-2', { content: 'newer', sender: 'human', role: 'user' }),
+        ],
+        sse: [],
+      }),
+    });
+    storageWrappers.getQueuedMessages = vi.fn()
+      .mockResolvedValueOnce([
+        {
+          messageId: 'user-last-1',
+          chatId: 'chat-2',
+          content: 'hi',
+          sender: 'human',
+          status: 'sending',
+          retryCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          messageId: 'user-last-1',
+          chatId: 'chat-2',
+          content: 'hi',
+          sender: 'human',
+          status: 'error',
+          retryCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ]);
+    mockStorageFactory(storageWrappers);
+
+    const { publishMessageWithId } = await setupCommonMocks();
+    const managers = await import('../../core/managers.js');
+
+    const restored = await managers.restoreChat('world-1', 'chat-2');
+    expect(restored).not.toBeNull();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith('user-last-1', 'error');
+    expect(publishMessageWithId).not.toHaveBeenCalled();
+  });
+
+  it('restores chat for mutation without triggering auto-resume when suppression is requested', async () => {
+    vi.resetModules();
+
+    const storageWrappers = buildBaseStorageWrappers();
+    mockStorageFactory(storageWrappers);
+
+    await setupCommonMocks();
+    const managers = await import('../../core/managers.js');
+
+    const restored = await managers.restoreChat('world-1', 'chat-2', { suppressAutoResume: true });
+    expect(restored).not.toBeNull();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(storageWrappers.addQueuedMessage).not.toHaveBeenCalled();
+    expect(storageWrappers.updateMessageQueueStatus).not.toHaveBeenCalled();
+  });
+
+  it('does not invent an auto-resume path from persisted user-last memory when queue ownership is absent', async () => {
+    vi.resetModules();
+
+    const storageWrappers = buildBaseStorageWrappers();
+    mockStorageFactory(storageWrappers);
+
+    const { publishMessageWithId } = await setupCommonMocks();
+    const managers = await import('../../core/managers.js');
+
+    const restored = await managers.restoreChat('world-1', 'chat-2');
+    expect(restored).not.toBeNull();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(storageWrappers.addQueuedMessage).not.toHaveBeenCalled();
+    expect(storageWrappers.updateMessageQueueStatus).not.toHaveBeenCalled();
+    expect(publishMessageWithId).not.toHaveBeenCalled();
   });
 });

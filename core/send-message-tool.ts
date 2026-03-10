@@ -8,7 +8,8 @@
  * - Accepts `messages` as `Array<string | { content: string; sender?: string }>`.
  * - Injects trusted `worldId` and `chatId` from tool execution context.
  * - Ignores model-provided routing fields (`worldId`, `chatId`) for safety.
- * - Delegates dispatch to `enqueueAndProcessUserMessage` to preserve queue/runtime semantics.
+ * - Delegates human/user senders to queue-backed `enqueueAndProcessUserTurn`.
+ * - Delegates assistant/tool/system senders to explicit immediate dispatch.
  * - Returns deterministic JSON-string summaries with per-item status.
  *
  * Implementation Notes:
@@ -17,11 +18,12 @@
  * - Runtime routing requires explicit `context.chatId`; it does not fall back to `world.currentChatId`.
  *
  * Recent Changes:
+ * - 2026-03-10: Split sender routing so queue-backed dispatch is user-only and non-user senders use immediate dispatch.
  * - 2026-03-04: Removed `world.currentChatId` fallback from trusted runtime routing; `context.chatId` is now required.
  * - 2026-03-04: Initial implementation of built-in `send_message` tool with trusted context injection.
  */
 
-import { enqueueAndProcessUserMessage } from './managers.js';
+import { dispatchImmediateChatMessage, enqueueAndProcessUserTurn } from './managers.js';
 import type { World } from './types.js';
 
 type SendMessageArgs = {
@@ -66,6 +68,11 @@ function normalizeSender(sender: unknown): { ok: true; value: string } | { ok: f
     return { ok: false, error: 'sender must not be empty when provided' };
   }
   return { ok: true, value: normalized };
+}
+
+function isUserSender(sender: string): boolean {
+  const normalized = String(sender || '').trim().toLowerCase();
+  return normalized === 'human' || normalized.startsWith('user');
 }
 
 function normalizeMessageEntry(entry: unknown, index: number):
@@ -222,14 +229,26 @@ export function createSendMessageToolDefinition() {
 
         accepted += 1;
         try {
-          const queuedMessage = await enqueueAndProcessUserMessage(
-            resolved.worldId,
-            resolved.chatId,
-            normalized.value.content,
-            normalized.value.sender,
-            resolved.world,
-            { source: 'direct' },
-          );
+          const queuedMessage = isUserSender(normalized.value.sender)
+            ? await enqueueAndProcessUserTurn(
+              resolved.worldId,
+              resolved.chatId,
+              normalized.value.content,
+              normalized.value.sender,
+              resolved.world,
+              { source: 'direct' },
+            )
+            : null;
+          const immediateMessage = queuedMessage
+            ? null
+            : await dispatchImmediateChatMessage(
+              resolved.worldId,
+              resolved.chatId,
+              normalized.value.content,
+              normalized.value.sender,
+              resolved.world,
+              { source: 'direct' },
+            );
 
           dispatched += 1;
           results.push({
@@ -237,7 +256,7 @@ export function createSendMessageToolDefinition() {
             sender: normalized.value.sender,
             status: 'dispatched',
             dispatchMode: queuedMessage ? 'queued' : 'immediate',
-            messageId: queuedMessage?.messageId ?? null,
+            messageId: queuedMessage?.messageId ?? immediateMessage?.messageId ?? null,
           });
         } catch (error) {
           failed += 1;

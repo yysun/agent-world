@@ -41,6 +41,7 @@ import {
   createOptimisticUserMessage,
   reconcileOptimisticUserMessage,
   removeOptimisticUserMessage,
+  trimChatMessagesFromCutoff,
   upsertMessageList,
 } from '../domain/message-updates';
 import { rendererLogger } from '../utils/logger';
@@ -292,7 +293,6 @@ export function useMessageManagement({
     // Reset registry so the working indicator clears before the new SSE flow begins.
     updateRegistry(r => clearChatAgents(r, loadedWorldId, targetChatId));
 
-    const targetIdentity = getMessageIdentity(message);
     const optimisticEditedMessage = createOptimisticUserMessage({
       chatId: targetChatId,
       content: editedText,
@@ -303,8 +303,7 @@ export function useMessageManagement({
     // Trim to before the edited message and insert the optimistic replacement in a
     // single functional update so the UI never shows a gap where no user message exists.
     setMessages((existing) => {
-      const editedIndex = existing.findIndex((entry) => getMessageIdentity(entry) === targetIdentity);
-      const trimmed = editedIndex >= 0 ? existing.slice(0, editedIndex) : existing;
+      const trimmed = trimChatMessagesFromCutoff(existing, String(message.messageId || ''), targetChatId);
       const clearedTransientErrors = clearChatTransientErrors(trimmed, targetChatId);
       return upsertMessageList(clearedTransientErrors, optimisticEditedMessage);
     });

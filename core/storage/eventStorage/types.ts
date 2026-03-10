@@ -11,6 +11,7 @@
  * - Multiple backend implementations (SQLite, in-memory, file-backed)
  *
  * Recent Changes:
+ * - 2026-03-10: Added optional targeted event deletion by event ID for trim/edit cleanup.
  * - 2026-02-08: Removed legacy manual tool-intervention metadata fields from message/tool event metadata
  * 
  * Event Structure:
@@ -165,6 +166,12 @@ export interface EventStorage {
     chatId: string | null,
     options?: GetEventsOptions
   ): Promise<StoredEvent[]>;
+
+  /**
+   * Delete specific persisted events by their IDs.
+   * Optional to preserve backward compatibility with older storage backends.
+   */
+  deleteEventsByIds?(ids: string[]): Promise<number>;
 
   /**
    * Delete all events for a specific world and chat

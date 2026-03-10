@@ -53,6 +53,8 @@ vi.mock('../../core/index.js', () => {
     editUserMessage: vi.fn(),
     stopMessageProcessing: vi.fn(),
     submitWorldHitlResponse: vi.fn(() => ({ accepted: true })),
+    enqueueAndProcessUserTurn: vi.fn(),
+    dispatchImmediateChatMessage: vi.fn(),
     subscribeWorld: vi.fn(),
     ClientConnection: vi.fn(),
     LLMProvider: { OPENAI: 'openai' },

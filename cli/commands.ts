@@ -46,6 +46,7 @@
  *
  * Recent Changes:
  * - 2026-03-06: Removed runtime message/export fallback to `world.currentChatId`; CLI execution now requires explicit selected chat state.
+ * - 2026-03-10: Switched CLI user message send path to the queue-only `enqueueAndProcessUserTurn` API.
  * - 2026-03-04: Added queue metadata (`messageId`, `queueStatus`, `queueRetryCount`) to successful message-send CLI results for queue error visibility.
  */
 
@@ -54,7 +55,7 @@ import {
   createWorld,
   getWorld,
   updateWorld,
-  enqueueAndProcessUserMessage,
+  enqueueAndProcessUserTurn,
   listWorlds,
   deleteWorld,
   listAgents,
@@ -2232,7 +2233,7 @@ export async function processCLIInput(
       };
     }
 
-    const queuedMessage = await enqueueAndProcessUserMessage(world.id, currentChatId, input, sender, world as any);
+    const queuedMessage = await enqueueAndProcessUserTurn(world.id, currentChatId, input, sender, world as any);
     return {
       success: true,
       message: '',

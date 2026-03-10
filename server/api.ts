@@ -8,6 +8,7 @@
  * - 2026-03-06: Removed runtime `world.currentChatId` fallback from message send routes; chat-scoped sends now require explicit `chatId`.
  * - 2026-03-06: Added `/tool-artifact` for stable, restorable adopted-tool preview URLs limited to approved world working directories and registered skill roots.
  * - 2026-03-06: Hardened `POST /worlds/:worldName/hitl/respond` for restart-safe validation: when the runtime pending map lacks the request entry but it exists in persisted messages, trigger `activateChatWithSnapshot` to seed the runtime map and return an actionable error.
+ * - 2026-03-10: Queue-backed message ingress is now user-only; non-user API senders use explicit immediate dispatch instead of the mixed queue helper.
  * - 2026-03-04: Added queue metadata fields to non-streaming `/messages` success responses (`queueMessageId`, `queueStatus`, `queueRetryCount`) to expose queue terminal/error state.
  * - 2026-02-27: Hardened non-streaming `/messages` event collection with chat-scoped filtering to prevent cross-chat response contamination.
  * - 2026-02-24: Added `hitlPrompts` payload to `POST /worlds/:worldName/setChat/:chatId` responses so web chat switches can render replayed pending HITL prompts.
@@ -63,7 +64,8 @@ import {
   createWorld,
   listWorlds,
   createCategoryLogger,
-  enqueueAndProcessUserMessage,
+  enqueueAndProcessUserTurn,
+  dispatchImmediateChatMessage,
   enableStreaming,
   disableStreaming,
   // core managers (function-based)
@@ -118,6 +120,11 @@ const loggerStream = createCategoryLogger('api.stream');
 const loggerValidation = createCategoryLogger('api.validation');
 const loggerMcp = createCategoryLogger('api.mcp');
 const loggerExport = createCategoryLogger('api.export');
+
+function isUserSender(sender: string): boolean {
+  const normalized = String(sender || '').trim().toLowerCase();
+  return normalized === 'human' || normalized.startsWith('user');
+}
 const DEFAULT_WORLD_NAME = 'Default World';
 
 type WorldContext = {
@@ -900,11 +907,18 @@ async function handleNonStreamingChat(
         world.eventEmitter.on(EventType.SSE, sseListener);
         listeners.set(EventType.SSE, sseListener);
 
-        // Queue-backed user ingress: enqueue then trigger event-driven processing.
-        const queued = await enqueueAndProcessUserMessage(world.id, chatId, message, sender, world);
-        queuedMessageId = queued?.messageId || null;
-        queuedStatus = queued?.status || null;
-        queuedRetryCount = typeof queued?.retryCount === 'number' ? queued.retryCount : null;
+        if (isUserSender(sender)) {
+          // Queue-backed user ingress: enqueue then trigger event-driven processing.
+          const queued = await enqueueAndProcessUserTurn(world.id, chatId, message, sender, world);
+          queuedMessageId = queued?.messageId || null;
+          queuedStatus = queued?.status || null;
+          queuedRetryCount = typeof queued?.retryCount === 'number' ? queued.retryCount : null;
+        } else {
+          const dispatched = await dispatchImmediateChatMessage(world.id, chatId, message, sender, world);
+          queuedMessageId = dispatched?.messageId || null;
+          queuedStatus = null;
+          queuedRetryCount = null;
+        }
       }).catch(error => {
         hasError = true;
         errorMessage = `Failed to connect to world: ${error instanceof Error ? error.message : error}`;
@@ -1000,8 +1014,11 @@ async function handleStreamingChat(
   res.on('close', cleanupSubscription);
 
   try {
-    // Queue-backed user ingress: enqueue then trigger event-driven processing.
-    await enqueueAndProcessUserMessage(world.id, chatId, message, sender, world);
+    if (isUserSender(sender)) {
+      await enqueueAndProcessUserTurn(world.id, chatId, message, sender, world);
+    } else {
+      await dispatchImmediateChatMessage(world.id, chatId, message, sender, world);
+    }
   } catch (error) {
     sseHandler.sendSSE({
       type: 'error',

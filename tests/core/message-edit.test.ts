@@ -350,7 +350,7 @@ describe('Message Edit Feature', () => {
         createdAt: new Date()
       });
 
-      const result = await editUserMessage(world.id, 'msg-1', 'list files', 'chat-1');
+      const result = await editUserMessage(world.id, 'msg-1', 'list files', 'chat-1', runtimeWorld!);
 
       expect(result.resubmissionStatus).toBe('success');
       const updatedChat = await getMemoryStorage().loadChatData(world.id, 'chat-1');
@@ -424,15 +424,17 @@ describe('Message Edit Feature', () => {
         createdAt: new Date()
       });
 
-      const originalEmit = runtimeWorld!.eventEmitter.emit.bind(runtimeWorld!.eventEmitter);
-      const emitSpy = vi
-        .spyOn(runtimeWorld!.eventEmitter, 'emit')
-        .mockImplementation((eventType: string, ...args: any[]) => {
-          if (eventType === 'message') {
-            throw new Error('simulated resubmit failure');
-          }
-          return originalEmit(eventType, ...args);
-        });
+      const storage = getMemoryStorage() as StorageAPI & {
+        addQueuedMessage?: (worldId: string, chatId: string, messageId: string, content: string, sender: string) => Promise<void>;
+      };
+      const originalAddQueuedMessage = storage.addQueuedMessage?.bind(storage);
+      if (!originalAddQueuedMessage) {
+        throw new Error('Expected in-memory storage to expose addQueuedMessage for queue-backed edit resubmission tests.');
+      }
+
+      storage.addQueuedMessage = vi.fn(async () => {
+        throw new Error('simulated resubmit failure');
+      });
 
       const result = await editUserMessage(world.id, 'msg-1', 'list files', 'chat-1', runtimeWorld!);
 
@@ -441,8 +443,7 @@ describe('Message Edit Feature', () => {
 
       const updatedChat = await getMemoryStorage().loadChatData(world.id, 'chat-1');
       expect(updatedChat?.name).toBe('Generated title');
-
-      emitSpy.mockRestore();
+      storage.addQueuedMessage = originalAddQueuedMessage;
     });
   });
 });
