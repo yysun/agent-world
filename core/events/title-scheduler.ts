@@ -7,17 +7,17 @@
  *   call title-scheduling directly without a cross-layer import violation.
  *
  * Key Features:
- * - Debounced title scheduling on human messages (no-activity path).
  * - Idle-triggered title generation on world activity events.
  * - In-flight deduplication and compare-and-set storage commit.
- * - Timer cleanup helper for world teardown.
+ * - World teardown cleanup helper that preserves the listener contract.
  *
  * Implementation Notes:
- * - All state (timers, in-flight set, storage cache) is module-level to preserve
+ * - All state (in-flight set, storage cache) is module-level to preserve
  *   singleton semantics previously in subscribers.ts.
- * - `isHumanSender` is exported so persistence.ts and subscribers.ts share one definition.
  *
  * Recent Changes:
+ * - 2026-03-10: Removed the human-message debounce trigger so idle activity is the sole
+ *   automatic chat-title generation entry point.
  * - 2026-03-03: Extracted from subscribers.ts to eliminate duplicate world-level EventEmitter
  *   listeners (persistence + activity + title-scheduler each had their own handler per channel).
  */
@@ -32,7 +32,6 @@ import { isDefaultChatTitle, NEW_CHAT_TITLE } from '../chat-constants.js';
 const loggerChatTitle = createCategoryLogger('chattitle');
 
 const titleGenerationInFlight = new Set<string>();
-const titleGenerationTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 let storageWrappers: StorageAPI | null = null;
 async function getStorageWrappers(): Promise<StorageAPI> {
@@ -49,24 +48,6 @@ function getTitleGenerationKey(worldId: string, chatId: string): string {
 export function isHumanSender(sender?: string): boolean {
   const normalized = String(sender ?? '').trim().toLowerCase();
   return normalized === 'human' || normalized.startsWith('user');
-}
-
-export function scheduleNoActivityTitleUpdate(world: World, chatId: string, content: string): void {
-  const key = getTitleGenerationKey(world.id, chatId);
-  const existingTimer = titleGenerationTimers.get(key);
-  if (existingTimer) {
-    clearTimeout(existingTimer);
-  }
-
-  const timer = setTimeout(async () => {
-    titleGenerationTimers.delete(key);
-    if (world.isProcessing) {
-      return;
-    }
-    await tryGenerateAndApplyTitle(world, chatId, content, 'message-no-activity');
-  }, 120);
-
-  titleGenerationTimers.set(key, timer);
 }
 
 export async function runIdleTitleUpdate(world: World, event: any): Promise<void> {
@@ -91,12 +72,7 @@ export async function runIdleTitleUpdate(world: World, event: any): Promise<void
 }
 
 export function clearWorldTitleTimers(worldId: string): void {
-  for (const [key, timer] of titleGenerationTimers.entries()) {
-    if (key.startsWith(`${worldId}:`)) {
-      clearTimeout(timer);
-      titleGenerationTimers.delete(key);
-    }
-  }
+  void worldId;
 }
 
 async function commitChatTitleIfDefault(
@@ -124,7 +100,7 @@ async function tryGenerateAndApplyTitle(
   world: World,
   targetChatId: string,
   content: string,
-  source: 'idle' | 'message-no-activity'
+  source: 'idle'
 ): Promise<void> {
   const inFlightKey = getTitleGenerationKey(world.id, targetChatId);
   if (titleGenerationInFlight.has(inFlightKey)) {

@@ -6,7 +6,7 @@
  * combining persistence with title-scheduling and activity-title logic in one handler each.
  *
  * Features:
- * - One combined `message` handler: persistence + no-activity title scheduling.
+ * - One combined `message` handler: persistence only.
  * - One combined `world` handler: persistence + idle title generation.
  * - SSE event persistence (start/end only, skips chunks).
  * - System event persistence.
@@ -22,6 +22,8 @@
  * - logger.ts
  *
  * Changes:
+ * - 2026-03-10: Removed human-message debounce title scheduling; idle activity is now the
+ *   sole automatic trigger path.
  * - 2026-03-06: Required explicit `chatId` on persisted message/SSE/tool/activity/system events; unscoped events are now rejected instead of inheriting `world.currentChatId`.
  * - 2026-03-03: Combined world-level listeners to eliminate MaxListenersExceededWarning;
  *   title-scheduling and idle-activity logic moved here from subscribers.ts (Layer 6) via
@@ -45,10 +47,7 @@ import {
   calculateIsMemoryOnly,
   calculateIsCrossAgentMessage
 } from '../events-metadata.js';
-import { isDefaultChatTitle } from '../chat-constants.js';
 import {
-  isHumanSender,
-  scheduleNoActivityTitleUpdate,
   runIdleTitleUpdate,
   clearWorldTitleTimers
 } from './title-scheduler.js';
@@ -93,7 +92,7 @@ export function setupEventPersistence(world: World): () => void {
     }
   };
 
-  // Combined message handler: persistence + no-activity title scheduling
+  // Combined message handler: persistence only
   const messageHandler = async (event: WorldMessageEvent): Promise<void> => {
     const targetChatId = typeof event.chatId === 'string' ? event.chatId.trim() : '';
     if (!targetChatId) {
@@ -185,13 +184,6 @@ export function setupEventPersistence(world: World): () => void {
 
     await persistEvent(eventData);
 
-    // Title scheduling: debounce on human messages while chat title is still default
-    if (isHumanSender(event.sender)) {
-      const chat = world.chats.get(targetChatId);
-      if (chat && isDefaultChatTitle(chat.name)) {
-        scheduleNoActivityTitleUpdate(world, targetChatId, event.content || '');
-      }
-    }
   };
 
   // SSE event handler - persist only start and end events, skip chunk events

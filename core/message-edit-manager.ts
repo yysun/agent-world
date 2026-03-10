@@ -46,6 +46,7 @@ import { createCategoryLogger } from './logger.js';
 import {
   subscribeAgentToMessages,
   subscribeWorldToMessages,
+  setupWorldActivityListener,
 } from './events/index.js';
 import { nanoid } from 'nanoid';
 import type {
@@ -688,6 +689,7 @@ export async function editUserMessage(
       subscribeAgentToMessages(worldForResubmission, agent);
     }
     subscribeWorldToMessages(worldForResubmission);
+    setupWorldActivityListener(worldForResubmission);
   }
 
   // Step 3: Attempt resubmission using the canonical queue-backed send path

@@ -41,6 +41,7 @@ import {
   publishEvent,
   subscribeAgentToMessages,
   subscribeWorldToMessages,
+  setupWorldActivityListener,
 } from './events/index.js';
 import { listPendingHitlPromptEventsFromMessages } from './hitl.js';
 import { nanoid } from 'nanoid';
@@ -273,6 +274,7 @@ async function refreshQueueRespondersFromStorage(world: World): Promise<void> {
     subscribeAgentToMessages(world, agent);
   }
   subscribeWorldToMessages(world);
+  setupWorldActivityListener(world);
 }
 
 async function runQueueResponderPreflight(

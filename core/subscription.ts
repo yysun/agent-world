@@ -11,6 +11,8 @@
  * - Uses world-id keyed runtime tracking with safe register/unregister semantics.
  *
  * Recent Changes:
+ * - 2026-03-10: Rebound the idle activity listener during standalone runtime startup so
+ *   idle-only title generation still works when event persistence is unavailable.
  * - 2026-03-04: Queue/runtime selection no longer relies on `world.currentChatId`.
  *   - `getActiveSubscribedWorld(worldId, preferredChatId)` now matches only by runtime chat membership.
  *   - Subscription startup no longer auto-resumes queue from runtime `currentChatId`.
@@ -21,7 +23,7 @@
 import { World } from './types.js';
 import { getWorld, recoverQueueSendingMessages } from './managers.js';
 import { createCategoryLogger, type LogLevel, addLogStreamCallback } from './logger.js';
-import { subscribeAgentToMessages, subscribeWorldToMessages } from './events/index.js';
+import { subscribeAgentToMessages, subscribeWorldToMessages, setupWorldActivityListener } from './events/index.js';
 import { generateId, toKebabCase } from './utils.js';
 import { getWorldRuntimeByKey, startWorldRuntime } from './world-registry.js';
 
@@ -116,6 +118,7 @@ export async function startWorld(world: World, client: ClientConnection): Promis
   }
 
   subscribeWorldToMessages(currentWorld);
+  setupWorldActivityListener(currentWorld);
 
   // Helper function to destroy current world instance
   const destroyCurrentWorld = async () => {
@@ -127,6 +130,9 @@ export async function startWorld(world: World, client: ClientConnection): Promis
 
       if (typeof currentWorld._worldMessagesUnsubscriber === 'function') {
         currentWorld._worldMessagesUnsubscriber();
+      }
+      if (typeof currentWorld._activityListenerCleanup === 'function') {
+        currentWorld._activityListenerCleanup();
       }
 
       if (currentWorld._agentUnsubscribers instanceof Map) {
@@ -188,6 +194,7 @@ export async function startWorld(world: World, client: ClientConnection): Promis
         subscribeAgentToMessages(currentWorld, agent);
       }
       subscribeWorldToMessages(currentWorld);
+      setupWorldActivityListener(currentWorld);
 
       logger.debug('World subscription refreshed', {
         worldId: currentWorld.id,

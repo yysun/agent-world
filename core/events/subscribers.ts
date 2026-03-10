@@ -7,8 +7,7 @@
  * Features:
  * - Agent message subscription with automatic response processing
  * - Tool message subscription with security checks
- * - World message subscription: idempotent wrapper — no-op when setupEventPersistence has run;
- *   standalone fallback path delegates title-scheduling to title-scheduler.ts.
+ * - World message subscription: idempotent wrapper for world-level message listeners.
  * - World activity listener: idempotent wrapper — no-op when setupEventPersistence has run;
  *   standalone fallback path delegates idle-title logic to title-scheduler.ts.
  *
@@ -20,6 +19,8 @@
  * - utils.ts, logger.ts
  *
  * Changes:
+ * - 2026-03-10: Removed standalone world-message title scheduling so idle activity is the sole
+ *   automatic chat-title trigger.
  * - 2026-03-06: Removed `world.currentChatId` fallback from world-message title scheduling; chat-scoped handlers now require explicit `event.chatId`.
  * - 2026-03-03: Removed private title-scheduling logic (moved to title-scheduler.ts Layer 4).
  *   subscribeWorldToMessages and setupWorldActivityListener are now idempotent wrappers that
@@ -44,10 +45,8 @@ import {
   resetLLMCallCountIfNeeded
 } from './memory-manager.js';
 import { processAgentMessage, shouldAgentRespond } from './orchestrator.js';
-import { isDefaultChatTitle } from '../chat-constants.js';
 import {
   isHumanSender,
-  scheduleNoActivityTitleUpdate,
   runIdleTitleUpdate,
   clearWorldTitleTimers
 } from './title-scheduler.js';
@@ -207,15 +206,8 @@ export function subscribeWorldToMessages(world: World): () => void {
     return world._worldMessagesUnsubscriber;
   }
 
-  const unsubscribe = subscribeToMessages(world, async (event: WorldMessageEvent) => {
-    const targetChatId = typeof event.chatId === 'string' ? event.chatId.trim() : '';
-    if (!targetChatId) return;
-    if (!isHumanSender(event.sender)) return;
-
-    const chat = world.chats.get(targetChatId);
-    if (!chat || !isDefaultChatTitle(chat.name)) return;
-
-    scheduleNoActivityTitleUpdate(world, targetChatId, event.content || '');
+  const unsubscribe = subscribeToMessages(world, (_event: WorldMessageEvent) => {
+    return;
   });
 
   const trackedUnsubscribe = () => {

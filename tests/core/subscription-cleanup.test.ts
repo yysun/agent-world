@@ -94,17 +94,18 @@ describe('World Subscription Cleanup', () => {
     const subscription = await startWorld(testWorld, { isOpen: true });
     const world = subscription.world;
 
-    // There should be no forwarding listeners initially
-    // (only system listeners from subscribeAgentToMessages/subscribeWorldToMessages)
+    // There should be no client-forwarding listeners initially.
+    // Minimal runtime setup still binds infrastructure listeners needed for
+    // standalone behavior, including the idle activity listener on `world`
+    // and the world message subscription boundary on `message`.
     const initialWorldListeners = world.eventEmitter.listenerCount('world');
     const initialMessageListeners = world.eventEmitter.listenerCount('message');
     const initialSystemListeners = world.eventEmitter.listenerCount('system');
     const initialSseListeners = world.eventEmitter.listenerCount('sse');
 
-    // Since we don't have callbacks, no forwarding listeners should be created
-    // There may be 1 system listener on 'message' from subscribeWorldToMessages
-    expect(initialWorldListeners).toBe(0);
-    expect(initialMessageListeners).toBeLessThanOrEqual(1); // May have system listener
+    // Since we don't have callbacks, only infrastructure listeners should exist.
+    expect(initialWorldListeners).toBe(1);
+    expect(initialMessageListeners).toBeLessThanOrEqual(1);
     expect(initialSystemListeners).toBe(0);
     expect(initialSseListeners).toBe(0);
 

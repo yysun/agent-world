@@ -15,6 +15,10 @@
  * - Exercises subscriber behavior through emitted `world` events.
  *
  * Recent Changes:
+ * - 2026-03-10: Added standalone runtime coverage so `startWorld(...)` still binds idle-based
+ *   title generation when event persistence is unavailable.
+ * - 2026-03-10: Removed the human-message debounce expectation; title generation now requires
+ *   an eligible idle activity event.
  * - 2026-02-27: Added idle-activity chatId routing coverage so title generation ignores `world.currentChatId` drift.
  * - 2026-02-19: Asserted chat-title CRUD payload shape.
  * - 2026-02-13: Asserted structured `chat-title-updated` system payload shape.
@@ -29,6 +33,7 @@ import { EventEmitter } from 'events';
 import type { World } from '../../../core/types';
 import { LLMProvider } from '../../../core/types';
 import { setupWorldActivityListener, subscribeWorldToMessages } from '../../../core/events';
+import { startWorld } from '../../../core/subscription.js';
 
 const mocks = vi.hoisted(() => ({
   chatNameById: new Map<string, string>(),
@@ -292,9 +297,10 @@ describe('World activity-based title update', () => {
 
     await new Promise(r => setTimeout(r, 10));
 
-    const promptMessages = mocks.generateAgentResponse.mock.calls.at(-1)?.[2];
+    const latestGenerateCall = mocks.generateAgentResponse.mock.calls.at(-1) as any[] | undefined;
+    const promptMessages = latestGenerateCall?.[2] as Array<{ content?: string }> | undefined;
     const promptContent = promptMessages?.[0]?.content ?? '';
-    const scopedChatId = mocks.generateAgentResponse.mock.calls.at(-1)?.[5];
+    const scopedChatId = latestGenerateCall?.[5];
 
     expect(promptContent).not.toContain('-assistant:');
     expect(promptContent).not.toContain('-tool:');
@@ -376,7 +382,7 @@ describe('World activity-based title update', () => {
     expect(world.chats.get('chat-1')!.name).toBe('Single Title Generation');
   });
 
-  test('generates title from human message when chat stays idle (no agent activity)', async () => {
+  test('does not generate title from a human message without an idle activity event', async () => {
     world.eventEmitter.emit('message', {
       sender: 'human',
       content: 'Edited onboarding question',
@@ -387,7 +393,42 @@ describe('World activity-based title update', () => {
 
     await new Promise(r => setTimeout(r, 180));
 
-    expect(world.chats.get('chat-1')!.name).toBe('Generated Chat Title');
-    expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(1);
+    expect(world.chats.get('chat-1')!.name).toBe('New Chat');
+    expect(mocks.generateAgentResponse).not.toHaveBeenCalled();
+  });
+
+  test('startWorld binds idle title generation for standalone worlds without persistence', async () => {
+    const standaloneWorld = {
+      id: 'world-standalone',
+      name: 'Standalone World',
+      eventEmitter: new EventEmitter(),
+      agents: new Map(),
+      chats: new Map(),
+      currentChatId: 'chat-1',
+      chatLLMProvider: LLMProvider.OPENAI,
+      chatLLMModel: 'gpt-4',
+    } as any as World;
+
+    standaloneWorld.chats.set('chat-1', { id: 'chat-1', name: 'New Chat' } as any);
+    mocks.chatNameById.set('chat-1', 'New Chat');
+
+    const subscription = await startWorld(standaloneWorld, { isOpen: true });
+
+    standaloneWorld.eventEmitter.emit('world', {
+      type: 'idle',
+      pendingOperations: 0,
+      activityId: 1,
+      timestamp: new Date().toISOString(),
+      activeSources: [],
+      queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
+      messageId: 'standalone-idle-1',
+      chatId: 'chat-1'
+    });
+
+    await new Promise(r => setTimeout(r, 15));
+
+    expect(standaloneWorld.chats.get('chat-1')!.name).toBe('Generated Chat Title');
+
+    await subscription.unsubscribe();
   });
 });
