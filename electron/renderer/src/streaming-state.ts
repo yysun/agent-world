@@ -17,6 +17,8 @@
  * - Cleanup method for session switches
  *
  * Recent Changes:
+ * - 2026-03-10: Added assistant-stream `chatId` propagation so live rows stay scoped across
+ *   selected-chat refresh reconciliation instead of disappearing until the final message arrives.
  * - 2026-02-21: Added optional command propagation for tool-stream entries so shell rows can display `Running command: <name>`.
  * - 2026-02-21: Added optional tool-name propagation for tool-stream entries so tool rows can render specific running labels (e.g., shell command).
  * - 2026-02-19: Deferred assistant message rendering to first chunk by emitting stream updates with full entry data.
@@ -35,6 +37,7 @@ export type ToolStreamType = 'stdout' | 'stderr';
 export interface StreamEntry {
   messageId: string;
   agentName: string;
+  chatId?: string | null;
   toolName?: string;
   command?: string;
   content: string;
@@ -70,8 +73,8 @@ interface PendingToolUpdate {
 }
 
 export interface StreamingStateApi {
-  handleStart: (messageId: string, agentName: string) => StreamEntry;
-  handleChunk: (messageId: string, chunk: string) => void;
+  handleStart: (messageId: string, agentName: string, chatId?: string | null) => StreamEntry;
+  handleChunk: (messageId: string, chunk: string, chatId?: string | null) => void;
   handleEnd: (messageId: string) => string | null;
   handleError: (messageId: string, errorMessage: string) => void;
   handleToolStreamStart: (messageId: string, agentName: string, streamType: ToolStreamType, toolName?: string, command?: string) => StreamEntry;
@@ -148,10 +151,11 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
     }
   }
 
-  function handleStart(messageId: string, agentName: string) {
+  function handleStart(messageId: string, agentName: string, chatId: string | null = null) {
     const entry: StreamEntry = {
       messageId,
       agentName,
+      chatId,
       content: '',
       isStreaming: true,
       hasError: false,
@@ -164,12 +168,13 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
     return entry;
   }
 
-  function handleChunk(messageId: string, chunk: string) {
+  function handleChunk(messageId: string, chunk: string, chatId: string | null = null) {
     const entry = streams.get(messageId);
     if (!entry) {
       const newEntry: StreamEntry = {
         messageId,
         agentName: 'assistant',
+        chatId,
         content: chunk,
         isStreaming: true,
         hasError: false,
@@ -182,6 +187,9 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
       return;
     }
 
+    if (!entry.chatId && chatId) {
+      entry.chatId = chatId;
+    }
     entry.content += chunk;
     scheduleUpdate(entry);
   }

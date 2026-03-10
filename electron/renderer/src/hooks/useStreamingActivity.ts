@@ -13,6 +13,8 @@
  * - Keeps manager setup/teardown centralized in one hook.
  *
  * Recent Changes:
+ * - 2026-03-10: Preserve assistant streaming `chatId` on live rows so selected-chat refresh
+ *   reconciliation retains in-progress stream content instead of dropping it until the final message lands.
  * - 2026-02-26: Added stream-error fallback message creation and redundant error-log cleanup so errors render inline without duplicate log rows.
  * - 2026-02-24: Removed activityStateRef entirely — activity-state.ts deleted
  *   as part of working-status simplification (all callbacks were no-ops).
@@ -48,13 +50,20 @@ export function useStreamingActivity({ setMessages }) {
               messageId,
               role: 'assistant',
               sender: entry.agentName,
+              chatId: entry.chatId || null,
               content: entry.content,
               createdAt: entry.createdAt,
               isStreaming: true
             });
           }
           const next = [...existing];
-          next[index] = { ...next[index], sender: entry.agentName, content: entry.content, isStreaming: true };
+          next[index] = {
+            ...next[index],
+            sender: entry.agentName,
+            chatId: next[index]?.chatId || entry.chatId || null,
+            content: entry.content,
+            isStreaming: true
+          };
           return next;
         });
       },

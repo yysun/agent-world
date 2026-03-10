@@ -13,6 +13,8 @@
  * - Accepts state setters/callbacks via dependency injection.
  *
  * Recent Changes:
+ * - 2026-03-10: Updated streaming-state typing to include chat-scoped assistant SSE start/chunk
+ *   propagation so selected-chat refreshes can retain live streaming rows.
  * - 2026-03-06: Ref-ified callback dependencies (onSessionSystemEvent, refreshSessions, resetActivityRuntimeState, onMainLogEvent, setHitlPromptQueue) so subscription effects only re-run on data-identity changes (world/session switch), not callback identity changes.
  * - 2026-03-06: Added app-level selected-chat system-event callback wiring for status-bar visibility while preserving title-refresh side effects.
  * - 2026-02-27: Global log listener now routes events only to logs-panel ingestion; chat message list is no longer mutated for realtime log events.
@@ -69,8 +71,8 @@ type HitlPrompt = {
 type RealtimeState = {
   getActiveCount: () => number;
   endAllToolStreams: () => string[];
-  handleStart: (messageId: string, agentName: string) => void;
-  handleChunk: (messageId: string, content: string) => void;
+  handleStart: (messageId: string, agentName: string, chatId?: string | null) => void;
+  handleChunk: (messageId: string, content: string, chatId?: string | null) => void;
   handleEnd: (messageId: string) => void;
   handleError: (messageId: string, errorMessage: string) => void;
   handleToolStreamStart: (messageId: string, agentName: string, streamType: 'stdout' | 'stderr', toolName?: string, command?: string) => void;

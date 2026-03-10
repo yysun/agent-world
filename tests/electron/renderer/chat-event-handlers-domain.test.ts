@@ -11,6 +11,8 @@
  * - Focuses on orchestration behavior, not UI rendering.
  *
  * Recent Changes:
+ * - 2026-03-10: Added assistant SSE chatId propagation coverage so live streaming rows stay scoped
+ *   to the selected chat during refresh reconciliation.
  * - 2026-03-10: Added coverage that unscoped activity events are ignored for the selected chat, preserving live streaming rows until a properly scoped event arrives.
  * - 2026-03-10: Reverted log-event transcript injection; logs remain diagnostics-only while structured system errors drive durable transcript failure rows.
  * - 2026-02-27: Updated global-log coverage to assert logs are routed only to panel callbacks (no chat-message insertion).
@@ -469,7 +471,7 @@ describe('createChatSubscriptionEventHandler', () => {
     expect(harness.getMessages()).toHaveLength(1);
   });
 
-  it('delegates SSE start events to streaming state manager', () => {
+  it('delegates SSE start events to streaming state manager with chat scope', () => {
     const harness = createMessageStateHarness();
     const streamingStateRef = makeFullStreamingRef();
     (streamingStateRef.current.getActiveCount as ReturnType<typeof vi.fn>).mockReturnValue(1);
@@ -506,8 +508,36 @@ describe('createChatSubscriptionEventHandler', () => {
       }
     });
 
-    expect(streamingStateRef.current.handleStart).toHaveBeenCalledWith('m-1', 'assistant-1');
+    expect(streamingStateRef.current.handleStart).toHaveBeenCalledWith('m-1', 'assistant-1', 'chat-1');
     expect(streamingStateRef.current.endAllToolStreams).toHaveBeenCalled();
+  });
+
+  it('delegates SSE chunk events to streaming state manager with chat scope', () => {
+    const harness = createMessageStateHarness();
+    const streamingStateRef = makeFullStreamingRef();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef,
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
+    });
+
+    handler({
+      type: 'sse',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      sse: {
+        eventType: 'chunk',
+        chatId: 'chat-1',
+        messageId: 'm-1',
+        agentName: 'assistant-1',
+        content: 'partial response'
+      }
+    });
+
+    expect(streamingStateRef.current.handleChunk).toHaveBeenCalledWith('m-1', 'partial response', 'chat-1');
   });
 
   it('propagates tool-start command to subsequent tool-stream chunk', () => {

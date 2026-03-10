@@ -13,6 +13,8 @@
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
+ * - 2026-03-10: Forwarded selected-chat `chatId` into assistant SSE start/chunk streaming-state
+ *   calls so live assistant rows remain refresh-safe for the active chat.
  * - 2026-03-10: Structured selected-chat `system` error events now also create transcript rows, while non-error system events remain status-bar-only.
  * - 2026-03-10: Reverted log-event transcript injection so realtime logs stay in the diagnostics panel only.
  * - 2026-03-06: Enforced explicit chat-scoped handling for SSE/tool/activity events; removed selected-session fallback rebinding.
@@ -59,8 +61,8 @@ interface RealtimeRefs {
   current: {
     getActiveCount: () => number;
     endAllToolStreams: () => string[];
-    handleStart: (messageId: string, agentName: string) => void;
-    handleChunk: (messageId: string, content: string) => void;
+    handleStart: (messageId: string, agentName: string, chatId?: string | null) => void;
+    handleChunk: (messageId: string, content: string, chatId?: string | null) => void;
     handleEnd: (messageId: string) => void;
     handleError: (messageId: string, errorMessage: string) => void;
     handleToolStreamStart: (messageId: string, agentName: string, streamType: 'stdout' | 'stderr', toolName?: string, command?: string) => void;
@@ -302,7 +304,7 @@ export function createChatSubscriptionEventHandler({
           ensureToolStreamMessageChatId(messageId, sseChatId);
         } else {
           endAllToolStreams();
-          streaming.handleStart(messageId, String(streamPayload.agentName || 'assistant'));
+          streaming.handleStart(messageId, String(streamPayload.agentName || 'assistant'), sseChatId);
         }
         if (sseAgentName && loadedWorldId && sseChatId) {
           updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', 'start'));
@@ -323,7 +325,7 @@ export function createChatSubscriptionEventHandler({
           streaming.handleToolStreamChunk(messageId, content, 'stdout', 'shell_cmd', shellCommand);
           ensureToolStreamMessageChatId(messageId, sseChatId);
         } else {
-          streaming.handleChunk(messageId, String(streamPayload.content || ''));
+          streaming.handleChunk(messageId, String(streamPayload.content || ''), sseChatId);
         }
       } else if (eventType === 'end') {
         if (isShellStdoutSSE) {

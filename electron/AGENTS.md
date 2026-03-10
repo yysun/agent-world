@@ -1,8 +1,9 @@
 ## Electron Renderer Hook & Event Rules (Strict)
 
 These rules apply to all changes inside `electron/renderer/src/`. They encode lessons
-from real regressions (2026-03-06) where unstable hook references and unscoped event
-payloads caused streaming loss, flickering, and dropped messages.
+from real regressions (2026-03-06 and 2026-03-10) where unstable hook references,
+unscoped event payloads, and unscoped live stream rows caused streaming loss, flickering,
+and dropped messages.
 
 ### 1. Memoize every callback that enters a `useEffect` dependency array
 
@@ -113,7 +114,32 @@ At minimum, refresh reconciliation must preserve:
 
 Do not replace the selected chat transcript with raw history when live rows still matter.
 
-### 8. Do not clear the selected chat message list during normal chat mutation flows
+### 8. Live assistant streaming rows must keep the selected chat's `chatId`
+
+It is not enough for the incoming SSE payload to carry `chatId`. Any live assistant row
+created from that SSE event must also preserve the same `chatId` once it enters renderer
+message state.
+
+Why this matters:
+
+- `reconcileRefreshedMessagesWithLiveState(...)` only carries forward live rows whose
+  `message.chatId` matches the active chat.
+- If the streaming accumulator or `useStreamingActivity` creates assistant rows without
+  `chatId`, a normal selected-chat refresh will drop the live stream row.
+- The user then sees no incremental assistant output and only the final persisted message
+  once the turn completes.
+
+Rules:
+
+- Assistant SSE `start` / `chunk` handlers must forward the scoped `chatId` into the
+  streaming-state layer.
+- `streaming-state.ts` must retain that `chatId` on the in-memory stream entry.
+- `useStreamingActivity.ts` must write that `chatId` onto the live assistant message row.
+
+Tests: `tests/electron/renderer/streaming-state.test.ts` and
+`tests/electron/renderer/chat-event-handlers-domain.test.ts`.
+
+### 9. Do not clear the selected chat message list during normal chat mutation flows
 
 `setMessages([])` is only valid when there is no selected chat or the world/session is
 being torn down.
@@ -127,7 +153,7 @@ Do not clear the selected chat transcript during:
 
 Clearing during those flows causes welcome-card/loading flicker and dropped transient rows.
 
-### 9. Restored event timestamps must preserve original time
+### 10. Restored event timestamps must preserve original time
 
 Replay/rehydration helpers must accept persisted `createdAt` values as either `string` or
 `Date` and preserve the original event time.
@@ -135,7 +161,7 @@ Replay/rehydration helpers must accept persisted `createdAt` values as either `s
 Do not restamp restored events with `new Date()` unless no persisted timestamp exists at all.
 Otherwise historical errors will look like fresh duplicates on revisit.
 
-### 10. Testing Electron renderer hooks
+### 11. Testing Electron renderer hooks
 
 - Electron renderer tests run in a `node` environment with no jsdom and no React runtime.
 - App.tsx is called as a plain function with all React hooks and child components mocked.
@@ -153,7 +179,7 @@ Cross-app queue, restore, durable error, and tool/HITL lifecycle rules now live 
 root `AGENTS.md` Event and Message Rules section. This Electron doc only keeps the
 additional renderer/main-runtime constraints that are specific to desktop chat behavior.
 
-### 11. Send/edit dispatch must use the active runtime after restore
+### 12. Send/edit dispatch must use the active runtime after restore
 
 Chat activation can swap or refresh the runtime world instance. Any queue or immediate
 dispatch that uses a pre-restore world reference risks publishing onto a stale emitter.
@@ -174,7 +200,7 @@ Failure mode:
 
 Tests: `tests/electron/main/main-ipc-handlers.test.ts`.
 
-### 12. Subscription/rebind helpers must be idempotent
+### 13. Subscription/rebind helpers must be idempotent
 
 Rebinding agent/world listeners must first remove any existing listener for the same target.
 
@@ -187,7 +213,7 @@ Do not stack duplicate listeners for:
 Duplicate listeners cause duplicate processing, duplicate persisted errors, and misleading
 UI “duplicates” that are actually multi-processing bugs.
 
-### 13. Messages briefly appearing then disappearing on chat switch is a streaming-state sign
+### 14. Messages briefly appearing then disappearing on chat switch is a streaming-state sign
 
 If the renderer shows messages momentarily and then they vanish on chat switch, check:
 
@@ -201,3 +227,6 @@ If the renderer shows messages momentarily and then they vanish on chat switch, 
 3. **Stale chatId on events** (main process) — are events arriving for the previous chat
    being applied to the new chat's message list before the subscription re-binds?
    See Rule 4 and Rule 5.
+4. **Lost chatId on live assistant rows** (renderer) — do SSE events carry `chatId`, but the
+   assistant stream row created in renderer state loses that scope before refresh reconciliation?
+   See Rule 8.

@@ -16,6 +16,8 @@
  * - beforeEach resets mocks and state
  *
  * Recent Changes:
+ * - 2026-03-10: Added chat-scoped assistant streaming coverage so live rows retain the
+ *   selected `chatId` during refresh reconciliation.
  * - 2026-02-12: Moved into layer-based tests/electron subfolder and updated module import paths.
  * - 2026-02-10: Added tests for tool stream bulk cleanup APIs (`getActiveToolStreamIds`, `endAllToolStreams`)
  * - 2026-02-10: Initial test suite
@@ -66,6 +68,12 @@ describe('createStreamingState', () => {
       expect(entry.createdAt).toBeDefined();
     });
 
+    it('preserves chatId on new assistant streams', () => {
+      const entry = state.handleStart('msg-1', 'agent-1', 'chat-1');
+
+      expect(entry.chatId).toBe('chat-1');
+    });
+
     it('calls onStreamStart callback', () => {
       state.handleStart('msg-1', 'agent-1');
 
@@ -114,6 +122,19 @@ describe('createStreamingState', () => {
       expect(callbacks.onStreamUpdate).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'msg-1', content: 'Hello' }));
     });
 
+    it('carries chatId through chunk updates', () => {
+      state.handleStart('msg-1', 'agent-1', 'chat-1');
+      state.handleChunk('msg-1', 'Hello', 'chat-1');
+
+      rafCallback();
+
+      expect(callbacks.onStreamUpdate).toHaveBeenCalledWith(expect.objectContaining({
+        messageId: 'msg-1',
+        content: 'Hello',
+        chatId: 'chat-1',
+      }));
+    });
+
     it('batches multiple chunks before RAF fires', () => {
       state.handleStart('msg-1', 'agent-1');
       state.handleChunk('msg-1', 'Hello');
@@ -131,12 +152,13 @@ describe('createStreamingState', () => {
     });
 
     it('handles chunks for unknown stream by creating entry', () => {
-      state.handleChunk('unknown-msg', 'Hello');
+      state.handleChunk('unknown-msg', 'Hello', 'chat-1');
 
       expect(callbacks.onStreamStart).toHaveBeenCalledWith(
         expect.objectContaining({
           messageId: 'unknown-msg',
-          content: 'Hello'
+          content: 'Hello',
+          chatId: 'chat-1',
         })
       );
       expect(state.isActive('unknown-msg')).toBe(true);
