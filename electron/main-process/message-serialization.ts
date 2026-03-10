@@ -384,7 +384,8 @@ export function serializeRealtimeActivityEvent(
       source: event?.source ? String(event.source) : null,
       activeSources,
       queue: event?.queue || null,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      chatId: chatId || null
     }
   };
 }

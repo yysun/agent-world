@@ -165,7 +165,7 @@ export default function RightPanelContent({
         behavior: 'auto',
       });
     });
-  }, [panelLogs, panelMode]);
+  }, [panelLogs.length, panelMode]);
 
   const onLogsContainerScroll = () => {
     const container = logsContainerRef.current;

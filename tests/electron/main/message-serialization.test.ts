@@ -9,6 +9,7 @@
  * - Uses pure helper tests with no Electron runtime dependencies.
  *
  * Recent Changes:
+ * - 2026-03-10: Added regression coverage ensuring activity event serialization includes chatId in nested object (E-Rule 4).
  * - 2026-03-06: Added regression coverage ensuring realtime log serialization preserves world/chat scope for transcript routing.
  * - 2026-02-28: Added regression coverage ensuring realtime tool message serialization preserves `tool_call_id` for renderer-side request/result linking.
  * - 2026-02-19: Added coverage for realtime CRUD-event serialization payload shape.
@@ -21,7 +22,8 @@ import {
   serializeChatsWithMessageCounts,
   serializeRealtimeLogEvent,
   serializeRealtimeMessageEvent,
-  serializeRealtimeCrudEvent
+  serializeRealtimeCrudEvent,
+  serializeRealtimeActivityEvent
 } from '../../../electron/main-process/message-serialization';
 
 describe('normalizeSessionMessages', () => {
@@ -144,6 +146,42 @@ describe('serializeRealtimeLogEvent', () => {
         chatId: 'chat-1',
       }
     });
+  });
+});
+
+describe('serializeRealtimeActivityEvent', () => {
+  it('includes chatId in nested activity object for renderer fallback', () => {
+    const payload = serializeRealtimeActivityEvent('world-1', 'chat-1', {
+      type: 'response-start',
+      pendingOperations: 1,
+      activityId: 42,
+      source: 'agent-a',
+      activeSources: ['agent-a'],
+      queue: null
+    });
+
+    expect(payload).toMatchObject({
+      type: 'activity',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      activity: {
+        eventType: 'response-start',
+        chatId: 'chat-1',
+        source: 'agent-a',
+        activeSources: ['agent-a']
+      }
+    });
+  });
+
+  it('sets nested chatId to null when top-level chatId is null', () => {
+    const payload = serializeRealtimeActivityEvent('world-1', null, {
+      type: 'idle',
+      pendingOperations: 0,
+      activityId: 43
+    });
+
+    expect(payload.chatId).toBeNull();
+    expect((payload.activity as any).chatId).toBeNull();
   });
 });
 
