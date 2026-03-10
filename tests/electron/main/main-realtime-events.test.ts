@@ -663,4 +663,87 @@ describe('createRealtimeEventsRuntime', () => {
       })
     );
   });
+
+  it('skips persisted-message HITL replay for toolCallIds already emitted by runtime map to preserve correct option IDs', async () => {
+    const send = vi.fn();
+    const worldSubscription = createWorldSubscription();
+
+    // Runtime map has the correct option IDs (e.g. shell_cmd uses 'approve'/'deny')
+    const listPendingHitlPromptEvents = vi.fn(() => ([
+      {
+        chatId: 'chat-1',
+        prompt: {
+          requestId: 'tc-shell-1',
+          title: 'Approve risky shell command?',
+          message: 'rm .e2e-hitl-delete-me.txt',
+          options: [
+            { id: 'approve', label: 'Approve' },
+            { id: 'deny', label: 'Deny' },
+          ],
+          defaultOptionId: 'deny',
+          metadata: { tool: 'shell_cmd' },
+          agentName: 'assistant',
+          toolName: 'shell_cmd',
+          toolCallId: 'tc-shell-1',
+        }
+      }
+    ]));
+
+    // Persisted-message reconstruction re-derives IDs as opt_1/opt_2 for the same toolCallId
+    const listPendingHitlPromptEventsFromMessages = vi.fn(() => ([
+      {
+        chatId: 'chat-1',
+        prompt: {
+          requestId: 'tc-shell-1',
+          title: 'Human input required',
+          message: 'rm .e2e-hitl-delete-me.txt',
+          options: [
+            { id: 'opt_1', label: 'Approve' },
+            { id: 'opt_2', label: 'Deny' },
+          ],
+          defaultOptionId: 'opt_1',
+          metadata: null,
+          agentName: null,
+          toolName: 'human_intervention_request',
+          toolCallId: 'tc-shell-1',
+        }
+      }
+    ]));
+
+    const getMemory = vi.fn(async () => []);
+
+    const runtime = createRealtimeEventsRuntime({
+      getMainWindow: () => ({
+        isDestroyed: () => false,
+        webContents: { send }
+      }),
+      chatEventChannel: 'chat:event',
+      addLogStreamCallback: () => () => { },
+      subscribeWorld: async () => worldSubscription,
+      ensureCoreReady: async () => { },
+      getMemory,
+      listPendingHitlPromptEvents,
+      listPendingHitlPromptEventsFromMessages,
+    });
+
+    await runtime.subscribeChatEvents({
+      subscriptionId: 'sub-dedup-test',
+      worldId: 'world-1',
+      chatId: 'chat-1'
+    });
+
+    // Exactly one event emitted (from runtime map, not duplicated by persisted-message path)
+    const toolEvents = (send as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([, payload]: [string, any]) => payload?.type === 'tool'
+    );
+    expect(toolEvents).toHaveLength(1);
+
+    // The emitted prompt must carry the correct IDs from the runtime map, not opt_1/opt_2
+    const emittedPrompt = toolEvents[0][1].tool?.metadata?.hitlPrompt;
+    expect(emittedPrompt?.options).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'approve' }),
+      expect.objectContaining({ id: 'deny' }),
+    ]));
+    expect(emittedPrompt?.options.some((o: any) => o.id === 'opt_1')).toBe(false);
+  });
 });

@@ -451,6 +451,24 @@ export async function removeMessagesFrom(
   // Get all agents
   const agents = await storageWrappers!.listAgents(resolvedWorldId);
 
+  // When no agents exist (e.g. all deleted), there is no agent memory to clean
+  // up. Treat this as a successful no-op so edit resubmission can proceed and
+  // surface a queue error instead of a confusing "Failed to edit message".
+  if (agents.length === 0) {
+    await removeTrimmedQueueRowsAndEvents(resolvedWorldId, chatId, 0, new Set());
+    return {
+      success: true,
+      messageId,
+      totalAgents: 0,
+      processedAgents: [],
+      failedAgents: [],
+      messagesRemovedTotal: 0,
+      requiresRetry: false,
+      resubmissionStatus: 'skipped',
+      newMessageId: undefined,
+    };
+  }
+
   // Track results per agent
   const processedAgents: string[] = [];
   const failedAgents: Array<{ agentId: string; error: string }> = [];

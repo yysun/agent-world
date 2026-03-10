@@ -98,6 +98,7 @@ import {
   parseOptionalInteger,
 } from './utils/app-helpers';
 import { useChatEventSubscriptions } from './hooks/useChatEventSubscriptions';
+import { deriveHitlPromptDisplayState } from './domain/hitl-scope';
 import { useMessageQueue } from './hooks/useMessageQueue';
 import type { MainProcessLogEntry } from './domain/chat-event-handlers';
 import { computeCanStopCurrentSession } from './domain/chat-stop-state';
@@ -249,7 +250,6 @@ function AppContent({ api }: { api: DesktopApi }) {
   const [worldViewMode, setWorldViewMode] = useState<WorldViewMode>('chat');
   const [worldGridLayoutChoiceId, setWorldGridLayoutChoiceId] = useState<WorldGridLayoutChoiceId>('1+2');
   const [isGridLayoutSubmenuOpen, setIsGridLayoutSubmenuOpen] = useState(false);
-  const hasActiveHitlPrompt = hitlPromptQueue.length > 0;
 
   // Skill editor state
   const [editorMode, setEditorMode] = useState<'none' | 'skill'>('none');
@@ -431,6 +431,11 @@ function AppContent({ api }: { api: DesktopApi }) {
   // Sync ref so async callbacks (refreshMessages, edit/delete follow-up) always
   // read the latest selected chat without needing it in their dependency arrays.
   selectedSessionIdRef.current = selectedSessionId;
+
+  const {
+    activeHitlPrompt,
+    hasActiveHitlPrompt,
+  } = deriveHitlPromptDisplayState(hitlPromptQueue, selectedSessionId);
 
   const scopedPanelLogs = filterPanelLogsForScope(panelLogs, loadedWorld?.id || null, selectedSessionId);
 
@@ -832,16 +837,10 @@ function AppContent({ api }: { api: DesktopApi }) {
     clearEditDeleteState();
   }, [selectedSessionId, clearEditDeleteState]);
 
-  // On chat switch: filter the HITL prompt queue to only prompts that belong
-  // to the newly selected chat (null chatId prompts are kept as they are
-  // considered unscoped/global). This prevents prompts for another chat from
-  // appearing in the active UI while remaining recoverable on return (AD-4).
-  useEffect(() => {
-    if (!selectedSessionId) return;
-    setHitlPromptQueue((existing) =>
-      existing.filter((prompt) => !prompt.chatId || prompt.chatId === selectedSessionId)
-    );
-  }, [selectedSessionId]);
+  // AD-4: HITL prompt queue is NOT filtered/cleared on session switch.
+  // Session scoping is applied at render time via selectHitlPromptForSession /
+  // hasHitlPromptForSession so prompts from all sessions survive in-memory
+  // and are shown when the owning session becomes active again.
 
   useEffect(() => {
     setSystemStatus((current) => retainSessionSystemStatusForContext(current, loadedWorld?.id, selectedSessionId));
@@ -938,8 +937,10 @@ function AppContent({ api }: { api: DesktopApi }) {
     setSubmittingHitlRequestId(null);
   }, [loadedWorld?.id, resetActivityRuntimeState, resetMessageRuntimeState]);
 
+  // On session switch: clear the in-progress submission flag only.
+  // The queue itself is NOT cleared — session scoping is handled at render
+  // time via selectHitlPromptForSession so prompts persist across switches.
   useEffect(() => {
-    setHitlPromptQueue([]);
     setSubmittingHitlRequestId(null);
   }, [selectedSessionId]);
 
@@ -1211,7 +1212,6 @@ function AppContent({ api }: { api: DesktopApi }) {
     isCurrentSessionPendingResponse,
     isCurrentSessionWorking,
   });
-  const activeHitlPrompt = hitlPromptQueue.length > 0 ? hitlPromptQueue[0] : null;
   const showInlineWorkingIndicator = !activeHitlPrompt && (chatStatus === 'working' || isCurrentSessionSending);
   const workingAgentEntries = agentStatuses.filter((agent) => agent.status === 'working');
   const workingAgentNames = workingAgentEntries.map((agent) => agent.name);
@@ -1527,6 +1527,7 @@ export default function App() {
     }
 
     let attempts = 0;
+
     const intervalId = window.setInterval(() => {
       const nextApi = readDesktopApi();
       if (nextApi) {
@@ -1537,6 +1538,7 @@ export default function App() {
       }
 
       attempts += 1;
+
       if (attempts >= DESKTOP_API_BOOTSTRAP_RETRY_LIMIT) {
         setBridgeTimedOut(true);
         window.clearInterval(intervalId);

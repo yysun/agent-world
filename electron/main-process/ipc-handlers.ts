@@ -1212,13 +1212,11 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     await ensureWorldSubscribed(id);
     const activated = await activateChatWithSnapshot(id, sessionId);
     if (!activated) throw new Error(`World or session not found: ${id}/${sessionId}`);
-    const refreshWarning = await refreshWorldSubscription(id);
 
     loggerIpcSession.debug('Session selection completed', {
       worldId: id,
       requestedChatId: sessionId,
       resolvedChatId: activated.chatId || sessionId,
-      refreshWarning: refreshWarning || null,
       elapsedMs: Date.now() - selectStartedAt
     });
 
@@ -1226,7 +1224,6 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       worldId: id,
       chatId: activated.chatId || sessionId,
       hitlPrompts: Array.isArray(activated.hitlPrompts) ? activated.hitlPrompts : [],
-      ...(refreshWarning ? { refreshWarning } : {})
     };
   }
 

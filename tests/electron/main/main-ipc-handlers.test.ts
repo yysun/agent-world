@@ -11,6 +11,8 @@
  * - Mocks the Electron `dialog` module virtually to avoid runtime Electron dependency.
  *
  * Recent Changes:
+ * - 2026-03-10: Added a chat-flow scenario matrix covering new/current/switched chat
+ *   send and edit lifecycles, including replay-safe pending HITL prompt recovery.
  * - 2026-03-10: Added coverage that edit/delete restore chat state in mutation mode without triggering auto-resume.
  * - 2026-03-04: Added `sendChatMessage` response coverage for queue metadata (`queueStatus`, `queueRetryCount`).
  * - 2026-02-28: Added edit-message IPC coverage asserting the subscribed runtime world is injected into core `editUserMessage` for realtime-safe resubmission events.
@@ -64,6 +66,11 @@ function createDependencies(overrides: Record<string, unknown> = {}) {
     })),
     submitWorldHitlResponse: vi.fn(() => ({ accepted: true })),
     stopMessageProcessing: vi.fn(async () => ({ stopped: true })),
+    activateChatWithSnapshot: vi.fn(async (_worldId: string, chatId: string) => ({
+      world: { id: 'world-1', currentChatId: chatId },
+      chatId,
+      hitlPrompts: [],
+    })),
     restoreChat: vi.fn(async () => ({ currentChatId: 'chat-1', chats: new Map([['chat-1', { id: 'chat-1' }]]) })),
     updateWorld: vi.fn(async () => ({})),
     editUserMessage: vi.fn(async () => ({ success: true, resubmissionStatus: 'success' })),
@@ -88,6 +95,121 @@ async function createHandlers(overrides: Record<string, unknown> = {}) {
   return {
     handlers: createMainIpcHandlers(dependencies as any),
     dependencies
+  };
+}
+
+type FlowLifecycle = 'new-chat' | 'current-chat' | 'switch-chat';
+
+function createRestoredWorld(chatIds: string[], currentChatId: string) {
+  return {
+    currentChatId,
+    chats: new Map(chatIds.map((chatId) => [chatId, { id: chatId }]))
+  };
+}
+
+function createPendingHitlPrompt(chatId: string, requestId: string) {
+  return {
+    chatId,
+    prompt: {
+      requestId,
+      title: 'Approval needed',
+      message: `Pending approval for ${chatId}`,
+      options: [
+        { id: 'approve', label: 'Approve' },
+        { id: 'deny', label: 'Deny' }
+      ],
+      defaultOptionId: 'approve'
+    }
+  };
+}
+
+function createActivatedSnapshot(worldId: string, chatId: string, hitlPrompts: any[] = []) {
+  return {
+    world: { id: worldId, currentChatId: chatId },
+    chatId,
+    memory: [],
+    hitlPrompts
+  };
+}
+
+async function createChatFlowScenarioHarness(overrides: Record<string, unknown> = {}) {
+  const knownChatIds = ['chat-current', 'chat-a', 'chat-b', 'chat-new'];
+  const pendingHitlPromptsByChat = new Map<string, any[]>();
+  const ensureWorldSubscribed = vi.fn(async (worldId: string) => ({
+    id: worldId,
+    currentChatId: 'chat-current',
+    eventEmitter: {},
+    chats: new Map(knownChatIds.map((chatId) => [chatId, { id: chatId }]))
+  }));
+  const restoreChat = vi.fn(async (_worldId: string, chatId: string) => createRestoredWorld(knownChatIds, chatId));
+  const activateChatWithSnapshot = vi.fn(async (worldId: string, chatId: string) => (
+    createActivatedSnapshot(worldId, chatId, pendingHitlPromptsByChat.get(chatId) || [])
+  ));
+  const newChat = vi.fn(async (worldId: string) => ({
+    id: worldId,
+    currentChatId: 'chat-new'
+  }));
+  const listChats = vi.fn(async () => knownChatIds.map((chatId, index) => ({
+    id: chatId,
+    name: chatId,
+    messageCount: index
+  })));
+  const getMemory = vi.fn(async (_worldId: string, chatId: string | null) => {
+    if (chatId === 'chat-current') {
+      return [{ messageId: 'msg-current-1', chatId: 'chat-current' }];
+    }
+    return [];
+  });
+
+  const harness = await createHandlers({
+    ensureWorldSubscribed,
+    restoreChat,
+    activateChatWithSnapshot,
+    newChat,
+    listChats,
+    getMemory,
+    ...overrides
+  });
+
+  return {
+    ...harness,
+    pendingHitlPromptsByChat,
+    mocks: {
+      ensureWorldSubscribed,
+      restoreChat,
+      activateChatWithSnapshot,
+      newChat,
+      listChats,
+      getMemory
+    }
+  };
+}
+
+async function prepareLifecycle(
+  handlers: Awaited<ReturnType<typeof createHandlers>>['handlers'],
+  lifecycle: FlowLifecycle
+): Promise<{ activeChatId: string; previousChatId: string | null }> {
+  if (lifecycle === 'new-chat') {
+    const created = await handlers.createWorldSession('world-1');
+    return {
+      activeChatId: String(created.currentChatId || ''),
+      previousChatId: null
+    };
+  }
+
+  if (lifecycle === 'current-chat') {
+    await handlers.selectWorldSession('world-1', 'chat-current');
+    return {
+      activeChatId: 'chat-current',
+      previousChatId: null
+    };
+  }
+
+  await handlers.selectWorldSession('world-1', 'chat-a');
+  await handlers.selectWorldSession('world-1', 'chat-b');
+  return {
+    activeChatId: 'chat-b',
+    previousChatId: 'chat-a'
   };
 }
 
@@ -526,7 +648,7 @@ describe('createMainIpcHandlers.selectWorldSession', () => {
     expect(activateChatWithSnapshot).toHaveBeenCalledWith('world-1', 'chat-2');
   });
 
-  it('refreshes the world subscription only after chat activation resolves', async () => {
+  it('activates the chat without touching world subscriptions', async () => {
     const callOrder: string[] = [];
     const ensureWorldSubscribed = vi.fn(async () => {
       callOrder.push('ensure');
@@ -541,10 +663,7 @@ describe('createMainIpcHandlers.selectWorldSession', () => {
         hitlPrompts: [],
       };
     });
-    const refreshWorldSubscription = vi.fn(async () => {
-      callOrder.push('refresh');
-      return null;
-    });
+    const refreshWorldSubscription = vi.fn(async () => null);
 
     const { handlers } = await createHandlers({
       ensureWorldSubscribed,
@@ -554,10 +673,27 @@ describe('createMainIpcHandlers.selectWorldSession', () => {
 
     await handlers.selectWorldSession('world-1', 'chat-2');
 
-    expect(callOrder).toEqual(['ensure', 'activate', 'refresh']);
-    expect(refreshWorldSubscription.mock.invocationCallOrder[0]).toBeGreaterThan(
-      activateChatWithSnapshot.mock.invocationCallOrder[0]
-    );
+    expect(callOrder).toEqual(['ensure', 'activate']);
+    expect(refreshWorldSubscription).not.toHaveBeenCalled();
+  });
+
+  it('does not call refreshWorldSubscription on session switch to avoid dropping in-flight SSE events', async () => {
+    const refreshWorldSubscription = vi.fn(async () => null);
+    const activateChatWithSnapshot = vi.fn(async () => ({
+      world: { id: 'world-1', currentChatId: 'chat-2' },
+      chatId: 'chat-2',
+      memory: [],
+      hitlPrompts: [],
+    }));
+
+    const { handlers } = await createHandlers({
+      activateChatWithSnapshot,
+      refreshWorldSubscription,
+    });
+
+    await handlers.selectWorldSession('world-1', 'chat-2');
+
+    expect(refreshWorldSubscription).not.toHaveBeenCalled();
   });
 
   it('does not refresh the world subscription when activation fails', async () => {
@@ -573,6 +709,277 @@ describe('createMainIpcHandlers.selectWorldSession', () => {
       'World or session not found: world-1/chat-missing'
     );
     expect(refreshWorldSubscription).not.toHaveBeenCalled();
+  });
+
+  it('returns pending HITL prompts for the selected chat', async () => {
+    const pendingPrompt = createPendingHitlPrompt('chat-current', 'req-current');
+    const activateChatWithSnapshot = vi.fn(async () => ({
+      world: { id: 'world-1', currentChatId: 'chat-current' },
+      chatId: 'chat-current',
+      memory: [],
+      hitlPrompts: [pendingPrompt]
+    }));
+
+    const { handlers } = await createHandlers({ activateChatWithSnapshot });
+    const result = await handlers.selectWorldSession('world-1', 'chat-current');
+
+    expect(result).toMatchObject({
+      worldId: 'world-1',
+      chatId: 'chat-current',
+      hitlPrompts: [pendingPrompt]
+    });
+  });
+
+  it('keeps pending HITL prompts scoped to the switched target chat', async () => {
+    const promptsByChat = new Map<string, any[]>([
+      ['chat-a', [createPendingHitlPrompt('chat-a', 'req-a')]],
+      ['chat-b', [createPendingHitlPrompt('chat-b', 'req-b')]]
+    ]);
+    const activateChatWithSnapshot = vi.fn(async (worldId: string, chatId: string) => (
+      createActivatedSnapshot(worldId, chatId, promptsByChat.get(chatId) || [])
+    ));
+
+    const { handlers } = await createHandlers({ activateChatWithSnapshot });
+
+    const first = await handlers.selectWorldSession('world-1', 'chat-a');
+    const second = await handlers.selectWorldSession('world-1', 'chat-b');
+
+    expect(first.hitlPrompts).toEqual(promptsByChat.get('chat-a'));
+    expect(second.hitlPrompts).toEqual(promptsByChat.get('chat-b'));
+    expect(second.hitlPrompts).not.toEqual(first.hitlPrompts);
+  });
+});
+
+describe('createMainIpcHandlers.createWorldSession', () => {
+  it('creates a new chat and returns serialized sessions for the updated world', async () => {
+    const newChat = vi.fn(async () => ({
+      id: 'world-1',
+      currentChatId: 'chat-new'
+    }));
+    const listChats = vi.fn(async () => ([
+      { id: 'chat-current', name: 'Current Chat', messageCount: 2 },
+      { id: 'chat-new', name: 'New Chat', messageCount: 0 }
+    ]));
+    const getMemory = vi.fn(async (_worldId: string, chatId: string | null) => (
+      chatId === 'chat-current'
+        ? [{ messageId: 'm-current-1', chatId: 'chat-current' }]
+        : []
+    ));
+
+    const { handlers } = await createHandlers({ newChat, listChats, getMemory });
+    const result = await handlers.createWorldSession('world-1');
+
+    expect(newChat).toHaveBeenCalledWith('world-1');
+    expect(result.currentChatId).toBe('chat-new');
+    expect(result.sessions.map((session: any) => session.id)).toEqual(['chat-current', 'chat-new']);
+  });
+
+  it('propagates refresh warnings after creating a new chat', async () => {
+    const newChat = vi.fn(async () => ({
+      id: 'world-1',
+      currentChatId: 'chat-new'
+    }));
+    const refreshWorldSubscription = vi.fn(async () => 'refresh failed');
+
+    const { handlers } = await createHandlers({ newChat, refreshWorldSubscription });
+    const result = await handlers.createWorldSession('world-1');
+
+    expect(result).toMatchObject({
+      currentChatId: 'chat-new',
+      refreshWarning: 'refresh failed'
+    });
+  });
+});
+
+describe('createMainIpcHandlers chat-flow scenario matrix', () => {
+  const sendLifecycleCases: Array<{ key: FlowLifecycle; label: string }> = [
+    { key: 'new-chat', label: 'new chat' },
+    { key: 'current-chat', label: 'load current chat' },
+    { key: 'switch-chat', label: 'switch chat' }
+  ];
+  const sendOutcomeCases = [
+    { key: 'success', label: 'success', queueStatus: 'queued', retryCount: 0 },
+    { key: 'hitl', label: 'pending HITL replay', queueStatus: 'sending', retryCount: 1 },
+    { key: 'error', label: 'error', queueStatus: null, retryCount: null }
+  ] as const;
+
+  it.each(
+    sendLifecycleCases.flatMap((lifecycle) => sendOutcomeCases.map((outcome) => ({ lifecycle, outcome })))
+  )('$lifecycle.label -> send new message -> $outcome.label', async ({ lifecycle, outcome }) => {
+    const enqueueAndProcessUserTurn = vi.fn(async (_worldId: string, chatId: string) => {
+      if (outcome.key === 'error') {
+        throw new Error(`send failed for ${chatId}`);
+      }
+      return {
+        messageId: `${chatId}-queued-1`,
+        sender: 'human',
+        content: `message for ${chatId}`,
+        createdAt: '2026-03-10T12:00:00.000Z',
+        status: outcome.queueStatus,
+        retryCount: outcome.retryCount
+      };
+    });
+
+    const { handlers, pendingHitlPromptsByChat, mocks } = await createChatFlowScenarioHarness({
+      enqueueAndProcessUserTurn
+    });
+
+    const prepared = await prepareLifecycle(handlers, lifecycle.key);
+    mocks.ensureWorldSubscribed.mockClear();
+    mocks.restoreChat.mockClear();
+    enqueueAndProcessUserTurn.mockClear();
+
+    if (outcome.key === 'hitl') {
+      pendingHitlPromptsByChat.set(
+        prepared.activeChatId,
+        [createPendingHitlPrompt(prepared.activeChatId, `${prepared.activeChatId}-send-hitl`)]
+      );
+    }
+
+    const payload = {
+      worldId: 'world-1',
+      chatId: prepared.activeChatId,
+      content: `${lifecycle.label} message`,
+      sender: 'human'
+    };
+
+    if (outcome.key === 'error') {
+      await expect(handlers.sendChatMessage(payload)).rejects.toThrow(`send failed for ${prepared.activeChatId}`);
+      expect(mocks.restoreChat).toHaveBeenCalledWith('world-1', prepared.activeChatId);
+      expect(enqueueAndProcessUserTurn).toHaveBeenCalledTimes(1);
+      return;
+    }
+
+    const result = await handlers.sendChatMessage(payload);
+
+    expect(mocks.restoreChat).toHaveBeenCalledWith('world-1', prepared.activeChatId);
+    expect(mocks.ensureWorldSubscribed).toHaveBeenCalledTimes(2);
+    expect(enqueueAndProcessUserTurn).toHaveBeenCalledWith(
+      'world-1',
+      prepared.activeChatId,
+      `${lifecycle.label} message`,
+      'human',
+      expect.objectContaining({ id: 'world-1' })
+    );
+    expect(result).toMatchObject({
+      messageId: `${prepared.activeChatId}-queued-1`,
+      queueStatus: outcome.queueStatus,
+      queueRetryCount: outcome.retryCount
+    });
+
+    if (outcome.key === 'hitl') {
+      const selected = await handlers.selectWorldSession('world-1', prepared.activeChatId);
+      expect(selected.hitlPrompts).toEqual(
+        [createPendingHitlPrompt(prepared.activeChatId, `${prepared.activeChatId}-send-hitl`)]
+      );
+      if (prepared.previousChatId) {
+        const previous = await handlers.selectWorldSession('world-1', prepared.previousChatId);
+        expect(previous.hitlPrompts).toEqual([]);
+      }
+    }
+  });
+
+  const editLifecycleCases: Array<{ key: Extract<FlowLifecycle, 'current-chat' | 'switch-chat'>; label: string }> = [
+    { key: 'current-chat', label: 'load current chat' },
+    { key: 'switch-chat', label: 'switch chat' }
+  ];
+  const editOutcomeCases = [
+    {
+      key: 'success',
+      label: 'success',
+      resultFactory: (chatId: string) => ({
+        success: true,
+        messagesRemovedTotal: 2,
+        resubmissionStatus: 'success',
+        newMessageId: `${chatId}-edited-1`
+      })
+    },
+    {
+      key: 'hitl',
+      label: 'pending HITL replay',
+      resultFactory: (chatId: string) => ({
+        success: true,
+        messagesRemovedTotal: 2,
+        resubmissionStatus: 'success',
+        newMessageId: `${chatId}-edited-1`
+      })
+    },
+    {
+      key: 'error',
+      label: 'error',
+      resultFactory: () => ({
+        success: true,
+        messagesRemovedTotal: 2,
+        resubmissionStatus: 'failed',
+        resubmissionError: 'edit replay failed'
+      })
+    }
+  ] as const;
+
+  it.each(
+    editLifecycleCases.flatMap((lifecycle) => editOutcomeCases.map((outcome) => ({ lifecycle, outcome })))
+  )('$lifecycle.label -> edit user message -> $outcome.label', async ({ lifecycle, outcome }) => {
+    const editUserMessage = vi.fn(async (_worldId: string, _messageId: string, _newContent: string, chatId: string) => (
+      outcome.resultFactory(chatId)
+    ));
+
+    const { handlers, pendingHitlPromptsByChat, mocks } = await createChatFlowScenarioHarness({
+      editUserMessage
+    });
+
+    const prepared = await prepareLifecycle(handlers, lifecycle.key);
+    mocks.ensureWorldSubscribed.mockClear();
+    mocks.restoreChat.mockClear();
+    editUserMessage.mockClear();
+
+    if (outcome.key === 'hitl') {
+      pendingHitlPromptsByChat.set(
+        prepared.activeChatId,
+        [createPendingHitlPrompt(prepared.activeChatId, `${prepared.activeChatId}-edit-hitl`)]
+      );
+    }
+
+    const result = await handlers.editMessageInChat({
+      worldId: 'world-1',
+      chatId: prepared.activeChatId,
+      messageId: `${prepared.activeChatId}-msg-1`,
+      newContent: `${lifecycle.label} edited prompt`
+    });
+
+    expect(mocks.restoreChat).toHaveBeenCalledWith('world-1', prepared.activeChatId, { suppressAutoResume: true });
+    expect(editUserMessage).toHaveBeenCalledWith(
+      'world-1',
+      `${prepared.activeChatId}-msg-1`,
+      `${lifecycle.label} edited prompt`,
+      prepared.activeChatId,
+      expect.objectContaining({ id: 'world-1' })
+    );
+
+    if (outcome.key === 'error') {
+      expect(result).toMatchObject({
+        success: true,
+        resubmissionStatus: 'failed',
+        resubmissionError: 'edit replay failed'
+      });
+      return;
+    }
+
+    expect(result).toMatchObject({
+      success: true,
+      resubmissionStatus: 'success',
+      newMessageId: `${prepared.activeChatId}-edited-1`
+    });
+
+    if (outcome.key === 'hitl') {
+      const selected = await handlers.selectWorldSession('world-1', prepared.activeChatId);
+      expect(selected.hitlPrompts).toEqual(
+        [createPendingHitlPrompt(prepared.activeChatId, `${prepared.activeChatId}-edit-hitl`)]
+      );
+      if (prepared.previousChatId) {
+        const previous = await handlers.selectWorldSession('world-1', prepared.previousChatId);
+        expect(previous.hitlPrompts).toEqual([]);
+      }
+    }
   });
 });
 

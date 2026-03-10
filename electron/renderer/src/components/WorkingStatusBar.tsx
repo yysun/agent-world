@@ -42,8 +42,11 @@ const notificationTextClass: Record<string, string> = {
 export default function WorkingStatusBar({ chatStatus, agentStatuses, notification, systemStatus }: WorkingStatusBarProps) {
   if (notification) {
     return (
-      <div className="px-4 pb-1">
-        <div className={`mx-auto flex min-h-5 w-full max-w-[750px] items-center gap-1.5 text-xs ${notificationTextClass[notification.kind] ?? 'text-muted-foreground'}`}>
+      <div className="px-4 pb-1" data-testid="working-status-bar">
+        <div
+          className={`mx-auto flex min-h-5 w-full max-w-[750px] items-center gap-1.5 text-xs ${notificationTextClass[notification.kind] ?? 'text-muted-foreground'}`}
+          data-testid="working-status-notification"
+        >
           <span>{notification.text}</span>
         </div>
       </div>
@@ -52,8 +55,11 @@ export default function WorkingStatusBar({ chatStatus, agentStatuses, notificati
 
   if (systemStatus) {
     return (
-      <div className="px-4 pb-1">
-        <div className={`mx-auto flex min-h-5 w-full max-w-[750px] items-center gap-1.5 text-xs ${notificationTextClass[systemStatus.kind] ?? 'text-muted-foreground'}`}>
+      <div className="px-4 pb-1" data-testid="working-status-bar">
+        <div
+          className={`mx-auto flex min-h-5 w-full max-w-[750px] items-center gap-1.5 text-xs ${notificationTextClass[systemStatus.kind] ?? 'text-muted-foreground'}`}
+          data-testid="working-status-system"
+        >
           <span>{systemStatus.text}</span>
         </div>
       </div>
@@ -62,7 +68,7 @@ export default function WorkingStatusBar({ chatStatus, agentStatuses, notificati
 
   if (chatStatus === 'idle') {
     return (
-      <div className="px-4 pb-1">
+      <div className="px-4 pb-1" data-testid="working-status-bar">
         <div className="mx-auto flex min-h-5 w-full max-w-[750px] items-center text-xs text-muted-foreground" aria-hidden="true" />
       </div>
     );
@@ -70,7 +76,7 @@ export default function WorkingStatusBar({ chatStatus, agentStatuses, notificati
 
   if (chatStatus === 'complete') {
     return (
-      <div className="px-4 pb-1">
+      <div className="px-4 pb-1" data-testid="working-status-bar">
         <div className="mx-auto flex min-h-5 w-full max-w-[750px] items-center gap-1.5 text-xs text-muted-foreground">
           <span className="text-green-500">✓</span>
           <span>Done</span>
@@ -83,7 +89,7 @@ export default function WorkingStatusBar({ chatStatus, agentStatuses, notificati
   const workingAgents = agentStatuses.filter(a => a.status === 'working');
 
   return (
-    <div className="px-4 pb-1">
+    <div className="px-4 pb-1" data-testid="working-status-bar">
       <div className="mx-auto flex min-h-5 w-full max-w-[750px] items-center gap-2">
         <ActivityPulse isActive={true} />
         {workingAgents.length > 0 ? (

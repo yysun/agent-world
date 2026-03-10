@@ -145,6 +145,7 @@ export default function LeftSidebarPanel({
             type="button"
             onClick={() => setWorkspaceMenuOpen((value) => !value)}
             className="flex w-full items-center justify-between rounded-md border border-sidebar-border bg-sidebar px-2 py-2 text-left text-sidebar-foreground hover:bg-sidebar-accent"
+            data-testid="world-selector"
           >
             <span className="truncate">
               {loadedWorld?.name || (availableWorlds.length > 0 ? 'Select a world' : 'No worlds available')}
@@ -178,6 +179,7 @@ export default function LeftSidebarPanel({
                     className={`flex w-full items-center rounded px-2 py-1.5 text-left text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ${loadedWorld?.id === world.id ? 'bg-sidebar-accent' : ''
                       }`}
                     title={world.id}
+                    data-testid={`world-item-${world.id}`}
                   >
                     <span className="truncate">{world.name}</span>
                   </button>
@@ -279,7 +281,7 @@ export default function LeftSidebarPanel({
         />
       </div>
 
-      <div className="flex-1 min-h-0 space-y-1 overflow-auto pr-1">
+      <div className="flex-1 min-h-0 space-y-1 overflow-auto pr-1" data-testid="session-list">
         {sessions.length === 0 ? (
           <div className="rounded-md border border-dashed border-sidebar-border p-3 text-xs text-sidebar-foreground/70">
             {loadedWorld ? 'No sessions yet.' : 'No world loaded.'}
@@ -305,6 +307,7 @@ export default function LeftSidebarPanel({
                 ? 'bg-sidebar-session-selected text-sidebar-foreground'
                 : 'bg-sidebar text-sidebar-foreground hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground'
                 }`}
+              data-testid={`session-item-${session.id}`}
             >
               <div className="flex items-center justify-between gap-1">
                 <div className="min-w-0 flex items-center gap-1.5">

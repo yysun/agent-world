@@ -567,6 +567,7 @@ export default function MessageListPanel({
       <div
         key={messageKey}
         className={`flex min-w-0 w-full items-start gap-2 ${shouldRightAlignMessage ? 'justify-end' : 'justify-start'}`}
+        data-testid={messageKey ? `message-row-${messageKey}` : undefined}
       >
         {showChatMessageChrome && messageAvatar ? (
           <div
@@ -578,11 +579,14 @@ export default function MessageListPanel({
           </div>
         ) : null}
 
-        <article className={`min-w-0 ${getMessageCardClassName(message, messagesById, sourceMessages, messageIndex, {
+        <article
+          className={`min-w-0 ${getMessageCardClassName(message, messagesById, sourceMessages, messageIndex, {
           isToolCallPending: isPendingToolCallRequest,
           showLeftBorder: showChatMessageChrome,
           fullWidthUserMessage: !showChatMessageChrome && isHuman,
-        })} ${isStreamingAssistantMessage ? 'agent-streaming-card' : ''} ${isActiveToolMessage ? 'agent-tool-active-card' : ''}`}>
+        })} ${isStreamingAssistantMessage ? 'agent-streaming-card' : ''} ${isActiveToolMessage ? 'agent-tool-active-card' : ''}`}
+          data-testid={messageKey ? `message-card-${messageKey}` : undefined}
+        >
           <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
             {isToolMessage ? (
               <span className="flex items-center gap-2">
@@ -919,7 +923,7 @@ export default function MessageListPanel({
         )}
 
         {activeHitlPrompt ? (
-          <div className="flex min-w-0 w-full items-start gap-2 justify-start">
+          <div className="flex min-w-0 w-full items-start gap-2 justify-start" data-testid="hitl-prompt">
             <article className="min-w-0 w-full rounded-lg border border-dashed border-border bg-card/70 px-3 py-3">
               <div className="mb-1 text-xs font-semibold text-foreground">
                 {activeHitlPrompt.title || 'Human input required'}

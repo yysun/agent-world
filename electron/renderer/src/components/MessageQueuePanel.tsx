@@ -43,7 +43,7 @@ export default function MessageQueuePanel({
   const hasSending = queuedMessages.some((m) => m.status === 'sending');
 
   return (
-    <div className="mx-auto w-full max-w-[750px] px-4 pb-2">
+    <div className="mx-auto w-full max-w-[750px] px-4 pb-2" data-testid="message-queue-panel">
       <div className="rounded-lg border border-border bg-card/50 p-2">
         <div className="mb-1.5 flex items-center justify-between px-1">
           <span className="text-xs font-medium text-muted-foreground">

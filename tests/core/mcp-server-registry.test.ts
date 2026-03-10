@@ -27,6 +27,7 @@ const {
   mockClientClose,
   mockClientCallTool,
   mockClientListTools,
+  mockCreateLoadSkillToolDefinition,
   failConnectCommands,
   listToolsPayload,
 } = vi.hoisted(() => ({
@@ -35,6 +36,11 @@ const {
   mockClientClose: vi.fn(),
   mockClientCallTool: vi.fn(),
   mockClientListTools: vi.fn(),
+  mockCreateLoadSkillToolDefinition: vi.fn(() => ({
+    description: 'load',
+    parameters: { type: 'object', properties: {} },
+    execute: vi.fn(),
+  })),
   failConnectCommands: new Set<string>(),
   listToolsPayload: [] as any[],
 }));
@@ -120,11 +126,7 @@ vi.mock('../../core/shell-cmd-tool.js', () => ({
 }));
 
 vi.mock('../../core/load-skill-tool.js', () => ({
-  createLoadSkillToolDefinition: vi.fn(() => ({
-    description: 'load',
-    parameters: { type: 'object', properties: {} },
-    execute: vi.fn(),
-  })),
+  createLoadSkillToolDefinition: mockCreateLoadSkillToolDefinition,
 }));
 
 vi.mock('../../core/create-agent-tool.js', () => ({
@@ -215,6 +217,11 @@ describe('mcp-server-registry behavior', () => {
     vi.clearAllMocks();
     failConnectCommands.clear();
     listToolsPayload.length = 0;
+    mockCreateLoadSkillToolDefinition.mockImplementation(() => ({
+      description: 'load',
+      parameters: { type: 'object', properties: {} },
+      execute: vi.fn(),
+    }));
     mockGetWorld.mockResolvedValue(null);
     mockClientCallTool.mockResolvedValue({
       content: [{ type: 'text', text: 'ok' }],
@@ -591,10 +598,12 @@ describe('mcp-server-registry behavior', () => {
 
     const toolsFirst = await getMCPToolsForWorld('world-1');
     expect(toolsFirst).toHaveProperty('shell_cmd');
+    expect(toolsFirst).toHaveProperty('load_skill');
     expect(toolsFirst).toHaveProperty('send_message');
     expect(toolsFirst).toHaveProperty('web_fetch');
     expect(toolsFirst).toHaveProperty('write_file');
     expect(toolsFirst).toHaveProperty('demo_lookup');
+    expect(mockCreateLoadSkillToolDefinition).toHaveBeenCalled();
     expect(mockClientListTools).toHaveBeenCalledTimes(1);
 
     const toolsSecond = await getMCPToolsForWorld('world-1');

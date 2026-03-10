@@ -50,3 +50,6 @@ awesome-agent-world
 .skills/
 skills/
 skills-lock.json
+
+.tmp/
+test-results/

@@ -11,6 +11,7 @@
  * - Uses dependency injection for window lookup and world subscription API.
  *
  * Recent Changes:
+ * - 2026-03-10: Runtime HITL replay now tracks emitted toolCallIds so the persisted-message replay cannot overwrite correct option IDs with re-derived opt_N values.
  * - 2026-03-06: Enforced explicit chat-scoped realtime forwarding for SSE/tool/activity/system/HITL replay paths; removed subscription-chat fallback rebinding.
  * - 2026-02-26: Replaced realtime console traces/warnings/errors with categorized injected logger calls.
  * - 2026-02-25: Added runtime pending-HITL replay on chat subscription so prompts created before renderer listener attach are re-delivered deterministically.
@@ -330,6 +331,10 @@ export function createRealtimeEventsRuntime(
       return { subscribed: false, canceled: true, stale: true, subscriptionId, worldId, chatId };
     }
 
+    // Track toolCallIds emitted by the live runtime map so the persisted-message
+    // replay does not overwrite them with re-derived opt_1/opt_2 IDs.
+    const runtimeEmittedToolCallIds = new Set<string>();
+
     if (chatId && typeof listPendingHitlPromptEvents === 'function') {
       try {
         const runtimePendingPrompts = listPendingHitlPromptEvents(world, chatId);
@@ -358,6 +363,7 @@ export function createRealtimeEventsRuntime(
             continue;
           }
 
+          runtimeEmittedToolCallIds.add(toolCallId);
           sendRealtimeEventToRenderer({
             ...serializeRealtimeToolEvent(worldId, pendingChatId, {
               type: 'tool-progress',
@@ -407,6 +413,11 @@ export function createRealtimeEventsRuntime(
           const toolCallId = String(prompt.toolCallId || prompt.requestId || '').trim();
           const toolName = String(prompt.toolName || 'human_intervention_request').trim() || 'human_intervention_request';
           if (!toolCallId) {
+            continue;
+          }
+
+          // Skip if the live runtime map already emitted this prompt with correct option IDs.
+          if (runtimeEmittedToolCallIds.has(toolCallId)) {
             continue;
           }
 

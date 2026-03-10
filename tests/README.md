@@ -6,27 +6,73 @@ This directory contains the comprehensive test suite for Agent World, including 
 ## Quick Start
 
 ```bash
-npm test                    # Run all tests
-npm test -- specific.test   # Run specific test
-npm run test:watch         # Watch mode with hot reload
-npm run test:ui            # Visual test UI
-npm run test:coverage      # Coverage report with v8
-npm run integration        # Integration tests
-npm run test:db            # Database migration tests
+npm test                        # Run all unit tests
+npm test -- specific.test       # Run specific test file
+npm run test:watch              # Watch mode with hot reload
+npm run test:ui                 # Visual test UI
+npm run test:coverage           # Coverage report with v8
+npm run integration             # Integration tests
+npm run test:db                 # Database migration tests
+npm run test:electron:e2e       # Real Electron desktop E2E tests (full build + run)
+npm run test:electron:e2e:run   # Electron E2E run only (skip builds)
 ```
 
 ## Test Structure
 ```
 tests/
+├── __mocks__/         # Manual module mocks (e.g. pino)
 ├── core/              # Core system unit tests
-│   ├── storage/       # Storage layer tests (migration-runner.test.ts)
+│   └── storage/       # Storage layer tests (migration-runner.test.ts)
 ├── api/               # API endpoint tests
 ├── cli/               # CLI command tests
-├── db/                # Standalone database tests (migration-tests.ts)
+├── db/                # Standalone database migration tests
+├── electron/          # Electron unit tests (main / preload / renderer layers)
+├── electron-e2e/      # Real Electron desktop Playwright E2E tests
+├── helpers/           # Shared test utilities (world-test-setup, storage-factory)
 ├── integration/       # Integration tests (migration-paths.test.ts)
+├── manual/            # Manual test scripts and checklists
 ├── opik/              # LLM Assessment & Robustness tests (LLM-as-a-Judge)
-└── web/               # Web interface tests
+└── web-domain/        # Web/renderer domain unit tests
 ```
+
+## Electron Unit Tests (`electron/`)
+
+Layer-oriented unit tests for the Electron runtime:
+
+| Sub-directory | Scope |
+|---|---|
+| `electron/main/` | Main-process lifecycle, window management, IPC registration |
+| `electron/preload/` | Preload bridge contracts, invoke guards, payload normalization |
+| `electron/renderer/` | Renderer streaming/activity state and domain orchestration helpers |
+| `electron/ipc-handlers.test.ts` | Cross-layer IPC handler contract tests |
+
+All Electron unit tests run in-memory with no real LLM calls. See `tests/electron/README.md` for naming conventions.
+
+## Electron Desktop E2E Tests (`electron-e2e/`)
+
+Playwright tests that launch the **real compiled Electron app** and exercise full desktop flows using actual LLM calls (Google Gemini). Requires `GOOGLE_API_KEY`.
+
+```bash
+npm run test:electron:e2e        # Full build + run
+npm run test:electron:e2e:run    # Run only (skip builds)
+```
+
+See `tests/electron-e2e/README.md` for full prerequisites, test descriptions, and debugging guidance.
+
+## Web Domain Tests (`web-domain/`)
+
+Unit tests for renderer/web domain logic: agent filtering, HITL flows, SSE log events, tool execution, chat state, history search, and more. All run in-memory with no real providers.
+
+## Test Helpers (`helpers/`)
+
+Shared utilities used across test suites:
+
+- **`world-test-setup.ts`** — `setupTestWorld()` helper for world creation/deletion with real in-memory storage; reduces boilerplate in `describe` blocks.
+- **`storage-factory.ts`** — Creates real in-memory storage instances for tests that need direct storage access.
+
+## Manual Tests (`manual/`)
+
+Step-by-step manual test scripts and checklists for scenarios that are impractical to automate (e.g., multi-agent collaboration flows). Not run by CI.
 
 ## Database Testing
 

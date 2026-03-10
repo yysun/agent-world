@@ -19,6 +19,7 @@
  * - Defaults to SQLite storage and workspace path if env vars not set
  *
  * Recent Changes:
+ * - 2026-03-10: Added an E2E-only user-data override and optional single-instance-lock bypass so the real Playwright Electron harness can launch without colliding with another generic Electron process.
  * - 2026-02-28: Added resilient realtime runtime module export resolution (named/default interop) to prevent startup failure from compiled export-shape drift.
  * - 2026-02-26: Added categorized Electron main loggers and renderer logging-config IPC bridge wiring for env-controlled main/renderer log behavior.
  * - 2026-02-26: Moved `.env` loading ahead of core module import so startup logger category levels honor `LOG_*` env values.
@@ -111,7 +112,14 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
+const e2eUserDataPath = String(process.env.AGENT_WORLD_E2E_USER_DATA_PATH || '').trim();
+if (e2eUserDataPath) {
+  fs.mkdirSync(e2eUserDataPath, { recursive: true });
+  app.setPath('userData', e2eUserDataPath);
+}
+
+const bypassSingleInstanceLock = String(process.env.AGENT_WORLD_E2E_DISABLE_SINGLE_INSTANCE || '').trim().toLowerCase() === 'true';
+const hasSingleInstanceLock = bypassSingleInstanceLock ? true : app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 }
