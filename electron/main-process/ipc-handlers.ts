@@ -12,6 +12,7 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-03-10: Rebound `sendChatMessage` queue dispatch to the post-restore subscribed runtime so user sends stream on the active world emitter after chat activation.
  * - 2026-03-10: Switched `sendChatMessage` to the queue-only `enqueueAndProcessUserTurn` core API.
  * - 2026-03-08: Added `readSkillContent` and `saveSkillContent` IPC handlers for reading/writing SKILL.md content from the renderer skill editor.
  * - 2026-03-06: Heartbeat job starts now require explicit `chatId`; workspace load no longer auto-starts heartbeat jobs from persisted world state.
@@ -1306,7 +1307,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!chatId) throw new Error('Chat ID is required.');
     if (!content) throw new Error('Message content is required.');
 
-    const world = await ensureWorldSubscribed(worldId);
+    await ensureWorldSubscribed(worldId);
 
     {
       const restoredWorld = await restoreChat(worldId, chatId);
@@ -1315,6 +1316,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       }
     }
 
+    const world = await ensureWorldSubscribed(worldId);
     if (!world) throw new Error(`World not found: ${worldId}`);
 
     const queued = await enqueueAndProcessUserTurn(worldId, chatId, content, sender, world);

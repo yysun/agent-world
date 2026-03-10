@@ -13,6 +13,7 @@
  * - Keeps branch/session refresh semantics aligned with the existing desktop IPC flows.
  *
  * Recent Changes:
+ * - 2026-03-10: Restored optimistic user-message insertion for normal sends so empty/new chats do not flash the welcome card before the realtime user echo arrives.
  * - 2026-03-07: Accept messageRefreshCounter ref and increment it in onSaveEditMessage before
  *   api.editMessage to invalidate any concurrent in-flight refreshMessages call triggered by
  *   a prior chat switch, preventing the resolved history from overwriting streaming messages (AD-8).
@@ -104,6 +105,12 @@ export function useMessageManagement({
 
     const content = composer.trim();
     if (!content) return;
+    const optimisticUserMessage = createOptimisticUserMessage({
+      chatId: activeSessionId,
+      content,
+      sender: 'human',
+    });
+    const optimisticUserMessageId = String(optimisticUserMessage.messageId || '').trim();
 
     setPendingResponseSessionIds((prev) => {
       const next = new Set(prev);
@@ -111,6 +118,7 @@ export function useMessageManagement({
       return next;
     });
     setSendingSessionIds((prev) => new Set([...prev, activeSessionId]));
+    setMessages((existing) => upsertMessageList(existing, optimisticUserMessage));
     setComposer('');
     try {
       if (!activeSessionId || !String(activeSessionId).trim()) {
@@ -136,6 +144,7 @@ export function useMessageManagement({
         next.delete(activeSessionId);
         return next;
       });
+      setMessages((existing) => removeOptimisticUserMessage(existing, optimisticUserMessageId));
       setStatusText(safeMessage(error, 'Failed to send message.'), 'error');
     } finally {
       setSendingSessionIds((prev) => {

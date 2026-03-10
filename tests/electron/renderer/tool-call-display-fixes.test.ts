@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { getMessageCardClassName, isToolRelatedMessage } from '../../../electron/renderer/src/utils/message-utils';
 import { createStreamingState } from '../../../electron/renderer/src/streaming-state';
-import { upsertMessageList } from '../../../electron/renderer/src/domain/message-updates';
+import { createOptimisticUserMessage, upsertMessageList } from '../../../electron/renderer/src/domain/message-updates';
 
 // ─── Fix 1: isToolRelatedMessage for assistant + tool_calls ─────────────
 
@@ -216,45 +216,54 @@ describe('streaming: no placeholder on stream start', () => {
   });
 });
 
-// ─── Fix 3: send flow skips optimistic user message ─────────────────────
+// ─── Fix 3: send flow keeps a pending user row until realtime confirmation ───
 
-describe('send flow: no optimistic user message insertion', () => {
-  it('upsertMessageList does not contain optimistic user message after send', () => {
-    // Before the fix, the send handler would call:
-    //   setMessages(existing => upsertMessageList(existing, optimisticMessage));
-    // Now it skips that step. Verify that a message list remains unchanged
-    // when no upsert is performed (simulating the new behavior).
+describe('send flow: optimistic user message insertion', () => {
+  it('adds an optimistic pending user message immediately after submit', () => {
     const existing = [
-      { messageId: 'msg-1', role: 'user', sender: 'human', content: 'previous message', createdAt: '2026-02-28T00:00:00Z' },
-      { messageId: 'msg-2', role: 'assistant', sender: 'a1', content: 'response', createdAt: '2026-02-28T00:00:01Z' },
+      { messageId: 'msg-1', role: 'assistant', sender: 'a1', content: 'previous response', createdAt: '2026-02-28T00:00:01Z' },
     ];
 
-    // New send flow: no optimistic insertion happens, messages stay the same
-    const afterSend = [...existing];
+    const optimisticMessage = createOptimisticUserMessage({
+      chatId: 'chat-1',
+      content: 'new question',
+      sender: 'human',
+      createdAt: '2026-02-28T00:01:00Z',
+    });
+
+    const afterSend = upsertMessageList(existing, optimisticMessage);
     expect(afterSend).toHaveLength(2);
-    expect(afterSend.every((m) => m.role !== 'user' || !('optimisticUserPending' in m))).toBe(true);
+    expect(afterSend[1].messageId).toBe(String(optimisticMessage.messageId));
+    expect(afterSend[1].optimisticUserPending).toBe(true);
+    expect(afterSend[1].content).toBe('new question');
   });
 
-  it('real user message arrives via backend upsert without optimistic reconciliation', () => {
+  it('reconciles the optimistic send row when the backend user echo arrives', () => {
+    const optimisticMessage = createOptimisticUserMessage({
+      chatId: 'chat-1',
+      content: 'new question',
+      sender: 'human',
+      createdAt: '2026-02-28T00:01:00Z',
+    });
     const existing = [
       { messageId: 'msg-1', role: 'user', sender: 'human', content: 'hello', createdAt: '2026-02-28T00:00:00Z' },
+      optimisticMessage,
     ];
 
-    // Simulate the backend-confirmed message arriving via SSE
     const confirmedMessage = {
       messageId: 'msg-3',
       id: 'msg-3',
       role: 'user',
       sender: 'human',
+      chatId: 'chat-1',
       content: 'new question',
-      createdAt: '2026-02-28T00:01:00Z',
+      createdAt: '2026-02-28T00:01:01Z',
     };
 
     const updated = upsertMessageList(existing, confirmedMessage);
     expect(updated).toHaveLength(2);
     expect(updated[1].messageId).toBe('msg-3');
     expect(updated[1].content).toBe('new question');
-    // No optimisticUserPending flag present
-    expect(updated[1]).not.toHaveProperty('optimisticUserPending');
+    expect(updated[1].optimisticUserPending).toBe(false);
   });
 });

@@ -391,7 +391,12 @@ describe('createMainIpcHandlers.sendChatMessage', () => {
   });
 
   it('applies provided skill settings payload to env before publishing', async () => {
-    const ensureWorldSubscribed = vi.fn(async () => ({ id: 'world-1' }));
+    const staleWorld = { id: 'world-1', runtime: 'stale' };
+    const activeWorld = { id: 'world-1', runtime: 'active' };
+    const ensureWorldSubscribed = vi
+      .fn()
+      .mockResolvedValueOnce(staleWorld)
+      .mockResolvedValueOnce(activeWorld);
     const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1', chats: new Map([['chat-1', { id: 'chat-1' }]]) }));
     const enqueueAndProcessUserTurn = vi.fn(async () => ({
       messageId: 'queued-msg-1',
@@ -428,6 +433,8 @@ describe('createMainIpcHandlers.sendChatMessage', () => {
       expect(process.env.AGENT_WORLD_DISABLED_GLOBAL_SKILLS).toBe('find-skills,rpd');
       expect(process.env.AGENT_WORLD_DISABLED_PROJECT_SKILLS).toBe('apprun-skills');
       expect(enqueueAndProcessUserTurn).toHaveBeenCalledTimes(1);
+      expect(ensureWorldSubscribed).toHaveBeenCalledTimes(2);
+      expect(enqueueAndProcessUserTurn).toHaveBeenCalledWith('world-1', 'chat-1', 'hello', 'human', activeWorld);
       expect(result).toMatchObject({
         messageId: 'queued-msg-1',
         queueStatus: 'queued',

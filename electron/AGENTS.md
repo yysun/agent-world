@@ -79,7 +79,63 @@ completes carry the **old** `chatId` and will be filtered out by the new subscri
 Do not fire streaming events immediately after `selectWorldSession` without awaiting the
 full activation sequence.
 
-### 6. Testing Electron renderer hooks
+### 6. Normal sends must insert an optimistic user row immediately
+
+The renderer must not leave the selected chat visually empty between submit and the
+backend's canonical user-message echo.
+
+Rules:
+
+- `onSendMessage` must insert an optimistic user message in the selected chat before IPC send.
+- The optimistic row must use the canonical optimistic-user helper so later realtime
+  user-message events reconcile by chat/content rather than appending duplicates.
+- On transport failure, remove the optimistic row.
+- On success, do **not** manually remove it; let the backend user-message echo reconcile it.
+
+Why this matters:
+
+- Without the optimistic row, new/empty chats briefly render the welcome card after submit.
+- That flicker is a regression even when the backend eventually streams correctly.
+
+Tests: `tests/electron/renderer/message-updates-domain.test.ts` and
+`tests/electron/renderer/tool-call-display-fixes.test.ts`.
+
+### 7. Refresh must merge live selected-chat state, not overwrite it
+
+`refreshMessages(...)` must preserve selected-chat live state that may not yet be reflected
+in persisted history.
+
+At minimum, refresh reconciliation must preserve:
+
+- optimistic user rows
+- live structured system-error rows
+- live streaming/tool rows until their canonical replacements arrive
+
+Do not replace the selected chat transcript with raw history when live rows still matter.
+
+### 8. Do not clear the selected chat message list during normal chat mutation flows
+
+`setMessages([])` is only valid when there is no selected chat or the world/session is
+being torn down.
+
+Do not clear the selected chat transcript during:
+
+- normal send
+- edit
+- delete
+- refresh of the same selected chat
+
+Clearing during those flows causes welcome-card/loading flicker and dropped transient rows.
+
+### 9. Restored event timestamps must preserve original time
+
+Replay/rehydration helpers must accept persisted `createdAt` values as either `string` or
+`Date` and preserve the original event time.
+
+Do not restamp restored events with `new Date()` unless no persisted timestamp exists at all.
+Otherwise historical errors will look like fresh duplicates on revisit.
+
+### 10. Testing Electron renderer hooks
 
 - Electron renderer tests run in a `node` environment with no jsdom and no React runtime.
 - App.tsx is called as a plain function with all React hooks and child components mocked.
@@ -96,7 +152,7 @@ full activation sequence.
 These rules apply to all changes touching `core/managers.ts` `restoreChat`,
 `core/queue-manager.ts`, and any future resume-on-load logic.
 
-### 7. Queue is the only automatic resume authority for user turns
+### 11. Queue is the only automatic resume authority for user turns
 
 **Symptom (2026-03-09):** Switching to a failing chat causes messages to briefly appear
 (including error messages) and then disappear. Every subsequent switch or restart repeats
@@ -125,7 +181,7 @@ calls separately, then delegates user-turn recovery only to `triggerPendingQueue
 in `core/queue-manager.ts`. The old memory-based `triggerPendingLastMessageResume`
 behavior must not be reintroduced.
 
-### 8. Automatic recovery is limited to queue-owned `queued` / interrupted `sending` rows
+### 12. Automatic recovery is limited to queue-owned `queued` / interrupted `sending` rows
 
 The persisted SSE sequence still matters, but only for queue-owned recovery.
 
@@ -149,7 +205,41 @@ Do not apply this interrupted-flight guard to:
 Tests: `tests/core/auto-resume-sse-error-guard.test.ts` and
 `tests/core/restore-chat-validation.test.ts`.
 
-### 9. Edit/delete mutation flows must suppress restore-time auto-resume
+### 13. Send/edit dispatch must use the active runtime after restore
+
+Chat activation can swap or refresh the runtime world instance. Any queue or immediate
+dispatch that uses a pre-restore world reference risks publishing onto a stale emitter.
+
+Rules:
+
+- If a flow restores/activates a chat before dispatch, re-resolve the subscribed runtime
+  world after restore and dispatch on that post-restore instance.
+- Do not capture a world instance, call `restoreChat(...)`, and then publish using the
+  stale pre-restore reference.
+- This is especially important in Electron main IPC send/edit flows because the renderer
+  subscribes to the active runtime emitter only.
+
+Failure mode:
+
+- User send appears accepted, but no realtime `message`/`sse` events reach the selected chat.
+- Streaming appears globally broken even though queue rows persist.
+
+Tests: `tests/electron/main/main-ipc-handlers.test.ts`.
+
+### 14. Subscription/rebind helpers must be idempotent
+
+Rebinding agent/world listeners must first remove any existing listener for the same target.
+
+Do not stack duplicate listeners for:
+
+- agent message subscriptions
+- world message/system/activity forwarding
+- chat realtime subscriptions
+
+Duplicate listeners cause duplicate processing, duplicate persisted errors, and misleading
+UI “duplicates” that are actually multi-processing bugs.
+
+### 15. Edit/delete mutation flows must suppress restore-time auto-resume
 
 `editMessageInChat(...)` and `deleteMessageFromChat(...)` restore chat state before
 mutating persisted messages. That restore must not replay the old failed user-last turn.
@@ -165,7 +255,7 @@ Rule:
 Without this suppression, a failed last user message can be replayed during restore and
 then the edited replacement is submitted, creating duplicate persisted user messages.
 
-### 10. Failed user turns do not auto-retry; recovery is explicit
+### 16. Failed user turns do not auto-retry; recovery is explicit
 
 Queue dispatch failure behavior:
 
@@ -176,7 +266,7 @@ Queue dispatch failure behavior:
 
 Background replay of failed user turns should be treated as a regression.
 
-### 11. Queue APIs are user-turn-only; non-user dispatch stays immediate
+### 17. Queue APIs are user-turn-only; non-user dispatch stays immediate
 
 Queue ownership rules:
 
@@ -194,7 +284,62 @@ Do not reintroduce mixed helpers where a queue-shaped API also direct-publishes 
 messages. That ambiguity was a source of retry/resume confusion and made queue behavior
 harder to reason about across edit, restore, CLI, API, and Electron IPC paths.
 
-### 12. Messages briefly appearing then disappearing on chat switch is a streaming-state sign
+### 18. Persist at most one canonical durable system-error row per failed turn, but trim and orphan-clean it
+
+Logs stay in the logs panel. The transcript may show a structured `system` error row for a
+failed user turn, and that row must survive refresh/restart. But it must also be removed
+when the failed turn is edited away.
+
+Rules:
+
+- Persist structured `system/error` events with canonical IDs and chat scope.
+- Realtime and restored system-error transcript rows must share canonical identity.
+- Refresh/replay must preserve the original event timestamp; do not restamp restored rows
+  with `now`, or old errors will look like fresh duplicates.
+- Edit/delete trim must remove post-cutoff persisted events for the removed tail.
+- Cleanup must also remove orphaned persisted `system/error` rows whose triggering user turn
+  no longer survives in chat memory.
+
+Target model:
+
+- one canonical durable system-error row per failed turn
+- duplicate rows should be treated as a bug in subscription, persistence, or cleanup logic
+
+Failure modes:
+
+- Switching away and back shows many “duplicate” system errors from historical failed turns.
+- Editing again does not clear old leftover error rows.
+- Old persisted errors reappear after refresh/restart even though the turn was replaced.
+
+Relevant code:
+
+- core trim/orphan cleanup in `core/message-edit-manager.ts`
+- renderer replay/merge in `electron/renderer/src/domain/message-updates.ts`
+
+### 19. Durable failed-turn artifacts should keep a stable turn link
+
+Whenever possible, persisted failed-turn artifacts should carry a stable link to the
+triggering user turn, such as `triggeringMessageId`.
+
+Do not rely only on loose timestamp similarity when exact turn ownership can be persisted.
+Exact links make trim/orphan cleanup deterministic and prevent old failed-turn rows from
+surviving unrelated later edits.
+
+Until an explicit turn-link field exists, cleanup may infer ownership from persisted event
+ordering and surviving chat memory. New schemas and migrations should prefer exact links.
+
+### 20. Queue preflight/dispatch failures must surface durable recovery state
+
+If queue dispatch is blocked or fails before streaming starts, the turn must still surface
+explicit recovery state.
+
+Rules:
+
+- transition the queue row to durable `error`
+- persist a structured system-error row when appropriate
+- do not silently fail with “nothing streamed” and no visible recovery path
+
+### 21. Messages briefly appearing then disappearing on chat switch is a streaming-state sign
 
 If the renderer shows messages momentarily and then they vanish on chat switch, check:
 
@@ -202,7 +347,7 @@ If the renderer shows messages momentarily and then they vanish on chat switch, 
    errors? Look for repeating `sse start → sse error` pairs in the events table with no
    new `message` events between them. Also check whether queue state already owns the
    message, whether a stale `sending` row is being recovered incorrectly, and whether
-   mutation-mode restore suppression is being bypassed. See Rule 7, Rule 8, and Rule 9.
+   mutation-mode restore suppression is being bypassed. See Rule 11, Rule 12, and Rule 15.
 2. **Subscription cycling** (renderer) — is `useChatEventSubscriptions` tearing down and
    recreating because a callback dep is unstable? See Rule 1 and Rule 3.
 3. **Stale chatId on events** (main process) — are events arriving for the previous chat
