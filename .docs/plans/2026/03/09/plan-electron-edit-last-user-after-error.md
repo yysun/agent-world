@@ -26,6 +26,10 @@ Fix the Electron failed-turn recovery path so the latest user message remains ed
 - **AD-12:** Retry affordances should be expressed as explicit recovery options, using existing recovery UI primitives where helpful but not relying on transient process-local HITL runtime state as the sole source of truth.
 - **AD-13:** Automatic queue retry/backoff for user-authored dispatch/runtime failures should be removed; only interrupted in-flight recovery remains automatic.
 - **AD-14:** Persisted queue row state plus durable system-error transcript artifacts are the recovery authority after restart.
+- **AD-15:** Selected-chat refresh must merge persisted history with live optimistic/system-error/streaming state rather than replacing the transcript wholesale.
+- **AD-16:** Queue dispatch failures before streaming starts must emit a durable recovery artifact, not just a queue-row state transition.
+- **AD-17:** Subscription/rebind helpers must be idempotent to prevent duplicate processing and duplicate durable error artifacts.
+- **AD-18:** Persisted system-error replay must preserve original timestamps even when storage returns `Date` objects.
 
 ## Target Components
 
@@ -134,10 +138,20 @@ flowchart LR
 - [x] Keep tests deterministic and avoid filesystem/LLM dependencies.
 - [x] Add focused coverage that non-user dispatch does not create queue rows.
 - [x] Add focused coverage that edit resubmission still uses the queue-only user API after the rename/split.
+- [ ] Add focused coverage that selected-chat refresh preserves optimistic/live streaming/system-error rows.
+- [ ] Add focused coverage that queue preflight/no-response failures emit a durable system-error recovery artifact.
+- [ ] Add focused coverage that `subscribeAgentToMessages(...)` rebinding is idempotent.
+- [ ] Add focused coverage that replayed persisted system-error events preserve original timestamps when `createdAt` is a `Date`.
 
 ### Phase 6 - Verification
 - [x] Run focused Vitest suites for the touched Electron/core tests.
 - [x] Run any required Electron or integration verification if the final implementation crosses renderer/runtime transport boundaries.
+
+### Phase 7 - Audit Gap Fixes (2026-03-10)
+- [ ] Replace the narrow `preserveLiveSystemErrorMessages(...)` refresh patch with one selected-chat reconciliation helper that also preserves optimistic and live streaming/tool state.
+- [ ] Publish a durable structured system-error event from queue preflight/no-response failure paths so non-streaming failed turns still surface visible recovery state.
+- [ ] Make agent subscription rebinding idempotent by removing any existing listener before adding a new one for the same agent.
+- [ ] Normalize persisted system-event replay timestamps from both `string` and `Date`.
 
 ## Intended Process Model
 
@@ -195,6 +209,21 @@ flowchart LR
 5. Error-specific recovery options may vary, but automatic replay remains disabled.
 6. The persisted queue row plus durable system-error artifact must be sufficient to rebuild retry/edit affordances after restart.
 7. Retry/reset handlers must only operate on user-owned queue rows.
+
+### Selected-Chat Refresh
+
+1. Selected-chat refresh must start from persisted chat memory and persisted events.
+2. Before applying the refreshed result, the renderer must merge back any still-authoritative live selected-chat state:
+   - optimistic user rows,
+   - durable/live system-error rows,
+   - active streaming/tool rows.
+3. The selected-chat transcript must never be emptied during normal send/edit/delete/refresh flows while the chat still exists.
+
+### Queue Failure Recovery Surface
+
+1. Queue preflight/no-response failures must transition the queue row to durable `error`.
+2. Those failures must also emit a durable structured system-error artifact so the transcript has a visible failed-turn recovery surface.
+3. Silent “nothing streamed” failures are not acceptable for queue-owned user turns.
 
 ### Message Display
 

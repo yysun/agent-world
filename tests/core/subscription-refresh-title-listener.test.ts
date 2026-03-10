@@ -3,6 +3,7 @@
  *
  * Features:
  * - Verifies world-level message subscription is restored after runtime refresh.
+ * - Verifies world/system listener helpers are idempotent.
  * - Protects chat-title scheduling behavior that depends on `subscribeWorldToMessages`.
  *
  * Implementation Notes:
@@ -28,6 +29,7 @@ vi.mock('../../core/managers.js', () => ({
 }));
 
 import { startWorld } from '../../core/subscription.js';
+import { setupWorldActivityListener, subscribeWorldToMessages } from '../../core/events/subscribers.js';
 
 function createRuntimeWorld(id: string): World {
   return {
@@ -65,5 +67,33 @@ describe('startWorld refresh world message subscription', () => {
     expect(refreshedWorld.eventEmitter.listenerCount('message')).toBe(1);
 
     await subscription.unsubscribe();
+  });
+});
+
+describe('world-level subscription helpers are idempotent', () => {
+  it('subscribeWorldToMessages reuses the same listener for repeated calls', () => {
+    const world = createRuntimeWorld('world-idem-1');
+
+    const firstCleanup = subscribeWorldToMessages(world);
+    const secondCleanup = subscribeWorldToMessages(world);
+
+    expect(firstCleanup).toBe(secondCleanup);
+    expect(world.eventEmitter.listenerCount('message')).toBe(1);
+
+    secondCleanup();
+    expect(world.eventEmitter.listenerCount('message')).toBe(0);
+  });
+
+  it('setupWorldActivityListener reuses the same listener for repeated calls', () => {
+    const world = createRuntimeWorld('world-idem-2');
+
+    const firstCleanup = setupWorldActivityListener(world);
+    const secondCleanup = setupWorldActivityListener(world);
+
+    expect(firstCleanup).toBe(secondCleanup);
+    expect(world.eventEmitter.listenerCount('world')).toBe(1);
+
+    secondCleanup();
+    expect(world.eventEmitter.listenerCount('world')).toBe(0);
   });
 });

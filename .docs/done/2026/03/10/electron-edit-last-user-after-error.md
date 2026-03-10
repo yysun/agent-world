@@ -73,6 +73,24 @@ Also changed failed-turn diagnostics handling:
 - Error logs remain in the right-side logs panel; the transcript uses the persisted `system` error row instead of replaying raw logs.
 - Structured `system` error transcript rows now render with a red left border so failed-turn diagnostics are visually distinct from neutral system notices.
 
+### Refresh, rebinding, and durable recovery follow-up
+
+- Selected-chat refresh now reconciles persisted reload results with live optimistic user rows, live assistant streaming rows, live tool-stream rows, and visible system-error rows instead of blindly overwriting the transcript state.
+- Persisted `system` error replay now preserves original timestamps from both `string` and `Date` `createdAt` values so old failures are not restamped as newly-created errors on revisit.
+- Queue preflight/dispatch failures that stop before streaming starts now emit a durable structured `system/error` artifact so the failed turn remains visible and recoverable in the transcript.
+- Agent message subscription rebinding is now idempotent: rebinding the same agent first removes the existing listener before attaching a replacement, preventing duplicate processing and duplicate persisted failure artifacts.
+
+### Tool / HITL lifecycle hardening
+
+- Expanded `electron/AGENTS.md` with explicit tool/HITL rules:
+  - tool and approval boundaries remain part of the owning user turn lifecycle
+  - pending approval prompts must be reconstructable from persisted messages
+  - stale queue recovery must not auto-resume across unresolved HITL prompts
+  - persisted `tool-start` needs a terminal partner or explicit durable wait/recovery artifact
+  - edit/delete trim must clear orphaned tool/HITL artifacts for the removed tail
+- Hardened stale queue recovery so a `sending` row is marked `error` when persisted chat memory already contains an unresolved HITL prompt for that chat, instead of replaying the original user turn again during restore.
+- Added message-authoritative load-skill approval coverage so synthetic `human_intervention_request` prompt/result messages preserve stable prompt identity and resolve cleanly from persisted memory alone.
+
 ### Regression coverage
 
 - Updated core restore tests for:
@@ -88,6 +106,9 @@ Also changed failed-turn diagnostics handling:
 - Updated message-edit-manager tests to assert edit resubmission uses the queue-backed submit path and that trimming a turn clears stale queue rows.
 - Updated Electron IPC tests to assert edit/delete restore the chat in mutation mode.
 - Updated queue-manager, send-message-tool, CLI, API, and restore validation tests to assert the queue-only user API split and that non-user dispatch does not create queue rows.
+- Added targeted tool/HITL regressions for:
+  - stale `sending` rows with persisted unresolved HITL prompts moving to `error` instead of auto-resuming
+  - persisted `load_skill` approval prompts reconstructing a stable pending prompt and resolving when the matching tool-response message appears
 
 ## Verification
 
@@ -98,6 +119,9 @@ Passed:
 - `npm run integration`
 - `npx vitest run tests/core/auto-resume-sse-error-guard.test.ts tests/core/message-edit-manager.test.ts tests/core/restore-chat-validation.test.ts`
 - `npx vitest run tests/core/queue-manager.test.ts tests/core/restore-chat-validation.test.ts tests/core/message-edit-manager.test.ts tests/core/send-message-tool.test.ts tests/cli/process-cli-input.test.ts tests/electron/main/main-ipc-handlers.test.ts tests/api/messages-nonstreaming-collection.test.ts`
+- `npx vitest run tests/core/queue-manager.test.ts tests/core/events/main-agent-routing.test.ts tests/electron/renderer/message-updates-domain.test.ts tests/electron/main/main-ipc-handlers.test.ts`
+- `npx vitest run tests/core/auto-resume-sse-error-guard.test.ts tests/core/hitl.test.ts`
+- `npm run integration`
 
 ## Result
 

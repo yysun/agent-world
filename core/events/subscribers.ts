@@ -106,6 +106,15 @@ function applyMainAgentMentionRouting(world: World, messageEvent: WorldMessageEv
  * Agent subscription with automatic message processing
  */
 export function subscribeAgentToMessages(world: World, agent: Agent): () => void {
+  const existingUnsubscribe = world._agentUnsubscribers?.get(agent.id);
+  if (typeof existingUnsubscribe === 'function') {
+    try {
+      existingUnsubscribe();
+    } catch {
+      // Best-effort cleanup before rebinding the same agent listener.
+    }
+  }
+
   const handler = async (messageEvent: WorldMessageEvent) => {
     const routedMessageEvent = applyMainAgentMentionRouting(world, messageEvent);
 

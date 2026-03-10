@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-03-10: Reconcile selected-chat refresh results with live optimistic/streaming/system-error rows so history reloads do not wipe authoritative transient state.
  * - 2026-03-10: Rehydrate persisted selected-chat system error events into the transcript on chat refresh so failed-turn diagnostics survive restart without moving raw logs out of the logs panel.
  * - 2026-03-06: Added renderer bridge bootstrap fallback UI so missing preload APIs show an explicit startup error instead of a blank screen.
  * - 2026-03-06: Scoped the right-side logs panel to the active world/chat and limited Clear to the visible scoped entries.
@@ -112,7 +113,7 @@ import {
   createMainHeaderProps,
 } from './utils/app-layout-props';
 import { initializeRendererLogger, rendererLogger, type RendererLogEntry } from './utils/logger';
-import { mergeStoredSystemErrorEvents, preserveLiveSystemErrorMessages } from './domain/message-updates';
+import { mergeStoredSystemErrorEvents, reconcileRefreshedMessagesWithLiveState } from './domain/message-updates';
 import {
   normalizeWorldGridLayoutChoiceId,
   normalizeWorldViewMode,
@@ -673,7 +674,7 @@ function AppContent({ api }: { api: DesktopApi }) {
         Array.isArray(storedEvents) ? storedEvents as Array<Record<string, unknown>> : [],
         sessionId,
       );
-      const nextVisibleMessages = preserveLiveSystemErrorMessages(
+      const nextVisibleMessages = reconcileRefreshedMessagesWithLiveState(
         mergedMessages,
         messagesRef.current,
         sessionId,

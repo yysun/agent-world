@@ -19,6 +19,7 @@
  *
  * Recent Changes:
  * - 2026-03-10: Removed memory-based restore resend and narrowed auto-resume to queue-owned recovery only.
+ * - 2026-03-10: Added pending-HITL recovery coverage so stale `sending` rows do not auto-resume across persisted approval boundaries.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -283,6 +284,91 @@ describe('restore-time queue-owned auto-resume guardrails', () => {
           messageId: 'user-last-1',
           chatId: 'chat-2',
           content: 'hi',
+          sender: 'human',
+          status: 'error',
+          retryCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ]);
+    mockStorageFactory(storageWrappers);
+
+    const { publishMessageWithId } = await setupCommonMocks();
+    const managers = await import('../../core/managers.js');
+
+    const restored = await managers.restoreChat('world-1', 'chat-2');
+    expect(restored).not.toBeNull();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith('user-last-1', 'error');
+    expect(publishMessageWithId).not.toHaveBeenCalled();
+  });
+
+  it('marks a stale sending row error when persisted memory already shows an unresolved HITL prompt', async () => {
+    vi.resetModules();
+
+    const storageWrappers = buildBaseStorageWrappers({
+      getEventsByWorldAndChat: createLatestEventQueryMock({
+        message: [
+          createStoredEvent(1, 'message', 'user-last-1', { content: 'load the skill', sender: 'human', role: 'user' }),
+        ],
+        sse: [],
+      }),
+    });
+    storageWrappers.getMemory = vi.fn().mockResolvedValue([
+      {
+        role: 'user',
+        content: 'load the skill',
+        sender: 'human',
+        messageId: 'user-last-1',
+        chatId: 'chat-2',
+        createdAt: new Date('2026-01-01T10:00:00Z'),
+      },
+      {
+        role: 'assistant',
+        content: 'Calling tool: human_intervention_request (skill_id: "yt-dlp")',
+        sender: 'qwen',
+        messageId: 'assistant-hitl-1',
+        chatId: 'chat-2',
+        createdAt: new Date('2026-01-01T10:00:05Z'),
+        tool_calls: [
+          {
+            id: 'load-skill-approval-1',
+            type: 'function',
+            function: {
+              name: 'human_intervention_request',
+              arguments: JSON.stringify({
+                question: 'Approve applying this skill now?',
+                options: ['Yes once', 'No'],
+                metadata: {
+                  source: 'load_skill',
+                  skillId: 'yt-dlp',
+                },
+              }),
+            },
+          },
+        ],
+      },
+    ]);
+    storageWrappers.getQueuedMessages = vi.fn()
+      .mockResolvedValueOnce([
+        {
+          messageId: 'user-last-1',
+          chatId: 'chat-2',
+          content: 'load the skill',
+          sender: 'human',
+          status: 'sending',
+          retryCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          messageId: 'user-last-1',
+          chatId: 'chat-2',
+          content: 'load the skill',
           sender: 'human',
           status: 'error',
           retryCount: 0,

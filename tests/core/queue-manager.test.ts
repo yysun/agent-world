@@ -27,6 +27,7 @@ import { EventEmitter } from 'events';
 vi.mock('../../core/events/index.js', () => ({
   publishMessage: vi.fn(() => ({ messageId: 'pub-msg-1' })),
   publishMessageWithId: vi.fn(() => ({ messageId: 'pub-msg-1' })),
+  publishEvent: vi.fn(),
   setupEventPersistence: vi.fn(),
   setupWorldActivityListener: vi.fn(),
   subscribeAgentToMessages: vi.fn(),
@@ -208,6 +209,31 @@ describe('queue-manager', () => {
       await expect(
         enqueueAndProcessUserTurn('world-q', 'chat-agent', 'agent says hi', 'agent-1')
       ).rejects.toThrow('not a queue-eligible user sender');
+    });
+
+    it('publishes a durable system error when queue preflight fails before streaming starts', async () => {
+      const { publishEvent } = await import('../../core/events/index.js');
+      const world = makeWorld();
+
+      await addToQueue('world-q', 'chat-human', 'user message', 'human', {
+        triggerProcessing: true,
+        targetWorld: world,
+        preassignedMessageId: 'preflight-fail-1',
+      });
+
+      await vi.waitFor(() => {
+        expect(publishEvent).toHaveBeenCalledWith(
+          world,
+          'system',
+          expect.objectContaining({
+            type: 'error',
+            eventType: 'error',
+            triggeringMessageId: 'preflight-fail-1',
+            failureKind: 'queue-dispatch',
+          }),
+          'chat-human',
+        );
+      });
     });
   });
 });

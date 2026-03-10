@@ -525,6 +525,55 @@ describe('createMainIpcHandlers.selectWorldSession', () => {
     expect(ensureWorldSubscribed).toHaveBeenCalledWith('world-1');
     expect(activateChatWithSnapshot).toHaveBeenCalledWith('world-1', 'chat-2');
   });
+
+  it('refreshes the world subscription only after chat activation resolves', async () => {
+    const callOrder: string[] = [];
+    const ensureWorldSubscribed = vi.fn(async () => {
+      callOrder.push('ensure');
+      return { id: 'world-1', currentChatId: 'chat-2' };
+    });
+    const activateChatWithSnapshot = vi.fn(async () => {
+      callOrder.push('activate');
+      return {
+        world: { id: 'world-1', currentChatId: 'chat-2' },
+        chatId: 'chat-2',
+        memory: [],
+        hitlPrompts: [],
+      };
+    });
+    const refreshWorldSubscription = vi.fn(async () => {
+      callOrder.push('refresh');
+      return null;
+    });
+
+    const { handlers } = await createHandlers({
+      ensureWorldSubscribed,
+      activateChatWithSnapshot,
+      refreshWorldSubscription,
+    });
+
+    await handlers.selectWorldSession('world-1', 'chat-2');
+
+    expect(callOrder).toEqual(['ensure', 'activate', 'refresh']);
+    expect(refreshWorldSubscription.mock.invocationCallOrder[0]).toBeGreaterThan(
+      activateChatWithSnapshot.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('does not refresh the world subscription when activation fails', async () => {
+    const activateChatWithSnapshot = vi.fn(async () => null);
+    const refreshWorldSubscription = vi.fn(async () => null);
+
+    const { handlers } = await createHandlers({
+      activateChatWithSnapshot,
+      refreshWorldSubscription,
+    });
+
+    await expect(handlers.selectWorldSession('world-1', 'chat-missing')).rejects.toThrow(
+      'World or session not found: world-1/chat-missing'
+    );
+    expect(refreshWorldSubscription).not.toHaveBeenCalled();
+  });
 });
 
 describe('createMainIpcHandlers.updateWorkspaceWorld heartbeat mapping', () => {

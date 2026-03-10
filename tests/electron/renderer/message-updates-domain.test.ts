@@ -11,6 +11,7 @@
  * - Avoids runtime dependencies beyond pure helper functions.
  *
  * Recent Changes:
+ * - 2026-03-10: Added regressions for failed-turn system-error coalescing and refresh protection against stale live streaming rows overriding canonical refreshed messages.
  * - 2026-02-26: Added coverage for redundant error-log suppression/removal and chat-scoped transient error clearing.
  * - 2026-02-20: Added optimistic user-message lifecycle coverage (create/reconcile/remove + identical-content reconciliation safety).
  * - 2026-02-12: Moved into layer-based tests/electron subfolder and updated module import paths.
@@ -25,6 +26,7 @@ import {
   createLogMessage,
   getMessageTimestamp,
   mergeStoredSystemErrorEvents,
+  reconcileRefreshedMessagesWithLiveState,
   preserveLiveSystemErrorMessages,
   reconcileOptimisticUserMessage,
   removeRedundantErrorLogMessages,
@@ -218,6 +220,57 @@ describe('message-updates domain helpers', () => {
     });
   });
 
+  it('preserves persisted system error timestamps when storage returns Date objects', () => {
+    const next = mergeStoredSystemErrorEvents([], [{
+      id: 'sys-date-1',
+      type: 'system',
+      chatId: 'chat-1',
+      createdAt: new Date('2026-03-10T03:18:01.000Z'),
+      payload: {
+        type: 'error',
+        eventType: 'error',
+        message: 'Agent failed to process the turn.',
+      },
+    }], 'chat-1');
+
+    expect(next).toHaveLength(1);
+    expect(next[0].createdAt).toBe('2026-03-10T03:18:01.000Z');
+  });
+
+  it('coalesces repeated persisted failed-turn system errors by triggering message id', () => {
+    const next = mergeStoredSystemErrorEvents([], [{
+      id: 'sys-first',
+      type: 'system',
+      chatId: 'chat-1',
+      createdAt: '2026-03-10T03:18:01.000Z',
+      payload: {
+        type: 'error',
+        eventType: 'error',
+        message: 'Queue failed to dispatch user turn: no responder.',
+        triggeringMessageId: 'user-turn-1',
+      },
+    }, {
+      id: 'sys-second',
+      type: 'system',
+      chatId: 'chat-1',
+      createdAt: '2026-03-10T03:18:02.000Z',
+      payload: {
+        type: 'error',
+        eventType: 'error',
+        message: 'Queue failed to dispatch user turn: no responder.',
+        triggeringMessageId: 'user-turn-1',
+      },
+    }], 'chat-1');
+
+    expect(next).toHaveLength(1);
+    expect(next[0].messageId).toBe('system-error:user-turn-1');
+    expect(next[0].createdAt).toBe('2026-03-10T03:18:02.000Z');
+    expect(next[0].systemEvent).toMatchObject({
+      sourceEventId: 'sys-second',
+      triggeringMessageId: 'user-turn-1',
+    });
+  });
+
   it('ignores non-error system events when restoring transcript error rows', () => {
     const existing = [{
       messageId: 'user-1',
@@ -268,6 +321,77 @@ describe('message-updates domain helpers', () => {
 
     const next = preserveLiveSystemErrorMessages(refreshed, live, 'chat-1');
     expect(next.map((message) => message.messageId)).toEqual(['user-1', 'sys-live-1']);
+  });
+
+  it('reconciles refresh results with optimistic and live streaming selected-chat state', () => {
+    const refreshed = [{
+      messageId: 'user-1',
+      role: 'user',
+      sender: 'human',
+      chatId: 'chat-1',
+      content: 'hello',
+      createdAt: '2026-03-10T03:18:00.000Z',
+    }];
+
+    const optimistic = createOptimisticUserMessage({
+      chatId: 'chat-1',
+      content: 'follow up',
+      sender: 'human',
+      createdAt: '2026-03-10T03:18:01.000Z',
+    });
+
+    const next = reconcileRefreshedMessagesWithLiveState(refreshed, [
+      optimistic,
+      {
+        messageId: 'stream-1',
+        role: 'assistant',
+        sender: 'gpt5',
+        chatId: 'chat-1',
+        content: 'partial',
+        createdAt: '2026-03-10T03:18:02.000Z',
+        isStreaming: true,
+      },
+      {
+        messageId: 'tool-1',
+        role: 'tool',
+        sender: 'shell_cmd',
+        chatId: 'chat-1',
+        content: 'running',
+        createdAt: '2026-03-10T03:18:03.000Z',
+        isToolStreaming: true,
+      },
+    ], 'chat-1');
+
+    expect(next.map((message) => message.messageId)).toEqual(['user-1', String(optimistic.messageId), 'stream-1', 'tool-1']);
+    expect(next[1].optimisticUserPending).toBe(true);
+    expect(next[2].isStreaming).toBe(true);
+    expect(next[3].isToolStreaming).toBe(true);
+  });
+
+  it('does not overwrite refreshed finalized assistant messages with stale live streaming rows', () => {
+    const refreshed = [{
+      messageId: 'assistant-1',
+      role: 'assistant',
+      sender: 'gpt5',
+      chatId: 'chat-1',
+      content: 'final answer',
+      createdAt: '2026-03-10T03:18:05.000Z',
+      isStreaming: false,
+    }];
+
+    const next = reconcileRefreshedMessagesWithLiveState(refreshed, [{
+      messageId: 'assistant-1',
+      role: 'assistant',
+      sender: 'gpt5',
+      chatId: 'chat-1',
+      content: 'partial',
+      createdAt: '2026-03-10T03:18:04.000Z',
+      isStreaming: true,
+    }], 'chat-1');
+
+    expect(next).toHaveLength(1);
+    expect(next[0].content).toBe('final answer');
+    expect(next[0].isStreaming).toBe(false);
   });
 
   it('trims the edited chat tail including structured system error rows', () => {

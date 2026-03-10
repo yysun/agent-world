@@ -11,6 +11,7 @@
  * - Focuses on orchestration behavior, not UI rendering.
  *
  * Recent Changes:
+ * - 2026-03-10: Added coverage that unscoped activity events are ignored for the selected chat, preserving live streaming rows until a properly scoped event arrives.
  * - 2026-03-10: Reverted log-event transcript injection; logs remain diagnostics-only while structured system errors drive durable transcript failure rows.
  * - 2026-02-27: Updated global-log coverage to assert logs are routed only to panel callbacks (no chat-message insertion).
  * - 2026-02-27: Added coverage for unified main-process log callback routing independent of active-session message-list updates.
@@ -1135,5 +1136,37 @@ describe('createChatSubscriptionEventHandler', () => {
     });
 
     expect(onSessionSystemEvent).not.toHaveBeenCalled();
+  });
+
+  it('ignores activity events without chatId when a session is selected', () => {
+    const harness = createMessageStateHarness([{
+      messageId: 'stream-1',
+      role: 'assistant',
+      sender: 'gpt5',
+      chatId: 'chat-1',
+      content: 'partial',
+      isStreaming: true,
+    }]);
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: makeFullStreamingRef(),
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
+    });
+
+    handler({
+      type: 'activity',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      activity: {
+        eventType: 'idle',
+        pendingOperations: 0,
+      }
+    });
+
+    expect(harness.getMessages()).toHaveLength(1);
+    expect(harness.getMessages()[0].messageId).toBe('stream-1');
   });
 });

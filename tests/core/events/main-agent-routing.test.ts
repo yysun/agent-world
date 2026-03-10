@@ -215,4 +215,28 @@ describe('subscribeAgentToMessages mainAgent routing', () => {
 
     unsubscribe();
   });
+
+  it('rebinding the same agent subscription is idempotent', async () => {
+    const { subscribeAgentToMessages } = await import('../../../core/events/subscribers.js');
+    const world = createWorldWithAgents('alice-agent');
+    const agent = world.agents.get('alice-agent')!;
+
+    const firstUnsubscribe = subscribeAgentToMessages(world, agent);
+    const secondUnsubscribe = subscribeAgentToMessages(world, agent);
+
+    world.eventEmitter.emit('message', {
+      content: 'Hello team',
+      sender: 'human',
+      timestamp: new Date(),
+      messageId: 'msg-rebind-1',
+      chatId: 'chat-1'
+    });
+
+    await vi.waitFor(() => {
+      expect(shouldAgentRespondMock).toHaveBeenCalledTimes(1);
+    });
+
+    firstUnsubscribe();
+    secondUnsubscribe();
+  });
 });

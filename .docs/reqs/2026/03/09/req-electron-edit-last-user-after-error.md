@@ -23,6 +23,10 @@ The current Electron chat flow can surface a failed turn as a user message follo
 - Stop automatic queue replay after dispatch/runtime failure; only interrupted in-flight recovery remains automatic.
 - Keep queue-based resume as the only automatic recovery authority; remove restore-based resend from persisted chat memory.
 - Add targeted automated coverage for failed-turn editability.
+- Preserve live selected-chat state during refresh so optimistic sends, live system errors, and streaming/tool rows are not lost when history reloads.
+- Surface a durable transcript recovery artifact when queue dispatch fails before streaming starts.
+- Keep subscription/rebind paths idempotent so one user turn is processed once.
+- Preserve persisted system-error timestamps exactly on replay.
 
 ## Non-Goals
 
@@ -120,6 +124,15 @@ The current Electron chat flow can surface a failed turn as a user message follo
 20. Queue-error UI MAY expose queue-specific retry/remove controls, but transcript editability MUST remain anchored to the canonical user message row.
 21. Error logs MUST remain in the logs panel; the transcript must show only the durable system-error artifact intended for conversation recovery.
 22. Transcript/system rendering MUST NOT infer queue ownership for assistant/tool/system rows; queue-backed affordances belong only to user turns.
+23. Refreshing the selected chat MUST reconcile persisted history with live selected-chat state rather than blindly replacing it.
+24. Selected-chat refresh MUST preserve, at minimum:
+   - optimistic user rows awaiting canonical confirmation,
+   - durable/live structured system-error rows,
+   - live streaming and tool-stream rows until canonical replacements arrive.
+25. A normal send/edit/delete/refresh flow for the selected chat MUST NOT clear the visible transcript to an empty state while the chat still exists.
+26. When queue dispatch fails before streaming begins, the user MUST still get a durable recovery artifact in the transcript or equivalent failed-turn surface; the failure MUST NOT appear as silent non-streaming.
+27. Agent/world/chat subscription rebinding MUST be idempotent; repeated rebind must not stack duplicate listeners for the same target.
+28. Persisted system-error artifacts MUST preserve their original timestamps when replayed into the transcript; historical rows must not be restamped as current-time rows.
 
 ## Required Behavioral Cases
 
@@ -214,3 +227,5 @@ The current Electron chat flow can surface a failed turn as a user message follo
 - Failed-turn recovery options remain available after restart from persisted state.
 - Queue is the only automatic resume authority for user turns.
 - Normal successful-turn edit semantics remain unchanged.
+- Selected-chat refresh never drops live optimistic/streaming/error state that is still authoritative.
+- Queue/preflight failures always surface a durable recovery artifact rather than a silent non-streaming turn.

@@ -17,6 +17,7 @@
  *
  * Recent changes:
  * - 2026-03-06: Added message-authoritative HITL read model tests and chained live-session test.
+ * - 2026-03-10: Added persisted `load_skill` approval prompt identity coverage for the message-authoritative read model.
  * - 2026-02-24: Replaced timeout fallback expectations with replay/scoping coverage.
  * - 2026-02-14: Added initial coverage for core HITL option runtime.
  */
@@ -425,6 +426,34 @@ function makeHitlAssistantMessage(toolCallId: string, question: string, options:
   };
 }
 
+function makeLoadSkillApprovalAssistantMessage(toolCallId: string, skillId: string, chatId?: string) {
+  return {
+    role: 'assistant',
+    sender: 'qwen',
+    chatId: chatId || null,
+    content: `Calling tool: human_intervention_request (skill_id: "${skillId}")`,
+    tool_calls: [
+      {
+        id: toolCallId,
+        function: {
+          name: 'human_intervention_request',
+          arguments: JSON.stringify({
+            question: 'Approve applying this skill now?',
+            options: ['Yes once', 'Yes in this session', 'No'],
+            defaultOption: 'No',
+            metadata: {
+              tool: 'human_intervention_request',
+              toolCallId,
+              source: 'load_skill',
+              skillId,
+            },
+          }),
+        },
+      },
+    ],
+  };
+}
+
 function makeToolResponseMessage(toolCallId: string) {
   return { role: 'tool', tool_call_id: toolCallId };
 }
@@ -466,6 +495,37 @@ describe('listPendingHitlPromptEventsFromMessages (message-authoritative read mo
 
     expect(pending).toHaveLength(1);
     expect(pending[0].prompt.requestId).toBe('call-u1');
+  });
+
+  it('reconstructs a persisted load_skill approval prompt and resolves it when the matching tool response exists', () => {
+    const unresolvedMessages = [
+      makeLoadSkillApprovalAssistantMessage('load-skill-approval-1', 'yt-dlp', 'chat-load'),
+    ];
+
+    const pending = listPendingHitlPromptEventsFromMessages(unresolvedMessages as any, 'chat-load');
+
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({
+      chatId: 'chat-load',
+      prompt: {
+        requestId: 'load-skill-approval-1',
+        toolCallId: 'load-skill-approval-1',
+        toolName: 'human_intervention_request',
+        agentName: 'qwen',
+      },
+    });
+    expect(pending[0].prompt.metadata).toMatchObject({
+      source: 'load_skill',
+      skillId: 'yt-dlp',
+      toolCallId: 'load-skill-approval-1',
+    });
+
+    const resolvedMessages = [
+      ...unresolvedMessages,
+      makeToolResponseMessage('load-skill-approval-1'),
+    ];
+
+    expect(listPendingHitlPromptEventsFromMessages(resolvedMessages as any, 'chat-load')).toHaveLength(0);
   });
 
   it('returns multiple unresolved requests in stable creation order', () => {

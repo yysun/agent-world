@@ -22,6 +22,8 @@
  * - All other dependencies (events/index.js, storage-init.ts, etc.) are static.
  *
  * Recent Changes:
+ * - 2026-03-10: Treat unresolved persisted HITL prompts as explicit recovery boundaries during stale `sending` recovery so restore does not replay turns that are already waiting for approval.
+ * - 2026-03-10: Queue dispatch failures that occur before streaming starts now publish a durable structured `system/error` artifact so failed turns remain visible in the transcript.
  * - 2026-03-10: Split queue-backed user submission from immediate non-user dispatch; queue APIs are now user-turn-only by contract.
  * - 2026-03-10: Removed memory-based restore resend and automatic queue backoff replay for failed user turns.
  * - 2026-03-09: Extracted from managers.ts as part of god-module decomposition.
@@ -36,9 +38,11 @@ import { hasActiveChatMessageProcessing } from './message-processing-control.js'
 import {
   publishMessageWithId,
   publishMessage,
+  publishEvent,
   subscribeAgentToMessages,
   subscribeWorldToMessages,
 } from './events/index.js';
+import { listPendingHitlPromptEventsFromMessages } from './hitl.js';
 import { nanoid } from 'nanoid';
 import type {
   World, Agent, QueuedMessage, StorageAPI, WorldMessageEvent,
@@ -350,6 +354,20 @@ async function resolveStaleSendingRecoveryDecision(
     };
   }
 
+  const currentMemory = typeof storageWrappers?.getMemory === 'function'
+    ? await storageWrappers.getMemory(world.id, chatId)
+    : [];
+  const pendingHitlPrompts = listPendingHitlPromptEventsFromMessages(
+    Array.isArray(currentMemory) ? currentMemory : [],
+    chatId,
+  );
+  if (pendingHitlPrompts.length > 0) {
+    return {
+      action: 'mark-error',
+      reason: `pending-hitl:${pendingHitlPrompts[0]?.prompt?.requestId || 'unknown'}`,
+    };
+  }
+
   const latestSseEvents = await eventStorage.getEventsByWorldAndChat(world.id, chatId, {
     types: ['sse'],
     order: 'desc',
@@ -417,6 +435,13 @@ async function handleQueueDispatchFailure(
     const newRetryCount = await queueStorage.incrementQueueMessageRetry(messageId);
     await queueStorage.updateMessageQueueStatus(messageId, 'error');
     world._queuedChatIds?.delete(chatId);
+    publishEvent(world, 'system', {
+      type: 'error',
+      eventType: 'error',
+      message: `Queue failed to dispatch user turn: ${reason}.`,
+      triggeringMessageId: messageId,
+      failureKind: 'queue-dispatch',
+    }, chatId);
     loggerQueue.warn('Queue dispatch failed; message marked error for explicit recovery', {
       worldId: world.id,
       chatId,

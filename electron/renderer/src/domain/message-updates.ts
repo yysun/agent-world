@@ -13,6 +13,8 @@
  * - Messages without canonical `messageId` are ignored by upsert logic.
  *
  * Recent Changes:
+ * - 2026-03-10: Prevented refresh from reapplying stale live streaming rows over canonical refreshed messages and canonicalized durable system-error transcript rows by triggering user turn.
+ * - 2026-03-10: Added selected-chat refresh reconciliation for optimistic/live streaming/system-error rows and normalized persisted system-event timestamps from both `Date` and `string`.
  * - 2026-03-10: Delegated generic chat-tail trim semantics to core and kept the renderer wrapper for transcript-specific usage.
  * - 2026-03-10: Added persisted `system` error-event to transcript conversion/replay helpers so failed-turn diagnostics can survive restart without replaying raw logs.
  * - 2026-03-06: Restored selected-chat error log rows to the transcript while keeping non-error logs panel-only.
@@ -63,6 +65,22 @@ export function getMessageTimestamp(message: MessageLike): number {
   if (!value) return 0;
   const timestamp = new Date(value).getTime();
   return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function normalizeCreatedAt(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  return null;
+}
+
+function normalizeMessageId(value: unknown): string | null {
+  const normalized = String(value || '').trim();
+  return normalized || null;
 }
 
 function normalizeErrorText(value: unknown): string {
@@ -376,16 +394,37 @@ function isSystemErrorContent(eventType: unknown, content: unknown): boolean {
     || text.includes('retry exhausted');
 }
 
+function getTriggeringMessageId(content: unknown): string | null {
+  if (!content || typeof content !== 'object') {
+    return null;
+  }
+
+  return normalizeMessageId((content as Record<string, unknown>).triggeringMessageId);
+}
+
+function getCanonicalSystemErrorMessageId(event: {
+  messageId?: string | null;
+  content?: unknown;
+}): string | null {
+  const triggeringMessageId = getTriggeringMessageId(event?.content);
+  if (triggeringMessageId) {
+    return `system-error:${triggeringMessageId}`;
+  }
+
+  return normalizeMessageId(event?.messageId);
+}
+
 export function createSystemErrorMessage(event: {
   messageId?: string | null;
-  createdAt?: string | null;
+  createdAt?: unknown;
   chatId?: string | null;
   eventType?: string | null;
   content?: unknown;
 }): MessageLike | null {
-  const messageId = String(event?.messageId || '').trim();
+  const messageId = getCanonicalSystemErrorMessageId(event);
   const chatId = String(event?.chatId || '').trim();
   const text = extractSystemEventText(event?.content);
+  const createdAt = normalizeCreatedAt(event?.createdAt);
   if (!messageId || !chatId || !text || !isSystemErrorContent(event?.eventType, event?.content)) {
     return null;
   }
@@ -398,12 +437,14 @@ export function createSystemErrorMessage(event: {
     type: 'system',
     content: text,
     text,
-    createdAt: event?.createdAt || new Date().toISOString(),
+    createdAt: createdAt || new Date().toISOString(),
     chatId,
     systemEvent: {
       eventType: String(event?.eventType || '').trim() || 'error',
       kind: 'error',
       content: event?.content,
+      sourceEventId: normalizeMessageId(event?.messageId),
+      triggeringMessageId: getTriggeringMessageId(event?.content),
     },
   };
 }
@@ -430,7 +471,7 @@ export function mergeStoredSystemErrorEvents(
 
     const systemMessage = createSystemErrorMessage({
       messageId: String(event?.id || '').trim() || String(event?.messageId || '').trim(),
-      createdAt: typeof event?.createdAt === 'string' ? event.createdAt : null,
+      createdAt: event?.createdAt,
       chatId: eventChatId,
       eventType: String((event?.payload as Record<string, unknown> | null)?.eventType || (event?.payload as Record<string, unknown> | null)?.type || '').trim(),
       content: event?.payload,
@@ -443,7 +484,68 @@ export function mergeStoredSystemErrorEvents(
   }, existingMessages);
 }
 
-export function preserveLiveSystemErrorMessages(
+function isRenderableLiveCarryForwardCandidate(message: MessageLike, chatId: string | null): boolean {
+  const messageChatId = String(message?.chatId || '').trim() || null;
+  if (!chatId || messageChatId !== chatId) {
+    return false;
+  }
+
+  if (message?.optimisticUserPending === true && isIncomingUserMessage(message)) {
+    return true;
+  }
+
+  const systemKind = String(message?.systemEvent?.kind || '').trim().toLowerCase();
+  if (systemKind === 'error') {
+    return true;
+  }
+
+  if (message?.isStreaming === true || message?.isToolStreaming === true) {
+    return true;
+  }
+
+  return false;
+}
+
+function hasCanonicalUserEcho(
+  refreshedMessages: MessageLike[],
+  optimisticMessage: MessageLike,
+  chatId: string | null,
+): boolean {
+  const optimisticContent = String(optimisticMessage?.content || '').trim();
+  if (!chatId || !optimisticContent) {
+    return false;
+  }
+
+  return refreshedMessages.some((message) => {
+    if (message?.optimisticUserPending === true) {
+      return false;
+    }
+    if (!isIncomingUserMessage(message)) {
+      return false;
+    }
+    const messageChatId = String(message?.chatId || '').trim() || null;
+    if (messageChatId !== chatId) {
+      return false;
+    }
+    return String(message?.content || '').trim() === optimisticContent;
+  });
+}
+
+function hasRefreshedMessageWithSameId(
+  refreshedMessages: MessageLike[],
+  liveMessage: MessageLike,
+): boolean {
+  const messageId = normalizeMessageId(liveMessage?.messageId);
+  if (!messageId) {
+    return false;
+  }
+
+  return refreshedMessages.some(
+    (message) => normalizeMessageId(message?.messageId) === messageId
+  );
+}
+
+export function reconcileRefreshedMessagesWithLiveState(
   refreshedMessages: MessageLike[],
   liveMessages: MessageLike[],
   chatId: string | null,
@@ -454,14 +556,28 @@ export function preserveLiveSystemErrorMessages(
   }
 
   return liveMessages.reduce((messages, message) => {
-    const messageChatId = String(message?.chatId || '').trim() || null;
-    const messageKind = String(message?.systemEvent?.kind || '').trim().toLowerCase();
-    if (messageChatId !== normalizedChatId || messageKind !== 'error') {
+    if (!isRenderableLiveCarryForwardCandidate(message, normalizedChatId)) {
+      return messages;
+    }
+
+    if ((message?.isStreaming === true || message?.isToolStreaming === true) && hasRefreshedMessageWithSameId(messages, message)) {
+      return messages;
+    }
+
+    if (message?.optimisticUserPending === true && hasCanonicalUserEcho(messages, message, normalizedChatId)) {
       return messages;
     }
 
     return upsertMessageList(messages, message);
   }, refreshedMessages);
+}
+
+export function preserveLiveSystemErrorMessages(
+  refreshedMessages: MessageLike[],
+  liveMessages: MessageLike[],
+  chatId: string | null,
+): MessageLike[] {
+  return reconcileRefreshedMessagesWithLiveState(refreshedMessages, liveMessages, chatId);
 }
 
 export function trimChatMessagesFromCutoff(

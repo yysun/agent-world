@@ -339,7 +339,82 @@ Rules:
 - persist a structured system-error row when appropriate
 - do not silently fail with “nothing streamed” and no visible recovery path
 
-### 21. Messages briefly appearing then disappearing on chat switch is a streaming-state sign
+---
+
+## Tool / HITL Turn Lifecycle Rules (Strict)
+
+These rules apply to tool-call execution, `load_skill`, HITL approval prompts, and any
+queue/restore behavior that overlaps with those flows.
+
+### 21. Tool/HITL state remains part of the owning user turn lifecycle
+
+A queue-owned user turn is not complete just because assistant text or a tool-start event
+was emitted.
+
+The turn remains active until it reaches one of these durable outcomes:
+
+- terminal assistant completion
+- terminal tool error/result with continuation settled
+- durable pending HITL/approval wait state
+- durable failed-turn recovery state
+
+Do not treat tool/HITL boundaries as detached side channels outside the user-turn lifecycle.
+
+### 22. Pending approval prompts must be reconstructable from persisted messages
+
+Runtime HITL maps are process-local and may be empty after refresh/restart. Frontends and
+restore flows must be able to reconstruct pending approval state from persisted messages.
+
+Rules:
+
+- synthetic approval prompts such as `load_skill` -> `human_intervention_request` must keep
+  stable `chatId`, `requestId`, `toolCallId`, and relevant metadata
+- the matching tool-response message must resolve that same prompt identity
+- runtime replay is additive, not the sole source of truth for pending approval UI
+
+Tests: `tests/core/hitl.test.ts` and `tests/electron/main/main-realtime-events.test.ts`.
+
+### 23. Queue stale-send recovery must not auto-resume across a pending HITL boundary
+
+If persisted chat state already shows an unresolved HITL/approval prompt for the chat, a
+stale queue row must not be blindly recovered back to `queued` and re-published.
+
+Rules:
+
+- unresolved persisted HITL prompts block restore-time auto-resume for the owning chat
+- stale raw `sending` should move to explicit recovery/error state instead of replaying
+  the user turn again
+- pending approval UI may replay, but the original user turn must not be auto-resubmitted
+
+Tests: `tests/core/auto-resume-sse-error-guard.test.ts`.
+
+### 24. Every persisted tool-start needs a terminal partner or explicit wait artifact
+
+A persisted `tool-start` must not leave the chat stuck forever with only a raw `sending`
+queue row.
+
+Acceptable follow-ups are:
+
+- `tool-result`
+- `tool-error`
+- durable pending HITL/approval artifact tied to the same turn
+- explicit durable failed-turn recovery state
+
+Raw `tool-start` with no terminal partner and no durable wait/recovery artifact is a bug.
+
+### 25. Edit/delete trim must clear orphaned tool/HITL artifacts for the removed tail
+
+When a user edits or deletes a turn, cleanup must remove orphaned artifacts created by the
+trimmed tail, including:
+
+- persisted system-error rows
+- pending HITL requests for that chat tail
+- stale queue rows for trimmed turns
+- tool/HITL artifacts whose owning turn no longer survives
+
+Do not let replaced turns leave behind retryable queue state or recoverable approval UI.
+
+### 26. Messages briefly appearing then disappearing on chat switch is a streaming-state sign
 
 If the renderer shows messages momentarily and then they vanish on chat switch, check:
 
