@@ -33,6 +33,21 @@ function createBaseState() {
   } as any;
 }
 
+async function collectGeneratedStates<T>(updates: AsyncGenerator<T>, fallbackState: T): Promise<{
+  states: T[];
+  finalState: T;
+}> {
+  const states: T[] = [];
+  for await (const update of updates) {
+    states.push(update);
+  }
+
+  return {
+    states,
+    finalState: states.at(-1) ?? fallbackState,
+  };
+}
+
 describe('web world update system refresh', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -42,13 +57,15 @@ describe('web world update system refresh', () => {
     const state = createBaseState();
     const getWorldSpy = vi.spyOn(api, 'getWorld');
 
-    const nextState = await (worldUpdateHandlers['handleSystemEvent'] as any)(state, {
+    const result = await collectGeneratedStates((worldUpdateHandlers['handleSystemEvent'] as any)(state, {
       content: {
         eventType: 'noop-event'
       }
-    });
+    }), state);
+    const nextState = result.finalState;
 
     expect(nextState).toBe(state);
+    expect(result.states).toHaveLength(0);
     expect(nextState.messages).toHaveLength(0);
     expect(getWorldSpy).not.toHaveBeenCalled();
   });
@@ -57,14 +74,16 @@ describe('web world update system refresh', () => {
     const state = createBaseState();
     const getWorldSpy = vi.spyOn(api, 'getWorld');
 
-    const nextState = await (worldUpdateHandlers['handleSystemEvent'] as any)(state, {
+    const result = await collectGeneratedStates((worldUpdateHandlers['handleSystemEvent'] as any)(state, {
       chatId: 'chat-1',
       content: {
         eventType: 'noop-event'
       }
-    });
+    }), state);
+    const nextState = result.finalState;
 
     expect(nextState).not.toBe(state);
+    expect(result.states).toHaveLength(1);
     expect(nextState.messages).toHaveLength(1);
     expect(nextState.messages[0]?.type).toBe('system');
     expect(getWorldSpy).not.toHaveBeenCalled();
@@ -80,14 +99,16 @@ describe('web world update system refresh', () => {
       agents: [{ id: 'new-agent', name: 'new-agent' }]
     } as any);
 
-    const nextState = await (worldUpdateHandlers['handleSystemEvent'] as any)(state, {
+    const result = await collectGeneratedStates((worldUpdateHandlers['handleSystemEvent'] as any)(state, {
       chatId: 'chat-1',
       content: {
         eventType: 'agent-created'
       }
-    });
+    }), state);
+    const nextState = result.finalState;
 
     expect(api.getWorld).toHaveBeenCalledWith('world-1');
+    expect(result.states).toHaveLength(1);
     expect(nextState.world?.agents).toHaveLength(1);
     expect(nextState.world?.agents[0]?.id).toBe('new-agent');
     expect(nextState.currentChat?.id).toBe('chat-1');
@@ -98,16 +119,18 @@ describe('web world update system refresh', () => {
     const state = createBaseState();
     const getWorldSpy = vi.spyOn(api, 'getWorld');
 
-    const nextState = await (worldUpdateHandlers['handleSystemEvent'] as any)(state, {
+    const result = await collectGeneratedStates((worldUpdateHandlers['handleSystemEvent'] as any)(state, {
       chatId: 'chat-1',
       content: {
         eventType: 'chat-title-updated',
         title: 'Renamed Chat'
       }
-    });
+    }), state);
+    const nextState = result.finalState;
 
     // Lightweight in-place update: no API round-trip needed since title is in payload.
     expect(getWorldSpy).not.toHaveBeenCalled();
+    expect(result.states).toHaveLength(1);
     expect(nextState.currentChat?.name).toBe('Renamed Chat');
     expect(nextState.world?.chats[0]?.name).toBe('Renamed Chat');
     expect(nextState.error).toBeNull();
@@ -117,13 +140,15 @@ describe('web world update system refresh', () => {
     const state = createBaseState();
     vi.spyOn(api, 'getWorld').mockRejectedValue(new Error('refresh failed'));
 
-    const nextState = await (worldUpdateHandlers['handleSystemEvent'] as any)(state, {
+    const result = await collectGeneratedStates((worldUpdateHandlers['handleSystemEvent'] as any)(state, {
       chatId: 'chat-1',
       content: {
         eventType: 'agent-created'
       }
-    });
+    }), state);
+    const nextState = result.finalState;
 
     expect(nextState.error).toContain('refresh failed');
+    expect(result.states).toHaveLength(1);
   });
 });

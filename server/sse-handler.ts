@@ -31,6 +31,8 @@
  * Created: 2025-11-10 - Extracted from api.ts for reusability
  * Updated: 2026-03-01 - Skip synthesis for 'edit' context to prevent duplicate "From human" messages after message edits.
  * Updated: 2026-03-11 - Exposed a readiness promise so chat/edit dispatch waits until SSE listeners are attached, preventing the web client from missing the initial user-message echo.
+ * Updated: 2026-03-11 - Replaced optional-call resolution of the readiness promise with an explicit helper to satisfy
+ *   strict TypeScript control-flow analysis in the build config.
  * Updated: 2026-02-27 - Scoped realtime log forwarding by world/chat to prevent cross-chat log leakage in chat-scoped streams.
  * Updated: 2026-02-26 - Added realtime log-stream forwarding (`type: 'log'`) to SSE clients to align web error visibility with Electron.
  * Updated: 2026-02-20 - Removed stale legacy event-channel SSE forwarding from this handler.
@@ -233,6 +235,14 @@ export function createSSEHandler(
   const ready = new Promise<void>((resolve) => {
     resolveReady = resolve;
   });
+  const markReady = (): void => {
+    if (!resolveReady) {
+      return;
+    }
+    const resolve = resolveReady;
+    resolveReady = null;
+    resolve();
+  };
 
   // Attach direct listeners to world.eventEmitter (defined inside attach to allow synth-before-attach)
   const worldListener = (eventData: any) => {
@@ -481,8 +491,7 @@ export function createSSEHandler(
     } finally {
       // Attach live listeners after synthesis to avoid race where resume emits before client subscribed
       attachListeners();
-      resolveReady?.();
-      resolveReady = null;
+      markReady();
     }
   })();
 

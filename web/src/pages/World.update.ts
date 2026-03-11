@@ -21,6 +21,8 @@
  *   when tool-progress events omit `chatId`.
  * - 2026-03-11: Preserved pending HITL queues across chat switches and scoped outbound-send blocking to the active chat
  *   so switched-chat approvals replay correctly without contaminating other chats.
+ * - 2026-03-11: Replaced handler-to-handler `app.run(...)` chaining in send and chat-create flows with direct
+ *   async-generator composition so intermediate web states are owned by the initiating handler.
  * - 2026-03-06: Removed runtime fallback to backend `currentChatId` from send/stop/event filtering; active chat actions now require explicit UI session selection.
  *
  * Message Edit Feature (Core-Driven):
@@ -781,9 +783,74 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
   }
 }
 
+async function* refreshWorldState(
+  state: WorldComponentState,
+  activeChatId?: string
+): AsyncGenerator<WorldComponentState> {
+  const updates = initWorld({ ...state }, state.worldName, activeChatId);
+  for await (const update of updates) {
+    const mergedMessages = preserveTransientMessagesAcrossRefresh(
+      state.messages || [],
+      (update as any).messages || [],
+      activeChatId || null
+    );
+    yield {
+      ...state,
+      ...update,
+      messages: mergedMessages
+    };
+    return;
+  }
+}
+
+async function* sendMessageFlow(state: WorldComponentState): AsyncGenerator<WorldComponentState> {
+  if (HitlDomain.hasHitlPromptForChat(state.hitlPromptQueue || [], state.currentChat?.id || null)) {
+    yield {
+      ...state,
+      error: 'Resolve the pending HITL prompt before sending a new message.'
+    };
+    return;
+  }
+
+  const prepared = InputDomain.validateAndPrepareMessage(state.userInput, state.worldName);
+  if (!prepared) {
+    return;
+  }
+
+  const activeChatId = state.currentChat?.id || null;
+  if (!activeChatId) {
+    yield {
+      ...state,
+      error: 'Select a chat session before sending a message.'
+    };
+    return;
+  }
+
+  const sendingState = InputDomain.createSendingState(state, prepared.message);
+  const optimisticState: WorldComponentState = {
+    ...sendingState,
+    lastUserMessageText: prepared.text
+  };
+  yield optimisticState;
+
+  try {
+    await sendChatMessage(state.worldName, prepared.text, {
+      sender: 'HUMAN',
+      chatId: activeChatId
+    });
+
+    yield InputDomain.createSentState(optimisticState);
+  } catch (error: any) {
+    yield InputDomain.createSendErrorState(optimisticState, error.message || 'Failed to send message');
+  }
+}
+
 
 // Event handlers for SSE and system events
-const handleSystemEvent = async (state: WorldComponentState, data: any): Promise<WorldComponentState> => {
+const handleSystemEvent = async function* (
+  state: WorldComponentState,
+  data: any
+): AsyncGenerator<WorldComponentState> {
   const envelope = (data && typeof data === 'object') ? (data as Record<string, any>) : null;
   const contentPayload = envelope && 'content' in envelope ? envelope.content : data;
   const structuredPayload =
@@ -802,7 +869,7 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
         ? null
         : undefined;
   if (activeChatId && (!scopedSystemChatId || scopedSystemChatId !== activeChatId)) {
-    return state;
+    return;
   }
 
   const eventType =
@@ -848,7 +915,8 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
       (structuredPayload && typeof structuredPayload.message === 'string' && structuredPayload.message) ||
       (envelope && typeof envelope.message === 'string' && envelope.message) ||
       'Chat processing failed';
-    return { ...newState, error: errorMessage };
+    yield { ...newState, error: errorMessage };
+    return;
   }
 
   // Handle specific system events
@@ -874,45 +942,38 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
           ),
         }
         : newState.world;
-      return { ...newState, currentChat: updatedCurrentChat, world: updatedWorld };
+      yield { ...newState, currentChat: updatedCurrentChat, world: updatedWorld };
+      return;
     }
     // Fallback: full world refresh when title is absent from payload.
-    const activeChatId = newState.currentChat?.id || undefined;
-    const updates = initWorld(newState, newState.worldName, activeChatId);
-    for await (const update of updates) {
-      const mergedMessages = preserveTransientMessagesAcrossRefresh(
-        newState.messages || [],
-        (update as any).messages || [],
-        activeChatId || null
-      );
-      return {
-        ...newState,
-        ...update,
-        messages: mergedMessages
-      };
-    }
+    yield* refreshWorldState(newState, newState.currentChat?.id || undefined);
+    return;
   }
 
   if (eventType === 'agent-created') {
     // Re-fetch world to pick up the new agent in the agents list.
-    const activeChatId = newState.currentChat?.id || undefined;
-    const updates = initWorld(newState, newState.worldName, activeChatId);
-    for await (const update of updates) {
-      const mergedMessages = preserveTransientMessagesAcrossRefresh(
-        newState.messages || [],
-        (update as any).messages || [],
-        activeChatId || null
-      );
-      return {
-        ...newState,
-        ...update,
-        messages: mergedMessages
-      };
-    }
+    yield* refreshWorldState(newState, newState.currentChat?.id || undefined);
+    return;
   }
 
-  return newState;
+  yield newState;
 };
+
+async function* handleComposerKeyPress(
+  state: WorldComponentState,
+  payload: WorldEventPayload<'key-press'>
+): AsyncGenerator<WorldComponentState> {
+  if (payload.nativeEvent?.isComposing || payload.keyCode === 229) {
+    return;
+  }
+  if (HitlDomain.hasHitlPromptForChat(state.hitlPromptQueue || [], state.currentChat?.id || null)) {
+    return;
+  }
+  if (InputDomain.shouldSendOnEnter(payload.key, payload.shiftKey, state.userInput)) {
+    payload.preventDefault?.();
+    yield* sendMessageFlow(state);
+  }
+}
 
 const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any): T => {
 
@@ -1126,54 +1187,9 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     chatSearchQuery: payload.target.value,
   }),
 
-  'key-press': (state: WorldComponentState, payload: WorldEventPayload<'key-press'>) => {
-    if (payload.nativeEvent?.isComposing || payload.keyCode === 229) {
-      return;
-    }
-    if (HitlDomain.hasHitlPromptForChat(state.hitlPromptQueue || [], state.currentChat?.id || null)) {
-      return;
-    }
-    if (InputDomain.shouldSendOnEnter(payload.key, payload.shiftKey, state.userInput)) {
-      payload.preventDefault?.();
-      app.run('send-message');
-    }
-  },
+  'key-press': handleComposerKeyPress,
 
-  'send-message': async (state: WorldComponentState): Promise<WorldComponentState> => {
-    if (HitlDomain.hasHitlPromptForChat(state.hitlPromptQueue || [], state.currentChat?.id || null)) {
-      return {
-        ...state,
-        error: 'Resolve the pending HITL prompt before sending a new message.'
-      };
-    }
-
-    const prepared = InputDomain.validateAndPrepareMessage(state.userInput, state.worldName);
-    if (!prepared) return state;
-
-    const sendingState = InputDomain.createSendingState(state, prepared.message);
-    const newState: WorldComponentState = {
-      ...sendingState,
-      lastUserMessageText: prepared.text
-    };
-
-    try {
-      const activeChatId = state.currentChat?.id || null;
-      if (!activeChatId) {
-        return InputDomain.createSendErrorState(newState, 'Select a chat session before sending a message.');
-      }
-
-      // Send the message via SSE stream
-      await sendChatMessage(state.worldName, prepared.text, {
-        sender: 'HUMAN',
-        chatId: activeChatId
-      });
-
-      // Note: isWaiting is controlled by world events (pending count), not send/stream events
-      return InputDomain.createSentState(newState);
-    } catch (error: any) {
-      return InputDomain.createSendErrorState(newState, error.message || 'Failed to send message');
-    }
-  },
+  'send-message': sendMessageFlow,
 
   'select-project-folder': async (state: WorldComponentState): Promise<WorldComponentState> => {
     if (!state.world?.name) {
@@ -1718,14 +1734,20 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
 
   'create-new-chat': async function* (state: WorldComponentState): AsyncGenerator<WorldComponentState> {
     try {
-      yield ChatHistoryDomain.createChatLoadingState(state);
+      const loadingState = ChatHistoryDomain.createChatLoadingState(state);
+      yield loadingState;
 
       const result = await api.newChat(state.worldName);
       if (!result.success) {
-        yield ChatHistoryDomain.createChatErrorState(state, 'Failed to create new chat');
+        yield ChatHistoryDomain.createChatErrorState(loadingState, 'Failed to create new chat');
         return;
       }
-      app.run('initWorld', state.worldName);
+
+      yield* initWorld(
+        { ...loadingState },
+        state.worldName,
+        typeof result.chatId === 'string' ? result.chatId : undefined
+      );
     } catch (error: any) {
       yield ChatHistoryDomain.createChatErrorState(state, error.message || 'Failed to create new chat');
     }
