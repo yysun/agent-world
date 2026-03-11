@@ -12,6 +12,7 @@
  * - Message body rendering is delegated to domain helpers to keep this file focused on view composition.
  *
  * Summary of Recent Changes:
+ * - 2026-03-10: Added stable transcript/composer/HITL selectors for Playwright web E2E coverage.
  * - 2026-03-01: Moved message timestamps to top metadata row (sender + time) to match Electron layout.
  * - 2026-03-01: Suppressed `...` streaming placeholder transcript rows so waiting state only shows inline working status until real stream content arrives.
  * - 2026-02-28: Switched chat-row suppression to shared domain visibility rules and hide assistant HITL tool-call placeholder rows.
@@ -320,7 +321,7 @@ export default function WorldChat(props: WorldChatProps) {
   };
 
   return (
-    <fieldset className="chat-fieldset">
+    <fieldset className="chat-fieldset" data-testid="world-chat">
       <legend>
         {worldName} {
           currentChat ? ` - ${currentChat}` :
@@ -336,6 +337,7 @@ export default function WorldChat(props: WorldChatProps) {
         {/* Conversation Area */}
         <div
           className="conversation-area"
+          data-testid="conversation-area"
           ref={(el, state) => {
             if (el && needScroll) {
               requestAnimationFrame(() => {
@@ -473,7 +475,13 @@ export default function WorldChat(props: WorldChatProps) {
               }
 
               return (
-                <div key={message.id || 'msg-' + index} className={`message-row ${rowAlignmentClass}`}>
+                <div
+                  key={message.id || 'msg-' + index}
+                  className={`message-row ${rowAlignmentClass}`}
+                  data-testid={message.messageId ? `message-row-${message.messageId}` : undefined}
+                  data-message-frontend-id={message.id || undefined}
+                  data-message-role={senderType}
+                >
                   {!hideAvatarForStreamingRow && (
                     <div className="message-avatar-container" title={avatarTitle}>
                       <div className={isHumanAvatar ? 'message-avatar message-avatar-empty' : `message-avatar agent-sprite sprite-${avatarSpriteIndex}`}></div>
@@ -498,18 +506,21 @@ export default function WorldChat(props: WorldChatProps) {
                           $oninput='update-edit-text'
                           rows={3}
                           autoFocus
+                          data-testid="message-edit-input"
                         />
                         <div className="message-edit-actions">
                           <button
                             className="btn-primary"
                             $onclick={['save-edit-message', message.id]}
                             disabled={!isEditChanged}
+                            data-testid="message-edit-save"
                           >
                             Update
                           </button>
                           <button
                             className="btn-secondary"
                             $onclick='cancel-edit-message'
+                            data-testid="message-edit-cancel"
                           >
                             Cancel
                           </button>
@@ -525,6 +536,7 @@ export default function WorldChat(props: WorldChatProps) {
                               $onclick={['start-edit-message', { messageId: message.id, text: message.text }]}
                               title="Edit message"
                               disabled={!message.messageId || message.userEntered}
+                              data-testid={`message-edit-${message.id}`}
                             >
                               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                                 <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm2.92 2.33H5v-.92l9.06-9.06.92.92L5.92 19.58zM20.71 7.04a1.003 1.003 0 0 0 0-1.42L18.37 3.29a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.83z" />
@@ -540,6 +552,7 @@ export default function WorldChat(props: WorldChatProps) {
                               }]}
                               title="Delete message and all after it"
                               disabled={!message.messageId || message.userEntered}
+                              data-testid={`message-delete-${message.id}`}
                             >
                               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                                 <path fill="currentColor" d="M6 7h12l-1 14H7L6 7zm3-4h6l1 2h4v2H4V5h4l1-2z" />
@@ -574,7 +587,7 @@ export default function WorldChat(props: WorldChatProps) {
 
           {/* Show waiting dots when processing */}
           {isWaiting && (
-            <div className="message-row message-row-left">
+            <div className="message-row message-row-left" data-testid="hitl-waiting">
               {waitingMessageUiConfig.showWaitingAvatar && (
                 <div className="message-avatar-container" title="HUMAN">
                   <div className="message-avatar message-avatar-empty"></div>
@@ -595,7 +608,7 @@ export default function WorldChat(props: WorldChatProps) {
           )}
 
           {activeHitlPrompt ? (
-            <div className="message-row message-row-left">
+            <div className="message-row message-row-left" data-testid="hitl-prompt">
               <div className="message-avatar-container" title="Human input required">
                 <div className="message-avatar sprite-4"></div>
               </div>
@@ -619,6 +632,7 @@ export default function WorldChat(props: WorldChatProps) {
                           optionId: option.id,
                           chatId: activeHitlPrompt.chatId
                         }]}
+                        data-testid={`hitl-option-${option.id}`}
                       >
                         <div className="font-bold">{option.label}</div>
                       </button>
@@ -642,6 +656,7 @@ export default function WorldChat(props: WorldChatProps) {
               rows={1}
               aria-label="Message input"
               disabled={composerDisabled}
+              data-testid="composer-input"
             />
             <div className="composer-toolbar">
               <div className="composer-toolbar-left">
@@ -694,6 +709,7 @@ export default function WorldChat(props: WorldChatProps) {
                 disabled={actionButtonDisabled}
                 title={actionButtonLabel}
                 aria-label={actionButtonLabel}
+                data-testid="composer-action"
               >
                 {canStopCurrentSession ? (
                   <svg

@@ -1,12 +1,18 @@
 /**
- * World Chat History Component - Chat history management interface
- * 
- * Features:
- * - List all chat history with create/load/delete operations
- * - Client-side chat-session search (case-insensitive title filtering)
- * - LLM-generated summaries and real-time updates
- * - AppRun JSX with fieldset layout matching other components
- * - Delete confirmation handled by parent World component
+ * Purpose:
+ * - Render the web chat-history sidebar controls and list for a world.
+ *
+ * Key Features:
+ * - Lists all chats with create/load/delete affordances.
+ * - Filters chats client-side with a case-insensitive query.
+ * - Exposes stable attributes for browser E2E automation.
+ *
+ * Notes on Implementation:
+ * - Delete confirmation remains delegated to the parent World component.
+ * - Filtering stays pure via `filterChatsByQuery` for direct unit coverage.
+ *
+ * Summary of Recent Changes:
+ * - 2026-03-10: Added stable chat-history selectors and current-chat metadata for Playwright web E2E coverage.
  */
 
 import type { WorldChatHistoryProps } from '../types';
@@ -27,7 +33,7 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
   const currentChatId = world?.currentChatId ?? null;
 
   return (
-    <fieldset className="settings-fieldset">
+    <fieldset className="settings-fieldset" data-testid="chat-history">
       <legend>Chat History</legend>
 
       <div className="chat-history-controls">
@@ -37,6 +43,7 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
           placeholder="Search chats..."
           value={chatSearchQuery || ''}
           $oninput="update-chat-search"
+          data-testid="chat-search"
         />
         <button
           className="new-chat-btn"
@@ -44,6 +51,7 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
           title={hasAgents ? "Create new chat session" : "Create an agent first to enable new chats"}
           aria-label={hasAgents ? "Create new chat session" : "Create an agent first to enable new chats"}
           disabled={!hasAgents}
+          data-testid="chat-create"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 5v14M5 12h14" />
@@ -62,7 +70,7 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
             <p>No chats match "{chatSearchQuery}".</p>
           </div>
         ) : (
-          <ul className="chat-list simplified-chat-list">
+          <ul className="chat-list simplified-chat-list" data-testid="chat-list">
             {filteredChats.map(chat => {
               const isCurrent = currentChatId === chat.id;
               return (
@@ -70,6 +78,9 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
                   key={chat.id}
                   $onclick={["load-chat-from-history", chat.id]}
                   className={`chat-item simplified-chat-item chat-list-li${isCurrent ? ' current' : ''}`}
+                  data-testid={`chat-item-${chat.id}`}
+                  data-chat-id={chat.id}
+                  data-chat-current={isCurrent ? 'true' : 'false'}
                 >
                   <span
                     className={`chat-title clickable chat-list-title${isCurrent ? ' current' : ''}`}
@@ -81,6 +92,7 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
                     className="chat-close-btn chat-list-close-btn"
                     $onclick={["chat-history-show-delete-confirm", chat]}
                     title="Delete chat"
+                    data-testid={`chat-delete-${chat.id}`}
                   >
                     ×
                   </button>

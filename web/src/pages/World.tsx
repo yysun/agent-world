@@ -15,6 +15,10 @@
  * - Custom CSS for agent sprites, animations, and message styling
  * 
  * Recent Changes:
+ * - 2026-03-11: Wired chat-history search state through the World page so the sidebar filter input updates visible chats.
+ * - 2026-03-11: Scoped visible HITL prompts to the active chat so pending approvals survive chat switches without
+ *   leaking into other chat views.
+ * - 2026-03-10: Added stable world-page and error-state selectors for Playwright web E2E coverage.
  * - 2026-02-27: Removed stale HITL modal wording; web HITL prompts are inline chat-flow cards.
  * - 2026-02-21: Moved mobile world action buttons into the right-panel header row so they align with the close button.
  * - 2026-02-21: Removed mobile Chats/World tabs, kept world action buttons pinned at the top of the panel, and simplified right-panel content visibility.
@@ -41,6 +45,7 @@ import WorldDashboard from '../components/world-dashboard';
 import WorldChatHistory from '../components/world-chat-history';
 import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
+import { selectHitlPromptForChat } from '../domain/hitl';
 import { worldUpdateHandlers } from './World.update';
 
 const DESKTOP_PANEL_BREAKPOINT = 1024;
@@ -101,6 +106,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
     connectionStatus: 'disconnected',
     needScroll: false,  // Always false by default, set true only when new content added
     currentChat: null,
+    chatSearchQuery: '',
     selectedProjectPath: null,
     editingMessageId: null,
     editingText: '',
@@ -134,7 +140,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
   };
 
   override view = (state: WorldComponentState) => {
-    const activeHitlPrompt = state.hitlPromptQueue?.length ? state.hitlPromptQueue[0] : null;
+    const activeHitlPrompt = selectHitlPromptForChat(state.hitlPromptQueue || [], state.currentChat?.id || null);
     const isDesktopViewport = state.viewportMode === 'desktop';
     const isRightPanelOpen = isDesktopViewport ? true : state.isRightPanelOpen;
 
@@ -169,7 +175,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
 
     if (state.error) {
       return (
-        <div className="world-container flex flex-col h-screen">
+        <div className="world-container flex flex-col h-screen" data-testid="world-page">
           <div className="world-columns flex flex-1 overflow-hidden">
             <div className="chat-column flex flex-col flex-1">
               <div className="agents-section">
@@ -177,7 +183,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
                   <div className="text-text-secondary">Error</div>
                 </div>
               </div>
-              <div className="error-state flex items-center justify-center flex-1 p-4">
+              <div className="error-state flex items-center justify-center flex-1 p-4" data-testid="world-error-state">
                 <div className="text-center">
                   <p className="text-lg text-text-primary mb-4">Error: {state.error}</p>
                   <button className="btn btn-primary px-6 py-3" $onclick={['/World', state.worldName]}>Retry</button>
@@ -200,7 +206,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
 
     // Main content view
     return (
-      <div className={`world-container flex flex-col h-screen viewport-${state.viewportMode}`}>
+      <div className={`world-container flex flex-col h-screen viewport-${state.viewportMode}`} data-testid="world-page">
         <div className="world-columns flex flex-1 overflow-hidden">
           <div className="chat-column flex flex-col flex-1">
             <div className="agents-section">
@@ -393,6 +399,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
             <div className="world-panel-chats-section">
               <WorldChatHistory
                 world={state.world}
+                chatSearchQuery={state.chatSearchQuery}
               />
             </div>
           </div>

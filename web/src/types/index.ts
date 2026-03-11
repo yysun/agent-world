@@ -18,6 +18,7 @@
  * - SSE event data structures for real-time updates
  * 
  * Changes:
+ * - 2026-03-11: Added `chatSearchQuery` world state/props typing so the chat-history filter input can drive visible list filtering.
  * - 2026-02-22: Added responsive right-panel UI state typings (`rightPanelTab`, `isRightPanelOpen`, `viewportMode`) for World page mobile/tablet behavior.
  * - 2026-02-21: Added project-folder selection props/state (`selectedProjectPath`) for web composer parity with Electron.
  * - 2026-02-20: Added inline HITL card props to `WorldChatProps` for in-flow prompt rendering (replacing popup-only HITL UI).
@@ -321,9 +322,8 @@ export interface AgentEditState {
 
 // Chat History Component Props
 export interface WorldChatHistoryProps {
-  // Simplified to only the field used by WorldChatHistory component
-  // Changes: Removed unused props (worldName, chats, currentChatId, onChatSelect, onChatDelete)
   world: World | null;
+  chatSearchQuery: string;
 }
 
 export type RightPanelTab = 'chats' | 'world';
@@ -371,6 +371,7 @@ export interface WorldComponentState extends SSEComponentState {
 
   // Chat management state
   currentChat: Chat | null;
+  chatSearchQuery: string;
   selectedProjectPath: string | null;
   chatToDelete: Chat | null;
 

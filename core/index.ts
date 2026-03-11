@@ -223,6 +223,7 @@ export {
   getWorldRuntimeByKey,
   listWorldRuntimeSnapshots,
   stopWorldRuntime,
+  stopWorldRuntimesByWorldId,
   stopAllWorldRuntimes,
   type StartedWorldRuntime,
   type WorldRuntimeSnapshot,

@@ -23,6 +23,9 @@
  * - Extracts error details from log data for better error visibility in UI
  *
  * Recent Changes:
+ * - 2026-03-11: Forwarded tool-event `chatId` into AppRun handlers so chat-scoped HITL prompts survive switches without
+ *   leaking across chats.
+ * - 2026-03-11: Preserved optimistic user messages across assistant stream start so the web chat does not lose edit/delete affordances before the backend echo confirms the message ID.
  * - 2026-03-06: Removed runtime fallback to backend `currentChatId` from web SSE log filtering; active-chat routing now uses explicit UI selection only.
  * 
  * Created: 2025-10-25 - Initial SSE client implementation
@@ -351,6 +354,7 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
       publishEvent('handleToolStart', {
         messageId,
         sender: agentName,
+        chatId: eventData.chatId,
         toolExecution: eventData.toolExecution,
         worldName: eventData.worldName || streamingState.currentWorldName
       });
@@ -360,6 +364,7 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
       publishEvent('handleToolProgress', {
         messageId,
         sender: agentName,
+        chatId: eventData.chatId,
         toolExecution: eventData.toolExecution,
         worldName: eventData.worldName || streamingState.currentWorldName
       });
@@ -373,6 +378,7 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
       publishEvent('handleToolResult', {
         messageId,
         sender: agentName,
+        chatId: eventData.chatId,
         toolExecution: eventData.toolExecution,
         worldName: eventData.worldName || streamingState.currentWorldName
       });
@@ -386,6 +392,7 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
       publishEvent('handleToolError', {
         messageId,
         sender: agentName,
+        chatId: eventData.chatId,
         toolExecution: eventData.toolExecution,
         worldName: eventData.worldName || streamingState.currentWorldName
       });
@@ -710,14 +717,13 @@ async function streamSSERequest(
 // Initialize streaming message display
 export const handleStreamStart = <T extends SSEComponentState>(state: T, data: StreamStartData): T => {
   const { messageId, sender } = data;
-  state.messages = state.messages.filter(msg => !msg.userEntered);
-  state.messages.push({
+  const messages = [...(state.messages || []), {
     sender: sender,
     text: '...',
     isStreaming: true,
     messageId: messageId,
-  } as any);
-  const newState = { ...state, needScroll: true };
+  } as any];
+  const newState = { ...state, messages, needScroll: true };
   return newState;
 };
 

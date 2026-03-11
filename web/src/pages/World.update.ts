@@ -17,6 +17,10 @@
  * - Memory-only message streaming for agent→agent messages saved without response
  *
  * Recent Changes:
+ * - 2026-03-11: Added chat-history search state updates and backfilled missing HITL prompt chat scope from the active chat
+ *   when tool-progress events omit `chatId`.
+ * - 2026-03-11: Preserved pending HITL queues across chat switches and scoped outbound-send blocking to the active chat
+ *   so switched-chat approvals replay correctly without contaminating other chats.
  * - 2026-03-06: Removed runtime fallback to backend `currentChatId` from send/stop/event filtering; active chat actions now require explicit UI session selection.
  *
  * Message Edit Feature (Core-Driven):
@@ -471,7 +475,13 @@ const handleToolStart = (state: WorldComponentState, data: any): WorldComponentS
 };
 
 const handleToolProgress = (state: WorldComponentState, data: any): WorldComponentState => {
-  const hitlPrompt = HitlDomain.parseHitlPromptFromToolEvent(data);
+  const parsedHitlPrompt = HitlDomain.parseHitlPromptFromToolEvent(data);
+  const hitlPrompt = parsedHitlPrompt
+    ? {
+      ...parsedHitlPrompt,
+      chatId: parsedHitlPrompt.chatId || data?.chatId || state.currentChat?.id || null,
+    }
+    : null;
   if (hitlPrompt) {
     let pausedState = state;
     if (pausedState.debounceFrameId !== null) {
@@ -764,9 +774,45 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
     needScroll: true
   };
 
+  // Surface queue dispatch failures as visible error state so the UI reflects the failure.
+  const failureKind =
+    structuredPayload && typeof structuredPayload.failureKind === 'string'
+      ? structuredPayload.failureKind
+      : null;
+  if (eventType === 'error' || failureKind === 'queue-dispatch') {
+    const errorMessage =
+      (structuredPayload && typeof structuredPayload.message === 'string' && structuredPayload.message) ||
+      (envelope && typeof envelope.message === 'string' && envelope.message) ||
+      'Chat processing failed';
+    return { ...newState, error: errorMessage };
+  }
+
   // Handle specific system events
   if (eventType === 'chat-title-updated') {
-    // Refresh current chat context to update chat list/title without switching sessions.
+    // Lightweight in-place update using the title already present in the event payload.
+    // Avoids calling initWorld (which rebuilds messages from agent memory): if agents are
+    // deleted concurrently, that reload would return empty messages and wipe the chat history.
+    const newTitle =
+      typeof structuredPayload?.title === 'string' && structuredPayload.title.trim()
+        ? structuredPayload.title.trim()
+        : null;
+    if (newTitle) {
+      const eventChatId = scopedSystemChatId || null;
+      const updatedCurrentChat =
+        eventChatId && newState.currentChat?.id === eventChatId
+          ? { ...newState.currentChat, name: newTitle }
+          : newState.currentChat;
+      const updatedWorld = newState.world
+        ? {
+          ...newState.world,
+          chats: (newState.world.chats || []).map((c) =>
+            c.id === eventChatId ? { ...c, name: newTitle } : c
+          ),
+        }
+        : newState.world;
+      return { ...newState, currentChat: updatedCurrentChat, world: updatedWorld };
+    }
+    // Fallback: full world refresh when title is absent from payload.
     const activeChatId = newState.currentChat?.id || undefined;
     const updates = initWorld(newState, newState.worldName, activeChatId);
     for await (const update of updates) {
@@ -922,11 +968,11 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
   );
 
   if (streamingIndex !== -1) {
-    const updatedMessages = existingMessages
-      .map((msg, index) => {
-        if (index !== streamingIndex) {
-          return msg;
-        }
+      const updatedMessages = existingMessages
+        .map((msg, index) => {
+          if (index !== streamingIndex) {
+            return msg;
+          }
 
         return {
           ...msg,
@@ -934,9 +980,9 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
           id: newMessage.id,
           isStreaming: false,
           messageId: newMessage.messageId ?? msg.messageId
-        };
-      })
-      .filter(msg => !!msg && !msg.userEntered);
+          };
+        })
+        .filter(msg => !!msg);
 
     return {
       ...state,
@@ -946,7 +992,6 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
 
   // Filter out temporary placeholders and user-entered messages before adding the new one
   state.messages = existingMessages.filter(msg =>
-    !msg.userEntered &&
     !(msg.isStreaming && (msg.sender || '').toLowerCase() === normalizedSender)
   );
   state.messages.push(newMessage);
@@ -1012,11 +1057,16 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'update-input': (state: WorldComponentState, payload: WorldEventPayload<'update-input'>): WorldComponentState =>
     InputDomain.updateInput(state, payload.target.value),
 
+  'update-chat-search': (state: WorldComponentState, payload: WorldEventPayload<'update-chat-search'>): WorldComponentState => ({
+    ...state,
+    chatSearchQuery: payload.target.value,
+  }),
+
   'key-press': (state: WorldComponentState, payload: WorldEventPayload<'key-press'>) => {
     if (payload.nativeEvent?.isComposing || payload.keyCode === 229) {
       return;
     }
-    if ((state.hitlPromptQueue || []).length > 0) {
+    if (HitlDomain.hasHitlPromptForChat(state.hitlPromptQueue || [], state.currentChat?.id || null)) {
       return;
     }
     if (InputDomain.shouldSendOnEnter(payload.key, payload.shiftKey, state.userInput)) {
@@ -1026,7 +1076,7 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   },
 
   'send-message': async (state: WorldComponentState): Promise<WorldComponentState> => {
-    if ((state.hitlPromptQueue || []).length > 0) {
+    if (HitlDomain.hasHitlPromptForChat(state.hitlPromptQueue || [], state.currentChat?.id || null)) {
       return {
         ...state,
         error: 'Resolve the pending HITL prompt before sending a new message.'
@@ -1636,7 +1686,7 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         elapsedMs: 0,
         activityStartTime: null,
         elapsedIntervalId: null,
-        hitlPromptQueue: [],
+        hitlPromptQueue: state.hitlPromptQueue || [],
         submittingHitlRequestId: null,
       };
 

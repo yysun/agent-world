@@ -11,6 +11,8 @@
  * - Stores both world id and name for robust restore when IDs are absent.
  *
  * Summary of recent changes:
+ * - 2026-03-11: Added stable world-dot selectors so web smoke tests can focus a specific world before asserting its actions.
+ * - 2026-03-10: Added stable world-card selectors for Playwright web E2E coverage.
  * - 2026-02-26: Added last-selected-world persistence/restore on Home page.
  */
 
@@ -198,7 +200,7 @@ export default class SwipeCarousel extends Component<SwipeCarouselState> {
     };
 
     return (
-      <div className="swipe-carousel">
+      <div className="swipe-carousel" data-testid="world-carousel">
 
         {/* ── Viewport + overlay arrows ── */}
         <div style={{ position: 'relative', width: '100%' }}>
@@ -252,6 +254,8 @@ export default class SwipeCarousel extends Component<SwipeCarouselState> {
                   >
                     <button
                       className={`btn world-card-btn ${isCenter ? 'btn-primary center' : 'btn-secondary side'} flex flex-col items-center justify-center rounded-xl`}
+                      data-testid={`world-card-${w.id || w.name}`}
+                      data-world-id={w.id || ''}
                       style={{
                         width: `${CARD_W}px`,
                         height: `${CARD_H}px`,
@@ -322,6 +326,7 @@ export default class SwipeCarousel extends Component<SwipeCarouselState> {
               className={`world-dot ${i === currentIndex ? 'active' : ''}`}
               $onclick={['sc-goto', i]}
               title={w.name}
+              data-testid={`world-dot-${w.id || w.name}`}
             />
           ))}
         </div>
@@ -337,10 +342,11 @@ export default class SwipeCarousel extends Component<SwipeCarouselState> {
               className="btn add-world-btn w-12 h-12 flex items-center justify-center rounded-lg"
               title="Add New World"
               $onclick="open-world-create"
+              data-testid="world-create"
             >
               <span className="plus-icon text-2xl">+</span>
             </button>
-            <a href={'/World/' + encodeURIComponent(world.id || world.name)}>
+            <a href={'/World/' + encodeURIComponent(world.id || world.name)} data-testid={`enter-world-${world.id || world.name}`}>
               <button className="btn btn-primary enter-btn px-8 py-3 rounded-lg text-lg">
                 Enter {world.name}
               </button>
@@ -349,6 +355,7 @@ export default class SwipeCarousel extends Component<SwipeCarouselState> {
               className="btn add-world-btn delete-world-btn w-12 h-12 flex items-center justify-center rounded-lg"
               title="Delete World"
               $onclick={['open-world-delete', world]}
+              data-testid={`delete-world-${world.id || world.name}`}
             >
               <span className="plus-icon text-2xl">×</span>
             </button>

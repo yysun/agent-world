@@ -14,10 +14,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   enqueueHitlPrompt,
+  hasHitlPromptForChat,
   parseHitlPromptFromToolEvent,
   parseHitlPromptRequest,
   reconstructPendingHitlPromptsFromMessages,
   removeHitlPromptByRequestId,
+  selectHitlPromptForChat,
 } from '../../web/src/domain/hitl';
 
 describe('web/domain/hitl', () => {
@@ -178,6 +180,45 @@ describe('web/domain/hitl', () => {
     );
     expect(remaining).toHaveLength(1);
     expect(remaining[0]?.requestId).toBe('req-2');
+  });
+
+  it('selects only the prompt that matches the active chat', () => {
+    const selected = selectHitlPromptForChat([
+      {
+        requestId: 'req-a',
+        chatId: 'chat-a',
+        title: 'A',
+        message: 'A',
+        mode: 'option',
+        defaultOptionId: 'no',
+        options: [{ id: 'no', label: 'No' }],
+      },
+      {
+        requestId: 'req-b',
+        chatId: 'chat-b',
+        title: 'B',
+        message: 'B',
+        mode: 'option',
+        defaultOptionId: 'no',
+        options: [{ id: 'no', label: 'No' }],
+      },
+    ], 'chat-b');
+
+    expect(selected?.requestId).toBe('req-b');
+  });
+
+  it('does not report a prompt for unrelated chats', () => {
+    expect(hasHitlPromptForChat([
+      {
+        requestId: 'req-a',
+        chatId: 'chat-a',
+        title: 'A',
+        message: 'A',
+        mode: 'option',
+        defaultOptionId: 'no',
+        options: [{ id: 'no', label: 'No' }],
+      },
+    ], 'chat-b')).toBe(false);
   });
 
   it('reconstructs unresolved HITL prompts from persisted request/response message pairs', () => {

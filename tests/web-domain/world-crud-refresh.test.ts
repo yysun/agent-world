@@ -96,23 +96,20 @@ describe('web world update system refresh', () => {
 
   it('refreshes world for chat-title-updated system events', async () => {
     const state = createBaseState();
-    vi.spyOn(api, 'getWorld').mockResolvedValue({
-      id: 'world-1',
-      name: 'world-1',
-      currentChatId: 'chat-1',
-      chats: [{ id: 'chat-1', name: 'Renamed Chat' }],
-      agents: []
-    } as any);
+    const getWorldSpy = vi.spyOn(api, 'getWorld');
 
     const nextState = await (worldUpdateHandlers['handleSystemEvent'] as any)(state, {
       chatId: 'chat-1',
       content: {
-        eventType: 'chat-title-updated'
+        eventType: 'chat-title-updated',
+        title: 'Renamed Chat'
       }
     });
 
-    expect(api.getWorld).toHaveBeenCalledWith('world-1');
+    // Lightweight in-place update: no API round-trip needed since title is in payload.
+    expect(getWorldSpy).not.toHaveBeenCalled();
     expect(nextState.currentChat?.name).toBe('Renamed Chat');
+    expect(nextState.world?.chats[0]?.name).toBe('Renamed Chat');
     expect(nextState.error).toBeNull();
   });
 

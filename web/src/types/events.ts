@@ -25,6 +25,7 @@
  * ```
  * 
  * Changes:
+ * - 2026-03-11: Added `update-chat-search` event typing for the web chat-history filter input.
  * - 2026-02-22: Added responsive right-panel events (`open-right-panel`, `close-right-panel`, `toggle-right-panel`, `switch-right-panel-tab`, `sync-right-panel-viewport`).
  * - 2026-02-21: Added `select-project-folder` event variant for web composer project picker integration.
  * - 2026-02-21: Extended `key-press` payload typing with keyboard modifier/preventDefault fields for textarea Enter/Shift+Enter composer behavior.
@@ -60,6 +61,9 @@ export type WorldEvents =
 
   /** Update user input field value */
   | { name: 'update-input'; payload: { target: { value: string } } }
+
+  /** Update chat-history search field value */
+  | { name: 'update-chat-search'; payload: { target: { value: string } } }
 
   /** Handle key press in message composer */
   | {

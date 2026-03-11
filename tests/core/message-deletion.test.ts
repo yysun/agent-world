@@ -135,7 +135,7 @@ describe('Message Deletion Feature - Unit Tests', () => {
       expect(result.messagesRemovedTotal).toBe(2); // msg-2 and msg-3 removed
     });
 
-    it('should include failure details when agents fail to process', async () => {
+    it('should return success when no agents exist (no-op case)', async () => {
       const world = createTestWorld();
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 0, createdAt: new Date(), updatedAt: new Date() };
 
@@ -144,7 +144,9 @@ describe('Message Deletion Feature - Unit Tests', () => {
 
       const result = await removeMessagesFrom('test-world', 'msg-1', 'chat-1');
 
-      expect(result.success).toBe(false);
+      // No agents means no agent memory to clean up — treated as a successful no-op
+      // so edit resubmission can proceed rather than surfacing a confusing failure.
+      expect(result.success).toBe(true);
       expect(result.failedAgents).toHaveLength(0); // No agents = no failures
       expect(result.messagesRemovedTotal).toBe(0);
     });

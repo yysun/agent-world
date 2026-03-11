@@ -38,4 +38,14 @@ describe('web/world-chat-history search filter', () => {
   it('returns empty list when no chats match', () => {
     expect(filterChatsByQuery(chats, 'non-existent')).toEqual([]);
   });
+
+  it('ignores chats without a usable name', () => {
+    const mixedChats = [
+      ...chats,
+      { id: 'chat-4', name: '' },
+      { id: 'chat-5' },
+    ];
+
+    expect(filterChatsByQuery(mixedChats, 'planning')).toEqual([{ id: 'chat-1', name: 'Planning Session' }]);
+  });
 });

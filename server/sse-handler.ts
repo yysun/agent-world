@@ -30,6 +30,7 @@
  *
  * Created: 2025-11-10 - Extracted from api.ts for reusability
  * Updated: 2026-03-01 - Skip synthesis for 'edit' context to prevent duplicate "From human" messages after message edits.
+ * Updated: 2026-03-11 - Exposed a readiness promise so chat/edit dispatch waits until SSE listeners are attached, preventing the web client from missing the initial user-message echo.
  * Updated: 2026-02-27 - Scoped realtime log forwarding by world/chat to prevent cross-chat log leakage in chat-scoped streams.
  * Updated: 2026-02-26 - Added realtime log-stream forwarding (`type: 'log'`) to SSE clients to align web error visibility with Electron.
  * Updated: 2026-02-20 - Removed stale legacy event-channel SSE forwarding from this handler.
@@ -103,6 +104,11 @@ interface LogStreamEventPayload {
 }
 
 export interface SSEHandler {
+  /**
+   * Resolves once synthesis has finished and live listeners are attached.
+   */
+  ready: Promise<void>;
+
   /**
    * Send a Server-Sent Event to the client
    * @param data - Data object to send (will be JSON stringified)
@@ -223,6 +229,10 @@ export function createSSEHandler(
   // Track already-sent ids to avoid double-emitting synthesized -> live events
   const sentMessageIds = new Set<string>();
   const sentToolCallIds = new Set<string>();
+  let resolveReady: (() => void) | null = null;
+  const ready = new Promise<void>((resolve) => {
+    resolveReady = resolve;
+  });
 
   // Attach direct listeners to world.eventEmitter (defined inside attach to allow synth-before-attach)
   const worldListener = (eventData: any) => {
@@ -471,6 +481,8 @@ export function createSSEHandler(
     } finally {
       // Attach live listeners after synthesis to avoid race where resume emits before client subscribed
       attachListeners();
+      resolveReady?.();
+      resolveReady = null;
     }
   })();
 
@@ -497,6 +509,7 @@ export function createSSEHandler(
   startTimeoutFallback();
 
   return {
+    ready,
     sendSSE,
     endResponse,
     isEnded: () => isResponseEnded

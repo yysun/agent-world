@@ -307,6 +307,25 @@ export async function stopWorldRuntime(runtimeKey: string): Promise<void> {
   await record.runtime.stop();
 }
 
+/**
+ * Stop all active world runtimes with the given worldId regardless of storage
+ * context. Used when a world is deleted so subsequent subscriptions do not
+ * reuse a stale runtime that was loaded for the previous incarnation.
+ */
+export async function stopWorldRuntimesByWorldId(worldId: string): Promise<void> {
+  const resolvedId = toKebabCase(String(worldId || '').trim());
+  if (!resolvedId) return;
+  const keysToStop: string[] = [];
+  for (const [key, record] of runtimes.entries()) {
+    if (record.worldId === resolvedId) {
+      keysToStop.push(key);
+    }
+  }
+  for (const key of keysToStop) {
+    await stopWorldRuntime(key);
+  }
+}
+
 export async function stopAllWorldRuntimes(): Promise<void> {
   const keys = Array.from(runtimes.keys());
   for (const key of keys) {

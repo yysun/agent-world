@@ -12,6 +12,11 @@
  * - 2026-03-04: Added queue metadata fields to non-streaming `/messages` success responses (`queueMessageId`, `queueStatus`, `queueRetryCount`) to expose queue terminal/error state.
  * - 2026-02-27: Hardened non-streaming `/messages` event collection with chat-scoped filtering to prevent cross-chat response contamination.
  * - 2026-02-24: Added `hitlPrompts` payload to `POST /worlds/:worldName/setChat/:chatId` responses so web chat switches can render replayed pending HITL prompts.
+ * - 2026-03-11: Added restoreChat(suppressAutoResume: true) before subscribeWorld in streaming edit path
+ *   to sync agent memory from storage, matching Electron editMessageInChat flow and fixing stale-runtime
+ *   cause of edit-success hang after world delete+recreate in e2e tests.
+ * - 2026-03-11: Added restoreChat before subscribeWorld in handleStreamingChat and handleNonStreamingChat
+ *   send-message paths to match Electron sendChatMessage pattern and prevent stale-agent hangs.
  * - 2026-02-21: Removed temporary server-side folder-picker endpoint in favor of web File API based selection.
  * - 2026-02-20: Enforced options-only HITL response endpoint `POST /worlds/:worldName/hitl/respond` (`optionId` required).
  * - 2026-02-14: Added HITL option response endpoint `POST /worlds/:worldName/hitl/respond` for web/CLI approval submissions.
@@ -810,6 +815,13 @@ async function handleNonStreamingChat(
   };
 
   try {
+    // Sync agent memory from storage before subscribing, mirroring the Electron sendChatMessage pattern.
+    // Prevents stale-runtime agents (e.g. after agent add/delete with a live runtime) from silently
+    // dropping the message with no response-start event.
+    if (chatId) {
+      await restoreChat(worldName, chatId);
+    }
+
     let responseContent = '';
     let queuedMessageId: string | null = null;
     let queuedStatus: string | null = null;
@@ -984,6 +996,13 @@ async function handleStreamingChat(
   sender: string,
   chatId: string
 ): Promise<void> {
+  // Sync agent memory from storage before subscribing, mirroring the Electron sendChatMessage pattern.
+  // Prevents stale-runtime agents (e.g. after agent add/delete with a live runtime) from silently
+  // dropping the message with no response-start event.
+  if (chatId) {
+    await restoreChat(worldName, chatId);
+  }
+
   // Subscribe to world to get the world instance
   const subscription = await subscribeWorld(worldName, { isOpen: true });
   if (!subscription) {
@@ -999,6 +1018,7 @@ async function handleStreamingChat(
 
   // Create SSE handler - automatically sets up headers, listeners, and cleanup
   const sseHandler = createSSEHandler(req, res, world, 'chat', chatId);
+  await sseHandler.ready;
 
   // Clean up subscription when the HTTP response closes/finishes to prevent stale world
   // instances from accumulating in activeSubscribedWorlds.
@@ -1120,6 +1140,11 @@ router.put('/worlds/:worldName/messages/:messageId', validateWorld, async (req: 
       return;
     }
 
+    // Sync agent memory from storage before subscribing so a stale runtime
+    // (e.g. after a world delete+recreate) picks up the fresh agent list.
+    // Mirrors the Electron editMessageInChat flow: restoreChat → ensureWorldSubscribed.
+    await restoreChat(worldCtx.id, chatId, { suppressAutoResume: true });
+
     const subscription = await subscribeWorld(worldCtx.id, { isOpen: true });
     if (!subscription?.world) {
       res.setHeader('Content-Type', 'text/event-stream');
@@ -1132,6 +1157,7 @@ router.put('/worlds/:worldName/messages/:messageId', validateWorld, async (req: 
     await attachOptionalOpikTracer(subscription.world, { source: 'server' });
 
     const sseHandler = createSSEHandler(req, res, subscription.world, 'edit', chatId);
+    await sseHandler.ready;
 
     let subscriptionCleanedUp = false;
     const cleanupSubscription = () => {

@@ -3,6 +3,9 @@
  *
  * Renders the banner and delegates all carousel/navigation UI to SwipeCarousel.
  * Retains only the WorldEdit modal state and its open/close handlers.
+ *
+ * Recent Changes:
+ * - 2026-03-10: Added stable home-page selectors for Playwright web E2E coverage.
  */
 
 import { app, Component } from 'apprun';
@@ -52,7 +55,7 @@ export default class HomeComponent extends Component<HomeState> {
   view = (state: HomeState) => {
     if (state.loading) {
       return (
-        <div className="home-page max-w-7xl mx-auto px-8 py-4">
+        <div className="home-page max-w-7xl mx-auto px-8 py-4" data-testid="home-page">
           <div className="flex flex-col items-center justify-center min-h-screen">
             <div className="text-2xl text-text-secondary">Loading worlds...</div>
           </div>
@@ -62,7 +65,7 @@ export default class HomeComponent extends Component<HomeState> {
 
     if (state.error) {
       return (
-        <div className="home-page max-w-7xl mx-auto px-8 py-4">
+        <div className="home-page max-w-7xl mx-auto px-8 py-4" data-testid="home-page">
           <div className="flex flex-col items-center justify-center min-h-screen gap-4">
             <div className="text-center">
               <h3 className="text-2xl font-bold text-text-primary mb-2">Error loading worlds</h3>
@@ -76,12 +79,12 @@ export default class HomeComponent extends Component<HomeState> {
 
     if (state.worlds.length === 0) {
       return (
-        <div className="home-page max-w-7xl mx-auto px-8 py-4">
+        <div className="home-page max-w-7xl mx-auto px-8 py-4" data-testid="home-page">
           <div className="flex flex-col items-center justify-center min-h-screen gap-4">
             <div className="text-center">
               <h3 className="text-2xl font-bold text-text-primary mb-2">No worlds found</h3>
               <p className="text-lg text-text-secondary mb-4">Create your first world to get started!</p>
-              <button className="btn btn-primary px-6 py-3" $onclick="open-world-create">Create World</button>
+              <button className="btn btn-primary px-6 py-3" $onclick="open-world-create" data-testid="world-create-empty">Create World</button>
             </div>
           </div>
         </div>
@@ -89,7 +92,7 @@ export default class HomeComponent extends Component<HomeState> {
     }
 
     return (
-      <div className="home-page max-w-7xl mx-auto px-8 py-4 min-h-screen flex flex-col justify-center">
+      <div className="home-page max-w-7xl mx-auto px-8 py-4 min-h-screen flex flex-col justify-center" data-testid="home-page">
         {/* Banner */}
         <div className="flex justify-center mb-8">
           <h1 className="banner-title text-4xl tablet:text-5xl desktop:text-6xl font-bold text-center">

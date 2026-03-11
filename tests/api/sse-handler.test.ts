@@ -13,6 +13,9 @@
  * Implementation notes:
  * - Uses an in-memory EventEmitter world and mocked core interfaces only.
  * - No network/socket/file-system usage.
+ *
+ * Recent Changes:
+ * - 2026-03-11: Added readiness coverage to lock listener attachment before chat/edit dispatch.
  */
 
 import { EventEmitter } from 'events';
@@ -242,5 +245,40 @@ describe('sse-handler behavior', () => {
     const messagePayloads = payloads.filter((p) => p.type === 'message');
     // Synthesis must not emit the stale user message for edit context
     expect(messagePayloads).toHaveLength(0);
+  });
+
+  it('exposes readiness only after live listeners are attached', async () => {
+    let resolveMemory: ((value: any[]) => void) | null = null;
+    getMemory.mockImplementation(
+      () =>
+        new Promise<any[]>((resolve) => {
+          resolveMemory = resolve;
+        }),
+    );
+
+    const { createSSEHandler } = await import('../../server/sse-handler.js');
+    const req = createMockReq();
+    const res = createMockRes();
+    const world = { id: 'world-1', eventEmitter: new EventEmitter() } as any;
+
+    const handler = createSSEHandler(req as any, res as any, world, 'test', 'chat-a');
+
+    expect(world.eventEmitter.listenerCount('message')).toBe(0);
+
+    let readyResolved = false;
+    const readyPromise = handler.ready.then(() => {
+      readyResolved = true;
+    });
+    await Promise.resolve();
+    expect(readyResolved).toBe(false);
+
+    resolveMemory?.([]);
+    await readyPromise;
+
+    expect(readyResolved).toBe(true);
+    expect(world.eventEmitter.listenerCount('world')).toBeGreaterThan(0);
+    expect(world.eventEmitter.listenerCount('message')).toBeGreaterThan(0);
+    expect(world.eventEmitter.listenerCount('sse')).toBeGreaterThan(0);
+    expect(world.eventEmitter.listenerCount('system')).toBeGreaterThan(0);
   });
 });

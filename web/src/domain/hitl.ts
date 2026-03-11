@@ -15,6 +15,8 @@
  * - Default option falls back to `no` when present, otherwise first option.
  *
  * Recent Changes:
+ * - 2026-03-11: Added chat-scoped prompt selection helpers so pending HITL state can survive chat switches without
+ *   leaking prompts into the wrong chat UI.
  * - 2026-02-26: Clarified helper support for tool-progress `hitlPrompt` payloads and pending prompt envelopes.
  * - 2026-02-14: Added initial HITL prompt parsing/queue helpers for web client flows.
  */
@@ -131,6 +133,30 @@ export function removeHitlPromptByRequestId(
 ): HitlPromptRequest[] {
   const existing = Array.isArray(queue) ? queue : [];
   return existing.filter((entry) => entry.requestId !== requestId);
+}
+
+export function selectHitlPromptForChat(
+  queue: HitlPromptRequest[],
+  chatId?: string | null,
+): HitlPromptRequest | null {
+  const existing = Array.isArray(queue) ? queue : [];
+  const normalizedChatId = String(chatId || '').trim();
+
+  for (const entry of existing) {
+    const entryChatId = String(entry?.chatId || '').trim();
+    if (!entryChatId || entryChatId === normalizedChatId) {
+      return entry;
+    }
+  }
+
+  return null;
+}
+
+export function hasHitlPromptForChat(
+  queue: HitlPromptRequest[],
+  chatId?: string | null,
+): boolean {
+  return selectHitlPromptForChat(queue, chatId) !== null;
 }
 
 function parseToolCallArgs(raw: unknown): Record<string, unknown> | null {

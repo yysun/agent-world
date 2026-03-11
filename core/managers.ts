@@ -94,6 +94,7 @@ import { hasActiveChatMessageProcessing } from './message-processing-control.js'
 import { replayPendingHitlRequests, listPendingHitlPromptEventsFromMessages } from './hitl.js';
 import { clearChatSkillApprovals, reconstructSkillApprovalsFromMessages } from './load-skill-tool.js';
 import { resumePendingToolCallsForChat } from './events/memory-manager.js';
+import { stopWorldRuntimesByWorldId } from './world-registry.js';
 import {
   storageWrappers,
   ensureInitialization,
@@ -465,7 +466,11 @@ export async function deleteWorld(worldId: string): Promise<boolean> {
     worldData._activityListenerCleanup();
   }
 
-  return await storageWrappers!.deleteWorld(resolvedWorldId);
+  const result = await storageWrappers!.deleteWorld(resolvedWorldId);
+  // Stop any active runtime so subsequent subscriptions get a fresh world
+  // instead of reusing state from the deleted incarnation.
+  await stopWorldRuntimesByWorldId(resolvedWorldId);
+  return result;
 }
 
 /**
