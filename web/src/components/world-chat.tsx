@@ -12,6 +12,12 @@
  * - Message body rendering is delegated to domain helpers to keep this file focused on view composition.
  *
  * Summary of Recent Changes:
+ * - 2026-03-11: Reserved the same left transcript indent for tool rows as avatar-bearing messages so compact tool
+ *   cards align with the other chat boxes instead of hugging the panel edge.
+ * - 2026-03-11: Applied the same surface shadow to user and assistant message cards as tool cards through a shared
+ *   message-surface class so transcript elevation stays visually consistent.
+ * - 2026-03-11: Render tool-related transcript rows as compact non-assistant status surfaces without avatar/meta chrome so
+ *   merged tool calls no longer read like normal assistant replies.
  * - 2026-03-11: Removed first-agent fallback from the waiting indicator so the transcript does not show the wrong
  *   agent name when runtime activity has not resolved a single active agent.
  * - 2026-03-10: Added stable transcript/composer/HITL selectors for Playwright web E2E coverage.
@@ -29,7 +35,7 @@ import type { WorldChatProps, Message } from '../types';
 import toKebabCase from '../utils/toKebabCase';
 import { SenderType, getSenderType } from '../utils/sender-type.js';
 import { shouldHideWorldChatMessage } from '../domain/message-visibility';
-import { isToolResultMessage, renderMessageContent } from '../domain/message-content';
+import { isToolRenderableMessage, renderMessageContent } from '../domain/message-content';
 import { buildCombinedRenderableMessages } from '../domain/tool-merge';
 import { ActivityPulse, ElapsedTimeCounter } from './activity-indicators';
 import { AgentQueueDisplay } from './agent-queue-display';
@@ -91,6 +97,23 @@ export function getWaitingAgentName(activeAgent: WorldChatProps['activeAgent']):
 
 export function isStreamingPlaceholderMessage(message: Message): boolean {
   return Boolean(message?.isStreaming) && String(message?.text || '').trim() === '...';
+}
+
+export function getMessageSurfaceShadowClass(params: {
+  senderType: SenderType;
+  isToolRow: boolean;
+}): string {
+  if (params.isToolRow) {
+    return 'message-surface-shadow';
+  }
+
+  return params.senderType === SenderType.HUMAN || params.senderType === SenderType.AGENT
+    ? 'message-surface-shadow'
+    : '';
+}
+
+export function getToolRowContainerClass(isToolRow: boolean): string {
+  return isToolRow ? 'message-row-tool message-row-reserved-indent' : '';
 }
 
 export function isBranchableAgentMessage(message: Message): boolean {
@@ -379,6 +402,7 @@ export default function WorldChat(props: WorldChatProps) {
               }
 
               const senderType = getSenderType(message.sender);
+              const isToolRow = isToolRenderableMessage(message);
               const isCrossAgentMessage = hasSenderAgentMismatch(message);
               // Memory-only message: INCOMING agent message (type=user/human) saved to another agent's memory without triggering response
               // This is when an agent's reply gets saved to another agent's memory as an incoming message
@@ -420,17 +444,21 @@ export default function WorldChat(props: WorldChatProps) {
                 return null;
               }
 
-              const baseMessageClass = senderType === SenderType.HUMAN ? 'user-message' : 'agent-message';
+              const baseMessageClass = isToolRow
+                ? 'tool-row-message'
+                : senderType === SenderType.HUMAN ? 'user-message' : 'agent-message';
               const systemClass = senderType === SenderType.SYSTEM ? 'system-message' : '';
               const crossAgentClass = isCrossAgentMessage && !isMemoryOnlyMessage && senderType !== SenderType.HUMAN ? 'cross-agent-message' : '';
               const memoryOnlyClass = isMemoryOnlyMessage ? 'memory-only-message' : '';
-              const toolClass = isToolResultMessage(message) ? 'tool-message' : '';
-              const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass} ${memoryOnlyClass} ${toolClass}`.trim();
-              const rowAlignmentClass = getMessageRowAlignmentClass(senderType, isCrossAgentMessage);
+              const toolClass = isToolRow ? 'tool-message' : '';
+              const shadowClass = getMessageSurfaceShadowClass({ senderType, isToolRow });
+              const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass} ${memoryOnlyClass} ${toolClass} ${shadowClass}`.trim();
+              const rowAlignmentClass = isToolRow ? 'message-row-left' : getMessageRowAlignmentClass(senderType, isCrossAgentMessage);
               const isHumanAvatar = senderType === SenderType.HUMAN;
               const avatarSpriteIndex = getMessageAvatarSpriteIndex(message);
               const avatarTitle = senderType === SenderType.HUMAN ? 'HUMAN' : message.sender || 'Agent';
-              const hideAvatarForStreamingRow = Boolean(message.isStreaming) && !waitingMessageUiConfig.showWaitingAvatar;
+              const hideAvatarForStreamingRow = isToolRow || (Boolean(message.isStreaming) && !waitingMessageUiConfig.showWaitingAvatar);
+              const showMessageMeta = !isToolRow;
 
               const isUserMessage = senderType === SenderType.HUMAN;
               const isEditing = editingMessageId === message.id;
@@ -484,7 +512,7 @@ export default function WorldChat(props: WorldChatProps) {
               return (
                 <div
                   key={message.id || 'msg-' + index}
-                  className={`message-row ${rowAlignmentClass}`}
+                  className={`message-row ${rowAlignmentClass} ${getToolRowContainerClass(isToolRow)}`.trim()}
                   data-testid={message.messageId ? `message-row-${message.messageId}` : undefined}
                   data-message-frontend-id={message.id || undefined}
                   data-message-role={senderType}
@@ -495,16 +523,18 @@ export default function WorldChat(props: WorldChatProps) {
                     </div>
                   )}
                   <div className={messageClasses}>
-                    <div className="message-meta">
-                      <div className="message-sender" style={{ whiteSpace: 'pre-line' }}>
-                        {displayLabel}
-                      </div>
-                      {messageMetaUiConfig.timestampPlacement === 'top' && (
-                        <div className="message-timestamp message-timestamp-top">
-                          {formatMessageTimestamp(message.createdAt)}
+                    {showMessageMeta && (
+                      <div className="message-meta">
+                        <div className="message-sender" style={{ whiteSpace: 'pre-line' }}>
+                          {displayLabel}
                         </div>
-                      )}
-                    </div>
+                        {messageMetaUiConfig.timestampPlacement === 'top' && (
+                          <div className="message-timestamp message-timestamp-top">
+                            {formatMessageTimestamp(message.createdAt)}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {isEditing ? (
                       <div className="message-edit-container">
                         <textarea

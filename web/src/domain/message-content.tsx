@@ -17,6 +17,12 @@
  * - Keeps helper logic local to this domain module for focused maintenance
  *
  * Recent Changes:
+ * - 2026-03-11: Doubled markdown tool-preview viewport height to 10 lines and exposed the max-line setting through
+ *   a small helper so compact preview sizing stays testable.
+ * - 2026-03-11: Removed visible tool toggle text so compact tool rows use chevron-only controls while keeping
+ *   accessible labels and correct expand/collapse icon state.
+ * - 2026-03-11: Added shared tool-row classification plus compact header rendering with explicit Open/Collapse text
+ *   and a flashing active-status dot so web tool rows no longer depend on assistant message chrome.
  * - 2026-03-06: Restore merged completed tool-card custom renderers from attached tool-result rows and allow same-origin artifact preview URLs.
  * - 2026-03-06: Render persisted tool execution envelope previews for adopted tools instead of showing raw envelope JSON in restored tool cards.
  * - 2026-03-06: Parse canonical JSON tool-result payloads in web status detection so failed shell results serialized as JSON do not render as `done`.
@@ -43,6 +49,32 @@ import {
 
 export function isToolResultMessage(message: Message): boolean {
   return message.type === 'tool';
+}
+
+export type ToolSummaryStatus = 'running' | 'done' | 'failed';
+
+export function isToolRenderableMessage(message: Message): boolean {
+  const anyMessage = message as any;
+  if (Array.isArray(anyMessage?.combinedToolResults)) {
+    return true;
+  }
+  if (Boolean(anyMessage?.isToolStreaming)) {
+    return true;
+  }
+  if (isToolResultMessage(message)) {
+    return true;
+  }
+  if (Array.isArray(anyMessage?.tool_calls) && anyMessage.tool_calls.length > 0) {
+    return true;
+  }
+
+  const role = String(anyMessage?.role || '').trim().toLowerCase();
+  if (role === 'tool') {
+    return true;
+  }
+
+  const content = String(anyMessage?.content || anyMessage?.text || '').trim();
+  return /^calling tool(?::|\s)/i.test(content);
 }
 
 function parseToolResultRecord(text: string): Record<string, unknown> | null {
@@ -144,7 +176,7 @@ function resolveToolDisplayName(message: Message): string {
   return 'unknown';
 }
 
-function resolveToolSummaryStatus(message: Message): 'running' | 'done' | 'failed' {
+function resolveToolSummaryStatus(message: Message): ToolSummaryStatus {
   const combinedToolResults: Message[] = Array.isArray((message as any)?.combinedToolResults)
     ? (message as any).combinedToolResults
     : [];
@@ -169,10 +201,22 @@ function resolveToolSummaryStatus(message: Message): 'running' | 'done' | 'faile
   return 'done';
 }
 
+export function getToolSummaryStatus(message: Message): ToolSummaryStatus {
+  return resolveToolSummaryStatus(message);
+}
+
 export function getToolOneLineSummary(message: Message): string {
   const name = resolveToolDisplayName(message);
-  const status = resolveToolSummaryStatus(message);
+  const status = getToolSummaryStatus(message);
   return `tool: ${name} - ${status}`;
+}
+
+export function getToolToggleLabel(isExpanded: boolean): 'Open' | 'Collapse' {
+  return isExpanded ? 'Collapse' : 'Open';
+}
+
+export function getToolPreviewMaxLines(): number {
+  return 10;
 }
 
 function getToolDisplayText(message: Message): string {
@@ -191,7 +235,11 @@ function renderToolPreviewItem(item: ToolPreview, key: string) {
 
   if ((item.kind === 'markdown' || item.renderer === 'markdown') && typeof item.text === 'string') {
     return (
-      <div className="tool-preview-item tool-preview-markdown" key={key}>
+      <div
+        className="tool-preview-item tool-preview-markdown"
+        key={key}
+        style={{ '--tool-preview-max-lines': String(getToolPreviewMaxLines()) } as any}
+      >
         {safeHTML(renderMarkdown(item.text))}
       </div>
     );
@@ -303,45 +351,56 @@ function getToolMergedStatus(combinedToolResults: Message[]): 'running' | 'done'
   return hasFailure ? 'failed' : 'done';
 }
 
-function renderMergedToolCard(message: Message) {
-  const combinedToolResults: Message[] = (message as any).combinedToolResults || [];
-  const toolCalls: any[] = Array.isArray((message as any).tool_calls) ? (message as any).tool_calls : [];
-  const status = getToolMergedStatus(combinedToolResults);
-  const isExpanded = (message as any).isToolOutputExpanded || false;
-  const summaryLine = getToolOneLineSummary(message);
-
+function renderToolSummaryHeader(message: Message, isExpanded: boolean) {
+  const status = getToolSummaryStatus(message);
   const statusClass = status === 'done' ? 'tool-status-done'
     : status === 'failed' ? 'tool-status-failed'
       : 'tool-status-running';
-  const toggleTitle = isExpanded ? 'Collapse' : 'Expand';
+  const toggleLabel = getToolToggleLabel(isExpanded);
 
   return (
-    <div className="merged-tool-card">
-      <div className="tool-output-header">
-        <span className={`tool-summary-line ${statusClass}`}>{summaryLine}</span>
-        <button
-          className="tool-output-toggle"
-          $onclick={['toggle-tool-output', message.id]}
-          title={toggleTitle}
-          aria-label={toggleTitle}
-          aria-expanded={isExpanded}
-        >
-          <svg
-            className="tool-toggle-icon"
-            viewBox="0 0 20 20"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            {isExpanded
-              ? <path d="M5 8l5 5 5-5" />
-              : <path d="M8 5l5 5-5 5" />}
-          </svg>
-        </button>
+    <div className="tool-output-header">
+      <div className="tool-summary-group">
+        <span
+          className={`tool-status-dot ${statusClass} ${status === 'running' ? 'tool-status-dot-pulse' : ''}`.trim()}
+          aria-hidden="true"
+        ></span>
+        <span className={`tool-summary-line ${statusClass}`}>{getToolOneLineSummary(message)}</span>
       </div>
+      <button
+        className="tool-output-toggle"
+        $onclick={['toggle-tool-output', message.id]}
+        title={toggleLabel}
+        aria-label={toggleLabel}
+        aria-expanded={isExpanded}
+      >
+        <svg
+          className="tool-toggle-icon"
+          viewBox="0 0 20 20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          {isExpanded
+            ? <path d="M5 8l5 5 5-5" />
+            : <path d="M8 5l5 5-5 5" />}
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+function renderMergedToolCard(message: Message) {
+  const combinedToolResults: Message[] = (message as any).combinedToolResults || [];
+  const toolCalls: any[] = Array.isArray((message as any).tool_calls) ? (message as any).tool_calls : [];
+  const isExpanded = (message as any).isToolOutputExpanded || false;
+
+  return (
+    <div className="merged-tool-card tool-surface">
+      {renderToolSummaryHeader(message, isExpanded)}
       {isExpanded && (
         <div className="merged-tool-body">
           {toolCalls.map((tc: any, i: number) => {
@@ -401,14 +460,16 @@ export function renderMessageContent(message: Message) {
   }
 
   if (message.isToolStreaming) {
+    const isExpanded = message.isToolOutputExpanded || false;
+
     return (
-      <div className="tool-stream-output">
-        <div className="tool-stream-header">
-          ⚙️ Executing...
-        </div>
-        <div className={`tool-stream-content ${message.streamType === 'stderr' ? 'stderr' : 'stdout'}`}>
-          <pre className="tool-output-text">{message.text || '(waiting for output...)'}</pre>
-        </div>
+      <div className="tool-output-container tool-surface tool-output-live">
+        {renderToolSummaryHeader(message, isExpanded)}
+        {isExpanded && (
+          <div className={`tool-output-content ${message.streamType === 'stderr' ? 'tool-output-stderr' : 'tool-output-stdout'}`}>
+            <pre className="tool-output-text">{message.text || '(waiting for output...)'}</pre>
+          </div>
+        )}
       </div>
     );
   }
@@ -417,41 +478,10 @@ export function renderMessageContent(message: Message) {
     const { content, wasTruncated } = truncateToolOutput(getToolDisplayText(message));
     const isExpanded = message.isToolOutputExpanded || false;
     const outputClass = isStderrOutput(message) ? 'tool-output-stderr' : 'tool-output-stdout';
-    const status = resolveToolSummaryStatus(message);
-    const statusClass = status === 'failed' ? 'tool-status-failed'
-      : status === 'running' ? 'tool-status-running'
-        : 'tool-status-done';
-    const toggleTitle = isExpanded ? 'Collapse output' : 'Open output';
 
     return (
-      <div className="tool-output-container">
-        <div className="tool-output-header">
-          <span className={`tool-summary-line ${statusClass}`}>
-            {getToolOneLineSummary(message)}
-          </span>
-          <button
-            className="tool-output-toggle"
-            $onclick={['toggle-tool-output', message.id]}
-            title={toggleTitle}
-            aria-label={toggleTitle}
-            aria-expanded={isExpanded}
-          >
-            <svg
-              className="tool-toggle-icon"
-              viewBox="0 0 20 20"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              {isExpanded
-                ? <path d="M5 8l5 5 5-5" />
-                : <path d="M8 5l5 5-5 5" />}
-            </svg>
-          </button>
-        </div>
+      <div className="tool-output-container tool-surface">
+        {renderToolSummaryHeader(message, isExpanded)}
         {isExpanded && (
           <div className={`tool-output-content ${outputClass}`}>
             {renderToolResultBody(message, content)}

@@ -12,6 +12,10 @@
  * - Balances AppRun/Tailwind utility usage with stylesheet-level overrides for complex chat behavior.
  *
  * Summary of Recent Changes:
+ * - 2026-03-11: Added the shared message-surface shadow class to user and assistant cards so they match tool-card elevation.
+ * - 2026-03-11: Removed visible tool toggle text so compact tool rows use icon-only expand/collapse controls.
+ * - 2026-03-11: Restyled tool-related transcript rows as compact full-width status cards with explicit Open/Collapse text
+ *   and a pulsing active dot so they no longer inherit assistant message chrome.
  * - 2026-02-21: Aligned mobile right-panel world action buttons on the same header row as the close button.
  * - 2026-02-21: Removed right-panel mobile Chats/World tab styling, kept world actions at the top of the panel, and added right spacing for the hamburger toggle button.
  * - 2026-02-22: Added responsive right-panel styles (desktop side panel, tablet slide-in, mobile bottom-sheet) and disabled world zoom scaling on smaller viewports.
@@ -1232,6 +1236,16 @@ legend {
   min-width: 0;
 }
 
+.message-row.message-row-reserved-indent {
+  box-sizing: border-box;
+  padding-left: calc(var(--chat-message-avatar-size) + var(--chat-message-avatar-gap));
+}
+
+.message-row.message-row-reserved-indent .message {
+  width: 100%;
+  max-width: 100%;
+}
+
 .user-message {
   align-self: flex-start;
   background: none;
@@ -1253,10 +1267,19 @@ legend {
   color: var(--text-primary);
 }
 
-/* Tool result message styling: purple border */
+/* Tool message styling */
+.tool-row-message {
+  align-self: stretch;
+  padding: 0;
+  gap: 0;
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+}
+
 .tool-message {
-  border-left: 3px solid #ab47bc !important;
-  /* Purple for tool outputs */
+  border-left: 0 !important;
+  /* Tool surfaces render inside the message body instead of using assistant bubble chrome */
 }
 
 /* Cross-agent message styling: purple border for agent-to-agent messages */
@@ -2140,6 +2163,10 @@ legend {
     --chat-message-avatar-gap: 0;
     display: block;
     width: 100%;
+  }
+
+  .message-row.message-row-reserved-indent {
+    padding-left: 0;
   }
 
   .message-avatar-container {
@@ -3657,10 +3684,16 @@ legend {
 /* Tool Output Container */
 .tool-output-container {
   margin: 8px 0;
-  border: none;
-  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--border-secondary) 82%, #f59e0b 18%);
+  border-radius: 10px;
   overflow: hidden;
-  background-color: var(--bg-secondary);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--bg-secondary) 88%, #fff3c4 12%), var(--bg-secondary));
+}
+
+.tool-surface,
+.message-surface-shadow {
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
 }
 
 /* Tool Output Header */
@@ -3669,7 +3702,53 @@ legend {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 8px 12px;
+  padding: 10px 12px;
+}
+
+.tool-summary-group {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.tool-status-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.tool-status-dot.tool-status-done {
+  background-color: #10b981;
+}
+
+.tool-status-dot.tool-status-failed {
+  background-color: #ef4444;
+}
+
+.tool-status-dot.tool-status-running {
+  background-color: #f59e0b;
+}
+
+.tool-status-dot-pulse {
+  animation: toolStatusPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes toolStatusPulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(0.9);
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+  }
+
+  50% {
+    opacity: 0.45;
+    transform: scale(1.12);
+    box-shadow: 0 0 0 0.35rem rgba(245, 158, 11, 0.16);
+  }
 }
 
 /* Tool Output Toggle Button */
@@ -3677,27 +3756,28 @@ legend {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.75rem;
-  height: 1.75rem;
+  width: 2rem;
+  height: 2rem;
   padding: 0;
-  background-color: transparent;
-  border: 0 !important;
-  border-radius: 4px;
+  background-color: color-mix(in srgb, var(--bg-tertiary) 72%, white 28%);
+  border: 1px solid color-mix(in srgb, var(--border-secondary) 75%, #f59e0b 25%) !important;
+  border-radius: 999px;
   cursor: pointer;
   color: var(--text-secondary);
   outline: none;
   box-shadow: none;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
 
 .tool-output-toggle:hover {
-  background-color: var(--bg-tertiary);
-  color: var(--accent-primary);
+  background-color: color-mix(in srgb, var(--bg-tertiary) 58%, #fff7d6 42%);
+  border-color: color-mix(in srgb, var(--border-secondary) 55%, #f59e0b 45%) !important;
+  color: var(--text-primary);
 }
 
 .tool-output-toggle:focus-visible {
-  outline: none;
-  box-shadow: none;
+  outline: 2px solid rgba(245, 158, 11, 0.35);
+  outline-offset: 2px;
 }
 
 /* Tool Label */
@@ -3711,7 +3791,7 @@ legend {
   min-width: 0;
   flex: 1;
   font-size: 0.9rem;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.35;
   white-space: nowrap;
   overflow: hidden;
@@ -3751,7 +3831,7 @@ legend {
   background-color: var(--bg-primary);
   border-radius: 4px;
   font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
-  font-size: 0.8125rem;
+  font-size: 0.9rem;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
@@ -3961,10 +4041,11 @@ legend {
 /* Merged Tool Card */
 .merged-tool-card {
   margin: 8px 0;
-  border: none;
-  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--border-secondary) 82%, #f59e0b 18%);
+  border-radius: 10px;
   overflow: hidden;
-  background-color: var(--bg-secondary);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--bg-secondary) 88%, #fff3c4 12%), var(--bg-secondary));
 }
 
 .tool-status {
@@ -3989,6 +4070,50 @@ legend {
 
 .merged-tool-body {
   padding: 4px 0;
+}
+
+.tool-output-live .tool-output-content {
+  padding-top: 8px;
+}
+
+.tool-preview-markdown {
+  padding: 12px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  max-height: calc(1.5em * var(--tool-preview-max-lines, 10) + 24px);
+  overflow-y: auto;
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+}
+
+.tool-preview-markdown h1,
+.tool-preview-markdown h2,
+.tool-preview-markdown h3,
+.tool-preview-markdown h4,
+.tool-preview-markdown h5,
+.tool-preview-markdown h6 {
+  margin: 0 0 0.5rem;
+  font-size: 1em;
+  line-height: 1.5;
+  font-weight: 700;
+}
+
+.tool-preview-markdown p,
+.tool-preview-markdown ul,
+.tool-preview-markdown ol,
+.tool-preview-markdown pre,
+.tool-preview-markdown blockquote {
+  margin: 0 0 0.5rem;
+}
+
+.tool-preview-markdown pre,
+.tool-preview-markdown code {
+  font-family: inherit;
+  font-size: 1em;
+}
+
+.tool-preview-markdown > *:last-child {
+  margin-bottom: 0;
 }
 
 .tool-result-block {

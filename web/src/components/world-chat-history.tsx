@@ -12,6 +12,8 @@
  * - Filtering stays pure via `filterChatsByQuery` for direct unit coverage.
  *
  * Summary of Recent Changes:
+ * - 2026-03-11: Applied the shared surface-shadow class to right-panel chat list rows so their elevation matches
+ *   transcript cards and tool panels.
  * - 2026-03-10: Added stable chat-history selectors and current-chat metadata for Playwright web E2E coverage.
  */
 
@@ -21,6 +23,10 @@ export function filterChatsByQuery<T extends { name?: string }>(chats: T[], quer
   const normalizedQuery = String(query || '').trim().toLowerCase();
   if (!normalizedQuery) return chats;
   return chats.filter((chat) => String(chat?.name || '').toLowerCase().includes(normalizedQuery));
+}
+
+export function getChatListItemClass(isCurrent: boolean): string {
+  return `chat-item simplified-chat-item chat-list-li message-surface-shadow${isCurrent ? ' current' : ''}`;
 }
 
 export default function WorldChatHistory(props: WorldChatHistoryProps) {
@@ -77,7 +83,7 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
                 <li
                   key={chat.id}
                   $onclick={["load-chat-from-history", chat.id]}
-                  className={`chat-item simplified-chat-item chat-list-li${isCurrent ? ' current' : ''}`}
+                  className={getChatListItemClass(isCurrent)}
                   data-testid={`chat-item-${chat.id}`}
                   data-chat-id={chat.id}
                   data-chat-current={isCurrent ? 'true' : 'false'}

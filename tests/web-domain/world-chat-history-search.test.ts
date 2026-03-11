@@ -8,10 +8,11 @@
  * - Empty query returns all chats.
  * - Matching is case-insensitive.
  * - Non-matching query returns an empty list.
+ * - Chat list rows reuse the shared surface-shadow class.
  */
 
 import { describe, expect, it } from 'vitest';
-import { filterChatsByQuery } from '../../web/src/components/world-chat-history';
+import { filterChatsByQuery, getChatListItemClass } from '../../web/src/components/world-chat-history';
 
 describe('web/world-chat-history search filter', () => {
   const chats = [
@@ -47,5 +48,10 @@ describe('web/world-chat-history search filter', () => {
     ];
 
     expect(filterChatsByQuery(mixedChats, 'planning')).toEqual([{ id: 'chat-1', name: 'Planning Session' }]);
+  });
+
+  it('adds the shared surface shadow class to chat list rows', () => {
+    expect(getChatListItemClass(false)).toBe('chat-item simplified-chat-item chat-list-li message-surface-shadow');
+    expect(getChatListItemClass(true)).toBe('chat-item simplified-chat-item chat-list-li message-surface-shadow current');
   });
 });

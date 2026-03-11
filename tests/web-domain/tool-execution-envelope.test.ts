@@ -18,6 +18,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { getCustomRendererMatch } from '../../web/src/domain/custom-renderers';
+import { getToolPreviewMaxLines } from '../../web/src/domain/message-content';
 import { extractToolPayload } from '../../web/src/domain/renderers/custom-renderer-utils';
 import { getToolPreviewDisplayText } from '../../web/src/domain/tool-execution-envelope';
 import type { Message } from '../../web/src/types';
@@ -35,6 +36,10 @@ function makeToolMessage(content: string): Message {
 }
 
 describe('web tool execution envelope helpers', () => {
+  it('uses a 10-line viewport for markdown tool previews', () => {
+    expect(getToolPreviewMaxLines()).toBe(10);
+  });
+
   it('returns preview display text from persisted tool envelopes', () => {
     const message = makeToolMessage(JSON.stringify({
       __type: 'tool_execution_envelope',
@@ -51,6 +56,25 @@ describe('web tool execution envelope helpers', () => {
 
     expect(getToolPreviewDisplayText(message)).toContain('status: success');
     expect(getToolPreviewDisplayText(message)).toContain('out.txt');
+  });
+
+  it('returns markdown preview text from persisted tool envelopes', () => {
+    const message = makeToolMessage(JSON.stringify({
+      __type: 'tool_execution_envelope',
+      version: 1,
+      tool: 'shell_cmd',
+      tool_call_id: 'call-1',
+      status: 'completed',
+      preview: {
+        kind: 'markdown',
+        renderer: 'markdown',
+        text: '# Command Execution\n\nCommand: codex exec\n\nStatus: done',
+      },
+      result: 'status: success\nexit_code: 0',
+    }));
+
+    expect(getToolPreviewDisplayText(message)).toContain('Command Execution');
+    expect(getToolPreviewDisplayText(message)).toContain('Status: done');
   });
 
   it('prefers envelope preview payloads for custom renderer extraction', () => {
