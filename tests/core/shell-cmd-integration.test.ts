@@ -19,6 +19,8 @@
  * - Executes real local shell commands and validates formatted tool output.
  * 
  * Changes:
+ * - 2026-03-11: Updated coverage: workingDirectory/working_directory args are now silently stripped (context fields); added test for genuinely unknown param system error event.
+ * - 2026-03-11: Added coverage for system error event emission on tool parameter validation failure (unknown parameter).
  * - 2026-03-06: Updated shell continuation assertions to use the canonical bounded-preview result and verified shell stdout is no longer persisted as a synthetic assistant message after streaming ends.
  * - 2026-02-28: Added risk-gating integration coverage for blocked catastrophic operations and approval-required high-risk commands without HITL context.
  * - 2026-02-21: Added `list_files` bounding/filtering coverage (`maxEntries`, `includePattern`) to prevent oversized tool results from inflating continuation tokens.
@@ -892,6 +894,80 @@ describe('shell_cmd integration with worlds', () => {
     expect(result).toContain('**Command:** `ls ./this-directory-does-not-exist-xyz`');
     expect(result).toContain('Error:');
     expect(result.toLowerCase()).toContain('no such file');
+  });
+
+  test('should silently strip workingDirectory when passed as a tool arg (context field, not tool param)', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+    const world = await getTestWorld();
+    if (!world) {
+      throw new Error('Test world not initialized');
+    }
+
+    const systemEvents: any[] = [];
+    const systemListener = (event: any) => systemEvents.push(event);
+    world.eventEmitter.on('system', systemListener);
+
+    let result: string | undefined;
+    try {
+      result = await shellCmdTool.execute(
+        {
+          command: 'echo',
+          parameters: ['wd-strip-test'],
+          workingDirectory: '/tmp' // context-level field — must be stripped, not rejected
+        },
+        undefined,
+        undefined,
+        {
+          world,
+          chatId: 'wd-strip-chat',
+        }
+      );
+    } finally {
+      world.eventEmitter.off('system', systemListener);
+    }
+
+    // Call must succeed — no system error event
+    const errorEvent = systemEvents.find((e) => e.content?.type === 'error');
+    expect(errorEvent).toBeUndefined();
+    // Command output is present
+    expect(result).toContain('wd-strip-test');
+  });
+
+  test('should emit system error event when a truly unknown parameter is passed', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+    const world = await getTestWorld();
+    if (!world) {
+      throw new Error('Test world not initialized');
+    }
+
+    const systemEvents: any[] = [];
+    const systemListener = (event: any) => systemEvents.push(event);
+    world.eventEmitter.on('system', systemListener);
+
+    try {
+      await shellCmdTool.execute(
+        {
+          command: 'echo',
+          parameters: ['hello'],
+          bogusUnknownParam: 'value' // genuinely unknown parameter
+        },
+        undefined,
+        undefined,
+        {
+          world,
+          chatId: 'validation-error-chat',
+        }
+      );
+    } finally {
+      world.eventEmitter.off('system', systemListener);
+    }
+
+    const errorEvent = systemEvents.find((e) => e.content?.type === 'error');
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent.content.message).toContain('shell_cmd');
+    expect(errorEvent.content.message.toLowerCase()).toContain('bogusunknownparam');
   });
 
   test('should persist execution history across tool calls', async () => {

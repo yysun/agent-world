@@ -16,6 +16,8 @@
  * - Consistent parameter validation for both MCP and built-in tools
  *
  * Recent Changes:
+ * - 2026-03-11: Strip workingDirectory/working_directory from shell_cmd args in normalizeKnownParameterAliases; these are context fields the LLM echoes from the system prompt, not tool parameters.
+ * - 2026-03-11: Emit system error event in wrapToolWithValidation when tool parameter validation fails so errors surface in the UI.
  * - 2026-03-01: Added backward-compatible normalization for `.includePattern` -> `includePattern` in `list_files` and `grep`.
  * - 2026-02-20: Enforced JSON-schema `additionalProperties: false` by rejecting unknown tool arguments during validation.
  * - 2026-02-27: Added backward-compat cleanup for removed HITL confirmation args by stripping them before schema validation.
@@ -29,6 +31,7 @@
 
 import { World, Agent, ChatMessage, WorldSSEEvent } from './types.js';
 import { publishToolEvent } from './events/index.js';
+import { publishEvent } from './events/publishers.js';
 
 function normalizeKnownParameterAliases(toolName: string, args: any): {
   normalizedArgs: any;
@@ -168,6 +171,20 @@ function normalizeKnownParameterAliases(toolName: string, args: any): {
       normalizedArgs.url = normalizedArgs.href;
       delete normalizedArgs.href;
       corrections.push("href -> url");
+    }
+  }
+
+  if (toolName === 'shell_cmd') {
+    // Strip context-level working directory fields if the LLM echoes them as tool args.
+    // The trusted working directory is always read from context.world.variables or
+    // context.workingDirectory by resolveTrustedShellWorkingDirectory — never from LLM args.
+    if (normalizedArgs.workingDirectory !== undefined) {
+      corrections.push('workingDirectory stripped (system context field, not a tool parameter)');
+      delete normalizedArgs.workingDirectory;
+    }
+    if (normalizedArgs.working_directory !== undefined) {
+      corrections.push('working_directory stripped (system context field, not a tool parameter)');
+      delete normalizedArgs.working_directory;
     }
   }
 
@@ -397,6 +414,20 @@ export function wrapToolWithValidation(tool: any, toolName: string): any {
       if (tool.parameters) {
         const validation = validateToolParameters(args, tool.parameters, toolName);
         if (!validation.valid) {
+          // Emit system error event so the UI can surface the validation failure
+          const validationWorld = context?.world;
+          const validationChatId = typeof context?.chatId === 'string' ? context.chatId.trim() : '';
+          if (validationWorld && validationChatId) {
+            try {
+              publishEvent(validationWorld, 'system', {
+                type: 'error',
+                eventType: 'error',
+                message: `Tool parameter validation errors for ${toolName}: ${validation.error}`,
+              }, validationChatId);
+            } catch {
+              // best-effort: don't let event emission fail the tool call
+            }
+          }
           // Return a standardized error result
           return `Error: Tool parameter validation failed for ${toolName}: ${validation.error}`;
         }
