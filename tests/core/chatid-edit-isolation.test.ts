@@ -10,6 +10,10 @@
  *
  * Notes:
  * - Uses mocked in-memory storage wrappers only.
+ *
+ * Recent Changes:
+ * - 2026-03-11: Added regression coverage that `updateWorld` synchronizes live runtime `variables`
+ *   so shell-command cwd resolution sees updated `working_directory` without a runtime refresh.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -50,6 +54,58 @@ describe('chatId isolation for edit flows', () => {
         id: 'world-1',
         name: 'World Renamed',
         currentChatId: 'chat-1'
+      })
+    );
+  });
+
+  it('syncs active runtime variables when updating world metadata', async () => {
+    vi.resetModules();
+
+    const persistedWorld = {
+      id: 'world-1',
+      name: 'World 1',
+      turnLimit: 5,
+      currentChatId: 'chat-1',
+      variables: 'working_directory=/tmp/old-project',
+      createdAt: new Date(),
+      lastUpdated: new Date()
+    };
+
+    const activeWorld = {
+      ...persistedWorld,
+      eventEmitter: new EventEmitter(),
+      agents: new Map(),
+      chats: new Map([['chat-1', { id: 'chat-1', name: 'New Chat', messageCount: 0 }]]),
+    } as any;
+
+    const storageWrappers = {
+      loadWorld: vi.fn().mockResolvedValue(persistedWorld),
+      saveWorld: vi.fn().mockResolvedValue(undefined),
+    };
+
+    vi.doMock('../../core/storage/storage-factory.js', () => ({
+      createStorageWithWrappers: vi.fn().mockResolvedValue(storageWrappers),
+      getDefaultRootPath: vi.fn().mockReturnValue('/test/data')
+    }));
+
+    vi.doMock('../../core/subscription.js', () => ({
+      getActiveSubscribedWorld: vi.fn().mockReturnValue(activeWorld)
+    }));
+
+    const managers = await import('../../core/managers.js');
+    const updated = await managers.updateWorld('world-1', {
+      variables: 'working_directory=/Users/esun/Documents/Projects/agent-world'
+    });
+
+    expect(updated).toBe(activeWorld);
+    expect(activeWorld.variables).toBe('working_directory=/Users/esun/Documents/Projects/agent-world');
+    expect(activeWorld.currentChatId).toBe('chat-1');
+    expect(storageWrappers.saveWorld).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'world-1',
+        variables: 'working_directory=/Users/esun/Documents/Projects/agent-world',
+        currentChatId: 'chat-1',
+        lastUpdated: expect.any(Date)
       })
     );
   });

@@ -26,6 +26,8 @@
  * - Automatic agent identification for message source tracking
  *
  * Recent Changes:
+ * - 2026-03-11: Synchronized active runtime world metadata during `updateWorld` so live chats pick up
+ *   updated `variables`/`working_directory` and other top-level config without requiring a runtime refresh.
  * - 2026-03-10: Renamed queue-backed ingress to `enqueueAndProcessUserTurn` and split non-user immediate dispatch into `dispatchImmediateChatMessage`.
  * - 2026-03-10: Removed restore-time user-last resend from persisted chat memory; queue-owned rows are now the only automatic resume authority.
  * - 2026-03-10: Added `restoreChat(..., { suppressAutoResume: true })` support for edit/delete mutation flows so failed last-turn messages are not replayed before mutation.
@@ -378,7 +380,33 @@ export async function updateWorld(worldId: string, updates: UpdateWorldParams): 
   };
 
   await storageWrappers!.saveWorld(updatedData);
+
+  const { getActiveSubscribedWorld } = await import('./subscription.js');
+  const activeRuntimeWorld = getActiveSubscribedWorld(resolvedWorldId);
+  if (activeRuntimeWorld) {
+    syncActiveRuntimeWorldMetadata(activeRuntimeWorld, updatedData);
+    return activeRuntimeWorld;
+  }
+
   return getWorld(resolvedWorldId);
+}
+
+function syncActiveRuntimeWorldMetadata(targetWorld: World, persistedWorld: World): void {
+  targetWorld.name = persistedWorld.name;
+  targetWorld.description = persistedWorld.description;
+  targetWorld.turnLimit = persistedWorld.turnLimit;
+  targetWorld.mainAgent = persistedWorld.mainAgent ?? null;
+  targetWorld.chatLLMProvider = persistedWorld.chatLLMProvider;
+  targetWorld.chatLLMModel = persistedWorld.chatLLMModel;
+  targetWorld.currentChatId = persistedWorld.currentChatId ?? null;
+  targetWorld.mcpConfig = persistedWorld.mcpConfig ?? null;
+  targetWorld.variables = persistedWorld.variables;
+  targetWorld.uiMode = persistedWorld.uiMode;
+  targetWorld.dashboardZones = persistedWorld.dashboardZones;
+  targetWorld.heartbeatEnabled = persistedWorld.heartbeatEnabled === true;
+  targetWorld.heartbeatInterval = persistedWorld.heartbeatInterval ?? null;
+  targetWorld.heartbeatPrompt = persistedWorld.heartbeatPrompt ?? null;
+  targetWorld.lastUpdated = persistedWorld.lastUpdated;
 }
 
 async function getPersistedCurrentChatId(worldId: string): Promise<string | null> {
