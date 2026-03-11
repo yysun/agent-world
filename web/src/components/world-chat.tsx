@@ -12,6 +12,8 @@
  * - Message body rendering is delegated to domain helpers to keep this file focused on view composition.
  *
  * Summary of Recent Changes:
+ * - 2026-03-11: Removed first-agent fallback from the waiting indicator so the transcript does not show the wrong
+ *   agent name when runtime activity has not resolved a single active agent.
  * - 2026-03-10: Added stable transcript/composer/HITL selectors for Playwright web E2E coverage.
  * - 2026-03-01: Moved message timestamps to top metadata row (sender + time) to match Electron layout.
  * - 2026-03-01: Suppressed `...` streaming placeholder transcript rows so waiting state only shows inline working status until real stream content arrives.
@@ -80,6 +82,11 @@ export function formatMessageTimestamp(createdAt: Message['createdAt'] | undefin
   }
 
   return date.toLocaleTimeString();
+}
+
+export function getWaitingAgentName(activeAgent: WorldChatProps['activeAgent']): string {
+  const agentName = String(activeAgent?.name || '').trim();
+  return agentName || 'Agent';
 }
 
 export function isStreamingPlaceholderMessage(message: Message): boolean {
@@ -183,7 +190,7 @@ export default function WorldChat(props: WorldChatProps) {
   const projectButtonTitle = selectedProjectPath
     ? `Project folder: ${selectedProjectPath}`
     : 'Select project folder for context';
-  const waitingAgentName = activeAgent?.name?.trim() || agents[0]?.name?.trim() || 'Agent';
+  const waitingAgentName = getWaitingAgentName(activeAgent);
   const waitingMessageUiConfig = getWaitingMessageUiConfig();
   const messageMetaUiConfig = getMessageMetaUiConfig();
   const agentSpriteByName = new Map<string, number>();

@@ -51,6 +51,8 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2026-03-11: Derived the web waiting indicator's `activeAgent` from world activity payloads so the transcript
+ *   shows the correct agent name instead of a static fallback.
  * - 2026-03-01: Cleared pending HITL prompt UI during optimistic message-edit application so stale pre-edit prompts do not remain visible.
  * - 2026-02-27: Enforced active-chat scoping for system-event ingestion (drop unscoped/mismatched system events when a chat is selected).
  * - 2026-02-26: Preserved transient realtime log/system/error messages across same-chat refreshes (`chat-title-updated`, `agent-created`, HITL refresh) so SSE errors remain visible after metadata reload.
@@ -574,6 +576,66 @@ const handleToolStream = (state: WorldComponentState, data: any): WorldComponent
   return handleToolStreamBase(state, data);
 };
 
+const normalizeActivityAgentKey = (value: unknown): string => {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  return raw.startsWith('agent:') ? raw.slice('agent:'.length) : raw;
+};
+
+const areSameActiveAgent = (
+  left: WorldComponentState['activeAgent'],
+  right: WorldComponentState['activeAgent']
+): boolean => {
+  return (left?.name || '') === (right?.name || '')
+    && (left?.spriteIndex ?? -1) === (right?.spriteIndex ?? -1);
+};
+
+const resolveActiveAgentFromActivity = (
+  state: WorldComponentState,
+  activity: any,
+  shouldWait: boolean
+): WorldComponentState['activeAgent'] => {
+  if (!shouldWait) {
+    return null;
+  }
+
+  const activeAgentKeys = Array.isArray(activity?.activeAgentNames)
+    ? activity.activeAgentNames
+      .map(normalizeActivityAgentKey)
+      .filter(Boolean)
+    : [];
+
+  if (activeAgentKeys.length === 0 && activity?.type === 'response-start') {
+    const sourceAgentKey = normalizeActivityAgentKey(activity?.source);
+    if (sourceAgentKey) {
+      activeAgentKeys.push(sourceAgentKey);
+    }
+  }
+
+  if (activeAgentKeys.length !== 1) {
+    return null;
+  }
+
+  const agentKey = activeAgentKeys[0].toLowerCase();
+  const matchingAgent = (state.world?.agents || []).find((agent) => {
+    const agentId = String(agent?.id || '').trim().toLowerCase();
+    const agentName = String(agent?.name || '').trim().toLowerCase();
+    return agentKey === agentId || agentKey === agentName;
+  });
+
+  if (!matchingAgent) {
+    return null;
+  }
+
+  return {
+    name: matchingAgent.name,
+    spriteIndex: matchingAgent.spriteIndex
+  };
+};
+
 const handleWorldActivity = (state: WorldComponentState, activity: any): WorldComponentState | void => {
   // Check for valid event types
   if (!activity || (activity.type !== 'response-start' && activity.type !== 'response-end' && activity.type !== 'idle')) {
@@ -589,6 +651,7 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
   // pending > 0: Show spinner
   // pending === 0: Hide spinner
   const shouldWait = pending > 0;
+  const nextActiveAgent = resolveActiveAgentFromActivity(state, activity, shouldWait);
 
   // Log world activity events for debugging
   if (activity.type === 'response-start') {
@@ -600,10 +663,11 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
   }
 
   // Only update and return state if isWaiting needs to change
-  if (state.isWaiting !== shouldWait) {
+  if (state.isWaiting !== shouldWait || !areSameActiveAgent(state.activeAgent, nextActiveAgent)) {
     return {
       ...state,
       isWaiting: shouldWait,
+      activeAgent: nextActiveAgent,
       needScroll: true  // Scroll when processing state changes (new content incoming)
     };
   }
