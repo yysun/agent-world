@@ -1,3 +1,99 @@
+v0.14.0
+
+**Highlights**
+- New user message queue for sequential, reliable turn handling
+- New built-in tools: `write_file`, `web_fetch`, and `send_message`
+- Shell command risk gating with human-approval flow before execution
+- Playwright E2E test harnesses for both web and Electron apps
+- Skill editor UI for editing SKILL.md files directly in the desktop app
+- World heartbeat scheduling with configurable cron-based triggers
+
+**User Message Queue**
+- Implemented full user message queue (phases 1–5) with world-scoped runtime registry
+- Automatic polling for queue status with auto-resume logic for recoverable rows
+- Queue-based status visibility in activity tracking and API
+- `send_message` built-in tool with trusted-context injection for batch agent dispatch
+- Enforced required `chatId` in trusted runtime context for tool dispatch
+- Enhanced recovery and error handling for HITL prompts and queue dispatch failures
+- Refactored queue management with dedicated panel slot and layout adjustments
+
+**New Built-in Tools**
+- `write_file` — trusted-scope file writing with security guards and unit tests
+- `web_fetch` — URL fetch with Markdown conversion and human-approval flow
+- `send_message` — batch agent messaging with trusted context injection
+- Tightened tool output size limits and enhanced test coverage for `read_file`, `list_files`, and `grep`
+- Removed deprecated `grep_search` alias
+
+**Shell Command Security**
+- Shell command risk gating: high-risk commands now require human approval before execution
+- Enhanced shell command error handling and output formatting
+- Fixed skill script execution CWD to use the project/skill root directory
+
+**HITL (Human-in-the-Loop) Improvements**
+- Message-authoritative HITL state management — state is now derived from persisted messages
+- Migrated HITL system events to tool-progress events for consistent streaming lifecycle
+- Streamlined HITL request format: removed confirmation stage and cleaned up parameters
+- Enhanced HITL prompt handling and logging across desktop and web
+
+**Skill Registry & Resolution**
+- Symlink-aware skill discovery with regression tests for SKILL.md files
+- Skill-aware script path resolution for global vs. project scope
+- Prevent misclassification of dot-prefixed and option-like tokens in skill path resolution
+- Enhanced `load_skill` feedback and execution directives
+- Duplicate suppression for `load_skill` calls in continuation runs
+- Collision precedence: project-scope skills take priority over global scope
+
+**Chat & Message Rendering**
+- Implemented web app message display parity with Electron (tool cards, status borders)
+- Added XML payload detection — renders XML as escaped code blocks in Markdown
+- Enhanced Markdown rendering with DOMPurify normalization and multiline link support
+- Allowed base64 SVG data URIs in Markdown sanitization
+- Restored optimistic user-message insertion to prevent welcome-card flicker
+- Fixed loading flicker and edit-path streaming issues
+- Fixed lost streaming on send-message path
+
+**Electron Desktop**
+- World view modes and selector in the Electron app
+- Unified logs panel in the Electron header for real-time log streaming
+- `readDesktopApi` helper for safer IPC bridge access with error handling
+- Chat isolation and refresh guards to prevent stale-world rendering
+- IPC error handling and error display in the status bar
+- System event visibility in the Electron status bar
+- Categorized, environment-controlled logging for main and renderer processes
+- Session ID copy button in `MainHeaderBar`
+- Skill editor: `BaseEditor` and `SkillEditor` components for editing SKILL.md files
+
+**Web App**
+- Dashboard mode with inline HITL panel and parser hardening
+- Real-time log streaming in SSE client and UI
+- GitHub shorthand world import support (e.g., `user/repo`)
+- World import from local folders and GitHub sources with validation
+
+**Heartbeat & World Scheduling**
+- Configurable heartbeat mechanism for worlds with `node-cron`-based scheduling
+- Heartbeat triggers idle-activity detection for title generation and other lifecycle hooks
+- Simplified chat title logic to use idle activity as the sole trigger
+
+**Tool Execution & Observability**
+- Tool Execution Envelope for improved tool result and error isolation
+- Feature-path logging categories for LLM and tool diagnostics
+- Real-time log serialization preserving world/chat scope for transcript routing
+- Restored error-level log visibility in the transcript and system status bar
+- Conversation message counting utilities integrated into serialization
+
+**Chat ID & Streaming Reliability**
+- Stronger `chatId` isolation across core, web, API, and CLI
+- Explicit `chatId` enforcement in chat handling refactor
+- `chatId` included in serialized activity events for context routing
+- Preserved `chatId` for assistant streaming rows during refresh reconciliation
+
+**Opik Integration (Optional Tracer)**
+- Optional Opik observability layer finalized with scenario coverage and safety verification
+
+**E2E Testing**
+- Playwright-based E2E harness for the web app (`playwright.web.config.ts`)
+- Playwright-based E2E harness for Electron (`playwright.electron.config.ts`)
+
 v0.13.0
 
 **Highlights**
