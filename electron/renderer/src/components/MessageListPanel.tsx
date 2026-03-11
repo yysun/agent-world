@@ -581,10 +581,10 @@ export default function MessageListPanel({
 
         <article
           className={`min-w-0 ${getMessageCardClassName(message, messagesById, sourceMessages, messageIndex, {
-          isToolCallPending: isPendingToolCallRequest,
-          showLeftBorder: showChatMessageChrome,
-          fullWidthUserMessage: !showChatMessageChrome && isHuman,
-        })} ${isStreamingAssistantMessage ? 'agent-streaming-card' : ''} ${isActiveToolMessage ? 'agent-tool-active-card' : ''}`}
+            isToolCallPending: isPendingToolCallRequest,
+            showLeftBorder: showChatMessageChrome,
+            fullWidthUserMessage: !showChatMessageChrome && isHuman,
+          })} ${isStreamingAssistantMessage ? 'agent-streaming-card' : ''} ${isActiveToolMessage ? 'agent-tool-active-card' : ''}`}
           data-testid={messageKey ? `message-card-${messageKey}` : undefined}
         >
           <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">

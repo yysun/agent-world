@@ -40,7 +40,7 @@ export default function MainContentArea({
     <div className="flex min-h-0 flex-1">
       <section
         className="relative flex min-h-0 min-w-0 flex-1 flex-col"
-        style={{ '--floating-composer-height': '8.5rem' } as React.CSSProperties}
+        style={{ '--floating-composer-height': queuePanel ? '14rem' : '8.5rem' } as React.CSSProperties}
       >
         <MessageListPanel {...messageListProps} />
 

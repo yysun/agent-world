@@ -1195,6 +1195,15 @@ function AppContent({ api }: { api: DesktopApi }) {
   }, [messages]);
 
   useEffect(() => {
+    if (!activeHitlPrompt) return;
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    requestAnimationFrame(() => {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    });
+  }, [activeHitlPrompt]);
+
+  useEffect(() => {
     if (!selectedSessionId) return;
     const composerTextarea = composerTextareaRef.current;
     if (!composerTextarea) return;
