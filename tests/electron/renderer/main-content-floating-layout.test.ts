@@ -15,6 +15,7 @@
  * - Avoids DOM runtime dependencies for deterministic unit coverage.
  *
  * Summary of Recent Changes:
+ * - 2026-03-11: Added no-queue regression coverage so the floating composer inset stays fixed across overlay variants.
  * - 2026-03-05: Updated queue wrapper overlap assertion to enforce lower queue placement near composer (`-mb-6`).
  * - 2026-03-04: Added regression coverage for floating composer/queue layout contract.
  */
@@ -23,7 +24,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('react', () => ({
   default: { createElement: (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({ type, props: props ?? {}, key }) },
-  useState: (initial: unknown) => [initial, () => {}],
+  useState: (initial: unknown) => [initial, () => { }],
 }));
 
 vi.mock('react/jsx-runtime', () => ({
@@ -99,5 +100,23 @@ describe('MainContentArea floating bottom stack layout', () => {
     expect(overlayChildren[0]?.props?.children).toBe(queueProbe);
     expect(overlayChildren[1]?.type).toBe(composerBarSpy);
     expect(overlayChildren[2]).toBe(statusProbe);
+  });
+
+  it('keeps the floating composer inset fixed when no queue panel is present', () => {
+    const tree = MainContentArea({
+      messageListProps: { a: 1 },
+      composerProps: { b: 2 },
+      rightPanelShellProps: { c: 3 },
+      rightPanelContentProps: { d: 4 },
+      queuePanel: null,
+      statusBar: null,
+    }) as {
+      props?: { children?: Array<any> };
+    };
+
+    const rootChildren = tree.props?.children ?? [];
+    const mainSection = rootChildren[0];
+
+    expect((mainSection?.props?.style as Record<string, unknown>)?.['--floating-composer-height']).toBe('8.5rem');
   });
 });

@@ -14,6 +14,7 @@
  * - Preserves existing render order and layout structure from the previous inline block.
  *
  * Recent Changes:
+ * - 2026-03-11: Restored the fixed floating composer inset so queue overlay does not expand message-panel bottom padding.
  * - 2026-03-05: Increased queue/composer overlap (`-mb-6`) so the queue card sits lower, closer to the composer input.
  * - 2026-03-05: Added dedicated `queuePanel` slot rendered above `ComposerBar` so queued user messages appear before the composer.
  * - 2026-03-04: Floated queue/composer/status stack above the message area and exposed a CSS inset variable for message-panel bottom padding.
@@ -40,7 +41,7 @@ export default function MainContentArea({
     <div className="flex min-h-0 flex-1">
       <section
         className="relative flex min-h-0 min-w-0 flex-1 flex-col"
-        style={{ '--floating-composer-height': queuePanel ? '14rem' : '8.5rem' } as React.CSSProperties}
+        style={{ '--floating-composer-height': '8.5rem' } as React.CSSProperties}
       >
         <MessageListPanel {...messageListProps} />
 
