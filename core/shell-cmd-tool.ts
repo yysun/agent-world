@@ -1742,6 +1742,36 @@ function containsImageDataUri(text: string): boolean {
   return /data:image\/[a-z0-9.+-]+;base64,/i.test(String(text || ''));
 }
 
+/**
+ * Strip ANSI escape sequences and terminal control characters from shell output
+ * before sending to the LLM. Raw terminal output often contains spinner animations
+ * (◒◐◓◑), cursor-control codes (\x1b[?25l, \x1b[999D\x1b[J), and ANSI color codes
+ * that confuse LLMs into thinking a process is still running when it has already
+ * completed successfully (exit_code: 0).
+ *
+ * Strips:
+ *  - CSI sequences: \x1b[ ... final-byte  (colors, cursor movement, erase, etc.)
+ *  - OSC sequences: \x1b] ... \x07 or \x1b\  (terminal title/hyperlinks)
+ *  - DCS/SOS/PM/APC sequences: \x1bP/\x1bX/\x1b^/\x1b_ ... \x1b\
+ *  - Single-char Fe escapes: \x1b followed by non-[ byte
+ *  - Bare carriage returns used by spinner overwrites
+ */
+export function stripAnsiFromShellOutput(text: string): string {
+  // CSI sequences: ESC [ ... (any intermediate+final byte)
+  let stripped = text.replace(/\x1b\[[0-9;?!#]*[a-zA-Z@`]/g, '');
+  // OSC sequences: ESC ] ... BEL or ESC\
+  stripped = stripped.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
+  // DCS/SOS/PM/APC: ESC [P X ^ _] ... ESC\
+  stripped = stripped.replace(/\x1b[PX\^_].*?\x1b\\/gs, '');
+  // Remaining single-char Fe escapes (ESC followed by one non-[ char)
+  stripped = stripped.replace(/\x1b[^[]/g, '');
+  // Carriage returns used by spinner-overwrite pattern (keep newlines)
+  stripped = stripped.replace(/\r(?!\n)/g, '\n');
+  // Collapse multiple blank lines from the cleanup
+  stripped = stripped.replace(/\n{3,}/g, '\n\n');
+  return stripped;
+}
+
 function buildLLMPreviewField(content: string, maxOutputChars: number): {
   text: string;
   truncated: boolean;
@@ -1760,7 +1790,11 @@ function buildLLMPreviewField(content: string, maxOutputChars: number): {
     };
   }
 
-  const snippet = buildOutputSnippet(normalized, maxOutputChars);
+  // Strip ANSI sequences before truncating so the LLM receives clean text.
+  // Without this, spinner animations and cursor-control codes in raw terminal
+  // output make the LLM think a completed process (exit_code: 0) is still running.
+  const clean = stripAnsiFromShellOutput(normalized);
+  const snippet = buildOutputSnippet(clean, maxOutputChars);
   return {
     text: snippet.text,
     truncated: snippet.truncated,
