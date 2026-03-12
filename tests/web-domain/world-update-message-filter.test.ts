@@ -70,6 +70,32 @@ describe('web world update message chat filtering', () => {
     });
   });
 
+  it('deduplicates repeated assistant messages by backend messageId', () => {
+    const state = createBaseState();
+    const firstState = (worldUpdateHandlers['handleMessageEvent'] as any)(state, {
+      messageId: 'msg-dup',
+      sender: 'assistant',
+      content: 'first copy',
+      role: 'assistant',
+      chatId: 'chat-1'
+    });
+
+    const nextState = (worldUpdateHandlers['handleMessageEvent'] as any)(firstState, {
+      messageId: 'msg-dup',
+      sender: 'assistant',
+      content: 'first copy',
+      role: 'assistant',
+      chatId: 'chat-1'
+    });
+
+    expect(nextState.messages).toHaveLength(1);
+    expect(nextState.messages[0]).toMatchObject({
+      messageId: 'msg-dup',
+      text: 'first copy',
+      chatId: 'chat-1'
+    });
+  });
+
   it('ignores tool-result events for a different chatId', () => {
     const state = {
       ...createBaseState(),

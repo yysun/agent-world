@@ -115,10 +115,11 @@ import {
   createWorldSystemStatus,
   createWorldSystemErrorMessage,
   isWorldSystemErrorStatus,
+  shouldPromoteSystemErrorToWorldError,
   retainWorldSystemStatusForContext,
   WORLD_SYSTEM_STATUS_TTL_MS,
 } from '../domain/system-status';
-import { getEnvValueFromText, upsertEnvVariable } from '../domain/world-variables';
+import { getEnvValueFromText, getToolPermissionLevelFromInput, upsertEnvVariable } from '../domain/world-variables';
 import { pickProjectFolderPath } from '../domain/project-folder-picker';
 import {
   sendChatMessage,
@@ -988,6 +989,7 @@ const handleSystemEvent = async function* (
       systemStatusTimerId: null,
       messages: nextMessages,
       needScroll: true,
+      error: shouldPromoteSystemErrorToWorldError(envelope || data) ? nextSystemStatus.text : state.error,
     };
     return;
   }
@@ -1208,6 +1210,28 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
     }
   }
 
+  if (!isUserMessage && newMessage.role !== 'tool' && newMessage.messageId) {
+    const existingMessageIndex = existingMessages.findIndex((message) => message.messageId === newMessage.messageId);
+    if (existingMessageIndex !== -1) {
+      const updatedMessages = existingMessages.map((message, index) => {
+        if (index !== existingMessageIndex) {
+          return message;
+        }
+
+        return {
+          ...message,
+          ...newMessage,
+          id: message.id || newMessage.id,
+        };
+      });
+
+      return {
+        ...state,
+        messages: updatedMessages,
+      };
+    }
+  }
+
   // If a streaming placeholder exists for this sender, convert it to the final message
   const streamingIndex = existingMessages.findIndex(
     msg => msg?.isStreaming && (msg.sender || '').toLowerCase() === normalizedSender
@@ -1353,10 +1377,10 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     }
   },
 
-  'set-tool-permission': async (state: WorldComponentState, toolPermission: string): Promise<WorldComponentState> => {
+  'set-tool-permission': async (state: WorldComponentState, payload: unknown): Promise<WorldComponentState> => {
     if (!state.world?.name) return state;
-    const validLevels = ['read', 'ask', 'auto'];
-    if (!validLevels.includes(toolPermission)) return state;
+    const toolPermission = getToolPermissionLevelFromInput(payload);
+    if (!toolPermission) return state;
     const nextVariables = upsertEnvVariable(
       state.world.variables || '',
       'tool_permission',

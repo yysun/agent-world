@@ -15,6 +15,7 @@
  *
  * Summary of Recent Changes:
  * - 2026-03-12: Created for cross-client selected-chat system-status parity.
+ * - 2026-03-12: Added queue-dispatch overlay promotion helper so web queue failures restore the visible world error state.
  */
 
 export type WorldSystemStatusKind = 'error' | 'success' | 'info';
@@ -219,6 +220,19 @@ function getCanonicalSystemErrorMessageId(event: WorldSystemEventEnvelope | null
 
 export function isWorldSystemErrorStatus(status: WorldSystemStatusEntry | null | undefined): boolean {
   return Boolean(status && status.kind === 'error');
+}
+
+export function shouldPromoteSystemErrorToWorldError(
+  event: WorldSystemEventEnvelope | null | undefined,
+): boolean {
+  const envelopeRecord = asRecord(event);
+  const rawContent = envelopeRecord && 'content' in envelopeRecord
+    ? envelopeRecord.content
+    : event;
+  const contentRecord = asRecord(rawContent ?? envelopeRecord);
+  const failureKind = readTrimmedString(contentRecord?.failureKind).toLowerCase();
+
+  return failureKind === 'queue-dispatch';
 }
 
 export function createWorldSystemErrorMessage(

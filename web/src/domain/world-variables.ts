@@ -12,7 +12,12 @@
  *
  * Summary of Recent Changes:
  * - 2026-02-21: Added for web Project-button parity so `working_directory` can be updated like Electron.
+ * - 2026-03-12: Added tool-permission event normalization for AppRun select handlers.
  */
+
+export type ToolPermissionLevel = 'read' | 'ask' | 'auto';
+
+const VALID_TOOL_PERMISSION_LEVELS = new Set<ToolPermissionLevel>(['read', 'ask', 'auto']);
 
 export function getEnvValueFromText(
   variablesText: string | undefined,
@@ -99,4 +104,22 @@ export function upsertEnvVariable(
   }
 
   return updatedLines.join('\n');
+}
+
+export function getToolPermissionLevelFromInput(payload: unknown): ToolPermissionLevel | null {
+  if (typeof payload === 'string') {
+    const normalized = payload.trim().toLowerCase() as ToolPermissionLevel;
+    return VALID_TOOL_PERMISSION_LEVELS.has(normalized) ? normalized : null;
+  }
+
+  const targetValue =
+    payload && typeof payload === 'object' && 'target' in payload
+      ? (payload as { target?: { value?: unknown } }).target?.value
+      : undefined;
+
+  if (typeof targetValue === 'string') {
+    return getToolPermissionLevelFromInput(targetValue);
+  }
+
+  return null;
 }

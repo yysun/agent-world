@@ -381,11 +381,17 @@ export async function updateWorld(worldId: string, updates: UpdateWorldParams): 
 
   await storageWrappers!.saveWorld(updatedData);
 
-  const { getActiveSubscribedWorld } = await import('./subscription.js');
-  const activeRuntimeWorld = getActiveSubscribedWorld(resolvedWorldId);
-  if (activeRuntimeWorld) {
-    syncActiveRuntimeWorldMetadata(activeRuntimeWorld, updatedData);
-    return activeRuntimeWorld;
+  const { getActiveSubscribedWorlds } = await import('./subscription.js');
+  const activeRuntimeWorlds = getActiveSubscribedWorlds(resolvedWorldId);
+  if (activeRuntimeWorlds.length > 0) {
+    const shouldSyncCurrentChatId = normalizedUpdates.currentChatId !== undefined;
+    for (const activeRuntimeWorld of activeRuntimeWorlds) {
+      syncActiveRuntimeWorldMetadata(activeRuntimeWorld, updatedData);
+      if (shouldSyncCurrentChatId) {
+        activeRuntimeWorld.currentChatId = updatedData.currentChatId ?? null;
+      }
+    }
+    return activeRuntimeWorlds[0] ?? null;
   }
 
   return getWorld(resolvedWorldId);
@@ -398,7 +404,6 @@ function syncActiveRuntimeWorldMetadata(targetWorld: World, persistedWorld: Worl
   targetWorld.mainAgent = persistedWorld.mainAgent ?? null;
   targetWorld.chatLLMProvider = persistedWorld.chatLLMProvider;
   targetWorld.chatLLMModel = persistedWorld.chatLLMModel;
-  targetWorld.currentChatId = persistedWorld.currentChatId ?? null;
   targetWorld.mcpConfig = persistedWorld.mcpConfig ?? null;
   targetWorld.variables = persistedWorld.variables;
   targetWorld.uiMode = persistedWorld.uiMode;
@@ -1154,12 +1159,20 @@ async function activateChatResources(
   reconstructSkillApprovalsFromMessages(resolvedWorldId, chatId, Array.isArray(memoryForApprovals) ? memoryForApprovals : []);
   const { getActiveSubscribedWorld } = await import('./subscription.js');
   const runtimeWorld = getActiveSubscribedWorld(resolvedWorldId, chatId) || world;
-  replayPendingHitlRequests(runtimeWorld, chatId);
+  const replayedHitlPromptCount = replayPendingHitlRequests(runtimeWorld, chatId);
   loggerRestore.debug('Restore chat pending HITL replay triggered', { worldId: world.id, chatId });
   if (options?.suppressAutoResume === true) {
     loggerRestore.debug('Restore chat auto-resume suppressed for mutation flow', {
       worldId: world.id,
       chatId,
+    });
+    return;
+  }
+  if (replayedHitlPromptCount > 0) {
+    loggerRestore.debug('Restore chat auto-resume skipped because chat is awaiting HITL input', {
+      worldId: world.id,
+      chatId,
+      replayedHitlPromptCount,
     });
     return;
   }

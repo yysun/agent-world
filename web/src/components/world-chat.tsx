@@ -822,14 +822,13 @@ export default function WorldChat(props: WorldChatProps) {
                 </button>
                 <select
                   className="composer-tool-permission-select"
-                  value={toolPermission}
                   $onchange='set-tool-permission'
                   aria-label="Tool permission level"
                   title="Tool permission level"
                 >
-                  <option value="read">permission: read</option>
-                  <option value="ask">permission: ask</option>
-                  <option value="auto">permission: auto</option>
+                  <option value="read" selected={toolPermission === 'read'}>permission: read</option>
+                  <option value="ask" selected={toolPermission === 'ask'}>permission: ask</option>
+                  <option value="auto" selected={toolPermission === 'auto'}>permission: auto</option>
                 </select>
               </div>
               <button

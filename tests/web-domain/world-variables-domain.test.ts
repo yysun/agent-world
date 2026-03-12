@@ -11,7 +11,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { getEnvValueFromText, upsertEnvVariable } from '../../web/src/domain/world-variables';
+import {
+  getEnvValueFromText,
+  getToolPermissionLevelFromInput,
+  upsertEnvVariable,
+} from '../../web/src/domain/world-variables';
 
 describe('web/world-variables domain', () => {
   it('reads existing env values and ignores comments', () => {
@@ -46,5 +50,18 @@ describe('web/world-variables domain', () => {
   it('appends missing key without leading newline when source is empty', () => {
     const next = upsertEnvVariable('', 'working_directory', '/Users/me/work');
     expect(next).toBe('working_directory=/Users/me/work');
+  });
+
+  it('normalizes tool permission levels from raw select values', () => {
+    expect(getToolPermissionLevelFromInput(' ask ')).toBe('ask');
+    expect(getToolPermissionLevelFromInput('invalid')).toBeNull();
+  });
+
+  it('normalizes tool permission levels from AppRun change events', () => {
+    expect(getToolPermissionLevelFromInput({
+      target: {
+        value: 'read',
+      },
+    })).toBe('read');
   });
 });

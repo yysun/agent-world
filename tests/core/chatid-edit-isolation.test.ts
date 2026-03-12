@@ -14,6 +14,7 @@
  * Recent Changes:
  * - 2026-03-11: Added regression coverage that `updateWorld` synchronizes live runtime `variables`
  *   so shell-command cwd resolution sees updated `working_directory` without a runtime refresh.
+ * - 2026-03-12: Added coverage that `updateWorld` synchronizes every active runtime for the same world.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -89,7 +90,7 @@ describe('chatId isolation for edit flows', () => {
     }));
 
     vi.doMock('../../core/subscription.js', () => ({
-      getActiveSubscribedWorld: vi.fn().mockReturnValue(activeWorld)
+      getActiveSubscribedWorlds: vi.fn().mockReturnValue([activeWorld])
     }));
 
     const managers = await import('../../core/managers.js');
@@ -108,6 +109,60 @@ describe('chatId isolation for edit flows', () => {
         lastUpdated: expect.any(Date)
       })
     );
+  });
+
+  it('syncs every active runtime instance for the same world', async () => {
+    vi.resetModules();
+
+    const persistedWorld = {
+      id: 'world-1',
+      name: 'World 1',
+      turnLimit: 5,
+      currentChatId: 'chat-1',
+      variables: 'working_directory=/tmp/old-project',
+      createdAt: new Date(),
+      lastUpdated: new Date()
+    };
+
+    const activeWorldA = {
+      ...persistedWorld,
+      eventEmitter: new EventEmitter(),
+      agents: new Map(),
+      chats: new Map([['chat-1', { id: 'chat-1', name: 'Chat 1', messageCount: 0 }]]),
+    } as any;
+
+    const activeWorldB = {
+      ...persistedWorld,
+      currentChatId: 'chat-2',
+      eventEmitter: new EventEmitter(),
+      agents: new Map(),
+      chats: new Map([['chat-2', { id: 'chat-2', name: 'Chat 2', messageCount: 0 }]]),
+    } as any;
+
+    const storageWrappers = {
+      loadWorld: vi.fn().mockResolvedValue(persistedWorld),
+      saveWorld: vi.fn().mockResolvedValue(undefined),
+    };
+
+    vi.doMock('../../core/storage/storage-factory.js', () => ({
+      createStorageWithWrappers: vi.fn().mockResolvedValue(storageWrappers),
+      getDefaultRootPath: vi.fn().mockReturnValue('/test/data')
+    }));
+
+    vi.doMock('../../core/subscription.js', () => ({
+      getActiveSubscribedWorlds: vi.fn().mockReturnValue([activeWorldA, activeWorldB])
+    }));
+
+    const managers = await import('../../core/managers.js');
+    const updated = await managers.updateWorld('world-1', {
+      variables: 'working_directory=/Users/esun/Documents/Projects/agent-world\ntool_permission=read'
+    });
+
+    expect(updated).toBe(activeWorldA);
+    expect(activeWorldA.variables).toBe('working_directory=/Users/esun/Documents/Projects/agent-world\ntool_permission=read');
+    expect(activeWorldB.variables).toBe('working_directory=/Users/esun/Documents/Projects/agent-world\ntool_permission=read');
+    expect(activeWorldA.currentChatId).toBe('chat-1');
+    expect(activeWorldB.currentChatId).toBe('chat-2');
   });
 
   it('keeps active runtime currentChatId unchanged when updating an agent', async () => {

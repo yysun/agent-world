@@ -63,6 +63,7 @@ vi.mock('../../web/src/domain/responsive-ui', () => ({
 }));
 
 import { getWorldChatLegendTitle } from '../../web/src/components/world-chat';
+import { shouldPromoteSystemErrorToWorldError } from '../../web/src/domain/system-status';
 
 describe('web world-chat legend system status', () => {
   it('prefers transient non-error system status over the chat title', () => {
@@ -97,5 +98,24 @@ describe('web world-chat legend system status', () => {
         kind: 'error',
       },
     )).toBe('world-1 - Chat 1');
+  });
+
+  it('promotes queue-dispatch failures into the world error overlay flow', () => {
+    expect(shouldPromoteSystemErrorToWorldError({
+      content: {
+        eventType: 'error',
+        failureKind: 'queue-dispatch',
+        message: 'Queue failed to dispatch user turn: no-responder-preflight.',
+      },
+    })).toBe(true);
+  });
+
+  it('does not promote ordinary system notices into the world error overlay flow', () => {
+    expect(shouldPromoteSystemErrorToWorldError({
+      content: {
+        eventType: 'chat-title-updated',
+        message: 'Chat title updated: New Chat',
+      },
+    })).toBe(false);
   });
 });

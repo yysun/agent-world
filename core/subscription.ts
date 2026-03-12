@@ -101,6 +101,20 @@ export function getActiveSubscribedWorld(worldIdentifier: string, preferredChatI
   return null;
 }
 
+export function getActiveSubscribedWorlds(worldIdentifier: string): World[] {
+  const resolvedWorldId = toKebabCase(String(worldIdentifier || '').trim());
+  if (!resolvedWorldId) {
+    return [];
+  }
+
+  const activeWorldSet = activeSubscribedWorlds.get(resolvedWorldId);
+  if (!activeWorldSet || activeWorldSet.size === 0) {
+    return [];
+  }
+
+  return Array.from(activeWorldSet.values());
+}
+
 // Start world with event listeners - extracted from subscribeWorld
 export async function startWorld(world: World, client: ClientConnection): Promise<WorldSubscription> {
   // Only set up forwarding listeners when the client actually wants them.

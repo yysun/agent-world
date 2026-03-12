@@ -25,7 +25,6 @@
 
 import { test, expect } from './support/fixtures.js';
 import {
-  HITL_SHELL_SUCCESS_MARKER,
   buildShellHitlPrompt,
   createNewChat,
   deleteAllAgents,
@@ -41,6 +40,7 @@ import {
   waitForWorldIdle,
   waitForErrorState,
   waitForHitlPrompt,
+  waitForShellHitlCompletion,
 } from './support/web-harness.js';
 
 const LONG_REAL_BROWSER_FLOW_TIMEOUT_MS = 30_000;
@@ -69,7 +69,7 @@ test.describe('Loaded Current Chat', () => {
     await sendComposerMessage(page, buildShellHitlPrompt('loaded current chat'));
     await waitForHitlPrompt(page, 60_000);
     await respondToHitlPrompt(page, 'approve', 60_000);
-    await waitForAssistantToken(page, HITL_SHELL_SUCCESS_MARKER, 60_000);
+    await waitForShellHitlCompletion(page, 60_000);
   });
 
   test('send error when responders are unavailable', async ({ page, bootstrapState }) => {
@@ -93,7 +93,7 @@ test.describe('Loaded Current Chat', () => {
     await editLatestUserMessage(page, buildShellHitlPrompt('loaded current chat edit'));
     await waitForHitlPrompt(page, 60_000);
     await respondToHitlPrompt(page, 'approve', 60_000);
-    await waitForAssistantToken(page, HITL_SHELL_SUCCESS_MARKER, 60_000);
+    await waitForShellHitlCompletion(page, 60_000);
   });
 
   test('edit error after responders become unavailable', async ({ page, bootstrapState }) => {
@@ -155,7 +155,7 @@ test.describe('Switched Chat', () => {
     await expect.poll(() => getCurrentChatId(page)).toBe(switchedChatId);
     await waitForHitlPrompt(page, 60_000);
     await respondToHitlPrompt(page, 'approve', 60_000);
-    await waitForAssistantToken(page, HITL_SHELL_SUCCESS_MARKER, 60_000);
+    await waitForShellHitlCompletion(page, 60_000);
   });
 
   test('send error after switching chats when responders are unavailable', async ({ page, bootstrapState }) => {
@@ -183,7 +183,7 @@ test.describe('Switched Chat', () => {
     await editLatestUserMessage(page, buildShellHitlPrompt('switched chat edit'));
     await waitForHitlPrompt(page, 60_000);
     await respondToHitlPrompt(page, 'approve', 60_000);
-    await waitForAssistantToken(page, HITL_SHELL_SUCCESS_MARKER, 60_000);
+    await waitForShellHitlCompletion(page, 60_000);
   });
 
   test('edit error after switching chats when responders are unavailable', async ({ page, bootstrapState }) => {
@@ -258,7 +258,7 @@ test.describe('New Chat', () => {
     await sendComposerMessage(page, buildShellHitlPrompt('new chat'));
     await waitForHitlPrompt(page, 60_000);
     await respondToHitlPrompt(page, 'approve', 60_000);
-    await waitForAssistantToken(page, HITL_SHELL_SUCCESS_MARKER, 60_000);
+    await waitForShellHitlCompletion(page, 60_000);
   });
 
   test('create new chat and send error when responders are unavailable', async ({ page, bootstrapState }) => {
@@ -285,7 +285,7 @@ test.describe('New Chat', () => {
     await editLatestUserMessage(page, buildShellHitlPrompt('new chat edit'));
     await waitForHitlPrompt(page, 60_000);
     await respondToHitlPrompt(page, 'approve', 60_000);
-    await waitForAssistantToken(page, HITL_SHELL_SUCCESS_MARKER, 60_000);
+    await waitForShellHitlCompletion(page, 60_000);
   });
 
   test('create new chat and edit error when responders are unavailable', async ({ page, bootstrapState }) => {

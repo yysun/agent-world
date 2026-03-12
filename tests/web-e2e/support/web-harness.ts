@@ -32,11 +32,14 @@
  *   reloads the world page so messages are restored from the backend DB, then retries.
  * - 2026-03-12: Added a deterministic slow-shell prompt path and tool-summary wait helpers for live web shell status E2E coverage.
  * - 2026-03-12: Added `setWorldToolPermission` helper to update the world-level tool_permission env key via the REST API.
+ * - 2026-03-12: Updated error waiting helpers to accept inline system error messages in addition to the legacy page-level error panel.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
+
+import { renderableSystemErrorTextPatterns } from './error-state.js';
 
 export const TEST_WORLD_NAME = 'e2e-test-web';
 export const TEST_AGENT_NAME = 'e2e-google';
@@ -508,6 +511,12 @@ export async function respondToHitlPrompt(page: Page, optionId: 'approve' | 'den
   await prompt.getByTestId(`hitl-option-${optionId}`).click();
 }
 
+export async function waitForShellHitlCompletion(page: Page, timeoutMs: number = 60_000): Promise<void> {
+  await waitForToolSummaryStatus(page, 'done', timeoutMs);
+  await waitForWorldIdle(page, timeoutMs);
+  await expect(page.getByTestId('hitl-prompt')).toHaveCount(0);
+}
+
 export async function clickLatestEditButton(page: Page): Promise<void> {
   const enabledEditButton = page.locator('[data-testid^="message-edit-"]:not([disabled])').last();
   await enabledEditButton.waitFor({ state: 'attached' });
@@ -521,7 +530,27 @@ export async function editLatestUserMessage(page: Page, nextText: string): Promi
 }
 
 export async function waitForErrorState(page: Page): Promise<void> {
-  await page.getByTestId('world-error-state').waitFor({ state: 'visible' });
+  await page.waitForFunction(
+    ({ patterns }) => {
+      if (document.querySelector('[data-testid="world-error-state"]')) {
+        return true;
+      }
+
+      if (document.querySelector('[data-testid="conversation-area"] .error-indicator')) {
+        return true;
+      }
+
+      const systemRows = Array.from(
+        document.querySelectorAll('[data-testid="conversation-area"] [data-message-role="system"]'),
+      );
+
+      return systemRows.some((row) => {
+        const text = (row.textContent || '').trim().toLowerCase();
+        return patterns.some((pattern: string) => text.includes(pattern));
+      });
+    },
+    { patterns: renderableSystemErrorTextPatterns },
+  );
 }
 
 export async function getConversationMessageCount(page: Page): Promise<number> {
