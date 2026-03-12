@@ -1,0 +1,6 @@
+#!/bin/sh
+# $3 is 1 for branch checkout, 0 for file checkout
+# When a worktree is created, post-checkout is called with flag=1
+if [ "$3" = "1" ]; then
+  npm run install:all
+fi

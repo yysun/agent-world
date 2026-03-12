@@ -26,6 +26,7 @@
     "agent-world-server": "bin/agent-world-server.js"
   },
   "scripts": {
+    "install:all": "npm install && npm install --prefix electron",
     "dev": "npm run web:dev",
     "dev:reset": "for p in 3000 8080; do pids=$(lsof -tiTCP:$p -sTCP:LISTEN 2>/dev/null || true); if [ -n \"$pids\" ]; then kill $pids; fi; done",
     "web:dev": "npm-run-all --parallel server:watch web:vite:wait",
