@@ -18,6 +18,7 @@
  * - Keeps payload format deterministic for stable downstream parsing
  *
  * Recent Changes:
+ * - 2026-03-12: Added `read` permission level guard to script execution — instructions load normally but all script execution steps are blocked with an inline note when toolPermission is 'read'.
  * - 2026-03-06: Removed `world.currentChatId` fallback from interactive approval/result scoping; interactive `load_skill` now requires explicit `context.chatId`.
  * - 2026-03-01: Removed minimal-check mode branch so `load_skill` always runs script/reference preflight consistently and keeps script-root execution guidance available.
  * - 2026-03-01: Relaxed execution-directive narration requirements to avoid mandatory pre-tool plan text and reduce token overhead.
@@ -63,7 +64,7 @@ import {
 import { createCategoryLogger } from './logger.js';
 import { parseSkillIdListFromEnv } from './skill-settings.js';
 import { requestWorldOption, type HitlOptionResolution } from './hitl.js';
-import { generateId } from './utils.js';
+import { generateId, getEnvValueFromText } from './utils.js';
 import { requestToolApproval } from './tool-approval.js';
 
 const APPROVAL_OPTION_YES_ONCE = 'yes_once';
@@ -831,6 +832,15 @@ async function executeSkillScripts(options: {
   const scriptPaths = options.scriptPaths;
   if (scriptPaths.length === 0) {
     return [];
+  }
+
+  // Check world-level tool permission: 'read' blocks all script execution steps.
+  const toolPermission = getEnvValueFromText((options.context?.world as any)?.variables, 'tool_permission') ?? 'auto';
+  if (toolPermission === 'read') {
+    return scriptPaths.map((scriptPath) => ({
+      source: scriptPath,
+      output: 'Script execution is blocked by the current permission level (read).',
+    }));
   }
 
   const worldId = String(options.context?.world?.id || '').trim();

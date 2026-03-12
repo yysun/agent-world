@@ -1214,11 +1214,11 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
   );
 
   if (streamingIndex !== -1) {
-      const updatedMessages = existingMessages
-        .map((msg, index) => {
-          if (index !== streamingIndex) {
-            return msg;
-          }
+    const updatedMessages = existingMessages
+      .map((msg, index) => {
+        if (index !== streamingIndex) {
+          return msg;
+        }
 
         return {
           ...msg,
@@ -1226,9 +1226,9 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
           id: newMessage.id,
           isStreaming: false,
           messageId: newMessage.messageId ?? msg.messageId
-          };
-        })
-        .filter(msg => !!msg);
+        };
+      })
+      .filter(msg => !!msg);
 
     return {
       ...state,
@@ -1350,6 +1350,24 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         ...state,
         error: error?.message || 'Failed to select project folder.'
       };
+    }
+  },
+
+  'set-tool-permission': async (state: WorldComponentState, toolPermission: string): Promise<WorldComponentState> => {
+    if (!state.world?.name) return state;
+    const validLevels = ['read', 'ask', 'auto'];
+    if (!validLevels.includes(toolPermission)) return state;
+    const nextVariables = upsertEnvVariable(
+      state.world.variables || '',
+      'tool_permission',
+      toolPermission
+    );
+    try {
+      const updatedWorld = await api.updateWorld(state.worldName, { variables: nextVariables });
+      const mergedWorld = mergeUpdatedWorldWithUiState(state.world, updatedWorld);
+      return { ...state, world: mergedWorld, error: null };
+    } catch (error: any) {
+      return { ...state, error: error?.message || 'Failed to update tool permission.' };
     }
   },
 

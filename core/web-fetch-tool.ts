@@ -15,6 +15,7 @@
  * - Applies timeout and output-size bounds with explicit truncation metadata
  *
  * Recent Changes:
+ * - 2026-03-12: Added `read` permission level guard to `web_fetch` — returns a blocked-tool error JSON when world toolPermission is 'read'.
  * - 2026-03-06: Removed `world.currentChatId` fallback from local/private access approvals; HITL approval now requires explicit `context.chatId`.
  * - 2026-03-05: Added deterministic timeout-error mapping (`timeout_error`) for aborted fetches caused by per-request timeout limits.
  * - 2026-03-05: Switched timeout/output bounds constants to shared reliability config.
@@ -30,6 +31,7 @@ import { gfm } from 'turndown-plugin-gfm';
 import { requestToolApproval } from './tool-approval.js';
 import { RELIABILITY_CONFIG } from './reliability-config.js';
 import { type World } from './types.js';
+import { getEnvValueFromText } from './utils.js';
 
 type WebFetchArgs = {
   url: string;
@@ -359,6 +361,16 @@ async function executeWebFetch(args: WebFetchArgs, context?: WebFetchToolContext
   const startedAt = Date.now();
   const activeTimeoutMs = clamp(Number(args.timeoutMs ?? DEFAULT_TIMEOUT_MS), MIN_TIMEOUT_MS, MAX_TIMEOUT_MS);
   let timedOut = false;
+
+  // Check world-level tool permission
+  const toolPermission = getEnvValueFromText((context?.world as any)?.variables, 'tool_permission') ?? 'auto';
+  if (toolPermission === 'read') {
+    return JSON.stringify({
+      ok: false,
+      url: typeof args.url === 'string' ? args.url : '',
+      error: 'web_fetch is blocked by the current permission level (read).',
+    });
+  }
 
   try {
     const target = parseUrlOrThrow(args.url);

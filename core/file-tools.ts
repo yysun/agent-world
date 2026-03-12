@@ -15,6 +15,7 @@
  * - Errors are returned as tool-friendly `Error:` strings
  *
  * Recent Changes:
+ * - 2026-03-12: Added `read` permission level guard to `write_file` — returns a blocked-tool error when world toolPermission is 'read'.
  * - 2026-03-03: Tightened tool output limits: read_file hard-capped at 200 lines, list_files capped at depth 2 and 200 entries, grep capped at 50 hits with configurable context_lines (2–5).
  * - 2026-03-01: Hardened `read_file` against undefined read payloads from mocked fs implementations by coercing to empty content instead of hard-failing.
  * - 2026-03-01: Added read_file fallback that resolves missing relative paths against loaded skill roots (for skill script paths like `scripts/convert.py`).
@@ -38,6 +39,7 @@ import {
   validateShellDirectoryRequest,
 } from './shell-cmd-tool.js';
 import { getSkillSourcePath, getSkills } from './skill-registry.js';
+import { getEnvValueFromText } from './utils.js';
 
 type ToolContext = {
   workingDirectory?: string;
@@ -486,6 +488,12 @@ export function createWriteFileToolDefinition() {
     },
     execute: async (args: any, _sequenceId?: string, _parentToolCall?: string, context?: ToolContext) => {
       try {
+        // Check world-level tool permission
+        const toolPermission = getEnvValueFromText((context?.world as any)?.variables, 'tool_permission') ?? 'auto';
+        if (toolPermission === 'read') {
+          return 'Error: write_file is blocked by the current permission level (read).';
+        }
+
         const trustedWorkingDirectory = getTrustedWorkingDirectory(context);
         const requestedFilePath = String(args.filePath ?? args.path ?? '').trim();
         if (!requestedFilePath) {

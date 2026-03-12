@@ -27,6 +27,7 @@
  * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - 2026-03-12: Added `toolPermission` enforcement: 'read' level blocks execution with an error result; 'ask' level forces every invocation through HITL approval regardless of risk tier.
  * - 2026-03-06: Added explicit canonical failure reasons for shell validation/policy failures so approval denials and validation errors no longer masquerade as non-zero exits.
  * - 2026-03-06: Unified shell continuation output on one bounded-preview result contract, removed `smart`-mode branching, and stopped persisting a synthetic assistant stdout mirror message after shell completion.
  * - 2026-03-06: Added canonical shell error-result formatting helper so upstream tool persistence can normalize shell failures without falling back to ad hoc error strings.
@@ -2266,6 +2267,56 @@ export function createShellCmdToolDefinition() {
         throw new Error(
           `Blocked dangerous operation: ${riskAssessment.reason}. This shell command cannot be executed.`
         );
+      }
+
+      // Check world-level tool permission
+      const toolPermission = getEnvValueFromText(world?.variables, 'tool_permission') ?? 'auto';
+      if (toolPermission === 'read') {
+        const blockedResult: CommandExecutionResult = {
+          executionId: 'permission-blocked',
+          command,
+          parameters: validParameters,
+          exitCode: null,
+          signal: null,
+          error: 'shell_cmd is blocked by the current permission level (read).',
+          failureReason: 'validation_error',
+          stdout: '',
+          stderr: '',
+          executedAt: new Date(),
+          duration: 0,
+        };
+        return formatShellToolReturnContent(blockedResult, {
+          llmResultMode,
+          outputFormat: outputFormat === 'json' ? 'json' : 'markdown',
+          outputDetail: 'minimal',
+          toolCallId: typeof currentMessageId === 'string' ? currentMessageId : undefined,
+          persistToolEnvelope,
+          worldId: typeof world?.id === 'string' ? world.id : undefined,
+        });
+      }
+
+      // At 'ask' level, every shell_cmd invocation requires HITL approval regardless of risk tier.
+      if (toolPermission === 'ask' && riskAssessment.tier !== 'hitl_required') {
+        if (!world) {
+          throw new Error(
+            'Approval required: world-level permission is "ask" but HITL approval context is unavailable.'
+          );
+        }
+        const askApproval = await requestShellCommandRiskApproval({
+          world,
+          chatId: chatId ?? null,
+          command,
+          parameters: validParameters,
+          resolvedDirectory,
+          risk: { tier: 'hitl_required', reason: 'world permission level is "ask"', tags: ['ask-permission'] },
+          toolCallId: typeof currentMessageId === 'string' ? currentMessageId : undefined,
+          agentName: streamAgentName,
+        });
+        if (!askApproval.approved) {
+          throw new Error(
+            `Command not executed: world permission is "ask" and the request was not approved (${askApproval.reason}).`
+          );
+        }
       }
 
       if (riskAssessment.tier === 'hitl_required') {

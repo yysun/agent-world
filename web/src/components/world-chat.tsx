@@ -253,6 +253,7 @@ export default function WorldChat(props: WorldChatProps) {
     currentChatId = null,
     selectedProjectPath = null,
     systemStatus = null,
+    toolPermission = 'auto',
     editingMessageId = null,
     editingText = '',
     agentFilters = [],  // Agent IDs to filter by
@@ -819,6 +820,17 @@ export default function WorldChat(props: WorldChatProps) {
                   </svg>
                   <span>Project</span>
                 </button>
+                <select
+                  className="composer-tool-permission-select"
+                  value={toolPermission}
+                  $onchange='set-tool-permission'
+                  aria-label="Tool permission level"
+                  title="Tool permission level"
+                >
+                  <option value="read">permission: read</option>
+                  <option value="ask">permission: ask</option>
+                  <option value="auto">permission: auto</option>
+                </select>
               </div>
               <button
                 className={actionButtonClass}

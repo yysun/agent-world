@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-03-12: Added `toolPermission` derived from `world.variables` env key and `onSetToolPermission` wired to composer props for the Electron tool permission dropdown.
  * - 2026-03-10: Reconcile selected-chat refresh results with live optimistic/streaming/system-error rows so history reloads do not wipe authoritative transient state.
  * - 2026-03-10: Rehydrate persisted selected-chat system error events into the transcript on chat refresh so failed-turn diagnostics survive restart without moving raw logs out of the logs panel.
  * - 2026-03-06: Added renderer bridge bootstrap fallback UI so missing preload APIs show an explicit startup error instead of a blank screen.
@@ -929,6 +930,8 @@ function AppContent({ api }: { api: DesktopApi }) {
     setSelectedProjectPath(workingDirectory || null);
   }, [loadedWorld?.id, loadedWorld?.variables]);
 
+  const toolPermission = (getEnvValueFromText(loadedWorld?.variables, 'tool_permission') as 'read' | 'ask' | 'auto') || 'auto';
+
   useEffect(() => {
     if (loadedWorld?.id) return;
     resetMessageRuntimeState();
@@ -1073,6 +1076,7 @@ function AppContent({ api }: { api: DesktopApi }) {
     onUpdateAgent,
     onDeleteAgent,
     onSelectProject,
+    onSetToolPermission,
     onComposerKeyDown,
   } = useAppActionHandlers({
     api,
@@ -1328,6 +1332,8 @@ function AppContent({ api }: { api: DesktopApi }) {
     onComposerKeyDown,
     onSelectProject,
     selectedProjectPath,
+    toolPermission,
+    onSetToolPermission,
     canStopCurrentSession,
     isCurrentSessionStopping,
     isCurrentSessionSending,

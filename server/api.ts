@@ -5,6 +5,7 @@
  * Supports world/agent/chat management with optimized serialization and error handling.
  *
  * Changes:
+ * - 2026-03-12: Trailing comma cleanup in WorldUpdateSchema; tool_permission is stored in world.variables env key — no dedicated API schema field needed.
  * - 2026-03-06: Removed runtime `world.currentChatId` fallback from message send routes; chat-scoped sends now require explicit `chatId`.
  * - 2026-03-06: Added `/tool-artifact` for stable, restorable adopted-tool preview URLs limited to approved world working directories and registered skill roots.
  * - 2026-03-06: Hardened `POST /worlds/:worldName/hitl/respond` for restart-safe validation: when the runtime pending map lacks the request entry but it exists in persisted messages, trigger `activateChatWithSnapshot` to seed the runtime map and return an actionable error.
@@ -365,7 +366,7 @@ const WorldUpdateSchema = z.object({
   chatLLMProvider: z.enum(['openai', 'anthropic', 'azure', 'google', 'xai', 'openai-compatible', 'ollama']).nullable().optional(),
   chatLLMModel: z.string().nullable().optional(),
   mcpConfig: z.string().nullable().optional(),
-  variables: z.string().nullable().optional()
+  variables: z.string().nullable().optional(),
 });
 
 const AgentCreateSchema = z.object({

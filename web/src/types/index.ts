@@ -290,6 +290,7 @@ export interface WorldChatProps {
   currentChatId?: string | null;
   selectedProjectPath?: string | null;
   systemStatus?: WorldSystemStatusEntry | null;
+  toolPermission?: 'read' | 'ask' | 'auto';
   editingMessageId?: string | null;
   editingText?: string;
   agentFilters?: string[];  // Agent IDs to filter messages by

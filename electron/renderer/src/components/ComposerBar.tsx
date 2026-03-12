@@ -11,6 +11,7 @@
  * - Keeps action-button sizing and iconography consistent with desktop UI updates
  *
  * Recent Changes:
+ * - 2026-03-12: Added tool permission `<select>` dropdown after the Project button to expose world-level read/ask/auto permission control.
  * - 2026-02-20: Disabled new-message composer actions while a HITL prompt is pending.
  * - 2026-02-14: Extracted from App.jsx to simplify renderer orchestration logic.
  */
@@ -30,6 +31,8 @@ export default function ComposerBar({
   isCurrentSessionSending,
   hasActiveHitlPrompt,
   onAddToQueue,
+  toolPermission = 'auto',
+  onSetToolPermission,
 }) {
   const composerDisabled = Boolean(hasActiveHitlPrompt) && !canStopCurrentSession;
   const showStopButton = canStopCurrentSession || isCurrentSessionSending;
@@ -88,6 +91,17 @@ export default function ComposerBar({
               </svg>
               <span>Project</span>
             </button>
+            <select
+              value={toolPermission}
+              onChange={(e) => onSetToolPermission?.(e.target.value)}
+              className="h-7 rounded-lg bg-transparent px-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none"
+              aria-label="Tool permission level"
+              title="Tool permission level"
+            >
+              <option value="read">permission: read</option>
+              <option value="ask">permission: ask</option>
+              <option value="auto">permission: auto</option>
+            </select>
           </div>
           <button
             type="submit"

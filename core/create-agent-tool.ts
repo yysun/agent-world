@@ -16,6 +16,7 @@
  * - Keeps runtime contract canonical (`autoReply`, `nextAgent`) while aliases are handled upstream.
  *
  * Recent Changes:
+ * - 2026-03-12: Added `read` permission level guard — returns a blocked-tool error when world toolPermission is 'read'.
  * - 2026-02-20: Added post-create HITL informational confirmation (`Agent <name> has been created`) with `refreshAfterDismiss` metadata set to true.
  * - 2026-02-20: Pre-claim agent creation slot before approval dialog to prevent parallel-call race where both calls pass approval before either calls createAgent.
  * - 2026-02-20: Updated tool create path to allow manager-level create during the current in-flight world processing turn.
@@ -26,6 +27,7 @@
 import { requestWorldOption } from './hitl.js';
 import { requestToolApproval } from './tool-approval.js';
 import { createAgent, claimAgentCreationSlot } from './managers.js';
+import { getEnvValueFromText } from './utils.js';
 import { LLMProvider, EventType, type CreateAgentParams, type World } from './types.js';
 import { publishEvent } from './events/publishers.js';
 
@@ -249,6 +251,17 @@ export function createCreateAgentToolDefinition() {
       const chatId = typeof context?.chatId === 'string' && context.chatId.trim()
         ? context.chatId.trim()
         : null;
+
+      // Check world-level tool permission
+      const toolPermission = getEnvValueFromText((world as any)?.variables, 'tool_permission') ?? 'auto';
+      if (toolPermission === 'read') {
+        return stringifyResult({
+          ok: false,
+          status: 'blocked',
+          created: false,
+          message: 'create_agent is blocked by the current permission level (read).',
+        });
+      }
 
       if (!world || !worldId) {
         return stringifyResult({

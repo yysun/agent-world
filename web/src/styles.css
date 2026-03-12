@@ -1994,12 +1994,41 @@ legend {
   height: 1.05rem;
 }
 
+.composer-tool-permission-select {
+  height: var(--interactive-control-height, 2rem);
+  -webkit-appearance: none;
+  appearance: none;
+  border: none;
+  outline: none;
+  border-radius: 10px;
+  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E") no-repeat right 0.5rem center;
+  color: color-mix(in srgb, var(--text-secondary) 80%, #7a7a7a 20%);
+  padding: 0 1.6rem 0 0.55rem;
+  font-family: 'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  font-size: var(--interactive-control-font-size, 0.95rem);
+  line-height: 1;
+  cursor: pointer;
+}
+
 /* Override doodle.css button/textarea border-image styles for composer controls */
 .doodle .composer-textarea,
 .doodle .composer-action-icon-button,
-.doodle .composer-project-button {
+.doodle .composer-project-button,
+.doodle .composer-tool-permission-select {
   border: none !important;
   border-image: none !important;
+}
+
+/* Override doodle.css select styles (border-image, caret.svg, font, color) for permission dropdown */
+.doodle .composer-tool-permission-select {
+  border-style: none !important;
+  border-width: 0 !important;
+  border-image: none !important;
+  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E") no-repeat right 0.5rem center !important;
+  font-family: 'Short Stack', cursive !important;
+  font-size: var(--interactive-control-font-size, 0.95rem) !important;
+  color: color-mix(in srgb, var(--text-secondary) 80%, #7a7a7a 20%) !important;
+  padding-right: 1.6rem !important;
 }
 
 /* Override doodle.css 0.5em form scaling so interactive controls stay readable on mobile. */
@@ -3896,6 +3925,7 @@ legend {
 }
 
 @keyframes toolStatusPulse {
+
   0%,
   100% {
     opacity: 1;
@@ -4160,8 +4190,15 @@ legend {
 }
 
 @keyframes zone-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.3;
+  }
 }
 
 /* Zone content area */
@@ -4277,7 +4314,7 @@ legend {
   font-size: 1em;
 }
 
-.tool-preview-markdown > *:last-child {
+.tool-preview-markdown>*:last-child {
   margin-bottom: 0;
 }
 

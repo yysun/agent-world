@@ -13,6 +13,7 @@
  * - Uses dependency injection for state setters and collaborators.
  *
  * Recent Changes:
+ * - 2026-03-12: Added `onSetToolPermission` handler that persists tool_permission env key via upsertEnvVariable → updateWorld.
  * - 2026-02-27: Updated Enter-key stop/send gating to include status-registry `working` state so keyboard behavior matches stop-button visibility.
  * - 2026-02-28: Updated settings-header action to toggle the right panel closed when settings mode is already active.
  * - 2026-02-28: Added settings-open flow helper that refreshes skill registry when System Settings panel is opened.
@@ -335,6 +336,21 @@ export function useAppActionHandlers({
     }
   }, [api, loadedWorld, setLoadedWorld, setSelectedProjectPath, setStatusText]);
 
+  const onSetToolPermission = useCallback(async (toolPermission: string) => {
+    if (!loadedWorld?.id) return;
+    const validLevels = ['read', 'ask', 'auto'];
+    if (!validLevels.includes(toolPermission)) return;
+    try {
+      const nextVariables = upsertEnvVariable(loadedWorld.variables || '', 'tool_permission', toolPermission);
+      const updated = await api.updateWorld(loadedWorld.id, { variables: nextVariables });
+      const updatedWorld = { ...updated };
+      delete updatedWorld.refreshWarning;
+      setLoadedWorld(updatedWorld);
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to update tool permission.'), 'error');
+    }
+  }, [api, loadedWorld, setLoadedWorld, setStatusText]);
+
   const onComposerKeyDown = useCallback((event) => {
     if (event.nativeEvent?.isComposing || event.keyCode === 229) {
       return;
@@ -394,6 +410,7 @@ export function useAppActionHandlers({
     onUpdateAgent,
     onDeleteAgent,
     onSelectProject,
+    onSetToolPermission,
     onComposerKeyDown,
   };
 }

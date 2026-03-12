@@ -51,6 +51,7 @@ import WorldChatHistory from '../components/world-chat-history';
 import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
 import { selectHitlPromptForChat } from '../domain/hitl';
+import { getEnvValueFromText } from '../domain/world-variables';
 import { worldUpdateHandlers } from './World.update';
 
 const DESKTOP_PANEL_BREAKPOINT = 1024;
@@ -382,6 +383,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
                 currentChatId={state.currentChat?.id || null}
                 selectedProjectPath={state.selectedProjectPath}
                 systemStatus={state.systemStatus}
+                toolPermission={(getEnvValueFromText(state.world?.variables, 'tool_permission') as 'read' | 'ask' | 'auto') || 'auto'}
                 editingMessageId={state.editingMessageId}
                 editingText={state.editingText}
                 agentFilters={state.activeAgentFilters}

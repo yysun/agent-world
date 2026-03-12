@@ -12,6 +12,7 @@
  * - Data-only transformations from provided inputs.
  *
  * Recent Changes:
+ * - 2026-03-12: Added `toolPermission` and `onSetToolPermission` to composer props for world-level tool permission dropdown.
  * - 2026-03-04: Added grid submenu open-state wiring for grid icon submenu toggle/dismiss behavior.
  * - 2026-03-04: Added world-view mode and grid-layout prop wiring for header selector and message-list render strategies.
  * - 2026-02-28: Added right-panel settings autosave handlers wiring for skill scope toggles.
@@ -78,6 +79,8 @@ export function createMainContentComposerProps<T extends PropBag>(input: T) {
     isCurrentSessionSending: input.isCurrentSessionSending,
     hasActiveHitlPrompt: input.hasActiveHitlPrompt,
     onAddToQueue: input.onAddToQueue,
+    toolPermission: input.toolPermission,
+    onSetToolPermission: input.onSetToolPermission,
   };
 }
 

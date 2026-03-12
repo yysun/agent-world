@@ -9,6 +9,7 @@
  * - Comprehensive LLM provider enumeration (OpenAI, Anthropic, Azure, Google, XAI, Ollama)
  *
  * Recent Changes:
+ * - 2026-03-12: Added tool_permission enforcement via world.variables env key (no dedicated DB column).
  * - 2026-02-28: Added optional world-level message subscription cleanup handle (`_worldMessagesUnsubscriber`) for refresh-safe title listener rebinds.
  * - 2026-02-13: Added world-level `mainAgent` routing field and agent-level `autoReply` flag.
  * - 2026-02-13: Added optional storage compare-and-set helper for chat title updates (`updateChatNameIfCurrent`).
