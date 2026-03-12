@@ -18,6 +18,7 @@
  * - SSE event data structures for real-time updates
  * 
  * Changes:
+ * - 2026-03-11: Added `viewportMode` chat/history props so responsive control sizing can follow the active world layout mode.
  * - 2026-03-11: Added `chatSearchQuery` world state/props typing so the chat-history filter input can drive visible list filtering.
  * - 2026-02-22: Added responsive right-panel UI state typings (`rightPanelTab`, `isRightPanelOpen`, `viewportMode`) for World page mobile/tablet behavior.
  * - 2026-02-21: Added project-folder selection props/state (`selectedProjectPath`) for web composer parity with Electron.
@@ -269,6 +270,7 @@ export interface WorldChatProps {
   // HITL inline prompt card
   activeHitlPrompt?: HitlPromptRequest | null;
   submittingHitlRequestId?: string | null;
+  viewportMode?: WorldViewportMode;
 }
 
 // World Settings Component Props
@@ -324,6 +326,7 @@ export interface AgentEditState {
 export interface WorldChatHistoryProps {
   world: World | null;
   chatSearchQuery: string;
+  viewportMode?: WorldViewportMode;
 }
 
 export type RightPanelTab = 'chats' | 'world';

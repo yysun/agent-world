@@ -16,6 +16,8 @@
  * - Tests config-level behavior exposed by world-chat domain component helpers.
  *
  * Recent Changes:
+ * - 2026-03-11: Added title-only legend config coverage so the world chat legend stays free of queue/activity widgets.
+ * - 2026-03-11: Added legend-title truncation assertions so long chat names stay compact across viewport modes.
  * - 2026-03-01: Added top timestamp placement and timestamp formatting assertions.
  * - 2026-03-01: Initial test file created for waiting-message UI cleanup.
  */
@@ -24,6 +26,8 @@ import { describe, expect, it } from 'vitest';
 import {
   formatMessageTimestamp,
   getMessageMetaUiConfig,
+  getWorldChatLegendUiConfig,
+  getWorldChatLegendTitle,
   getWaitingMessageUiConfig,
   isStreamingPlaceholderMessage,
 } from '../../web/src/components/world-chat';
@@ -56,7 +60,23 @@ describe('web/world-chat waiting UI config', () => {
     expect(config.timestampPlacement).toBe('top');
   });
 
+  it('keeps the chat legend title-only without queue or activity widgets', () => {
+    expect(getWorldChatLegendUiConfig()).toEqual({
+      showQueueStatus: false,
+      showActivityPulse: false,
+      showElapsedTime: false,
+    });
+  });
+
   it('formats missing timestamps as Now', () => {
     expect(formatMessageTimestamp(undefined)).toBe('Now');
+  });
+
+  it('truncates long chat titles more aggressively on smaller viewports', () => {
+    const longChatTitle = '@dev REQ Implement three permission control levels to built-in tools: const policy = { read: { list_files: "allow" } }';
+
+    expect(getWorldChatLegendTitle('codex', longChatTitle, 'mobile')).toBe('codex - @dev REQ Implement three permissi…');
+    expect(getWorldChatLegendTitle('codex', longChatTitle, 'tablet')).toBe('codex - @dev REQ Implement three permission control levels…');
+    expect(getWorldChatLegendTitle('codex', longChatTitle, 'desktop')).toContain('codex - @dev REQ Implement three permission control levels');
   });
 });

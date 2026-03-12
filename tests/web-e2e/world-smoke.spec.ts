@@ -5,19 +5,21 @@
  * - Validate that world and chat management affordances in the web app remain reachable.
  *
  * Key Features:
- * - Verifies world selection, creation, and delete affordances on the home page.
+ * - Verifies world selection, search, creation, and delete affordances on the home page.
  * - Verifies chat creation, search, and delete affordances inside the world page.
  * - Validates that deleting a chat removes it from the sidebar.
  * - Notes fast-fail credential check: tested at the Node bootstrap level in web-harness.ts.
  *
  * Implementation Notes:
- * - The Home carousel can contain many pre-existing worlds, so these checks first focus the seeded
- *   `e2e-test-web` card before asserting its enter/delete affordances.
+ * - The Home carousel can contain many pre-existing worlds, so these checks use the home-page search box
+ *   to isolate the seeded `e2e-test-web` card before asserting open/delete affordances.
  * - Chat search requires a query that matches at least one existing chat title;
  *   the default chat created by bootstrap is named "Chat 1" or similar, so we
   *   search for a partial string guaranteed to match.
  *
  * Recent Changes:
+ * - 2026-03-11: Updated the home hint assertion to cover the new swipe guidance copy.
+ * - 2026-03-11: Updated home-page coverage for the search-driven world entry flow replacing the Enter button.
  * - 2026-03-10: Added initial world and chat management smoke coverage.
  */
 
@@ -28,19 +30,29 @@ import {
   getCurrentChatId,
   gotoHome,
   gotoWorld,
+  searchHomeWorld,
   selectChatById,
 } from './support/web-harness.js';
 
-async function focusHomeWorld(page: Parameters<typeof gotoHome>[0], worldName: string): Promise<void> {
-  await page.getByTestId(`world-dot-${worldName}`).click();
-}
-
 test.describe('World management affordances', () => {
-  test('world list is shown and entry affordance is reachable', async ({ page, bootstrapState }) => {
+  test('world list is shown and card-open affordance is reachable', async ({ page, bootstrapState }) => {
     await gotoHome(page);
     await expect(page.getByTestId('world-carousel')).toBeVisible();
-    await focusHomeWorld(page, bootstrapState.worldName);
-    await expect(page.getByTestId(`enter-world-${bootstrapState.worldName}`)).toBeVisible();
+    await searchHomeWorld(page, bootstrapState.worldName);
+    await expect(page.locator('.world-card-btn.center').filter({ hasText: bootstrapState.worldName })).toBeVisible();
+    await expect(page.getByTestId('world-open-hint')).toContainText('Swipe to browse');
+    await expect(page.getByTestId('world-open-hint')).toContainText('centered card');
+  });
+
+  test('world search filters the carousel to matching worlds', async ({ page, bootstrapState }) => {
+    await gotoHome(page);
+    await page.getByTestId('world-search').fill(bootstrapState.worldName);
+    await expect(page.locator('.world-card-btn.center').filter({ hasText: bootstrapState.worldName })).toBeVisible();
+    await expect(page.getByTestId('world-search-empty')).toHaveCount(0);
+    await expect(page.locator('.description-title')).toContainText(bootstrapState.worldName);
+
+    await page.getByTestId('world-search').fill('zzz-no-match-zzz');
+    await expect(page.getByTestId('world-search-empty')).toBeVisible();
   });
 
   test('world create affordance is reachable from the home page carousel', async ({ page, bootstrapState }) => {
@@ -50,7 +62,7 @@ test.describe('World management affordances', () => {
 
   test('world delete affordance is reachable for each listed world', async ({ page, bootstrapState }) => {
     await gotoHome(page);
-    await focusHomeWorld(page, bootstrapState.worldName);
+    await searchHomeWorld(page, bootstrapState.worldName);
     await expect(page.getByTestId(`delete-world-${bootstrapState.worldName}`)).toBeVisible();
   });
 });

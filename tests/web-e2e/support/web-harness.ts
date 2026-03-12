@@ -11,10 +11,12 @@
  *
  * Implementation Notes:
  * - The local server stays running across tests, so resets happen through the real API instead of separate SQLite writers.
- * - The dev web server does not reliably deep-link arbitrary SPA paths during Playwright startup, so world entry goes through the real Home UI.
+ * - Home-page helpers now use the real search + centered-card flow so browser tests cover the primary world-entry affordance.
+ * - The dev web server does not reliably deep-link arbitrary SPA paths during Playwright startup, so world entry can still fall back to direct URLs when needed.
  * - Assertions still target visible browser behavior in the actual web app.
  *
  * Recent Changes:
+ * - 2026-03-11: Added home-page search/card helpers so smoke tests exercise the new search-driven world-entry flow.
  * - 2026-03-11: Added API-level world-idle polling so chat creation and agent teardown do not race
  *   the final backend persistence step after assistant text appears in the UI.
  * - 2026-03-11: Made createNewChat wait on the real chat-create API response and world refresh so tests follow the app's
@@ -302,9 +304,21 @@ export async function gotoHome(page: Page): Promise<void> {
   await page.getByTestId('home-page').waitFor({ state: 'visible' });
 }
 
+export async function searchHomeWorld(page: Page, worldName: string): Promise<void> {
+  await page.getByTestId('world-search').fill(worldName);
+  await expect(page.locator('.world-card-btn.center').filter({ hasText: worldName })).toBeVisible();
+}
+
+export async function openWorldFromHome(page: Page, worldName: string): Promise<void> {
+  await gotoHome(page);
+  await searchHomeWorld(page, worldName);
+  await page.locator('.world-card-btn.center').filter({ hasText: worldName }).click();
+  await page.getByTestId('world-page').waitFor({ state: 'visible' });
+}
+
 export async function gotoWorld(page: Page, state: WebBootstrapState, chatId?: string): Promise<void> {
   // Navigate directly to the world URL to avoid carousel selection issues
-  // (the carousel only shows the Enter link for the currently-selected world).
+  // when a test does not need to exercise the home-page world-entry flow.
   await page.goto(`/World/${encodeURIComponent(state.worldName)}`, { waitUntil: 'domcontentloaded' });
   await page.getByTestId('world-page').waitFor({ state: 'visible' });
   await page.getByTestId('chat-history').waitFor({ state: 'visible' });

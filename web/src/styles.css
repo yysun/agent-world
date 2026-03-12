@@ -12,6 +12,18 @@
  * - Balances AppRun/Tailwind utility usage with stylesheet-level overrides for complex chat behavior.
  *
  * Summary of Recent Changes:
+ * - 2026-03-11: Hid the desktop world-action row inside mobile/tablet overlays and removed extra fieldset inset from the chat-history panel.
+ * - 2026-03-11: Reduced the world-page top inset so the top agent row sits closer to the viewport.
+ * - 2026-03-11: Swapped home carousel arrow text for SVG icons so the desktop controls fit inside the doodle button chrome.
+ * - 2026-03-11: Increased world transcript line height through responsive tokens so message boxes read more comfortably.
+ * - 2026-03-11: Rebalanced world-page legend and transcript typography so the world view no longer feels oversized against the home page.
+ * - 2026-03-11: Removed the legacy desktop world zoom and added responsive legend/title layout rules for the world view.
+ * - 2026-03-11: Restored outline-only inactive carousel dots while keeping the active dot filled and mobile-visible.
+ * - 2026-03-11: Made inactive home-carousel dots visible without hover so mobile users can read the full indicator row.
+ * - 2026-03-11: Scaled home carousel dots down for large world lists so the indicator row still fits on mobile.
+ * - 2026-03-11: Reworked home search controls into a top action row plus full-width search field.
+ * - 2026-03-11: Replaced the duplicate home Enter button with world search and a centered-card open hint.
+ * - 2026-03-11: Hid home carousel arrows on phone-sized viewports and restored readable mobile control sizing for chat/history inputs.
  * - 2026-03-11: Added the shared message-surface shadow class to user and assistant cards so they match tool-card elevation.
  * - 2026-03-11: Removed visible tool toggle text so compact tool rows use icon-only expand/collapse controls.
  * - 2026-03-11: Restyled tool-related transcript rows as compact full-width status cards with explicit Open/Collapse text
@@ -168,15 +180,14 @@ a {
     max-width: 100%;
   }
 
-  .home-page .action-buttons {
+  .home-page .home-world-action-row,
+  .home-page .home-world-search-row {
     width: 100%;
-    flex-wrap: wrap;
-    gap: 0.65rem;
   }
 
-  .home-page .btn.enter-btn {
-    font-size: 1.05rem !important;
-    padding: 0.6rem 1.1rem;
+  .home-page .world-search-input {
+    min-height: 2.9rem;
+    font-size: 1rem !important;
   }
 }
 
@@ -196,6 +207,11 @@ a {
     min-width: 0;
     width: 100%;
   }
+
+  .home-page .home-world-action-row,
+  .home-page .home-world-search-row {
+    width: min(100%, 20rem);
+  }
 }
 
 h1,
@@ -212,25 +228,52 @@ h2 {
   margin-bottom: 2rem;
 }
 
+.world-dot-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 100%;
+  padding: 0 0.25rem;
+  margin-top: 0.75rem;
+  overflow: hidden;
+}
+
 .world-dot {
   width: 12px;
   height: 12px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1.25px solid rgba(51, 65, 85, 0.72);
+  border: 1.25px solid color-mix(in srgb, var(--accent-secondary) 72%, white 28%);
   border-radius: 50%;
-  border: none;
+  border-image: none !important;
+  appearance: none;
+  box-shadow: none;
   cursor: pointer;
-  transition: all 0.3s ease;
-  background-color: var(--text-quaternary);
+  opacity: 1;
+  transition: transform 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+  background-color: transparent;
 }
 
-.world-dot:hover {
-  background-color: var(--text-tertiary);
-  transform: scale(1.1);
+.doodle .world-dot {
+  border-image: none !important;
+  border-width: 1.25px !important;
+}
+
+.world-dot:hover,
+.world-dot:focus-visible {
+  background-color: rgba(71, 85, 105, 0.12);
+  transform: scale(1.08);
   border-color: var(--accent-primary);
 }
 
 .world-dot.active {
   background-color: var(--accent-primary);
-  transform: scale(1.2);
+  border-color: var(--accent-primary);
+  opacity: 1;
+  transform: scale(1.15);
 }
 
 /* Banner styles */
@@ -289,7 +332,7 @@ h2 {
 /* Hide arrows on mobile – swipe is the primary gesture */
 @media (max-width: 640px) {
   .swipe-carousel-arrow {
-    display: none;
+    display: none !important;
   }
 }
 
@@ -304,11 +347,22 @@ h2 {
 
 /* Arrow buttons */
 .carousel-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 2rem;
+  line-height: 1;
   padding: 0.5rem 1rem;
   width: auto;
   height: auto;
   border-radius: 50%;
+}
+
+.carousel-arrow-icon {
+  width: 1rem;
+  height: 1rem;
+  display: block;
+  flex: 0 0 auto;
 }
 
 .carousel-arrow.highlighted {
@@ -391,13 +445,6 @@ h2 {
   line-height: 1.6;
   margin-bottom: 1.5rem;
   color: var(--text-secondary);
-}
-
-.btn.enter-btn {
-  margin-top: 1rem;
-  padding: 0.75rem 2.5rem;
-  font-size: 1.5rem !important;
-  font-weight: bold;
 }
 
 /* Container and layout styles */
@@ -508,8 +555,8 @@ h2 {
   border: none;
   color: var(--accent-primary);
   padding: 0;
-  width: 40px;
-  height: 40px;
+  width: var(--world-top-action-button-size, 40px);
+  height: var(--world-top-action-button-size, 40px);
   font-size: 1rem;
   border-radius: 4px;
   cursor: pointer;
@@ -543,6 +590,71 @@ h2 {
   justify-content: center;
   gap: 1rem;
   margin-top: 1rem;
+  width: 100%;
+}
+
+.home-world-action-row,
+.home-world-search-row {
+  width: min(100%, 22rem);
+}
+
+.home-world-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.home-world-search-row {
+  margin-top: 0.9rem;
+}
+
+.world-search-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 3rem;
+  padding: 0.65rem 0.95rem;
+  border: 2px solid var(--border-primary);
+  border-radius: 12px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Short Stack', cursive;
+  font-size: 1.05rem;
+  line-height: 1.2;
+  box-shadow: var(--shadow-sm);
+}
+
+.doodle .world-search-input {
+  font-size: 1.05rem !important;
+}
+
+.world-search-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.world-search-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg-accent) 55%, white 45%);
+}
+
+.world-open-hint {
+  margin-top: 0.85rem;
+  font-size: 0.95rem;
+  color: var(--text-tertiary);
+}
+
+.world-search-empty-state {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 1.25rem;
+  font-size: 1rem;
 }
 
 /* Settings button */
@@ -577,11 +689,11 @@ h2 {
 
 /* World Component Styles - Two-column layout with chat and settings */
 .world-container {
-  --world-scale: 0.75;
-  max-width: 90vw !important;
-  width: 90vw;
+  --world-scale: 1;
+  max-width: min(96vw, 1500px) !important;
+  width: min(96vw, 1500px);
   margin: 0 auto;
-  padding: 0.5rem 2rem 1rem 2rem;
+  padding: var(--world-page-padding-top, 0.75rem) 1.5rem 1rem;
   min-height: 100vh;
   height: 100vh;
   box-sizing: border-box;
@@ -590,34 +702,13 @@ h2 {
 
 .world-columns {
   display: flex;
-  gap: 1rem;
+  gap: 1.25rem;
   height: calc(100vh - 1rem);
   min-height: 650px;
   width: 100%;
   max-width: none;
   min-width: 0;
   overflow: hidden;
-  zoom: var(--world-scale);
-}
-
-/* Keep World-page dialogs visually aligned with scaled world content. */
-.world-container .modal-content {
-  zoom: var(--world-scale);
-}
-
-@supports not (zoom: 1) {
-  .world-columns {
-    height: calc((100vh - 1rem) / var(--world-scale));
-    min-height: calc(650px / var(--world-scale));
-    width: calc(100% / var(--world-scale));
-    transform: scale(var(--world-scale));
-    transform-origin: top left;
-  }
-
-  .world-container .modal-content {
-    transform: scale(var(--world-scale));
-    transform-origin: center center;
-  }
 }
 
 /* Chat Column - takes up most of the space */
@@ -638,8 +729,8 @@ h2 {
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-width: 200px;
-  max-width: 350px;
+  min-width: 18rem;
+  max-width: 22rem;
   flex-shrink: 0;
   width: auto;
   height: 100%;
@@ -648,8 +739,8 @@ h2 {
 /* Agents Section - at top of chat column */
 .agents-section {
   height: auto;
-  min-height: 100px;
-  padding: 1rem 0;
+  min-height: var(--world-top-row-min-height, 100px);
+  padding: var(--world-top-row-section-padding-y, 1rem) 0;
 }
 
 
@@ -658,7 +749,7 @@ h2 {
   align-items: center;
   justify-content: center;
   height: 100%;
-  min-height: 100px;
+  min-height: var(--world-top-row-min-height, 100px);
 }
 
 .agents-row-with-back {
@@ -677,24 +768,37 @@ h2 {
 
 .agents-list-container {
   flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scroll-behavior: smooth;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding: var(--agent-strip-top-padding, 0.7rem) var(--agent-strip-side-padding, 0.75rem) 0.2rem;
+}
+
+.agents-list-container::-webkit-scrollbar {
+  display: none;
 }
 
 .agents-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1.5rem;
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: var(--agent-strip-gap, 1.25rem);
   justify-content: center;
   align-items: center;
+  min-width: 100%;
+  width: max-content;
 }
 
 /* Settings Section - at top of settings column */
 .settings-section {
   height: auto;
-  min-height: 100px;
-  padding: 1rem;
+  min-height: var(--world-top-row-min-height, 100px);
+  padding: var(--world-top-row-section-padding-y, 1rem) 1rem;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -705,7 +809,7 @@ h2 {
   align-items: center;
   justify-content: center;
   height: 100%;
-  min-height: 100px;
+  min-height: var(--world-top-row-min-height, 100px);
 }
 
 .right-panel-toggle-container {
@@ -745,6 +849,23 @@ h2 {
   width: 100%;
 }
 
+.chat-fieldset legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+  width: 100%;
+}
+
+.chat-legend-title {
+  flex: 1 1 18rem;
+  min-width: 0;
+  font-size: var(--chat-legend-font-size, 1.125rem);
+  font-weight: 700;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
 .world-panel-world-actions {
   flex-shrink: 0;
 }
@@ -760,8 +881,10 @@ h2 {
   align-items: center;
   /* gap: 0.5rem; */
   cursor: pointer;
+  flex: 0 0 auto;
+  scroll-snap-align: center;
   transition: all 0.2s ease;
-  padding: 0 1rem;
+  padding: 0 var(--agent-strip-item-padding-x, 1rem);
   border-radius: 8px;
 }
 
@@ -880,10 +1003,10 @@ h2 {
 
 /* Sprite sheet implementation */
 .agent-sprite {
-  width: 80px;
-  height: 80px;
+  width: var(--agent-strip-sprite-size, 80px);
+  height: var(--agent-strip-sprite-size, 80px);
   background-image: url('../imgs/agent-sprites.png');
-  background-size: 240px 240px;
+  background-size: calc(var(--agent-strip-sprite-size, 80px) * 3) calc(var(--agent-strip-sprite-size, 80px) * 3);
   background-repeat: no-repeat;
   transition: all 0.2s ease;
 }
@@ -922,35 +1045,35 @@ h2 {
 }
 
 .sprite-1 {
-  background-position: -80px 0;
+  background-position: calc(-1 * var(--agent-strip-sprite-size, 80px)) 0;
 }
 
 .sprite-2 {
-  background-position: -160px 0;
+  background-position: calc(-2 * var(--agent-strip-sprite-size, 80px)) 0;
 }
 
 .sprite-3 {
-  background-position: 0 -80px;
+  background-position: 0 calc(-1 * var(--agent-strip-sprite-size, 80px));
 }
 
 .sprite-4 {
-  background-position: -80px -80px;
+  background-position: calc(-1 * var(--agent-strip-sprite-size, 80px)) calc(-1 * var(--agent-strip-sprite-size, 80px));
 }
 
 .sprite-5 {
-  background-position: -160px -80px;
+  background-position: calc(-2 * var(--agent-strip-sprite-size, 80px)) calc(-1 * var(--agent-strip-sprite-size, 80px));
 }
 
 .sprite-6 {
-  background-position: 0 -160px;
+  background-position: 0 calc(-2 * var(--agent-strip-sprite-size, 80px));
 }
 
 .sprite-7 {
-  background-position: -80px -160px;
+  background-position: calc(-1 * var(--agent-strip-sprite-size, 80px)) calc(-2 * var(--agent-strip-sprite-size, 80px));
 }
 
 .sprite-8 {
-  background-position: -160px -160px;
+  background-position: calc(-2 * var(--agent-strip-sprite-size, 80px)) calc(-2 * var(--agent-strip-sprite-size, 80px));
 }
 
 .agent-name {
@@ -965,8 +1088,8 @@ h2 {
   border: none;
   cursor: pointer;
   padding: 0;
-  width: 40px;
-  height: 40px;
+  width: var(--world-top-action-button-size, 40px);
+  height: var(--world-top-action-button-size, 40px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1000,6 +1123,14 @@ legend {
   font-size: 1.5rem;
   padding: 0 1rem;
   font-weight: bold;
+}
+
+.chat-fieldset legend {
+  font-size: var(--chat-legend-font-size, 1.5rem);
+}
+
+.settings-fieldset legend {
+  font-size: var(--history-legend-font-size, 1.5rem);
 }
 
 .agent-queue-display {
@@ -1113,6 +1244,22 @@ legend {
   max-width: 350px;
   width: auto;
   height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* Override doodle.css fieldset descendant max-width so history content can fill the panel width. */
+.settings-fieldset .chat-history-container,
+.settings-fieldset .chat-history-controls,
+.settings-fieldset .chat-list,
+.settings-fieldset .chat-list-li,
+.settings-fieldset .no-chats {
+  width: 100%;
+  max-width: 100%;
+}
+
+.settings-fieldset .chat-history-search-input {
+  max-width: none !important;
 }
 
 /* Conversation Area */
@@ -1345,7 +1492,7 @@ legend {
 
 .message-sender {
   font-weight: bold;
-  font-size: 1.2rem;
+  font-size: var(--chat-message-meta-font-size, 0.875rem);
   opacity: 0.9;
 }
 
@@ -1362,8 +1509,8 @@ legend {
 }
 
 .message-content {
-  font-size: 1rem;
-  line-height: 1.48;
+  font-size: var(--chat-message-font-size, 0.9375rem);
+  line-height: var(--chat-message-line-height, 1.56);
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -1510,8 +1657,8 @@ legend {
 }
 
 .error-indicator {
-  font-size: 1rem;
-  line-height: 1.48;
+  font-size: var(--chat-message-font-size, 0.9375rem);
+  line-height: var(--chat-message-line-height, 1.56);
 }
 
 .message-timestamp {
@@ -1762,7 +1909,7 @@ legend {
   outline: none;
   background-color: transparent;
   font-family: 'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-  font-size: 0.95rem;
+  font-size: var(--interactive-control-font-size, 0.95rem);
   line-height: 1.45;
   color: color-mix(in srgb, var(--text-primary) 70%, #4b5563 30%);
   overflow-y: auto;
@@ -1796,8 +1943,8 @@ legend {
 }
 
 .composer-action-icon-button {
-  width: 2rem;
-  height: 2rem;
+  width: var(--interactive-icon-button-size, 2rem);
+  height: var(--interactive-control-height, 2rem);
   border: none;
   border-radius: 10px;
   background: transparent;
@@ -1820,7 +1967,7 @@ legend {
 }
 
 .composer-project-button {
-  height: 2rem;
+  height: var(--interactive-control-height, 2rem);
   border: none;
   border-radius: 10px;
   background: transparent;
@@ -1830,7 +1977,7 @@ legend {
   gap: 0.35rem;
   padding: 0 0.55rem;
   font-family: 'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-  font-size: 0.95rem;
+  font-size: var(--interactive-control-font-size, 0.95rem);
   line-height: 1;
   cursor: pointer;
   transition: background-color 0.2s ease, color 0.2s ease;
@@ -1854,12 +2001,22 @@ legend {
   border-image: none !important;
 }
 
+/* Override doodle.css 0.5em form scaling so interactive controls stay readable on mobile. */
+.doodle .message-input,
+.doodle .composer-textarea,
+.doodle .composer-action-icon-button,
+.doodle .composer-project-button,
+.doodle .composer-submit-button,
+.doodle .new-chat-btn {
+  font-size: var(--interactive-control-font-size, 1rem) !important;
+}
+
 .composer-submit-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.05rem;
-  height: 2.05rem;
+  width: var(--interactive-submit-button-size, 2.05rem);
+  height: var(--interactive-submit-button-size, 2.05rem);
   padding: 0;
   border-radius: 9999px;
   border: none;
@@ -1900,7 +2057,7 @@ legend {
   border: 2px solid var(--border-primary);
   border-radius: 4px;
   font-family: 'Short Stack', cursive;
-  font-size: 0.85rem;
+  font-size: var(--interactive-control-font-size, 0.85rem);
   background-color: var(--bg-primary);
   color: var(--text-primary);
   transition: border-color 0.2s ease;
@@ -1944,31 +2101,13 @@ legend {
     --world-scale: 1;
     max-width: 100% !important;
     width: 100%;
-    padding: 0.5rem 0.75rem 0.75rem;
+    padding: var(--world-page-padding-top, 0.5rem) 0.75rem 0.75rem;
     overflow-x: hidden;
   }
 
   .world-columns {
     height: calc(100dvh - 1.25rem);
     min-height: 0;
-    zoom: 1;
-  }
-
-  .world-container .modal-content {
-    zoom: 1;
-  }
-
-  @supports not (zoom: 1) {
-    .world-columns {
-      width: 100%;
-      height: calc(100dvh - 1.25rem);
-      transform: none;
-      min-height: 0;
-    }
-
-    .world-container .modal-content {
-      transform: none;
-    }
   }
 
   .right-panel-toggle-container {
@@ -2038,6 +2177,10 @@ legend {
     row-gap: 0.35rem;
   }
 
+  .world-right-panel .world-panel-world-actions {
+    display: none;
+  }
+
   .world-right-panel .settings-section {
     justify-content: flex-start;
     min-height: auto;
@@ -2058,8 +2201,11 @@ legend {
   }
 
   .agents-list {
-    justify-content: center;
-    gap: 1rem;
+    gap: var(--agent-strip-gap, 1rem);
+  }
+
+  .chat-legend-title {
+    flex-basis: 100%;
   }
 }
 
@@ -2213,7 +2359,7 @@ legend {
   }
 
   .world-container {
-    padding: 0.5rem 0.5rem 0.75rem 0.5rem;
+    padding: var(--world-page-padding-top, 0.5rem) 0.5rem 0.75rem 0.5rem;
   }
 
   .world-columns {
@@ -2250,7 +2396,7 @@ legend {
 
   .composer-textarea {
     min-height: 2.45rem;
-    font-size: 0.84rem;
+    font-size: var(--interactive-control-font-size, 0.84rem);
   }
 
   .composer-action-icon-button,
@@ -2259,21 +2405,21 @@ legend {
   }
 
   .composer-action-icon-button {
-    width: 1.8rem;
+    width: var(--interactive-icon-button-size, 1.8rem);
   }
 
   .composer-project-button {
-    font-size: 0.84rem;
+    font-size: var(--interactive-control-font-size, 0.84rem);
     padding: 0 0.5rem;
   }
 
   .composer-submit-button {
-    width: 1.85rem;
-    height: 1.85rem;
+    width: var(--interactive-submit-button-size, 1.85rem);
+    height: var(--interactive-submit-button-size, 1.85rem);
   }
 
   .agents-list {
-    gap: 0.75rem;
+    gap: var(--agent-strip-gap, 0.75rem);
   }
 
   .agent-sprite {
@@ -2329,6 +2475,14 @@ legend {
   .right-panel-mobile-tab {
     font-size: 0.74rem;
     padding: 0.25rem 0.55rem;
+  }
+
+  .chat-fieldset legend {
+    gap: 0.25rem 0.45rem;
+  }
+
+  .chat-legend-title {
+    line-height: 1.28;
   }
 }
 
@@ -3009,7 +3163,7 @@ legend {
 .chat-history-container {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.6rem;
   /* Fill the remaining vertical space within settings fieldset */
   flex: 1 1 auto;
   min-height: 0;
@@ -3030,14 +3184,15 @@ legend {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin: 0.35rem 0 0.6rem 0;
+  margin: 0.1rem 0 0.35rem 0;
 }
 
 .chat-history-search-input {
   flex: 1 1 auto;
   min-width: 0;
   padding: 0.45rem 0.65rem;
-  font-size: 0.88rem;
+  min-height: var(--interactive-control-height, 2rem);
+  font-size: var(--interactive-control-font-size, 0.88rem);
 }
 
 /* Simplified chat list styles */
@@ -3071,8 +3226,9 @@ legend {
 }
 
 .chat-list-title {
-  font-size: 1rem;
-  font-weight: 500;
+  font-size: var(--chat-list-title-font-size, 0.9rem);
+  font-weight: var(--chat-list-title-font-weight, 700);
+  line-height: 1.35;
   color: var(--text-primary);
   flex: 1;
   transition: color 0.2s;
@@ -3312,7 +3468,9 @@ legend {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-weight: 600;
+  font-size: var(--chat-list-title-font-size, 0.9rem);
+  font-weight: var(--chat-list-title-font-weight, 700);
+  line-height: 1.35;
   color: var(--text-primary);
 }
 
@@ -3338,8 +3496,8 @@ legend {
   background: var(--accent-primary);
   color: white;
   border: none;
-  width: 2rem;
-  height: 2rem;
+  width: var(--interactive-control-height, 2rem);
+  height: var(--interactive-control-height, 2rem);
   padding: 0;
   border-radius: 0.25rem;
   cursor: pointer;

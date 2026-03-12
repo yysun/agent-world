@@ -15,6 +15,11 @@
  * - Custom CSS for agent sprites, animations, and message styling
  * 
  * Recent Changes:
+ * - 2026-03-11: Made right-panel close actions resolve against the live viewport width so the mobile close button still works after viewport mismatches.
+ * - 2026-03-11: Reduced the world-page top inset so the compressed agent row sits closer to the viewport edge.
+ * - 2026-03-11: Compressed the top world row by driving agent-strip height, sprite size, and action-button size from shared viewport vars.
+ * - 2026-03-11: Switched the top agent list to a single-row horizontal strip with viewport-tuned spacing vars.
+ * - 2026-03-11: Passed viewport mode into chat and history surfaces so responsive control sizing follows the active layout mode.
  * - 2026-03-11: Wired chat-history search state through the World page so the sidebar filter input updates visible chats.
  * - 2026-03-11: Scoped visible HITL prompts to the active chat so pending approvals survive chat switches without
  *   leaking into other chat views.
@@ -60,6 +65,70 @@ function getViewportMode(width: number): WorldViewportMode {
 function getInitialViewportMode(): WorldViewportMode {
   if (typeof window === 'undefined') return 'desktop';
   return getViewportMode(window.innerWidth);
+}
+
+export function resolveRightPanelViewportMode(
+  currentViewportMode: WorldViewportMode,
+  measuredWidth?: number,
+): WorldViewportMode {
+  const width = Number(measuredWidth);
+  if (Number.isFinite(width) && width > 0) {
+    return getViewportMode(width);
+  }
+
+  if (typeof window !== 'undefined' && Number.isFinite(window.innerWidth) && window.innerWidth > 0) {
+    return getViewportMode(window.innerWidth);
+  }
+
+  return currentViewportMode;
+}
+
+export function getAgentStripCssVars(viewportMode: WorldViewportMode): Record<string, string> {
+  if (viewportMode === 'mobile') {
+    return {
+      '--world-page-padding-top': '0.2rem',
+      '--agent-strip-gap': '0.75rem',
+      '--agent-strip-side-padding': '0.35rem',
+      '--agent-strip-top-padding': '0.3rem',
+      '--agent-strip-item-padding-x': '0.5rem',
+      '--agent-strip-sprite-size': '3.25rem',
+      '--world-top-row-min-height': '4.35rem',
+      '--world-top-row-section-padding-y': '0.35rem',
+      '--world-top-action-button-size': '2.15rem',
+    };
+  }
+
+  if (viewportMode === 'tablet') {
+    return {
+      '--world-page-padding-top': '0.2rem',
+      '--agent-strip-gap': '0.85rem',
+      '--agent-strip-side-padding': '0.45rem',
+      '--agent-strip-top-padding': '0.32rem',
+      '--agent-strip-item-padding-x': '0.55rem',
+      '--agent-strip-sprite-size': '3.35rem',
+      '--world-top-row-min-height': '4.5rem',
+      '--world-top-row-section-padding-y': '0.4rem',
+      '--world-top-action-button-size': '2.2rem',
+    };
+  }
+
+  return {
+    '--world-page-padding-top': '0.2rem',
+    '--agent-strip-gap': '0.95rem',
+    '--agent-strip-side-padding': '0.55rem',
+    '--agent-strip-top-padding': '0.35rem',
+    '--agent-strip-item-padding-x': '0.6rem',
+    '--agent-strip-sprite-size': '3.5rem',
+    '--world-top-row-min-height': '4.75rem',
+    '--world-top-row-section-padding-y': '0.45rem',
+    '--world-top-action-button-size': '2.3rem',
+  };
+}
+
+export function getAgentStripStyleAttribute(viewportMode: WorldViewportMode): string {
+  return Object.entries(getAgentStripCssVars(viewportMode))
+    .map(([name, value]) => `${name}: ${value}`)
+    .join('; ');
 }
 
 function isWorldMainAgent(agent: Agent, worldMainAgent: string | null | undefined): boolean {
@@ -206,7 +275,11 @@ export default class WorldComponent extends Component<WorldComponentState, World
 
     // Main content view
     return (
-      <div className={`world-container flex flex-col h-screen viewport-${state.viewportMode}`} data-testid="world-page">
+      <div
+        className={`world-container flex flex-col h-screen viewport-${state.viewportMode}`}
+        data-testid="world-page"
+        style={getAgentStripStyleAttribute(state.viewportMode)}
+      >
         <div className="world-columns flex flex-1 overflow-hidden">
           <div className="chat-column flex flex-col flex-1">
             <div className="agents-section">
@@ -218,13 +291,16 @@ export default class WorldComponent extends Component<WorldComponentState, World
                     </button>
                   </a>
                 </div>
-                <div className="agents-list-container flex-1">
+                <div
+                  className="agents-list-container flex-1"
+                  data-testid="agent-strip-container"
+                >
                   {!state.world?.agents?.length ? (
                     <div className="no-agents text-text-secondary">No agents in this world:
                       <span> {safeHTML('<a href="#" onclick="app.run(\'open-agent-create\')">Create Agent</a>')}</span>
                     </div>
                   ) : (
-                    <div className="agents-list flex flex-wrap gap-6 justify-center items-center">
+                    <div className="agents-list" data-testid="agent-strip">
                       {state.world?.agents.map((agent, index) => {
                         const isSelected = state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id;
                         const isFilterActive = state.activeAgentFilters.includes(agent.id);
@@ -312,6 +388,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
                 isStopping={state.isStopping}
                 activeHitlPrompt={activeHitlPrompt}
                 submittingHitlRequestId={state.submittingHitlRequestId}
+                viewportMode={state.viewportMode}
               />
             )}
           </div>
@@ -400,6 +477,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
               <WorldChatHistory
                 world={state.world}
                 chatSearchQuery={state.chatSearchQuery}
+                viewportMode={state.viewportMode}
               />
             </div>
           </div>
@@ -602,10 +680,14 @@ export default class WorldComponent extends Component<WorldComponentState, World
       isRightPanelOpen: true,
     }),
 
-    'close-right-panel': (state: WorldComponentState): WorldComponentState => ({
-      ...state,
-      isRightPanelOpen: state.viewportMode === 'desktop' ? true : false,
-    }),
+    'close-right-panel': (state: WorldComponentState): WorldComponentState => {
+      const effectiveViewportMode = resolveRightPanelViewportMode(state.viewportMode);
+      return {
+        ...state,
+        viewportMode: effectiveViewportMode,
+        isRightPanelOpen: effectiveViewportMode === 'desktop',
+      };
+    },
 
     'toggle-right-panel': (state: WorldComponentState, tab?: RightPanelTab): WorldComponentState => ({
       ...state,

@@ -12,12 +12,14 @@
  * - Filtering stays pure via `filterChatsByQuery` for direct unit coverage.
  *
  * Summary of Recent Changes:
+ * - 2026-03-11: Added viewport-driven responsive sizing vars so mobile chat-history controls keep readable touch-friendly sizing.
  * - 2026-03-11: Applied the shared surface-shadow class to right-panel chat list rows so their elevation matches
  *   transcript cards and tool panels.
  * - 2026-03-10: Added stable chat-history selectors and current-chat metadata for Playwright web E2E coverage.
  */
 
 import type { WorldChatHistoryProps } from '../types';
+import { getResponsiveControlStyleAttribute } from '../domain/responsive-ui';
 
 export function filterChatsByQuery<T extends { name?: string }>(chats: T[], query: string): T[] {
   const normalizedQuery = String(query || '').trim().toLowerCase();
@@ -30,7 +32,7 @@ export function getChatListItemClass(isCurrent: boolean): string {
 }
 
 export default function WorldChatHistory(props: WorldChatHistoryProps) {
-  const { world, chatSearchQuery } = props;
+  const { world, chatSearchQuery, viewportMode = 'desktop' } = props;
 
   // Check if agents exist to enable/disable New Chat button
   const hasAgents = world && world.agents && world.agents.length > 0;
@@ -39,7 +41,11 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
   const currentChatId = world?.currentChatId ?? null;
 
   return (
-    <fieldset className="settings-fieldset" data-testid="chat-history">
+    <fieldset
+      className="settings-fieldset"
+      data-testid="chat-history"
+      style={getResponsiveControlStyleAttribute(viewportMode)}
+    >
       <legend>Chat History</legend>
 
       <div className="chat-history-controls">

@@ -144,7 +144,7 @@ A disposable file `.e2e-hitl-delete-me.txt` is created inside the workspace befo
 |---------------|-----------|---------|
 | `home-page` | Home.tsx | `gotoHome()` |
 | `world-carousel` | swipe-carousel.tsx | app-shell smoke test |
-| `enter-world-{name}` | swipe-carousel.tsx | `gotoWorld()` |
+| `world-search` | swipe-carousel.tsx | home-page world search coverage |
 | `world-page` | World.tsx | `gotoWorld()` |
 | `world-error-state` | World.tsx | `waitForErrorState()` |
 | `chat-history` | world-chat-history.tsx | `gotoWorld()` |

@@ -12,6 +12,9 @@
  * - Message body rendering is delegated to domain helpers to keep this file focused on view composition.
  *
  * Summary of Recent Changes:
+ * - 2026-03-11: Simplified the chat legend to title-only so world chats no longer show queue/activity widgets in the legend row.
+ * - 2026-03-11: Added responsive legend-title truncation so long chat names do not overwhelm the world layout.
+ * - 2026-03-11: Added viewport-driven responsive sizing vars so composer and mobile controls keep readable touch-friendly sizing.
  * - 2026-03-11: Reserved the same left transcript indent for tool rows as avatar-bearing messages so compact tool
  *   cards align with the other chat boxes instead of hugging the panel edge.
  * - 2026-03-11: Applied the same surface shadow to user and assistant message cards as tool cards through a shared
@@ -31,7 +34,7 @@
  */
 
 import { app } from 'apprun';
-import type { WorldChatProps, Message } from '../types';
+import type { WorldChatProps, Message, WorldViewportMode } from '../types';
 import toKebabCase from '../utils/toKebabCase';
 import { SenderType, getSenderType } from '../utils/sender-type.js';
 import { shouldHideWorldChatMessage } from '../domain/message-visibility';
@@ -39,6 +42,7 @@ import { isToolRenderableMessage, renderMessageContent } from '../domain/message
 import { buildCombinedRenderableMessages } from '../domain/tool-merge';
 import { ActivityPulse, ElapsedTimeCounter } from './activity-indicators';
 import { AgentQueueDisplay } from './agent-queue-display';
+import { getResponsiveControlStyleAttribute } from '../domain/responsive-ui';
 
 const debug = false;
 const SYSTEM_AVATAR_SPRITE_INDEX = 4;
@@ -62,6 +66,12 @@ export interface MessageMetaUiConfig {
   timestampPlacement: 'top';
 }
 
+export interface WorldChatLegendUiConfig {
+  showQueueStatus: boolean;
+  showActivityPulse: boolean;
+  showElapsedTime: boolean;
+}
+
 export function getWaitingMessageUiConfig(): WaitingMessageUiConfig {
   return {
     showWaitingAvatar: false,
@@ -75,6 +85,51 @@ export function getMessageMetaUiConfig(): MessageMetaUiConfig {
   return {
     timestampPlacement: 'top',
   };
+}
+
+export function getWorldChatLegendUiConfig(): WorldChatLegendUiConfig {
+  return {
+    showQueueStatus: false,
+    showActivityPulse: false,
+    showElapsedTime: false,
+  };
+}
+
+function normalizeLegendText(value: string | null | undefined, fallback: string): string {
+  const normalized = String(value || '').trim().replace(/\s+/g, ' ');
+  return normalized || fallback;
+}
+
+function getLegendChatNameMaxLength(viewportMode: WorldViewportMode): number {
+  if (viewportMode === 'mobile') {
+    return 34;
+  }
+
+  if (viewportMode === 'tablet') {
+    return 52;
+  }
+
+  return 80;
+}
+
+export function getWorldChatLegendTitle(
+  worldName: string,
+  currentChat: string | null | undefined,
+  viewportMode: WorldViewportMode,
+): string {
+  const normalizedWorldName = normalizeLegendText(worldName, 'World');
+  const normalizedCurrentChat = normalizeLegendText(currentChat, '');
+
+  if (!normalizedCurrentChat) {
+    return normalizedWorldName;
+  }
+
+  const maxLength = getLegendChatNameMaxLength(viewportMode);
+  const truncatedChatName = normalizedCurrentChat.length > maxLength
+    ? `${normalizedCurrentChat.slice(0, maxLength - 1).trimEnd()}…`
+    : normalizedCurrentChat;
+
+  return `${normalizedWorldName} - ${truncatedChatName}`;
 }
 
 export function formatMessageTimestamp(createdAt: Message['createdAt'] | undefined): string {
@@ -183,7 +238,6 @@ export default function WorldChat(props: WorldChatProps) {
     isSending,
     isWaiting,
     needScroll = false,
-    activeAgent,
     agents = [],
     currentChat,
     currentChatId = null,
@@ -191,11 +245,13 @@ export default function WorldChat(props: WorldChatProps) {
     editingMessageId = null,
     editingText = '',
     agentFilters = [],  // Agent IDs to filter by
+    activeAgent,
     isBusy = false,
     elapsedMs = 0,
     isStopping = false,
     activeHitlPrompt = null,
     submittingHitlRequestId = null,
+    viewportMode = 'desktop',
   } = props;
 
   const { canStopCurrentSession, composerDisabled, actionButtonDisabled, actionButtonClass, actionButtonLabel } = getComposerActionState({
@@ -216,6 +272,7 @@ export default function WorldChat(props: WorldChatProps) {
   const waitingAgentName = getWaitingAgentName(activeAgent);
   const waitingMessageUiConfig = getWaitingMessageUiConfig();
   const messageMetaUiConfig = getMessageMetaUiConfig();
+  const legendUiConfig = getWorldChatLegendUiConfig();
   const agentSpriteByName = new Map<string, number>();
   const agentSpriteById = new Map<string, number>();
 
@@ -351,17 +408,29 @@ export default function WorldChat(props: WorldChatProps) {
   };
 
   return (
-    <fieldset className="chat-fieldset" data-testid="world-chat">
+    <fieldset
+      className="chat-fieldset"
+      data-testid="world-chat"
+      style={getResponsiveControlStyleAttribute(viewportMode)}
+    >
       <legend>
-        {worldName} {
-          currentChat ? ` - ${currentChat}` :
-            <span className="unsaved-indicator" title="Unsaved chat"> ●</span>}
-        <AgentQueueDisplay
-          activeAgent={activeAgent ? { name: activeAgent.name, spriteIndex: activeAgent.spriteIndex } : null}
-          queuedAgents={queuedAgents}
-        />
-        <ActivityPulse isBusy={isBusy || false} />
-        {(isBusy || elapsedMs > 0) && <ElapsedTimeCounter elapsedMs={elapsedMs || 0} />}
+        <span
+          className="chat-legend-title"
+          title={currentChat ? `${worldName} - ${currentChat}` : worldName}
+        >
+          {getWorldChatLegendTitle(worldName, currentChat, viewportMode)}
+          {!currentChat ? <span className="unsaved-indicator" title="Unsaved chat"> ●</span> : null}
+        </span>
+        {legendUiConfig.showQueueStatus ? (
+          <AgentQueueDisplay
+            activeAgent={activeAgent ? { name: activeAgent.name, spriteIndex: activeAgent.spriteIndex } : null}
+            queuedAgents={queuedAgents}
+          />
+        ) : null}
+        {legendUiConfig.showActivityPulse ? <ActivityPulse isBusy={isBusy || false} /> : null}
+        {legendUiConfig.showElapsedTime && (isBusy || elapsedMs > 0) ? (
+          <ElapsedTimeCounter elapsedMs={elapsedMs || 0} />
+        ) : null}
       </legend>
       <div className="chat-container">
         {/* Conversation Area */}
