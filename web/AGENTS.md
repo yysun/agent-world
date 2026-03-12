@@ -1,6 +1,13 @@
-# Web App — CSS & Styling Rules
+# Web App — Styling, Events, and Async Generator Rules
 
-Rules for anyone writing or modifying CSS in `web/src/styles.css` or adding new UI controls to the web (AppRun) frontend.
+Rules for anyone writing or modifying the AppRun-based web frontend.
+
+These rules apply to:
+
+- CSS in `web/src/styles.css`
+- UI controls in `web/src/components/*`
+- AppRun event/update flows in `web/src/pages/World.update.ts`
+- Routed page state in `web/src/pages/*`
 
 ---
 
@@ -95,3 +102,95 @@ Checklist:
    }
    ```
 4. Verify font matches `.composer-project-button` (Short Stack wins in doodle context).
+
+---
+
+## AppRun Event Handling Rules
+
+The web app uses AppRun with typed events and generator-based state transitions.
+
+### Required event-handling rules
+
+1. Keep AppRun update handlers as the source of truth for web UI state.
+2. Prefer pure synchronous handlers for single-step state changes.
+3. Use typed event names and payloads from `web/src/types/events.ts`; do not introduce ad-hoc event strings without updating the shared event types.
+4. Do not call `app.run(...)` from one AppRun update handler to trigger another AppRun update handler as part of normal control flow.
+5. When one handler needs another handler's multi-step behavior, extract a shared local flow helper and compose it directly.
+6. Preserve chat scoping, SSE event ordering, HITL scoping, and world hydration semantics when changing handlers in `World.update.ts`.
+7. Keep scheduler or external-source dispatches distinct from handler composition.
+
+### `app.run(...)` rule
+
+Inside AppRun update handlers:
+
+- Do not use `app.run(...)` for handler-to-handler chaining.
+- Prefer `yield*` into a shared async-generator flow when the next state transition belongs to the current handler.
+- Prefer a shared synchronous helper when the flow is single-step.
+
+Outside AppRun update handlers:
+
+- `app.run(...)` remains acceptable for external event sources such as SSE callbacks, timers, resize listeners, or browser APIs that need to publish into AppRun.
+
+### Event-flow expectations for `World.update.ts`
+
+- `key-press` and click-triggered send paths must stay behaviorally aligned.
+- World refresh flows must preserve transient messages that are intentionally carried across refresh.
+- System events must stay chat-scoped.
+- Streaming lifecycle semantics must remain `start -> chunk -> end` with explicit error handling.
+- Queue/HITL state must remain scoped to the active chat and reconstructable after refresh.
+
+---
+
+## Async Generator Rules
+
+Async generators are the preferred mechanism for multi-step UI state transitions in the web app.
+
+### Use `async function*` when
+
+- A handler must yield an intermediate state before awaiting async work.
+- A flow has a clear sequence such as `loading -> success`, `optimistic -> settled`, or `queued -> hydrated`.
+- Multiple triggers need to share the same multi-step state logic.
+- One handler should compose another multi-step flow directly with `yield*`.
+
+Examples in the current codebase:
+
+- `initWorld`
+- `sendMessageFlow`
+- `handleSystemEvent`
+- `create-new-chat`
+- modal save/delete flows in `agent-edit.tsx` and `world-edit.tsx`
+
+### Do not use `async function*` when
+
+- The update is a single synchronous state change.
+- The logic is a simple async fetch that belongs to a top-level routed page's initial state.
+- The code is an external event producer rather than an AppRun state owner.
+
+### `state = async` rule
+
+Use `state = async` only for top-level routed page initialization, such as loading route data on first render.
+
+- Good fit: `web/src/pages/Home.tsx`
+- Do not use `state = async` for JSX-embedded modal or leaf components
+- For embedded components, use `mounted(...)` plus handler-based updates
+
+### Generator composition rules
+
+1. Prefer local reusable helpers that return `AsyncGenerator<State>`.
+2. Prefer `yield* helper(state, payload)` over dispatching another AppRun event.
+3. Validate blocking conditions before yielding optimistic UI when the action must not create transient state.
+4. Keep yielded states at the production boundary:
+   - loading flags
+   - optimistic transcript rows
+   - hydrated world/chat state
+   - error state visible to the user
+5. Keep side effects narrow and explicit after the yielded state sequence is clear.
+
+### Testing requirements for generator flows
+
+- Add targeted unit coverage for each changed generator flow.
+- Assert yielded states in order, not internal implementation details.
+- Cover at least:
+  - optimistic or loading first yield
+  - final success/error yield
+  - an edge case that must not emit an invalid intermediate state
