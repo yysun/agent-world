@@ -185,6 +185,72 @@ describe('web_fetch tool', () => {
     expect(mockRequestWorldOption).toHaveBeenCalledTimes(1);
   });
 
+  it('persists durable approval prompt and resolution messages when localhost access is denied', async () => {
+    mockRequestWorldOption.mockImplementationOnce(async (_world, request) => ({
+      requestId: String(request?.requestId || ''),
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      optionId: 'no',
+      source: 'user',
+    }));
+
+    const messages: Array<Record<string, unknown>> = [];
+    const tool = createWebFetchToolDefinition();
+    const result = await tool.execute(
+      { url: 'http://127.0.0.1:8080' },
+      undefined,
+      undefined,
+      {
+        world: { id: 'world-1', currentChatId: 'chat-1' } as any,
+        chatId: 'chat-1',
+        toolCallId: 'web-fetch-call-1',
+        agentName: 'agent-1',
+        messages: messages as any,
+      },
+    );
+
+    expect(String(result)).toContain('Error: web_fetch failed - blocked_target: local/private access denied');
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({
+      role: 'assistant',
+      sender: 'agent-1',
+      tool_calls: [
+        expect.objectContaining({ id: 'web-fetch-call-1::approval' }),
+      ],
+    });
+
+    const promptArgs = JSON.parse(String((messages[0] as any).tool_calls[0].function.arguments));
+    expect(promptArgs).toMatchObject({
+      title: 'Allow local/private web_fetch access?',
+      defaultOptionId: 'no',
+      defaultOption: 'No',
+      metadata: {
+        tool: 'web_fetch',
+        toolCallId: 'web-fetch-call-1',
+      },
+    });
+    expect(promptArgs.options).toEqual([
+      {
+        id: 'yes',
+        label: 'Yes',
+        description: 'Allow this local/private fetch request.',
+      },
+      {
+        id: 'no',
+        label: 'No',
+        description: 'Keep blocking this request.',
+      },
+    ]);
+
+    expect(JSON.parse(String(messages[1].content))).toMatchObject({
+      requestId: 'web-fetch-call-1::approval',
+      toolCallId: 'web-fetch-call-1',
+      tool: 'web_fetch',
+      status: 'denied',
+      reason: 'user_denied',
+    });
+  });
+
   it('does not infer chatId from world context for localhost approval', async () => {
     const tool = createWebFetchToolDefinition();
     const result = await tool.execute(

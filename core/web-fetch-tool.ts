@@ -15,6 +15,7 @@
  * - Applies timeout and output-size bounds with explicit truncation metadata
  *
  * Recent Changes:
+ * - 2026-03-12: Shared tool approval flow now persists durable approval prompt/resolution messages for replay-safe local/private access denials.
  * - 2026-03-12: Added `read` permission level guard to `web_fetch` — returns a blocked-tool error JSON when world toolPermission is 'read'.
  * - 2026-03-06: Removed `world.currentChatId` fallback from local/private access approvals; HITL approval now requires explicit `context.chatId`.
  * - 2026-03-05: Added deterministic timeout-error mapping (`timeout_error`) for aborted fetches caused by per-request timeout limits.
@@ -30,7 +31,7 @@ import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
 import { requestToolApproval } from './tool-approval.js';
 import { RELIABILITY_CONFIG } from './reliability-config.js';
-import { type World } from './types.js';
+import { type AgentMessage, type World } from './types.js';
 import { getEnvValueFromText } from './utils.js';
 
 type WebFetchArgs = {
@@ -46,6 +47,7 @@ type WebFetchToolContext = {
   chatId?: string | null;
   toolCallId?: string;
   agentName?: string | null;
+  messages?: AgentMessage[];
 };
 
 type WebFetchResult = {
@@ -187,6 +189,7 @@ async function requestLocalAccessApproval(options: {
   reason: string;
   toolCallId?: string;
   agentName?: string | null;
+  messages?: AgentMessage[];
 }): Promise<{ approved: boolean; reason: 'approved' | 'user_denied' | 'timeout' }> {
   const resolution = await requestToolApproval({
     world: options.world,
@@ -197,6 +200,7 @@ async function requestLocalAccessApproval(options: {
       'Allow this request to proceed?',
     ].join('\n'),
     chatId: options.chatId,
+    toolCallId: options.toolCallId,
     defaultOptionId: LOCAL_DENY_OPTION,
     options: [
       { id: LOCAL_APPROVE_OPTION, label: 'Yes', description: 'Allow this local/private fetch request.' },
@@ -212,6 +216,7 @@ async function requestLocalAccessApproval(options: {
         : {}),
     },
     agentName: options.agentName || null,
+    messages: options.messages,
   });
 
   return {
@@ -397,6 +402,7 @@ async function executeWebFetch(args: WebFetchArgs, context?: WebFetchToolContext
         chatId,
         toolCallId: context?.toolCallId,
         agentName: context?.agentName || null,
+        messages: context?.messages,
       });
 
       if (!approval.approved) {

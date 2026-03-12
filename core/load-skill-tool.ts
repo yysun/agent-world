@@ -608,7 +608,12 @@ async function persistLoadSkillApprovalPromptMessage(options: {
   const question = `Skill "${options.skillId}" requested execution.${options.scriptPaths.length > 0 ? ` Referenced scripts:\n${options.scriptPaths.map((scriptPath) => `- ${scriptPath}`).join('\n')}` : ''}\n\nApprove applying this skill now?`;
   const toolArguments = {
     question,
-    options: ['Yes once', 'Yes in this session', 'No'],
+    options: [
+      { id: APPROVAL_OPTION_YES_ONCE, label: 'Yes once' },
+      { id: APPROVAL_OPTION_YES_IN_SESSION, label: 'Yes in this session' },
+      { id: APPROVAL_OPTION_NO, label: 'No' },
+    ],
+    defaultOptionId: APPROVAL_OPTION_NO,
     defaultOption: 'No',
     metadata: {
       tool: 'human_intervention_request',

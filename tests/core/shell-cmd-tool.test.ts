@@ -10,6 +10,7 @@
  * - Output accumulation
  * 
  * Changes:
+ * - 2026-03-12: Added black-box durable approval prompt/resolution coverage for denied shell risk approvals.
  * - 2026-03-05: Added deterministic timeout outcome coverage (timed_out) for long-running commands and quick-success non-timeout assertions.
  * - 2026-02-28: Added skill-aware script path resolution tests for `resolveSkillScriptParameters`.
  * - 2026-02-28: Added deterministic risk-tier tests for `allow`, `hitl_required`, and `block` shell command classification outcomes.
@@ -22,13 +23,36 @@
  */
 
 import { describe, test, expect, vi, beforeEach } from 'vitest';
+
+const mockRequestWorldOption = vi.hoisted(() => vi.fn());
+
+vi.mock('../../core/hitl.js', async () => {
+  const actual = await vi.importActual<typeof import('../../core/hitl.js')>('../../core/hitl.js');
+  return {
+    ...actual,
+    requestWorldOption: mockRequestWorldOption,
+  };
+});
+
 import {
+  createShellCmdToolDefinition,
   executeShellCommand,
   validateShellDirectoryRequest,
   validateShellCommandScope,
   classifyShellCommandRisk,
   resolveSkillScriptParameters
 } from '../../core/shell-cmd-tool.js';
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockRequestWorldOption.mockResolvedValue({
+    requestId: 'req-1',
+    worldId: 'world-1',
+    chatId: 'chat-1',
+    optionId: 'approve',
+    source: 'user',
+  });
+});
 
 describe('shell command execution', () => {
   test('should execute command and return result', async () => {
@@ -83,6 +107,79 @@ describe('shell command execution', () => {
     expect(result.timedOut).toBe(true);
     expect(result.error).toContain('Command execution timed out after 50ms');
     expect(result.exitCode).not.toBe(0);
+  });
+});
+
+describe('shell command durable approvals', () => {
+  test('persists durable approval prompt and resolution messages when risky command is denied', async () => {
+    mockRequestWorldOption.mockImplementationOnce(async (_world, request) => ({
+      requestId: String(request?.requestId || ''),
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      optionId: 'deny',
+      source: 'user',
+    }));
+
+    const messages: Array<Record<string, unknown>> = [];
+    const tool = createShellCmdToolDefinition();
+
+    await expect(
+      tool.execute(
+        {
+          command: 'rm',
+          parameters: ['-rf', './build'],
+        },
+        undefined,
+        undefined,
+        {
+          world: { id: 'world-1', variables: 'working_directory=/tmp/project' },
+          workingDirectory: '/tmp/project',
+          chatId: 'chat-1',
+          agentName: 'test-agent',
+          toolCallId: 'shell-call-1',
+          messages: messages as any,
+        },
+      ),
+    ).rejects.toThrow('not approved');
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({
+      role: 'assistant',
+      sender: 'test-agent',
+      tool_calls: [
+        expect.objectContaining({ id: 'shell-call-1::approval' }),
+      ],
+    });
+
+    const promptArgs = JSON.parse(String((messages[0] as any).tool_calls[0].function.arguments));
+    expect(promptArgs).toMatchObject({
+      title: 'Approve risky shell command?',
+      defaultOptionId: 'deny',
+      metadata: {
+        tool: 'shell_cmd',
+        toolCallId: 'shell-call-1',
+      },
+    });
+    expect(promptArgs.options).toEqual([
+      {
+        id: 'approve',
+        label: 'Approve',
+        description: 'Run this command once.',
+      },
+      {
+        id: 'deny',
+        label: 'Deny',
+        description: 'Do not run this command.',
+      },
+    ]);
+
+    expect(JSON.parse(String(messages[1].content))).toMatchObject({
+      requestId: 'shell-call-1::approval',
+      toolCallId: 'shell-call-1',
+      tool: 'shell_cmd',
+      status: 'denied',
+      reason: 'user_denied',
+    });
   });
 });
 

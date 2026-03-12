@@ -333,7 +333,7 @@ export function createRealtimeEventsRuntime(
 
     // Track toolCallIds emitted by the live runtime map so the persisted-message
     // replay does not overwrite them with re-derived opt_1/opt_2 IDs.
-    const runtimeEmittedToolCallIds = new Set<string>();
+    const runtimeEmittedRequestIds = new Set<string>();
 
     if (chatId && typeof listPendingHitlPromptEvents === 'function') {
       try {
@@ -353,8 +353,9 @@ export function createRealtimeEventsRuntime(
           }
 
           const toolCallId = String(prompt.toolCallId || prompt.requestId || '').trim();
+          const requestId = String(prompt.requestId || '').trim();
           const toolName = String(prompt.toolName || 'human_intervention_request').trim() || 'human_intervention_request';
-          if (!toolCallId) {
+          if (!toolCallId || !requestId) {
             continue;
           }
 
@@ -363,7 +364,7 @@ export function createRealtimeEventsRuntime(
             continue;
           }
 
-          runtimeEmittedToolCallIds.add(toolCallId);
+          runtimeEmittedRequestIds.add(requestId);
           sendRealtimeEventToRenderer({
             ...serializeRealtimeToolEvent(worldId, pendingChatId, {
               type: 'tool-progress',
@@ -411,13 +412,14 @@ export function createRealtimeEventsRuntime(
           }
 
           const toolCallId = String(prompt.toolCallId || prompt.requestId || '').trim();
+          const requestId = String(prompt.requestId || '').trim();
           const toolName = String(prompt.toolName || 'human_intervention_request').trim() || 'human_intervention_request';
-          if (!toolCallId) {
+          if (!toolCallId || !requestId) {
             continue;
           }
 
           // Skip if the live runtime map already emitted this prompt with correct option IDs.
-          if (runtimeEmittedToolCallIds.has(toolCallId)) {
+          if (runtimeEmittedRequestIds.has(requestId)) {
             continue;
           }
 

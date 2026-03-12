@@ -109,6 +109,17 @@ async function waitForMockCallCount(mockFn: { mock: { calls: unknown[] } }, coun
   }
 }
 
+function createInteractiveWorld(
+  toolPermission: 'read' | 'ask' | 'auto' = 'auto',
+): { id: string; currentChatId: string; variables?: string; eventEmitter: { emit: ReturnType<typeof vi.fn> } } {
+  return {
+    id: 'world-1',
+    currentChatId: 'chat-1',
+    ...(toolPermission === 'auto' ? {} : { variables: `tool_permission=${toolPermission}` }),
+    eventEmitter: { emit: vi.fn() },
+  };
+}
+
 describe('core/load-skill-tool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -346,7 +357,7 @@ describe('core/load-skill-tool', () => {
       undefined,
       undefined,
       {
-        world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+        world: createInteractiveWorld('ask'),
         chatId: 'chat-1',
         workingDirectory: '/skills/pdf-extract',
       },
@@ -498,7 +509,7 @@ describe('core/load-skill-tool', () => {
       undefined,
       undefined,
       {
-        world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+        world: createInteractiveWorld('ask'),
         chatId: 'chat-1',
       },
     );
@@ -534,7 +545,7 @@ describe('core/load-skill-tool', () => {
       undefined,
       undefined,
       {
-        world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+        world: createInteractiveWorld('ask'),
         chatId: 'chat-1',
       },
     );
@@ -567,7 +578,7 @@ describe('core/load-skill-tool', () => {
       undefined,
       undefined,
       {
-        world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+        world: createInteractiveWorld('ask'),
         chatId: 'chat-1',
       },
     );
@@ -607,7 +618,7 @@ describe('core/load-skill-tool', () => {
       undefined,
       undefined,
       {
-        world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+        world: createInteractiveWorld('ask'),
         chatId: 'chat-1',
       },
     );
@@ -760,7 +771,7 @@ describe('core/load-skill-tool', () => {
     }];
 
     const context = {
-      world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+      world: createInteractiveWorld('ask'),
       chatId: 'chat-1',
       messages,
       agentName: 'a1',
@@ -821,7 +832,7 @@ describe('core/load-skill-tool', () => {
     }];
 
     const context = {
-      world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+      world: createInteractiveWorld('ask'),
       chatId: 'chat-1',
       messages,
       agentName: 'a1',
@@ -882,7 +893,7 @@ describe('core/load-skill-tool', () => {
     }];
 
     const context = {
-      world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+      world: createInteractiveWorld('ask'),
       chatId: 'chat-1',
       messages,
       agentName: 'a1',
@@ -924,7 +935,7 @@ describe('core/load-skill-tool', () => {
     }];
 
     const context = {
-      world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+      world: createInteractiveWorld('ask'),
       chatId: 'chat-1',
       messages,
       agentName: 'a1',

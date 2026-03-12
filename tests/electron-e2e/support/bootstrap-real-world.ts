@@ -73,7 +73,7 @@ function configureWorkspaceEnv(workspacePath: string): void {
   process.env.AGENT_WORLD_DATA_PATH = workspacePath;
   process.env.AGENT_WORLD_PROJECT_PATH = workspacePath;
   process.env.AGENT_WORLD_WORKSPACE_PATH = workspacePath;
-  process.env.AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS = process.env.AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS || '250';
+  process.env.AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS = process.env.AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS || '5000';
 }
 
 function resetWorkspacePath(workspacePath: string): void {

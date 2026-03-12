@@ -16,6 +16,7 @@
  * - Runtime is in-memory and process-local by design.
  *
  * Recent Changes:
+ * - 2026-03-12: Relaxed the hard `requestId === toolCallId` invariant so durable approval prompts can keep distinct request and owning-tool identities.
  * - 2026-03-06: Removed `world.currentChatId` fallback from HITL option requests; interactive requests now require explicit `chatId`.
  * - 2026-02-26: Replaced direct `[hitl]` console traces with categorized structured logger events (`hitl`) for env-controlled filtering.
  * - 2026-02-25: Added HITL runtime trace logs for request emission, replay, and resolution lifecycle diagnostics.
@@ -274,10 +275,8 @@ export async function requestWorldOption(
   const requestedToolCallId = requestMetadata && typeof requestMetadata.toolCallId === 'string'
     ? String(requestMetadata.toolCallId).trim()
     : '';
-  if (explicitRequestId && requestedToolCallId && explicitRequestId !== requestedToolCallId) {
-    throw new Error(`HITL requestId '${explicitRequestId}' must match toolCallId '${requestedToolCallId}'.`);
-  }
   const requestId = explicitRequestId || requestedToolCallId || generateId();
+  const toolCallId = requestedToolCallId || requestId;
   const chatId = normalizeExplicitChatId(request.chatId);
   if (!chatId) {
     throw new Error('HITL option request requires an explicit chatId.');
@@ -298,7 +297,7 @@ export async function requestWorldOption(
     metadata: requestMetadata,
     agentName: resolveHitlAgentName(world, request.agentName),
     toolName: requestedToolName || 'human_intervention_request',
-    toolCallId: requestedToolCallId || requestId,
+    toolCallId,
   };
 
   return await new Promise<HitlOptionResolution>((resolve) => {
@@ -353,14 +352,34 @@ function normalizeOptionsFromToolArgs(args: Record<string, unknown>): Array<{ id
   const seen = new Set<string>();
 
   for (let index = 0; index < options.length; index += 1) {
-    const label = String(options[index] || '').trim();
+    const rawOption = options[index];
+    if (rawOption && typeof rawOption === 'object' && !Array.isArray(rawOption)) {
+      const label = String((rawOption as Record<string, unknown>).label || '').trim();
+      const id = String((rawOption as Record<string, unknown>).id || '').trim();
+      if (!label || !id) {
+        continue;
+      }
+
+      const dedupeKey = id.toLowerCase();
+      if (seen.has(dedupeKey)) {
+        continue;
+      }
+
+      seen.add(dedupeKey);
+      normalized.push({ id, label });
+      continue;
+    }
+
+    const label = String(rawOption || '').trim();
     if (!label) {
       continue;
     }
+
     const dedupeKey = label.toLowerCase();
     if (seen.has(dedupeKey)) {
       continue;
     }
+
     seen.add(dedupeKey);
     normalized.push({
       id: `opt_${normalized.length + 1}`,
@@ -375,6 +394,14 @@ function resolveDefaultOptionFromToolArgs(
   normalizedOptions: Array<{ id: string; label: string }>,
   args: Record<string, unknown>,
 ): string {
+  const defaultOptionId = String(args.defaultOptionId || '').trim();
+  if (defaultOptionId) {
+    const explicitById = normalizedOptions.find((option) => option.id === defaultOptionId);
+    if (explicitById) {
+      return explicitById.id;
+    }
+  }
+
   const defaultOptionLabel = String(args.defaultOption || '').trim().toLowerCase();
   if (defaultOptionLabel) {
     const explicit = normalizedOptions.find((option) => option.label.toLowerCase() === defaultOptionLabel);
@@ -435,19 +462,25 @@ export function listPendingHitlPromptEventsFromMessages(
       const metadata = args.metadata && typeof args.metadata === 'object' && !Array.isArray(args.metadata)
         ? (args.metadata as Record<string, unknown>)
         : null;
+      const metadataToolCallId = metadata && typeof metadata.toolCallId === 'string'
+        ? String(metadata.toolCallId).trim()
+        : '';
+      const metadataToolName = metadata && typeof metadata.tool === 'string'
+        ? String(metadata.tool).trim()
+        : '';
 
       unresolvedById.set(toolCallId, {
         chatId: normalizedChatId,
         prompt: {
           requestId: toolCallId,
-          title: 'Human input required',
+          title: String(args.title || 'Human input required').trim() || 'Human input required',
           message: String(args.question || args.prompt || '').trim(),
           options,
           defaultOptionId: resolveDefaultOptionFromToolArgs(options, args),
           metadata,
           agentName: String(message?.sender || '').trim() || null,
-          toolName,
-          toolCallId,
+          toolName: metadataToolName || toolName,
+          toolCallId: metadataToolCallId || toolCallId,
         },
       });
     }

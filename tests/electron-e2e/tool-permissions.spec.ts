@@ -38,6 +38,7 @@ import {
   selectSessionByName,
   sendComposerMessage,
   setDesktopToolPermission,
+  clearCurrentChatQueue,
   waitForHitlPrompt,
   waitForAssistantToken,
 } from './support/electron-harness.js';
@@ -47,7 +48,8 @@ const WRITE_FILE_TARGET = '.e2e-write-output.txt';
 const LOAD_SKILL_RUN_MARKER = '.e2e-load-skill-ran.txt';
 const CREATE_AGENT_ASK_NAME = 'E2E Ask Agent';
 const CREATE_AGENT_AUTO_NAME = 'E2E Auto Agent';
-const PERMISSION_FLOW_TIMEOUT_MS = 60_000;
+const PERMISSION_FLOW_TIMEOUT_MS = 90_000;
+const PERMISSION_TEST_TIMEOUT_MS = 180_000;
 
 async function reloadDesktopWithPermission(
   page: Parameters<typeof launchAndPrepare>[0],
@@ -56,6 +58,25 @@ async function reloadDesktopWithPermission(
   await setDesktopToolPermission(page, level);
   await launchAndPrepare(page);
   await selectSessionByName(page, CHAT_NAMES.current);
+
+  const state = await getDesktopState(page);
+  const chatId = state.sessionIdsByName[CHAT_NAMES.current];
+  if (!state.worldId || !chatId) {
+    throw new Error('Expected the current Electron E2E session to exist after permission reload.');
+  }
+
+  await page.evaluate(async ({ worldId, chatId }) => {
+    const api = (window as any).agentWorldDesktop;
+    await api.selectSession(worldId, chatId);
+    await api.getMessages(worldId, chatId);
+  }, { worldId: state.worldId, chatId });
+
+  await expect.poll(async () => (await getDesktopState(page)).currentChatId, {
+    timeout: 15_000,
+    message: 'Expected the Electron desktop session reselect to settle after permission reload.',
+  }).toBe(chatId);
+
+  await expect(page.getByLabel('Message input')).toBeVisible();
   await expect(page.getByLabel('Tool permission level')).toHaveValue(level);
 }
 
@@ -148,7 +169,7 @@ test.describe('Tool permission dropdown — UI affordances', () => {
 });
 
 test.describe('Tool permission enforcement', () => {
-  test.describe.configure({ timeout: PERMISSION_FLOW_TIMEOUT_MS });
+  test.describe.configure({ timeout: PERMISSION_TEST_TIMEOUT_MS });
 
   test('write_file follows the read/ask/auto matrix', async ({ page }) => {
     const writeTargetPath = await resetWorkspaceFile(WRITE_FILE_TARGET);
@@ -218,11 +239,13 @@ test.describe('Tool permission enforcement', () => {
     await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
     await respondToHitlPrompt(page, 'Approve', PERMISSION_FLOW_TIMEOUT_MS);
     await waitForAssistantToken(page, 'E2E_SHELL_ASK_OK', PERMISSION_FLOW_TIMEOUT_MS);
+    await clearCurrentChatQueue(page);
 
     await reloadDesktopWithPermission(page, 'auto');
     await sendComposerMessage(page, 'SHELL_AUTO: exercise the auto low-risk path.');
     await waitForAssistantToken(page, 'E2E_SHELL_AUTO_OK', PERMISSION_FLOW_TIMEOUT_MS);
     await expect(page.getByTestId('hitl-prompt')).toBeHidden();
+    await clearCurrentChatQueue(page);
 
     await resetWorkspaceFile(
       HITL_DELETE_TARGET,

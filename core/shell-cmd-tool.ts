@@ -27,6 +27,7 @@
  * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - 2026-03-12: Shared tool approval flow now persists durable approval prompt/resolution messages for replay-safe shell approval history.
  * - 2026-03-12: Added `toolPermission` enforcement: 'read' level blocks execution with an error result; 'ask' level forces every invocation through HITL approval regardless of risk tier.
  * - 2026-03-06: Added explicit canonical failure reasons for shell validation/policy failures so approval denials and validation errors no longer masquerade as non-zero exits.
  * - 2026-03-06: Unified shell continuation output on one bounded-preview result contract, removed `smart`-mode branching, and stopped persisting a synthetic assistant stdout mirror message after shell completion.
@@ -96,6 +97,7 @@ import {
   serializeToolExecutionEnvelope,
   type ToolExecutionEnvelope,
 } from './tool-execution-envelope.js';
+import { type AgentMessage } from './types.js';
 import {
   createShellProcessExecution,
   transitionShellProcessExecution,
@@ -674,10 +676,12 @@ async function requestShellCommandRiskApproval(options: {
   risk: ShellCommandRiskAssessment;
   toolCallId?: string;
   agentName?: string | null;
+  messages?: AgentMessage[];
 }): Promise<{ approved: boolean; reason: 'approved' | 'user_denied' | 'timeout' }> {
   const approval = await requestToolApproval({
     world: options.world,
     chatId: options.chatId,
+    toolCallId: options.toolCallId,
     title: 'Approve risky shell command?',
     message: [
       `Command: ${options.command} ${options.parameters.join(' ')}`.trim(),
@@ -702,6 +706,7 @@ async function requestShellCommandRiskApproval(options: {
       ...(options.toolCallId ? { toolCallId: options.toolCallId } : {}),
     },
     agentName: options.agentName || null,
+    messages: options.messages,
   });
 
   return {
@@ -2311,6 +2316,7 @@ export function createShellCmdToolDefinition() {
           risk: { tier: 'hitl_required', reason: 'world permission level is "ask"', tags: ['ask-permission'] },
           toolCallId: typeof currentMessageId === 'string' ? currentMessageId : undefined,
           agentName: streamAgentName,
+          messages: Array.isArray(context?.messages) ? context.messages as AgentMessage[] : undefined,
         });
         if (!askApproval.approved) {
           throw new Error(
@@ -2335,6 +2341,7 @@ export function createShellCmdToolDefinition() {
           risk: riskAssessment,
           toolCallId: typeof currentMessageId === 'string' ? currentMessageId : undefined,
           agentName: streamAgentName,
+          messages: Array.isArray(context?.messages) ? context.messages as AgentMessage[] : undefined,
         });
 
         if (!approval.approved) {

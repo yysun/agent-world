@@ -17,6 +17,7 @@
  * - Uses wrapper-based execution to exercise real alias/validation behavior.
  *
  * Recent Changes:
+ * - 2026-03-12: Added durable synthetic approval prompt/resolution coverage for denied create_agent approvals.
  * - 2026-02-20: Added coverage that `create_agent` forwards manager override to allow in-turn creation while world processing is active.
  * - 2026-02-20: Added initial unit coverage for built-in `create_agent`.
  */
@@ -170,6 +171,53 @@ describe('core/create-agent-tool', () => {
     });
     expect(mockedCreateAgent).not.toHaveBeenCalled();
     expect(mockedRequestWorldOption).toHaveBeenCalledTimes(1);
+  });
+
+  it('persists synthetic approval prompt and resolution messages when approval is denied', async () => {
+    mockedRequestWorldOption.mockImplementationOnce(async (_world, request) => ({
+      worldId: 'world-1',
+      requestId: String(request?.requestId || ''),
+      chatId: 'chat-1',
+      optionId: 'no',
+      source: 'user',
+    }));
+
+    const messages: any[] = [];
+    const tool = buildWrappedCreateAgentTool();
+    const result = await tool.execute(
+      { name: 'Review Agent' },
+      undefined,
+      undefined,
+      {
+        ...buildToolContext(),
+        messages,
+        toolCallId: 'create-agent-call-1',
+        agentName: 'planner',
+      },
+    );
+
+    const payload = JSON.parse(String(result));
+    expect(payload).toMatchObject({
+      ok: false,
+      status: 'denied',
+      created: false,
+      reason: 'user_denied',
+    });
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({
+      role: 'assistant',
+      sender: 'planner',
+      tool_calls: [
+        expect.objectContaining({ id: 'create-agent-call-1::approval' }),
+      ],
+    });
+    expect(JSON.parse(messages[1].content)).toMatchObject({
+      requestId: 'create-agent-call-1::approval',
+      toolCallId: 'create-agent-call-1',
+      tool: 'create_agent',
+      status: 'denied',
+      reason: 'user_denied',
+    });
   });
 
   it('returns agent_exists error before approval when pre-claim detects existing agent', async () => {

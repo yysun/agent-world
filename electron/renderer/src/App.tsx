@@ -100,6 +100,7 @@ import {
 } from './utils/app-helpers';
 import { useChatEventSubscriptions } from './hooks/useChatEventSubscriptions';
 import { deriveHitlPromptDisplayState } from './domain/hitl-scope';
+import { shouldShowQueuePanel } from './domain/queue-visibility';
 import { useMessageQueue } from './hooks/useMessageQueue';
 import type { MainProcessLogEntry } from './domain/chat-event-handlers';
 import { computeCanStopCurrentSession } from './domain/chat-stop-state';
@@ -1491,7 +1492,7 @@ function AppContent({ api }: { api: DesktopApi }) {
             ) : undefined
           }
           queuePanel={(
-            queuedMessages.length > 0 ? (
+            shouldShowQueuePanel(queuedMessages.length, Boolean(activeHitlPrompt)) ? (
               <MessageQueuePanel
                 queuedMessages={queuedMessages}
                 onRemove={removeMessageFromQueue}

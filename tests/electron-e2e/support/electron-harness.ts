@@ -30,6 +30,7 @@ import { resolveCreatedSessionId } from './session-resolution.js';
 
 const execFileAsync = promisify(execFile);
 const electronWorkspaceRequire = createRequire(path.resolve(process.cwd(), 'electron/package.json'));
+const ELECTRON_E2E_QUEUE_NO_RESPONSE_FALLBACK_MS = process.env.AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS || '5000';
 
 export const TEST_WORLD_ID = 'e2e-test';
 export const TEST_WORLD_NAME = 'e2e-test';
@@ -105,7 +106,7 @@ export async function bootstrapWorkspace(): Promise<void> {
             AGENT_WORLD_DATA_PATH: activeWorkspacePath,
             AGENT_WORLD_PROJECT_PATH: activeWorkspacePath,
             AGENT_WORLD_WORKSPACE_PATH: activeWorkspacePath,
-            AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS: process.env.AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS || '250',
+            AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS: ELECTRON_E2E_QUEUE_NO_RESPONSE_FALLBACK_MS,
           },
         },
       );
@@ -142,7 +143,7 @@ export function getElectronLaunchOptions(): {
       AGENT_WORLD_DATA_PATH: workspacePath,
       AGENT_WORLD_PROJECT_PATH: workspacePath,
       AGENT_WORLD_WORKSPACE_PATH: workspacePath,
-      AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS: process.env.AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS || '250',
+      AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS: ELECTRON_E2E_QUEUE_NO_RESPONSE_FALLBACK_MS,
       AGENT_WORLD_E2E_DISABLE_SINGLE_INSTANCE: 'true',
       AGENT_WORLD_E2E_USER_DATA_PATH: electronUserDataPath,
     },
@@ -325,6 +326,41 @@ export async function addQueueMessageToCurrentChat(page: Page, content: string):
     const api = (window as any).agentWorldDesktop;
     await api.addToQueue(worldId, chatId, content, 'human');
   }, { worldId: state.worldId, chatId: state.currentChatId, content });
+}
+
+export async function waitForQueueToDrain(page: Page, timeoutMs: number = 15_000): Promise<void> {
+  await expect.poll(async () => {
+    const state = await getDesktopState(page);
+    if (!state.worldId || !state.currentChatId) {
+      return 'missing-chat';
+    }
+
+    return await page.evaluate(async ({ worldId, chatId }) => {
+      const api = (window as any).agentWorldDesktop;
+      const queuedMessages = await api.getQueuedMessages(worldId, chatId);
+      return Array.isArray(queuedMessages)
+        ? queuedMessages.filter((entry: any) => {
+          const status = String(entry?.status || '').trim().toLowerCase();
+          return status === 'queued' || status === 'sending';
+        }).length
+        : 0;
+    }, { worldId: state.worldId, chatId: state.currentChatId });
+  }, {
+    timeout: timeoutMs,
+    message: 'Expected the Electron message queue to drain before continuing.',
+  }).toBe(0);
+}
+
+export async function clearCurrentChatQueue(page: Page): Promise<void> {
+  const state = await getDesktopState(page);
+  if (!state.worldId || !state.currentChatId) {
+    throw new Error('Unable to resolve the current world/chat for queue cleanup.');
+  }
+
+  await page.evaluate(async ({ worldId, chatId }) => {
+    const api = (window as any).agentWorldDesktop;
+    await api.clearQueue(worldId, chatId);
+  }, { worldId: state.worldId, chatId: state.currentChatId });
 }
 
 export async function pauseCurrentChatQueue(page: Page): Promise<void> {

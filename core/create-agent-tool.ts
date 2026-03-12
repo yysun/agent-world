@@ -16,6 +16,7 @@
  * - Keeps runtime contract canonical (`autoReply`, `nextAgent`) while aliases are handled upstream.
  *
  * Recent Changes:
+ * - 2026-03-12: Shared tool approval flow now persists durable approval prompt/resolution messages for replay-safe denial history.
  * - 2026-03-12: Added `read` permission level guard — returns a blocked-tool error when world toolPermission is 'read'.
  * - 2026-02-20: Added post-create HITL informational confirmation (`Agent <name> has been created`) with `refreshAfterDismiss` metadata set to true.
  * - 2026-02-20: Pre-claim agent creation slot before approval dialog to prevent parallel-call race where both calls pass approval before either calls createAgent.
@@ -28,7 +29,7 @@ import { requestWorldOption } from './hitl.js';
 import { requestToolApproval } from './tool-approval.js';
 import { createAgent, claimAgentCreationSlot } from './managers.js';
 import { getEnvValueFromText } from './utils.js';
-import { LLMProvider, EventType, type CreateAgentParams, type World } from './types.js';
+import { LLMProvider, EventType, type AgentMessage, type CreateAgentParams, type World } from './types.js';
 import { publishEvent } from './events/publishers.js';
 
 const APPROVAL_OPTION_YES = 'yes';
@@ -48,6 +49,9 @@ type CreateAgentToolArgs = {
 type CreateAgentToolContext = {
   world?: World;
   chatId?: string | null;
+  messages?: Array<Record<string, any>>;
+  toolCallId?: string;
+  agentName?: string | null;
 };
 
 type NormalizedCreateAgentArgs = {
@@ -132,6 +136,9 @@ async function requestCreateAgentApproval(options: {
   autoReply: boolean;
   role: string | null;
   nextAgent: string;
+  messages?: AgentMessage[];
+  toolCallId?: string;
+  agentName?: string | null;
 }): Promise<{
   approved: boolean;
   reason: 'approved' | 'user_denied' | 'timeout';
@@ -146,6 +153,7 @@ async function requestCreateAgentApproval(options: {
       `Next agent: ${options.nextAgent}`,
     ].join('\n'),
     chatId: options.chatId,
+    toolCallId: options.toolCallId,
     defaultOptionId: APPROVAL_OPTION_NO,
     options: [
       { id: APPROVAL_OPTION_YES, label: 'Yes', description: 'Create the agent now.' },
@@ -159,6 +167,8 @@ async function requestCreateAgentApproval(options: {
       role: options.role,
       nextAgent: options.nextAgent,
     },
+    agentName: options.agentName ?? null,
+    messages: options.messages,
   });
 
   return {
@@ -302,6 +312,9 @@ export function createCreateAgentToolDefinition() {
           autoReply: normalized.args.autoReply,
           role: normalized.args.role,
           nextAgent: normalized.args.nextAgent,
+          messages: context?.messages as AgentMessage[] | undefined,
+          toolCallId: context?.toolCallId,
+          agentName: context?.agentName ?? null,
         });
 
         if (!approval.approved) {

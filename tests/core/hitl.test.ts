@@ -365,14 +365,24 @@ describe('core/hitl', () => {
     });
   });
 
-  it('rejects mismatched requestId and toolCallId', async () => {
+  it('accepts distinct requestId and toolCallId and keeps their roles separate', async () => {
+    const worldEventEmitter = new EventEmitter();
     const world = {
       id: 'world-mismatch',
       currentChatId: 'chat-mismatch',
-      eventEmitter: new EventEmitter(),
+      eventEmitter: worldEventEmitter,
     } as any;
 
-    await expect(requestWorldOption(world, {
+    const seenEvents: Array<{ requestId: string; toolCallId: string; messageId: string }> = [];
+    worldEventEmitter.on('world', (event: any) => {
+      seenEvents.push({
+        requestId: String(event?.toolExecution?.metadata?.hitlPrompt?.requestId || ''),
+        toolCallId: String(event?.toolExecution?.toolCallId || ''),
+        messageId: String(event?.messageId || ''),
+      });
+    });
+
+    const pending = requestWorldOption(world, {
       requestId: 'req-explicit',
       title: 'Approval required',
       message: 'Proceed?',
@@ -381,11 +391,32 @@ describe('core/hitl', () => {
         { id: 'no', label: 'No' },
       ],
       metadata: {
-        tool: 'human_intervention_request',
+        tool: 'shell_cmd',
         toolCallId: 'call-different',
       },
       chatId: 'chat-mismatch',
-    })).rejects.toThrow("must match toolCallId");
+    });
+
+    await Promise.resolve();
+    expect(seenEvents).toEqual([{
+      requestId: 'req-explicit',
+      toolCallId: 'call-different',
+      messageId: 'call-different',
+    }]);
+
+    const accepted = submitWorldHitlResponse({
+      worldId: 'world-mismatch',
+      requestId: 'req-explicit',
+      optionId: 'yes',
+      chatId: 'chat-mismatch',
+    });
+    expect(accepted.accepted).toBe(true);
+
+    await expect(pending).resolves.toMatchObject({
+      requestId: 'req-explicit',
+      optionId: 'yes',
+      source: 'user',
+    });
   });
 
   it('rejects HITL requests without an explicit chatId', async () => {
@@ -526,6 +557,57 @@ describe('listPendingHitlPromptEventsFromMessages (message-authoritative read mo
     ];
 
     expect(listPendingHitlPromptEventsFromMessages(resolvedMessages as any, 'chat-load')).toHaveLength(0);
+  });
+
+  it('reconstructs a persisted prompt with distinct requestId and owning toolCallId', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        sender: 'planner',
+        chatId: 'chat-shell',
+        content: 'Calling tool: human_intervention_request',
+        tool_calls: [
+          {
+            id: 'shell-approval-1',
+            function: {
+              name: 'human_intervention_request',
+              arguments: JSON.stringify({
+                title: 'Approve shell command?',
+                question: 'Run rm test.txt?',
+                options: [
+                  { id: 'approve', label: 'Approve' },
+                  { id: 'deny', label: 'Deny' },
+                ],
+                defaultOptionId: 'deny',
+                defaultOption: 'Deny',
+                metadata: {
+                  tool: 'shell_cmd',
+                  toolCallId: 'shell-call-1',
+                },
+              }),
+            },
+          },
+        ],
+      },
+    ];
+
+    const pending = listPendingHitlPromptEventsFromMessages(messages as any, 'chat-shell');
+
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({
+      chatId: 'chat-shell',
+      prompt: {
+        requestId: 'shell-approval-1',
+        toolCallId: 'shell-call-1',
+        toolName: 'shell_cmd',
+        title: 'Approve shell command?',
+        defaultOptionId: 'deny',
+        options: [
+          { id: 'approve', label: 'Approve' },
+          { id: 'deny', label: 'Deny' },
+        ],
+      },
+    });
   });
 
   it('returns multiple unresolved requests in stable creation order', () => {

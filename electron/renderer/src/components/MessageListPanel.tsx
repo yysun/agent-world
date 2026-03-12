@@ -491,6 +491,7 @@ export default function MessageListPanel({
   );
   const shouldShowLoading = messagesLoading && renderableMessages.length === 0;
   const [messageCollapseOverrides, setMessageCollapseOverrides] = useState<Record<string, boolean>>({});
+
   const toggleMessageCollapsed = (messageId: string, currentCollapsed: boolean) => {
     setMessageCollapseOverrides((prev) => ({
       ...prev,

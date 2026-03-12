@@ -9,6 +9,7 @@
  * - Mocks requestWorldOption to keep tests deterministic and offline
  *
  * Recent Changes:
+ * - 2026-03-12: Added durable synthetic approval prompt/resolution persistence coverage with distinct owning toolCallId.
  * - 2026-02-28: Added initial coverage for shared tool approval helper.
  */
 
@@ -85,6 +86,89 @@ describe('tool approval helper', () => {
       reason: 'timeout',
       optionId: 'no',
       source: 'timeout',
+    });
+  });
+
+  it('persists synthetic approval prompt and resolution messages with a distinct owning toolCallId', async () => {
+    mockRequestWorldOption.mockImplementationOnce(async (_world, request) => ({
+      requestId: String(request?.requestId || ''),
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      optionId: 'no',
+      source: 'user',
+    }));
+
+    const messages: any[] = [];
+    const result = await requestToolApproval({
+      world: { id: 'world-1' } as any,
+      chatId: 'chat-1',
+      toolCallId: 'shell-call-1',
+      title: 'Approve shell command?',
+      message: 'Run rm test.txt?',
+      options: [
+        { id: 'yes', label: 'Yes' },
+        { id: 'no', label: 'No' },
+      ],
+      defaultOptionId: 'no',
+      approvedOptionIds: ['yes'],
+      metadata: { tool: 'shell_cmd' },
+      agentName: 'planner',
+      messages,
+    });
+
+    expect(result).toEqual({
+      approved: false,
+      reason: 'user_denied',
+      optionId: 'no',
+      source: 'user',
+    });
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({
+      role: 'assistant',
+      chatId: 'chat-1',
+      sender: 'planner',
+      tool_calls: [
+        expect.objectContaining({
+          id: 'shell-call-1::approval',
+          function: expect.objectContaining({ name: 'human_intervention_request' }),
+        }),
+      ],
+    });
+
+    const promptArgs = JSON.parse(messages[0].tool_calls[0].function.arguments);
+    expect(promptArgs).toMatchObject({
+      title: 'Approve shell command?',
+      question: 'Run rm test.txt?',
+      defaultOptionId: 'no',
+      defaultOption: 'No',
+      metadata: {
+        tool: 'shell_cmd',
+        toolCallId: 'shell-call-1',
+      },
+    });
+    expect(promptArgs.options).toEqual([
+      {
+        id: 'yes',
+        label: 'Yes',
+      },
+      {
+        id: 'no',
+        label: 'No',
+      },
+    ]);
+
+    expect(messages[1]).toMatchObject({
+      role: 'tool',
+      chatId: 'chat-1',
+      tool_call_id: 'shell-call-1::approval',
+      sender: 'planner',
+    });
+    expect(JSON.parse(messages[1].content)).toMatchObject({
+      requestId: 'shell-call-1::approval',
+      toolCallId: 'shell-call-1',
+      tool: 'shell_cmd',
+      status: 'denied',
+      reason: 'user_denied',
     });
   });
 });

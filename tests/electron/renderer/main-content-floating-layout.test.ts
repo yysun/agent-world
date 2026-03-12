@@ -61,7 +61,7 @@ vi.mock('../../../electron/renderer/src/components/RightPanelShell', () => ({
   default: rightPanelShellSpy,
 }));
 
-import MainContentArea from '../../../electron/renderer/src/components/MainContentArea';
+import MainContentArea, { DEFAULT_FLOATING_COMPOSER_HEIGHT } from '../../../electron/renderer/src/components/MainContentArea';
 
 describe('MainContentArea floating bottom stack layout', () => {
   it('renders message panel full-height and floats queue/composer/status in a bottom overlay', () => {
@@ -85,7 +85,7 @@ describe('MainContentArea floating bottom stack layout', () => {
 
     expect(String(mainSection?.props?.className || '')).toContain('relative');
     expect(String(mainSection?.props?.className || '')).toContain('flex-1');
-    expect((mainSection?.props?.style as Record<string, unknown>)?.['--floating-composer-height']).toBe('8.5rem');
+    expect((mainSection?.props?.style as Record<string, unknown>)?.['--floating-composer-height']).toBe(DEFAULT_FLOATING_COMPOSER_HEIGHT);
 
     expect(mainSectionChildren[0]?.type).toBe(messageListPanelSpy);
 
@@ -117,6 +117,6 @@ describe('MainContentArea floating bottom stack layout', () => {
     const rootChildren = tree.props?.children ?? [];
     const mainSection = rootChildren[0];
 
-    expect((mainSection?.props?.style as Record<string, unknown>)?.['--floating-composer-height']).toBe('8.5rem');
+    expect((mainSection?.props?.style as Record<string, unknown>)?.['--floating-composer-height']).toBe(DEFAULT_FLOATING_COMPOSER_HEIGHT);
   });
 });

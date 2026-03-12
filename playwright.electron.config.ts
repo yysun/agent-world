@@ -23,9 +23,9 @@ export default defineConfig({
   testDir: './tests/electron-e2e',
   fullyParallel: false,
   workers: 1,
-  timeout: 180_000,
+  timeout: 5_000,
   expect: {
-    timeout: 30_000,
+    timeout: 5_000,
   },
   reporter: 'list',
   use: {
