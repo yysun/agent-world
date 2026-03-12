@@ -7,10 +7,13 @@
  * Coverage:
  * - Ignores unrelated system events.
  * - Ignores unscoped system events while a chat session is active.
+ * - Stores transient non-error statuses in selected-chat legend state.
+ * - Renders error-like system events as transcript rows instead of page-level overlay state.
  * - Refreshes world/currentChat on `agent-created` and `chat-title-updated` events.
  * - Surfaces refresh failures as UI errors.
  *
  * Recent Changes:
+ * - 2026-03-12: Replaced hidden system-message ingestion assertions with visible selected-chat status state coverage.
  * - 2026-02-27: Added active-chat scope expectations for system events.
  */
 
@@ -29,6 +32,8 @@ function createBaseState() {
     },
     currentChat: { id: 'chat-1', name: 'Chat 1' },
     messages: [],
+    systemStatus: null,
+    systemStatusTimerId: null,
     error: null
   } as any;
 }
@@ -70,23 +75,66 @@ describe('web world update system refresh', () => {
     expect(getWorldSpy).not.toHaveBeenCalled();
   });
 
-  it('records scoped unrelated system events without refresh', async () => {
+  it('stores scoped unrelated system events as visible selected-chat status without refresh', async () => {
     const state = createBaseState();
     const getWorldSpy = vi.spyOn(api, 'getWorld');
 
     const result = await collectGeneratedStates((worldUpdateHandlers['handleSystemEvent'] as any)(state, {
       chatId: 'chat-1',
       content: {
-        eventType: 'noop-event'
+        eventType: 'retry-wait',
+        message: 'Retrying in 2s.'
       }
     }), state);
     const nextState = result.finalState;
 
     expect(nextState).not.toBe(state);
     expect(result.states).toHaveLength(1);
-    expect(nextState.messages).toHaveLength(1);
-    expect(nextState.messages[0]?.type).toBe('system');
+    expect(nextState.messages).toHaveLength(0);
+    expect(nextState.systemStatus).toMatchObject({
+      worldName: 'world-1',
+      chatId: 'chat-1',
+      eventType: 'retry-wait',
+      text: 'Retrying in 2s.',
+      kind: 'info',
+    });
+    expect(nextState.systemStatusTimerId).toBeTruthy();
     expect(getWorldSpy).not.toHaveBeenCalled();
+  });
+
+  it('renders queue-dispatch failures as transcript-visible system error rows', async () => {
+    const state = createBaseState();
+
+    const result = await collectGeneratedStates((worldUpdateHandlers['handleSystemEvent'] as any)(state, {
+      chatId: 'chat-1',
+      messageId: 'sys-error-1',
+      content: {
+        type: 'error',
+        eventType: 'error',
+        failureKind: 'queue-dispatch',
+        triggeringMessageId: 'user-1',
+        message: 'Queue failed to dispatch user turn: world is busy.',
+      }
+    }), state);
+    const nextState = result.finalState;
+
+    expect(result.states).toHaveLength(1);
+    expect(nextState.error).toBeNull();
+    expect(nextState.systemStatus).toBeNull();
+    expect(nextState.messages).toHaveLength(1);
+    expect(nextState.messages[0]).toMatchObject({
+      id: 'system-error:user-1',
+      messageId: 'system-error:user-1',
+      sender: 'system',
+      type: 'system',
+      chatId: 'chat-1',
+      text: 'Queue failed to dispatch user turn: world is busy.',
+      systemEvent: {
+        kind: 'error',
+        eventType: 'error',
+        triggeringMessageId: 'user-1',
+      },
+    });
   });
 
   it('refreshes world for agent-created system events', async () => {
@@ -150,5 +198,36 @@ describe('web world update system refresh', () => {
 
     expect(nextState.error).toContain('refresh failed');
     expect(result.states).toHaveLength(1);
+  });
+
+  it('clears transient system status only when the matching timer payload arrives', () => {
+    const state = {
+      ...createBaseState(),
+      systemStatus: {
+        worldName: 'world-1',
+        chatId: 'chat-1',
+        eventType: 'retry-wait',
+        messageId: 'sys-status-1',
+        createdAt: null,
+        text: 'Retrying in 2s.',
+        kind: 'info',
+      },
+      systemStatusTimerId: 123,
+    };
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout').mockImplementation(() => undefined as any);
+
+    const unchanged = (worldUpdateHandlers['clear-system-status'] as any)(state, {
+      messageId: 'sys-status-2',
+      chatId: 'chat-1',
+    });
+    const cleared = (worldUpdateHandlers['clear-system-status'] as any)(state, {
+      messageId: 'sys-status-1',
+      chatId: 'chat-1',
+    });
+
+    expect(unchanged).toBe(state);
+    expect(cleared.systemStatus).toBeNull();
+    expect(cleared.systemStatusTimerId).toBeNull();
+    expect(clearTimeoutSpy).toHaveBeenCalledWith(123);
   });
 });

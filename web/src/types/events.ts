@@ -222,6 +222,9 @@ export type WorldEvents =
   /** Handle system event from SSE */
   | { name: 'handleSystemEvent'; payload: any }
 
+  /** Clear transient legend-bound system status after TTL */
+  | { name: 'clear-system-status'; payload: { messageId?: string | null; chatId?: string | null; text?: string | null } }
+
   /** Submit selected HITL option response */
   | { name: 'respond-hitl-option'; payload: { requestId: string; optionId: string; chatId?: string | null } }
 

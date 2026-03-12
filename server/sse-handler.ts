@@ -341,7 +341,7 @@ export function createSSEHandler(
   };
 
   const systemListener = (eventData: SystemEventPayload) => {
-    if (!isChatEventInScope(eventData?.chatId, true)) {
+    if (!isChatEventInScope(eventData?.chatId, false)) {
       return;
     }
     sendSSE({ type: EventType.SYSTEM, data: eventData });

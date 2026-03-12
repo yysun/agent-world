@@ -177,6 +177,8 @@ export default class WorldComponent extends Component<WorldComponentState, World
     currentChat: null,
     chatSearchQuery: '',
     selectedProjectPath: null,
+    systemStatus: null,
+    systemStatusTimerId: null,
     editingMessageId: null,
     editingText: '',
     messageToDelete: null,
@@ -379,6 +381,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
                 currentChat={state.currentChat?.name}
                 currentChatId={state.currentChat?.id || null}
                 selectedProjectPath={state.selectedProjectPath}
+                systemStatus={state.systemStatus}
                 editingMessageId={state.editingMessageId}
                 editingText={state.editingText}
                 agentFilters={state.activeAgentFilters}

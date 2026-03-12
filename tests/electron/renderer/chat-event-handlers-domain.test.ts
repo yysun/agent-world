@@ -11,6 +11,7 @@
  * - Focuses on orchestration behavior, not UI rendering.
  *
  * Recent Changes:
+ * - 2026-03-12: Added plain-text selected-chat system-event forwarding coverage for status-bar visibility.
  * - 2026-03-10: Added assistant SSE chatId propagation coverage so live streaming rows stay scoped
  *   to the selected chat during refresh reconciliation.
  * - 2026-03-10: Added coverage that unscoped activity events are ignored for the selected chat, preserving live streaming rows until a properly scoped event arrives.
@@ -1012,6 +1013,42 @@ describe('createChatSubscriptionEventHandler', () => {
         source: 'idle'
       }
     });
+  });
+
+  it('forwards plain-text system events to the selected-chat status callback without transcript rows', () => {
+    const harness = createMessageStateHarness();
+    const onSessionSystemEvent = vi.fn();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
+      onSessionSystemEvent
+    });
+
+    handler({
+      type: 'system',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      system: {
+        eventType: 'system',
+        messageId: 'sys-plain-1',
+        createdAt: '2026-03-12T00:00:00.000Z',
+        content: 'Retrying in 2s.',
+      }
+    });
+
+    expect(onSessionSystemEvent).toHaveBeenCalledWith({
+      eventType: 'system',
+      chatId: 'chat-1',
+      messageId: 'sys-plain-1',
+      createdAt: '2026-03-12T00:00:00.000Z',
+      content: 'Retrying in 2s.',
+    });
+    expect(harness.getMessages()).toEqual([]);
   });
 
   it('adds structured system error events to the selected chat transcript', () => {

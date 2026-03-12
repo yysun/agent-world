@@ -116,8 +116,18 @@ export function getWorldChatLegendTitle(
   worldName: string,
   currentChat: string | null | undefined,
   viewportMode: WorldViewportMode,
+  systemStatus?: WorldChatProps['systemStatus'],
 ): string {
   const normalizedWorldName = normalizeLegendText(worldName, 'World');
+  const transientStatus = String(systemStatus?.text || '').trim();
+  if (transientStatus && systemStatus?.kind !== 'error') {
+    const maxLength = getLegendChatNameMaxLength(viewportMode);
+    const truncatedStatus = transientStatus.length > maxLength
+      ? `${transientStatus.slice(0, maxLength - 1).trimEnd()}…`
+      : transientStatus;
+    return `${normalizedWorldName} - ${truncatedStatus}`;
+  }
+
   const normalizedCurrentChat = normalizeLegendText(currentChat, '');
 
   if (!normalizedCurrentChat) {
@@ -242,6 +252,7 @@ export default function WorldChat(props: WorldChatProps) {
     currentChat,
     currentChatId = null,
     selectedProjectPath = null,
+    systemStatus = null,
     editingMessageId = null,
     editingText = '',
     agentFilters = [],  // Agent IDs to filter by
@@ -416,9 +427,9 @@ export default function WorldChat(props: WorldChatProps) {
       <legend>
         <span
           className="chat-legend-title"
-          title={currentChat ? `${worldName} - ${currentChat}` : worldName}
+          title={getWorldChatLegendTitle(worldName, currentChat, viewportMode, systemStatus)}
         >
-          {getWorldChatLegendTitle(worldName, currentChat, viewportMode)}
+          {getWorldChatLegendTitle(worldName, currentChat, viewportMode, systemStatus)}
           {!currentChat ? <span className="unsaved-indicator" title="Unsaved chat"> ●</span> : null}
         </span>
         {legendUiConfig.showQueueStatus ? (

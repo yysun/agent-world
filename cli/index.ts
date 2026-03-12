@@ -119,6 +119,7 @@ import {
   getToolIcon,
   log as statusLog,
 } from './display.js';
+import { getSystemEventDisplayText } from './system-events.js';
 import {
   markHitlRequestHandled,
   parseHitlPromptFromToolEvent,
@@ -717,8 +718,11 @@ function attachCLIListeners(
     if (streaming && globalState && rl && statusLine) {
       handleWorldEvent(EventType.SYSTEM, eventData, streaming, globalState, activityMonitor, statusLine, rl)
         .catch(err => console.error('Error handling system event:', err));
-    } else if (eventData.message || eventData.content) {
-      // Pipeline mode: system messages are handled by message listener
+    } else {
+      const systemText = getSystemEventDisplayText(eventData);
+      if (systemText) {
+        console.log(`${boldRed('● system:')} ${systemText}`);
+      }
     }
   };
   world.eventEmitter.on(EventType.SYSTEM, systemListener);
@@ -1103,8 +1107,19 @@ async function handleWorldEvent(
     return;
   }
 
-  if ((eventType === 'system' || eventType === 'world') && (eventData.message || eventData.content)) {
-    // existing logic
+  if (eventType === 'system') {
+    const systemText = getSystemEventDisplayText(eventData);
+    if (systemText) {
+      statusLog(statusLine, `${boldRed('● system:')} ${systemText}`);
+    }
+    return;
+  }
+
+  if (eventType === 'world' && (eventData.message || eventData.content)) {
+    const worldText = getSystemEventDisplayText(eventData);
+    if (worldText) {
+      statusLog(statusLine, `${gray('[World]')} ${worldText}`);
+    }
   }
 }
 

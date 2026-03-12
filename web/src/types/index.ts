@@ -69,6 +69,18 @@ export interface WorldEvent {
   messageId: string;
 }
 
+export type WorldSystemStatusKind = 'error' | 'success' | 'info';
+
+export interface WorldSystemStatusEntry {
+  worldName: string;
+  chatId: string;
+  eventType: string;
+  messageId: string | null;
+  createdAt: string | null;
+  text: string;
+  kind: WorldSystemStatusKind;
+}
+
 export interface HitlPromptOption {
   id: string;
   label: string;
@@ -120,6 +132,13 @@ export interface Message {
   seenByAgents?: string[]; // CALCULATED field - built incrementally from actual message data (NOT persisted)
   logEvent?: LogEvent; // For log message types
   worldEvent?: WorldEvent; // For world/system event types
+  systemEvent?: {
+    eventType: string;
+    kind: 'error';
+    content?: unknown;
+    sourceEventId?: string | null;
+    triggeringMessageId?: string | null;
+  };
 
   // Phase 2.2 Enhancement: Tool execution event properties
   isToolEvent?: boolean;
@@ -270,6 +289,7 @@ export interface WorldChatProps {
   currentChat?: string;
   currentChatId?: string | null;
   selectedProjectPath?: string | null;
+  systemStatus?: WorldSystemStatusEntry | null;
   editingMessageId?: string | null;
   editingText?: string;
   agentFilters?: string[];  // Agent IDs to filter messages by
@@ -391,6 +411,8 @@ export interface WorldComponentState extends SSEComponentState {
   currentChat: Chat | null;
   chatSearchQuery: string;
   selectedProjectPath: string | null;
+  systemStatus: WorldSystemStatusEntry | null;
+  systemStatusTimerId: number | null;
   chatToDelete: Chat | null;
 
   // Message edit state

@@ -15,6 +15,7 @@
  * - No network/socket/file-system usage.
  *
  * Recent Changes:
+ * - 2026-03-12: Added scoped system-event forwarding coverage to prevent unscoped leakage into chat streams.
  * - 2026-03-11: Added readiness coverage to lock listener attachment before chat/edit dispatch.
  */
 
@@ -171,6 +172,40 @@ describe('sse-handler behavior', () => {
     expect(toolPayloads[0].data.chatId).toBe('chat-a');
     expect(logPayloads).toHaveLength(1);
     expect(logPayloads[0].data.chatId).toBe('chat-a');
+  });
+
+  it('forwards only scoped system events to chat-scoped streams', async () => {
+    const { createSSEHandler } = await import('../../server/sse-handler.js');
+    const req = createMockReq();
+    const res = createMockRes();
+    const world = { id: 'world-1', eventEmitter: new EventEmitter() } as any;
+
+    createSSEHandler(req as any, res as any, world, 'test', 'chat-a');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    world.eventEmitter.emit('system', {
+      content: 'unscoped status should stay out',
+      messageId: 'sys-unscoped',
+      chatId: null,
+    });
+    world.eventEmitter.emit('system', {
+      content: 'wrong chat status',
+      messageId: 'sys-b',
+      chatId: 'chat-b',
+    });
+    world.eventEmitter.emit('system', {
+      content: 'right chat status',
+      messageId: 'sys-a',
+      chatId: 'chat-a',
+    });
+
+    const payloads = extractPayloads(res);
+    const systemPayloads = payloads.filter((payload) => payload.type === 'system');
+
+    expect(systemPayloads).toHaveLength(1);
+    expect(systemPayloads[0].data.chatId).toBe('chat-a');
+    expect(systemPayloads[0].data.content).toBe('right chat status');
   });
 
   it('ends stream after idle event when response cycle is complete', async () => {

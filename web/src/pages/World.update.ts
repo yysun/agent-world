@@ -111,6 +111,13 @@ import * as MessageDisplayDomain from '../domain/message-display';
 import * as HitlDomain from '../domain/hitl';
 import { resolveZoneContent } from '../domain/dashboard-zones';
 import { resolveActiveChatId } from '../domain/chat-selection';
+import {
+  createWorldSystemStatus,
+  createWorldSystemErrorMessage,
+  isWorldSystemErrorStatus,
+  retainWorldSystemStatusForContext,
+  WORLD_SYSTEM_STATUS_TTL_MS,
+} from '../domain/system-status';
 import { getEnvValueFromText, upsertEnvVariable } from '../domain/world-variables';
 import { pickProjectFolderPath } from '../domain/project-folder-picker';
 import {
@@ -309,6 +316,23 @@ const deduplicateMessages = (messages: Message[], agents: Agent[] = []): Message
       return roleOrderA - roleOrderB;
     });
 };
+
+function clearSystemStatusTimer(timerId: number | null | undefined): void {
+  if (typeof timerId === 'number') {
+    clearTimeout(timerId);
+  }
+}
+
+function upsertSystemMessage(messages: Message[], nextMessage: Message): Message[] {
+  const index = messages.findIndex((message) => message.id === nextMessage.id || message.messageId === nextMessage.messageId);
+  if (index < 0) {
+    return [...messages, nextMessage];
+  }
+
+  const nextMessages = [...messages];
+  nextMessages[index] = nextMessage;
+  return nextMessages;
+}
 
 function isTransientRealtimeMessage(message: Message): boolean {
   return Boolean(
@@ -817,12 +841,18 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
     const dashboardZoneContent = world.dashboardZones?.length
       ? resolveZoneContent(world.dashboardZones, messages)
       : new Map();
+    const retainedSystemStatus = retainWorldSystemStatusForContext(state.systemStatus, worldName, chatId || null);
+    if (!retainedSystemStatus) {
+      clearSystemStatusTimer(state.systemStatusTimerId);
+    }
 
     yield {
       ...state,
       world,
       currentChat: world.chats.find(c => c.id === chatId) || null,
       selectedProjectPath,
+      systemStatus: retainedSystemStatus,
+      systemStatusTimerId: retainedSystemStatus ? state.systemStatusTimerId : null,
       messages,
       rawMessages,
       hitlPromptQueue: replayedHitlQueue,
@@ -835,10 +865,16 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
 
   } catch (error: any) {
     console.log(`[web:initWorld] error message=${error?.message || String(error)} requestedChat=${chatId || 'n/a'}`);
+    const retainedSystemStatus = retainWorldSystemStatusForContext(state.systemStatus, state.worldName, chatId || null);
+    if (!retainedSystemStatus) {
+      clearSystemStatusTimer(state.systemStatusTimerId);
+    }
     yield {
       ...state,
       error: error.message || 'Failed to load world data',
       loading: false,
+      systemStatus: retainedSystemStatus,
+      systemStatusTimerId: retainedSystemStatus ? state.systemStatusTimerId : null,
       needScroll: false,
       lastUserMessageText: state.lastUserMessageText ?? null,
     };
@@ -938,48 +974,49 @@ const handleSystemEvent = async function* (
     (structuredPayload && typeof structuredPayload.eventType === 'string' && structuredPayload.eventType) ||
     (typeof contentPayload === 'string' ? contentPayload : null) ||
     (typeof data === 'string' ? data : null);
+  const nextSystemStatus = createWorldSystemStatus(state.worldName, envelope || data, activeChatId);
+  clearSystemStatusTimer(state.systemStatusTimerId);
 
-  // Create a log-style message for system events
-  const systemMessage: Message = {
-    id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-    type: 'system',
-    sender: 'SYSTEM',
-    text: '',
-    createdAt: new Date(),
-    worldEvent: {
-      type: 'system',
-      category: 'system',
-      message:
-        (typeof contentPayload === 'string' && contentPayload) ||
-        (typeof eventType === 'string' && eventType) ||
-        (envelope && typeof envelope.message === 'string' ? envelope.message : '') ||
-        'System event',
-      timestamp: new Date().toISOString(),
-      data: envelope || undefined,
-      messageId: `system-${Date.now()}`
-    },
-    isLogExpanded: false
-  };
+  if (isWorldSystemErrorStatus(nextSystemStatus)) {
+    const systemErrorMessage = createWorldSystemErrorMessage(envelope || data, state.worldName, activeChatId) as Message | null;
+    const nextMessages = systemErrorMessage
+      ? upsertSystemMessage(state.messages || [], systemErrorMessage)
+      : state.messages || [];
+    yield {
+      ...state,
+      systemStatus: null,
+      systemStatusTimerId: null,
+      messages: nextMessages,
+      needScroll: true,
+    };
+    return;
+  }
+
+  let nextTimerId: number | null = null;
+  if (nextSystemStatus?.messageId) {
+    const statusMessageId = nextSystemStatus.messageId;
+    nextTimerId = setTimeout(() => {
+      app.run('clear-system-status', {
+        messageId: statusMessageId,
+        chatId: nextSystemStatus.chatId,
+        text: nextSystemStatus.text,
+      });
+    }, WORLD_SYSTEM_STATUS_TTL_MS);
+  } else if (nextSystemStatus) {
+    nextTimerId = setTimeout(() => {
+      app.run('clear-system-status', {
+        chatId: nextSystemStatus.chatId,
+        text: nextSystemStatus.text,
+      });
+    }, WORLD_SYSTEM_STATUS_TTL_MS);
+  }
 
   const newState = {
     ...state,
-    messages: [...(state.messages || []), systemMessage],
+    systemStatus: nextSystemStatus,
+    systemStatusTimerId: nextTimerId,
     needScroll: true
   };
-
-  // Surface queue dispatch failures as visible error state so the UI reflects the failure.
-  const failureKind =
-    structuredPayload && typeof structuredPayload.failureKind === 'string'
-      ? structuredPayload.failureKind
-      : null;
-  if (eventType === 'error' || failureKind === 'queue-dispatch') {
-    const errorMessage =
-      (structuredPayload && typeof structuredPayload.message === 'string' && structuredPayload.message) ||
-      (envelope && typeof envelope.message === 'string' && envelope.message) ||
-      'Chat processing failed';
-    yield { ...newState, error: errorMessage };
-    return;
-  }
 
   // Handle specific system events
   if (eventType === 'chat-title-updated') {
@@ -1386,6 +1423,35 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'handleLogEvent': handleLogEvent,
   'handleMessageEvent': handleMessageEvent,
   'handleSystemEvent': handleSystemEvent,
+  'clear-system-status': (
+    state: WorldComponentState,
+    payload: WorldEventPayload<'clear-system-status'>
+  ): WorldComponentState => {
+    const currentStatus = state.systemStatus;
+    if (!currentStatus) {
+      return state;
+    }
+
+    const targetMessageId = String(payload?.messageId || '').trim() || null;
+    const targetChatId = String(payload?.chatId || '').trim() || null;
+    const targetText = String(payload?.text || '').trim() || null;
+    if (targetMessageId && currentStatus.messageId && currentStatus.messageId !== targetMessageId) {
+      return state;
+    }
+    if (!targetMessageId && targetText && currentStatus.text !== targetText) {
+      return state;
+    }
+    if (targetChatId && currentStatus.chatId !== targetChatId) {
+      return state;
+    }
+
+    clearSystemStatusTimer(state.systemStatusTimerId);
+    return {
+      ...state,
+      systemStatus: null,
+      systemStatusTimerId: null,
+    };
+  },
   'respond-hitl-option': async function* (
     state: WorldComponentState,
     payload: WorldEventPayload<'respond-hitl-option'>

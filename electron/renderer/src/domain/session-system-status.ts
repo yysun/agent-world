@@ -84,7 +84,12 @@ function inferStatusKind(eventType: string, content: unknown, text: string): Ses
   }
 
   const haystack = `${eventType} ${text}`.trim().toLowerCase();
-  if (haystack.includes('timed out') || haystack.includes('[error]') || haystack.includes('retry exhausted')) {
+  if (
+    haystack.includes('timed out')
+    || haystack.includes('[error]')
+    || haystack.includes('retry exhausted')
+    || haystack.includes('failed to dispatch')
+  ) {
     return 'error';
   }
 

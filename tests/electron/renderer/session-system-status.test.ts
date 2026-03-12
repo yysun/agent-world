@@ -60,6 +60,13 @@ describe('session-system-status helpers', () => {
       createdAt: null,
       content: 'Queue retry scheduled (timeout): attempt 2/3, remaining attempts 1, elapsed 3s, next retry in 1s.',
     });
+    const queueFailureStatus = createSessionSystemStatus('world-1', {
+      eventType: 'system',
+      chatId: 'chat-1',
+      messageId: 'sys-queue-fail',
+      createdAt: null,
+      content: 'Queue failed to dispatch user turn: world is busy.',
+    });
 
     expect(timeoutStatus?.text).toContain('timed out');
     expect(timeoutStatus?.kind).toBe('error');
@@ -67,6 +74,8 @@ describe('session-system-status helpers', () => {
     expect(retryStatus?.text).toContain('attempt 2/3');
     expect(retryStatus?.kind).toBe('info');
     expect(retryStatus?.expiresAfterMs).toBe(5000);
+    expect(queueFailureStatus?.kind).toBe('error');
+    expect(queueFailureStatus?.expiresAfterMs).toBeNull();
   });
 
   it('rejects unscoped events and clears state on chat switch', () => {

@@ -311,10 +311,8 @@ export function serializeRealtimeSystemEvent(
   chatId: string | null,
   event: any
 ): Record<string, unknown> {
-  const content = event?.content;
-  const normalizedEventType = typeof content === 'string'
-    ? content
-    : typeof content?.eventType === 'string'
+  const content = event?.content ?? event?.message ?? null;
+  const normalizedEventType = typeof content?.eventType === 'string'
       ? content.eventType
       : typeof content?.type === 'string'
         ? content.type

@@ -11,6 +11,7 @@
  * - Avoids Electron runtime and filesystem dependencies.
  *
  * Recent Changes:
+ * - 2026-03-12: Added plain-text and message-fallback system-event forwarding coverage for selected-chat status parity.
  * - 2026-02-24: Reinstated strict chat-scope filtering coverage for unscoped SSE/tool events after source-side chatId streaming guarantees.
  * - 2026-02-20: Added coverage for chat-scoped HITL prompt delivery during chat subscription lifecycle transitions.
  * - 2026-02-16: Added coverage for world-level activity events forwarded to chat-scoped subscriptions.
@@ -349,6 +350,50 @@ describe('createRealtimeEventsRuntime', () => {
             title: 'Scoped Chat Title',
             source: 'idle'
           })
+        })
+      })
+    );
+  });
+
+  it('forwards plain-text system events using message fallback content', async () => {
+    const send = vi.fn();
+    const worldSubscription = createWorldSubscription();
+
+    const runtime = createRealtimeEventsRuntime({
+      getMainWindow: () => ({
+        isDestroyed: () => false,
+        webContents: { send }
+      }),
+      chatEventChannel: 'chat:event',
+      addLogStreamCallback: () => () => { },
+      subscribeWorld: async () => worldSubscription,
+      ensureCoreReady: async () => { }
+    });
+
+    await runtime.subscribeChatEvents({
+      subscriptionId: 'sub-system-plain',
+      worldId: 'world-1',
+      chatId: 'chat-1'
+    });
+
+    worldSubscription.world.eventEmitter.emit('system', {
+      message: 'Retrying in 2s.',
+      messageId: 'sys-plain-1',
+      timestamp: new Date('2026-03-12T00:00:00.000Z'),
+      chatId: 'chat-1'
+    });
+
+    expect(send).toHaveBeenCalledWith(
+      'chat:event',
+      expect.objectContaining({
+        type: 'system',
+        subscriptionId: 'sub-system-plain',
+        worldId: 'world-1',
+        chatId: 'chat-1',
+        system: expect.objectContaining({
+          eventType: 'system',
+          messageId: 'sys-plain-1',
+          content: 'Retrying in 2s.',
         })
       })
     );
