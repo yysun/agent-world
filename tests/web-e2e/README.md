@@ -14,7 +14,24 @@ These tests run against an actual Chromium browser, a running Express API server
 | `chat-flow-matrix.spec.ts` | Chat lifecycle matrix across Loaded Current Chat, Switched Chat, and New Chat categories |
 | `queue.spec.ts` | Queue and processing lifecycle — in-progress indicator, stop, failed item, error overlay |
 | `shell-stream-parity.spec.ts` | Live shell tool card status transition — running tool summary flips to done without refresh |
+| `tool-permissions.spec.ts` | Tool-permission dropdown UI affordances and `read` enforcement — select presence, default value, PATCH persistence, and real-LLM block verification |
 | `world-smoke.spec.ts` | World and chat management affordances — create, delete, search, settings |
+
+### 5. Tool Permission Controls (`tool-permissions.spec.ts`)
+
+**Validates the world-level tool-permission dropdown in the composer bar and enforces the `read` level.**
+
+| Test | LLM | What it checks |
+|---|---|---|
+| Select element is visible | No | `aria-label="Tool permission level"` present on the world page |
+| Default value is auto | No | Fresh world with no `tool_permission` key shows `auto` in the select |
+| All three options present | No | `read`, `ask`, `auto` option elements all exist |
+| Change to read fires PATCH + persists | No | UI select change intercepts PATCH `/worlds/:name`; reload reflects `read` |
+| Select reflects ask set via API | No | `setWorldToolPermission('ask')` → navigate → UI shows `ask` |
+| Select reflects read set via API | No | `setWorldToolPermission('read')` → navigate → UI shows `read` |
+| read blocks shell_cmd (agent response) | **Yes** | Tool returns blocked error; agent response includes `"permission level"` |
+
+---
 
 ### 2. Chat Flow Matrix (`chat-flow-matrix.spec.ts`)
 
@@ -136,6 +153,7 @@ A disposable file `.e2e-hitl-delete-me.txt` is created inside the workspace befo
 | `waitForErrorState` | `support/web-harness.ts` | Wait for the visible world-error-state overlay |
 | `deleteAllAgents` | `support/web-harness.ts` | Delete all agents via the API (triggers error path) |
 | `buildShellHitlPrompt` | `support/web-harness.ts` | Build the prompt text that triggers the shell HITL flow |
+| `setWorldToolPermission` | `support/web-harness.ts` | PATCH the world variables to set or clear the `tool_permission` env key |
 
 ---
 
@@ -159,6 +177,7 @@ A disposable file `.e2e-hitl-delete-me.txt` is created inside the workspace befo
 | `message-edit-{id}` | world-chat.tsx | `editLatestUserMessage()` |
 | `message-edit-input` | world-chat.tsx | `editLatestUserMessage()` |
 | `message-edit-save` | world-chat.tsx | `editLatestUserMessage()` |
+| _(aria-label)_ `Tool permission level` | world-chat.tsx | `tool-permissions.spec.ts` — select affordance and value assertions |
 
 ---
 

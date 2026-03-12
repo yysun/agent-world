@@ -31,6 +31,7 @@
  *   its messageId-confirmation event arrives. When no enabled delete button is found in the live DOM, the helper
  *   reloads the world page so messages are restored from the backend DB, then retries.
  * - 2026-03-12: Added a deterministic slow-shell prompt path and tool-summary wait helpers for live web shell status E2E coverage.
+ * - 2026-03-12: Added `setWorldToolPermission` helper to update the world-level tool_permission env key via the REST API.
  */
 
 import fs from 'node:fs';
@@ -575,4 +576,24 @@ export async function waitForTokenGone(page: Page, token: string): Promise<void>
     token,
     { timeout: 15_000 },
   );
+}
+
+export async function setWorldToolPermission(
+  state: WebBootstrapState,
+  level: 'read' | 'ask' | 'auto',
+): Promise<void> {
+  const world = await apiRequest<{ variables?: string }>(
+    `/worlds/${encodeURIComponent(state.worldName)}`,
+  );
+  const currentVariables = String(world?.variables ?? '');
+  const filtered = currentVariables
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('tool_permission='));
+  const nextVariables = level === 'auto'
+    ? filtered.join('\n').trim()
+    : [...filtered, `tool_permission=${level}`].join('\n').trim();
+  await apiRequest(`/worlds/${encodeURIComponent(state.worldName)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ variables: nextVariables }),
+  });
 }

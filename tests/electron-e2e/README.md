@@ -49,6 +49,19 @@ This directory contains Playwright E2E tests that launch the real compiled Elect
 | HITL scoped to owning session | — | ✅ | — |
 | HITL replays on return | — | ✅ | — |
 
+### 3. Tool Permission Controls (`tool-permissions.spec.ts`)
+
+**Validates the world-level tool-permission dropdown in the ComposerBar and enforces the `read` level.**
+
+| Test | LLM | What it checks |
+|---|---|---|
+| Select element is visible | No | `aria-label="Tool permission level"` present in ComposerBar |
+| Default value is auto | No | Fresh bootstrapped world shows `auto` in the select |
+| All three options present | No | `read`, `ask`, `auto` option elements all exist |
+| Change to read updates world variables | No | `selectOption('read')` → bridge `loadWorld` returns variables with `tool_permission=read` |
+| Select reflects read set via bridge | No | `setDesktopToolPermission('read')` → world reload → UI shows `read` |
+| read blocks shell_cmd (agent response) | **Yes** | Tool returns blocked error; agent response includes `"permission level"` |
+
 ## Running the Tests
 
 ### Full build + run (recommended)
@@ -96,6 +109,7 @@ High-level desktop helpers used by spec files:
 - `selectSessionByName` — switches to a named session in the sidebar
 - `deleteAllAgents` — removes all agents from the current world (for error-path tests)
 - `createNewSession` — creates a fresh chat session via the UI
+- `setDesktopToolPermission` — sets the `tool_permission` env key on the current world via the preload bridge `updateWorld` call
 
 ## Configuration
 

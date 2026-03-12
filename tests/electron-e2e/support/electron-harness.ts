@@ -16,6 +16,7 @@
  * Recent Changes:
  * - 2026-03-10: Added initial helper set for the real Electron Playwright E2E harness.
  * - 2026-03-10: Switched workspace bootstrapping to per-run isolated directories to avoid SQLite/user-data lock collisions.
+ * - 2026-03-12: Added `setDesktopToolPermission` helper to update tool_permission env key via the preload bridge.
  */
 
 import fs from 'node:fs';
@@ -337,4 +338,30 @@ export async function launchAndPrepare(page: Page): Promise<void> {
 
 export async function closeElectronApp(app: ElectronApplication): Promise<void> {
   await app.close();
+}
+
+export async function setDesktopToolPermission(
+  page: Page,
+  level: 'read' | 'ask' | 'auto',
+): Promise<void> {
+  const state = await getDesktopState(page);
+  if (!state.worldId) {
+    throw new Error('Unable to resolve the current world ID for tool permission update.');
+  }
+
+  await page.evaluate(
+    async ({ worldId, permissionLevel }) => {
+      const api = (window as any).agentWorldDesktop;
+      const result = await api.loadWorld(worldId);
+      const currentVariables = String(result?.world?.variables ?? '');
+      const filtered = currentVariables
+        .split('\n')
+        .filter((line: string) => !line.trim().startsWith('tool_permission='));
+      const nextVariables = permissionLevel === 'auto'
+        ? filtered.join('\n').trim()
+        : [...filtered, `tool_permission=${permissionLevel}`].join('\n').trim();
+      await api.updateWorld(worldId, { variables: nextVariables });
+    },
+    { worldId: state.worldId, permissionLevel: level },
+  );
 }
