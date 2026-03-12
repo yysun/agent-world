@@ -25,7 +25,8 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { promisify } from 'node:util';
-import type { ElectronApplication, Locator, Page } from '@playwright/test';
+import { expect, type ElectronApplication, type Locator, type Page } from '@playwright/test';
+import { resolveCreatedSessionId } from './session-resolution.js';
 
 const execFileAsync = promisify(execFile);
 const electronWorkspaceRequire = createRequire(path.resolve(process.cwd(), 'electron/package.json'));
@@ -206,15 +207,30 @@ export async function getDesktopState(page: Page): Promise<DesktopState> {
 }
 
 export async function createNewSession(page: Page): Promise<string> {
+  const previousState = await getDesktopState(page);
+  const previousSessionIds = previousState.sessions.map((session) => String(session.id || '').trim()).filter(Boolean);
+
   await page.getByLabel('Create new session').click();
   await expectNotificationText(page, 'Chat session created');
-  await page.getByText('New Chat', { exact: true }).first().waitFor({ state: 'visible' });
-  const state = await getDesktopState(page);
-  const currentChatId = String(state.currentChatId || '').trim()
-    || String(state.sessionIdsByName['New Chat'] || '').trim();
+  let currentChatId = '';
+  await expect.poll(async () => {
+    currentChatId = resolveCreatedSessionId(previousSessionIds, await getDesktopState(page));
+    return currentChatId;
+  }, {
+    timeout: 15_000,
+    message: 'Expected the newly created chat session to become available.',
+  }).not.toBe('');
+
   if (!currentChatId) {
     throw new Error('Expected a selected current chat after creating a new session.');
   }
+
+  await page.getByTestId(`session-item-${currentChatId}`).waitFor({ state: 'visible' });
+  await expect.poll(async () => (await getDesktopState(page)).currentChatId, {
+    timeout: 15_000,
+    message: 'Expected the newly created session to become the active selected chat.',
+  }).toBe(currentChatId);
+
   return currentChatId;
 }
 
@@ -225,6 +241,10 @@ export async function selectSessionByName(page: Page, name: string): Promise<voi
     throw new Error(`Session "${name}" was not found in the current world.`);
   }
   await page.getByTestId(`session-item-${chatId}`).click();
+  await expect.poll(async () => (await getDesktopState(page)).currentChatId, {
+    timeout: 15_000,
+    message: `Expected session "${name}" to become selected.`,
+  }).toBe(chatId);
 }
 
 export async function sendComposerMessage(page: Page, content: string): Promise<void> {

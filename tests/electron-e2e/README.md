@@ -2,6 +2,8 @@
 
 This directory contains Playwright E2E tests that launch the real compiled Electron application and exercise desktop flows with actual LLM API calls.
 
+The current desktop suite covers 47 real-app tests across app shell, chat-flow matrix, queue lifecycle, and tool-permission scenarios.
+
 ## Prerequisites
 
 1. **Environment Setup**: Create a `.env` file in the project root with a Google API key:
@@ -49,7 +51,18 @@ This directory contains Playwright E2E tests that launch the real compiled Elect
 | HITL scoped to owning session | — | ✅ | — |
 | HITL replays on return | — | ✅ | — |
 
-### 3. Tool Permission Controls (`tool-permissions.spec.ts`)
+### 3. Queue Lifecycle (`queue.spec.ts`)
+
+**Validates queue visibility, in-flight processing state, interruption, and failed-item affordances in the real desktop app.**
+
+| Test | What it checks |
+|---|---|
+| Processing indicator | Queue panel appears with `Processing` while the agent is still working |
+| Stop queue | Stop action interrupts an active turn and returns the composer to send-ready |
+| Failed item surfaced | Queue panel shows `Error` state when no responders are available |
+| Retry control visible | Failed queue item exposes the retry affordance |
+
+### 4. Tool Permission Controls (`tool-permissions.spec.ts`)
 
 **Validates the world-level tool-permission dropdown in the ComposerBar and enforces the `read` level.**
 
@@ -79,6 +92,11 @@ npm run test:electron:e2e:run
 npx playwright test --config playwright.electron.config.ts tests/electron-e2e/app-shell.spec.ts
 ```
 
+### Run a focused scenario by name
+```bash
+npx playwright test --config playwright.electron.config.ts --grep "New Chat"
+```
+
 ## Test Infrastructure
 
 ### Workspace Isolation
@@ -106,10 +124,15 @@ High-level desktop helpers used by spec files:
 - `waitForHitlPrompt` / `respondToHitlPrompt` — locates and responds to an approval dialog
 - `waitForQueuePanel` / `waitForQueueStatus` — asserts queue panel state
 - `pauseCurrentChatQueue` / `addQueueMessageToCurrentChat` — sets up queue scenarios
-- `selectSessionByName` — switches to a named session in the sidebar
+- `selectSessionByName` — switches to a named session in the sidebar and waits until that chat becomes the active selected session
 - `deleteAllAgents` — removes all agents from the current world (for error-path tests)
-- `createNewSession` — creates a fresh chat session via the UI
+- `createNewSession` — creates a fresh chat session via the UI and waits until the newly created chat is both visible and actively selected
 - `setDesktopToolPermission` — sets the `tool_permission` env key on the current world via the preload bridge `updateWorld` call
+
+### Session Resolution Helper (`support/session-resolution.ts`)
+- Pure helper used by the Electron harness to distinguish a newly created chat from pre-existing seeded sessions
+- Lets the harness wait for actual desktop session selection to settle before the next action runs
+- Covered by a unit regression test at `tests/electron/e2e/electron-harness-session-resolution.test.ts`
 
 ## Configuration
 
@@ -127,3 +150,4 @@ The Playwright Electron config lives at [`playwright.electron.config.ts`](../../
 - **API Key missing**: The suite throws `GOOGLE_API_KEY is required` at bootstrap time if the key is absent. Set it in `.env` before running.
 - **SQLite busy errors**: Already handled by per-run workspace isolation. If they recur, ensure no stale Electron process is holding the database open.
 - **Stale build**: If UI selectors stop matching, rebuild with `npm run electron:renderer:build` before re-running.
+- **New-chat or session-switch flake**: The desktop harness now waits for the created or selected chat to become the active session before continuing. If this regresses, inspect `support/electron-harness.ts` and `support/session-resolution.ts` first.
