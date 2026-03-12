@@ -14,6 +14,7 @@
  *
  * Recent Changes:
  * - 2026-03-12: Replaced hidden system-message ingestion assertions with visible selected-chat status state coverage.
+ * - 2026-03-12: Aligned queue-dispatch failure expectations with the world error overlay promotion contract.
  * - 2026-02-27: Added active-chat scope expectations for system events.
  */
 
@@ -119,7 +120,7 @@ describe('web world update system refresh', () => {
     const nextState = result.finalState;
 
     expect(result.states).toHaveLength(1);
-    expect(nextState.error).toBeNull();
+    expect(nextState.error).toBe('Queue failed to dispatch user turn: world is busy.');
     expect(nextState.systemStatus).toBeNull();
     expect(nextState.messages).toHaveLength(1);
     expect(nextState.messages[0]).toMatchObject({

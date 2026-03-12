@@ -17,6 +17,8 @@
  * - Memory-only message streaming for agent→agent messages saved without response
  *
  * Recent Changes:
+ * - 2026-03-12: Preserved assistant finalization for same-messageId streaming rows and allowed unscoped HITL tool-progress events
+ *   to inherit the active chat before chat filtering drops them.
  * - 2026-03-11: Added chat-history search state updates and backfilled missing HITL prompt chat scope from the active chat
  *   when tool-progress events omit `chatId`.
  * - 2026-03-11: Preserved pending HITL queues across chat switches and scoped outbound-send blocking to the active chat
@@ -489,10 +491,22 @@ const hasActivity = (state: WorldComponentState): boolean => {
   return state.activeTools.length > 0 || state.pendingStreamUpdates.size > 0;
 };
 
-function shouldIgnoreToolEventForActiveChat(state: WorldComponentState, data: any): boolean {
+function shouldIgnoreToolEventForActiveChat(
+  state: WorldComponentState,
+  data: any,
+  options?: { allowMissingChatId?: boolean }
+): boolean {
   const activeChatId = state.currentChat?.id || null;
   const incomingChatId = data?.chatId ?? null;
-  return Boolean(activeChatId && (!incomingChatId || incomingChatId !== activeChatId));
+  if (!activeChatId) {
+    return false;
+  }
+
+  if (!incomingChatId) {
+    return options?.allowMissingChatId !== true;
+  }
+
+  return incomingChatId !== activeChatId;
 }
 
 // ========================================
@@ -542,11 +556,11 @@ const handleToolStart = (state: WorldComponentState, data: any): WorldComponentS
 };
 
 const handleToolProgress = (state: WorldComponentState, data: any): WorldComponentState => {
-  if (shouldIgnoreToolEventForActiveChat(state, data)) {
+  const parsedHitlPrompt = HitlDomain.parseHitlPromptFromToolEvent(data);
+  if (shouldIgnoreToolEventForActiveChat(state, data, { allowMissingChatId: Boolean(parsedHitlPrompt) })) {
     return state;
   }
 
-  const parsedHitlPrompt = HitlDomain.parseHitlPromptFromToolEvent(data);
   const hitlPrompt = parsedHitlPrompt
     ? {
       ...parsedHitlPrompt,
@@ -1222,6 +1236,7 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
           ...message,
           ...newMessage,
           id: message.id || newMessage.id,
+          isStreaming: message.isStreaming ? false : message.isStreaming,
         };
       });
 
