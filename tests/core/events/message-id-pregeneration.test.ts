@@ -11,6 +11,7 @@
  * - Tests publishMessageWithId function
  * - Validates agent message ID generation flow
  * - Ensures ID consistency in memory and events
+ * - Verifies tool-call metadata survives publisher emission for live clients
  */
 
 import { describe, test, expect, beforeEach, vi } from 'vitest';
@@ -101,6 +102,46 @@ describe('Pre-Generated Message IDs', () => {
 
         publishMessageWithId(mockWorld, testContent, testSender, testId, mockWorld.currentChatId);
       });
+    });
+
+    test('publishMessageWithId should preserve assistant tool_calls and tool tool_call_id metadata', () => {
+      const assistantToolRequest = publishMessageWithId(
+        mockWorld,
+        'Calling tool: shell_cmd',
+        'agent',
+        'assistant-tool-msg',
+        mockWorld.currentChatId,
+      );
+
+      const toolResult = publishMessageWithId(
+        mockWorld,
+        JSON.stringify({
+          __type: 'tool_result',
+          tool_call_id: 'call-shell-1',
+          agentId: 'agent',
+          content: 'status: success',
+        }),
+        'agent',
+        'tool-result-msg',
+        mockWorld.currentChatId,
+      );
+
+      expect(assistantToolRequest.role).toBe('assistant');
+      expect(Array.isArray(assistantToolRequest.tool_calls)).toBe(false);
+      expect(toolResult.role).toBe('tool');
+      expect(toolResult.tool_call_id).toBe('call-shell-1');
+    });
+
+    test('publishMessage should preserve world sender role instead of reclassifying it as user', () => {
+      const worldMessage = publishMessage(
+        mockWorld,
+        'heartbeat prompt',
+        'world',
+        mockWorld.currentChatId,
+      );
+
+      expect(worldMessage.sender).toBe('world');
+      expect(worldMessage.role).toBe('world');
     });
 
     test('publishMessage should still generate IDs automatically', () => {

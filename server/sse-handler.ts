@@ -320,7 +320,8 @@ export function createSSEHandler(
       replyToMessageId: eventData.replyToMessageId,
       createdAt: eventData.timestamp || new Date().toISOString(),
       role: eventData.role,
-      tool_calls: eventData.tool_calls
+      tool_calls: eventData.tool_calls,
+      tool_call_id: eventData.tool_call_id
     };
     sendSSE({ type: EventType.MESSAGE, data: messageData });
   };

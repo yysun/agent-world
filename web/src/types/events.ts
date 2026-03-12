@@ -25,6 +25,7 @@
  * ```
  * 
  * Changes:
+ * - 2026-03-12: Added `handleToolStreamEnd` event typing for terminal cleanup of live web shell tool rows.
  * - 2026-03-11: Added `update-chat-search` event typing for the web chat-history filter input.
  * - 2026-02-22: Added responsive right-panel events (`open-right-panel`, `close-right-panel`, `toggle-right-panel`, `switch-right-panel-tab`, `sync-right-panel-viewport`).
  * - 2026-02-21: Added `select-project-folder` event variant for web composer project picker integration.
@@ -36,7 +37,7 @@
  * - 2025-10-26: Initial creation with 40+ typed events for World component
  */
 
-import type { Agent, Message, StreamStartData, StreamChunkData, StreamEndData, StreamErrorData, ToolStreamData } from './index';
+import type { Agent, Message, StreamStartData, StreamChunkData, StreamEndData, StreamErrorData, ToolStreamData, ToolStreamEndData } from './index';
 
 /**
  * World Component Events - Discriminated Union Type
@@ -211,6 +212,9 @@ export type WorldEvents =
 
   /** Handle tool stream event */
   | { name: 'handleToolStream'; payload: ToolStreamData }
+
+  /** Handle tool stream end event */
+  | { name: 'handleToolStreamEnd'; payload: ToolStreamEndData }
 
   /** Handle message event from SSE */
   | { name: 'handleMessageEvent'; payload: any }

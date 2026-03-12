@@ -17,6 +17,12 @@
  * - Keeps helper logic local to this domain module for focused maintenance
  *
  * Recent Changes:
+ * - 2026-03-12: Merged attached live tool-stream output into the request card body so running shell output does not
+ *   render as a second standalone tool box.
+ * - 2026-03-12: Reused one bounded scroll viewport for live and completed plain-text tool output and surfaced
+ *   live tool-input metadata in the expanded running tool body.
+ * - 2026-03-11: Parsed tool names from inline `Calling tool:` request text and added an expanded-body fallback for
+ *   live request rows that have not yet received structured `tool_calls` metadata.
  * - 2026-03-11: Doubled markdown tool-preview viewport height to 10 lines and exposed the max-line setting through
  *   a small helper so compact preview sizing stays testable.
  * - 2026-03-11: Removed visible tool toggle text so compact tool rows use chevron-only controls while keeping
@@ -58,6 +64,9 @@ export function isToolRenderableMessage(message: Message): boolean {
   if (Array.isArray(anyMessage?.combinedToolResults)) {
     return true;
   }
+  if (Array.isArray(anyMessage?.combinedToolStreams)) {
+    return true;
+  }
   if (Boolean(anyMessage?.isToolStreaming)) {
     return true;
   }
@@ -75,6 +84,15 @@ export function isToolRenderableMessage(message: Message): boolean {
 
   const content = String(anyMessage?.content || anyMessage?.text || '').trim();
   return /^calling tool(?::|\s)/i.test(content);
+}
+
+function getToolRequestText(message: Message): string {
+  return String((message as any)?.content || (message as any)?.text || '').trim();
+}
+
+function parseToolNameFromRequestText(text: string): string {
+  const match = String(text || '').match(/calling tool\s*:\s*([a-z0-9_.:-]+)/i);
+  return String(match?.[1] || '').trim();
 }
 
 function parseToolResultRecord(text: string): Record<string, unknown> | null {
@@ -173,6 +191,11 @@ function resolveToolDisplayName(message: Message): string {
     return `${primaryName} +${toolCalls.length - 1} more`;
   }
 
+  const inlineToolName = parseToolNameFromRequestText(getToolRequestText(message));
+  if (inlineToolName) {
+    return inlineToolName;
+  }
+
   return 'unknown';
 }
 
@@ -219,9 +242,52 @@ export function getToolPreviewMaxLines(): number {
   return 10;
 }
 
+function getToolTextViewportMaxLines(): number {
+  return 10;
+}
+
 function getToolDisplayText(message: Message): string {
   return getToolPreviewDisplayText(message)
     ?? String((message as any)?.text || (message as any)?.content || '');
+}
+
+function stringifyToolInput(value: unknown): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function renderPlainToolOutputText(textContent: string) {
+  return (
+    <pre
+      className="tool-output-text tool-output-body-text"
+      style={{ '--tool-output-max-lines': String(getToolTextViewportMaxLines()) } as any}
+    >
+      {textContent}
+    </pre>
+  );
+}
+
+function getLiveToolArgsText(message: Message): string {
+  const toolInput = stringifyToolInput((message as any)?.toolInput);
+  if (toolInput) {
+    return toolInput;
+  }
+
+  const command = String((message as any)?.command || '').trim();
+  if (command) {
+    return stringifyToolInput({ command });
+  }
+
+  return '';
 }
 
 function canEmbedWebMedia(source: string): boolean {
@@ -321,7 +387,7 @@ function renderToolResultBody(message: Message, textContent: string) {
     return rendererMatch.renderer.render(rendererMatch.message);
   }
 
-  return renderToolPreview(message) || <pre className="tool-output-text">{textContent}</pre>;
+  return renderToolPreview(message) || renderPlainToolOutputText(textContent);
 }
 
 function truncateToolOutput(text: string): { content: string; wasTruncated: boolean } {
@@ -349,6 +415,21 @@ function getToolMergedStatus(combinedToolResults: Message[]): 'running' | 'done'
     return isToolResultFailureText(text) || Boolean((r as any)?.isError);
   });
   return hasFailure ? 'failed' : 'done';
+}
+
+function findCombinedToolStream(message: Message, callId: string, fallbackIndex: number): Message | null {
+  const combinedToolStreams: Message[] = Array.isArray((message as any)?.combinedToolStreams)
+    ? (message as any).combinedToolStreams
+    : [];
+
+  if (!callId) {
+    return combinedToolStreams.length === 1 && fallbackIndex === 0
+      ? combinedToolStreams[0]
+      : null;
+  }
+
+  return combinedToolStreams.find((streamRow) => String((streamRow as any)?.toolCallId || '').trim() === callId)
+    || (combinedToolStreams.length === 1 && fallbackIndex === 0 ? combinedToolStreams[0] : null);
 }
 
 function renderToolSummaryHeader(message: Message, isExpanded: boolean) {
@@ -395,27 +476,46 @@ function renderToolSummaryHeader(message: Message, isExpanded: boolean) {
 
 function renderMergedToolCard(message: Message) {
   const combinedToolResults: Message[] = (message as any).combinedToolResults || [];
+  const combinedToolStreams: Message[] = (message as any).combinedToolStreams || [];
   const toolCalls: any[] = Array.isArray((message as any).tool_calls) ? (message as any).tool_calls : [];
+  const requestText = getToolRequestText(message);
   const isExpanded = (message as any).isToolOutputExpanded || false;
+  const fallbackToolCalls = toolCalls.length > 0
+    ? toolCalls
+    : [{
+      id: `${String((message as any)?.messageId || message.id || 'tool-request')}-inline`,
+      function: {
+        name: resolveToolDisplayName(message),
+        arguments: requestText,
+      },
+    }];
 
   return (
     <div className="merged-tool-card tool-surface">
       {renderToolSummaryHeader(message, isExpanded)}
       {isExpanded && (
         <div className="merged-tool-body">
-          {toolCalls.map((tc: any, i: number) => {
+          {fallbackToolCalls.map((tc: any, i: number) => {
             const callId = String(tc?.id || '');
             const args = String(tc?.function?.arguments || tc?.arguments || '');
             const result = combinedToolResults.find(r => String((r as any).tool_call_id || '') === callId)
               || (combinedToolResults.length === 1 && i === 0 ? combinedToolResults[0] : null);
+            const liveStream = findCombinedToolStream(message, callId, i);
             const resultText = result ? getToolDisplayText(result as Message) : null;
+            const liveStreamText = liveStream ? String((liveStream as any)?.text || (liveStream as any)?.content || '') : null;
             const { content: truncatedResult, wasTruncated } = resultText !== null
               ? truncateToolOutput(resultText)
               : { content: null, wasTruncated: false };
+            const { content: truncatedLiveOutput, wasTruncated: liveOutputWasTruncated } = liveStreamText !== null
+              ? truncateToolOutput(liveStreamText)
+              : { content: null, wasTruncated: false };
+            const liveStreamOutputClass = liveStream && (liveStream as any)?.streamType === 'stderr'
+              ? 'tool-output-stderr'
+              : 'tool-output-stdout';
 
             return (
-              <div className="tool-result-block">
-                {toolCalls.length > 1 && (
+              <div className="tool-result-block" key={callId || `tool-call-${i}`}>
+                {fallbackToolCalls.length > 1 && (
                   <div className="tool-call-name">{String(tc?.function?.name || tc?.name || 'tool')}</div>
                 )}
                 {args && (
@@ -433,7 +533,17 @@ function renderMergedToolCard(message: Message) {
                     )}
                   </div>
                 )}
-                {result == null && (
+                {truncatedResult === null && truncatedLiveOutput !== null && (
+                  <div className={`tool-output-content ${liveStreamOutputClass}`}>
+                    {renderPlainToolOutputText(truncatedLiveOutput)}
+                    {liveOutputWasTruncated && (
+                      <div className="tool-output-truncated">
+                        ⚠️ Output truncated (exceeded 50,000 characters)
+                      </div>
+                    )}
+                  </div>
+                )}
+                {result == null && truncatedLiveOutput === null && (
                   <div className="tool-output-content">
                     <span className="tool-waiting">waiting for result...</span>
                   </div>
@@ -461,13 +571,19 @@ export function renderMessageContent(message: Message) {
 
   if (message.isToolStreaming) {
     const isExpanded = message.isToolOutputExpanded || false;
+    const argsText = getLiveToolArgsText(message);
 
     return (
       <div className="tool-output-container tool-surface tool-output-live">
         {renderToolSummaryHeader(message, isExpanded)}
         {isExpanded && (
           <div className={`tool-output-content ${message.streamType === 'stderr' ? 'tool-output-stderr' : 'tool-output-stdout'}`}>
-            <pre className="tool-output-text">{message.text || '(waiting for output...)'}</pre>
+            {argsText && (
+              <div className="tool-args">
+                <pre className="tool-output-text">{argsText}</pre>
+              </div>
+            )}
+            {renderPlainToolOutputText(message.text || '(waiting for output...)')}
           </div>
         )}
       </div>

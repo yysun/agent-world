@@ -3996,6 +3996,12 @@ legend {
   overflow-x: auto;
 }
 
+.tool-output-body-text {
+  max-height: calc(1.5em * var(--tool-output-max-lines, 10) + 24px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
 /* Stdout Output (default terminal style) */
 .tool-output-stdout {
   background-color: #1e1e1e;

@@ -30,6 +30,7 @@
  * - 2026-03-10: Fixed deleteLatestMessage to handle SSE race where handleStreamStart filters the user message before
  *   its messageId-confirmation event arrives. When no enabled delete button is found in the live DOM, the helper
  *   reloads the world page so messages are restored from the backend DB, then retries.
+ * - 2026-03-12: Added a deterministic slow-shell prompt path and tool-summary wait helpers for live web shell status E2E coverage.
  */
 
 import fs from 'node:fs';
@@ -42,6 +43,7 @@ export const TEST_WORKSPACE_PATH = path.resolve(process.cwd(), '.tmp', 'web-play
 export const HITL_DELETE_TARGET = '.e2e-hitl-delete-me.txt';
 export const HITL_SHELL_SUCCESS_MARKER = 'E2E_SHELL_OK';
 export const HITL_SHELL_SUCCESS_TOKEN = `E2E_SHELL_OK: ${HITL_DELETE_TARGET}`;
+export const SLOW_SHELL_SCRIPT_NAME = 'slow-delete.mjs';
 
 const API_BASE_URL = 'http://127.0.0.1:3000/api';
 
@@ -85,6 +87,21 @@ function ensureWorkspaceArtifacts(): void {
   fs.writeFileSync(
     path.join(TEST_WORKSPACE_PATH, HITL_DELETE_TARGET),
     'Disposable file for real web E2E shell_cmd HITL approval coverage.\n',
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(TEST_WORKSPACE_PATH, SLOW_SHELL_SCRIPT_NAME),
+    [
+      "import { promises as fs } from 'node:fs';",
+      '',
+      'const target = process.argv[2];',
+      'if (!target) {',
+      "  throw new Error('Missing target path');",
+      '}',
+      '',
+      'await new Promise((resolve) => setTimeout(resolve, 2000));',
+      'await fs.unlink(target);',
+    ].join('\n'),
     'utf8',
   );
 }
@@ -192,6 +209,7 @@ function buildAgentSystemPrompt(): string {
     'Rules:',
     '- For normal user messages, reply with one short sentence that starts with "E2E_OK:" and includes the full user message text.',
     `- If a user message includes the exact filename "${HITL_DELETE_TARGET}" and asks to use shell_cmd, do not call human_intervention_request. Call only shell_cmd with command "rm" and parameters ["${HITL_DELETE_TARGET}"].`,
+    `- If a user message starts with "SLOW_SHELL:" and includes the exact filename "${HITL_DELETE_TARGET}", do not ask for approval. Call only shell_cmd with command "node" and parameters ["./${SLOW_SHELL_SCRIPT_NAME}", "${HITL_DELETE_TARGET}"].`,
     `- After that shell_cmd completes successfully, reply with exactly "${HITL_SHELL_SUCCESS_TOKEN}".`,
     '- If a user message starts with "HITL:", call the tool "human_intervention_request" with question "Approve the E2E request?" and options ["Approve","Decline"]. Do not answer with plain text first.',
     '- After a generic HITL option is submitted, reply with one short sentence that starts with "E2E_RESUMED:" and includes the chosen option label.',
@@ -296,6 +314,15 @@ export function buildShellHitlPrompt(label: string): string {
     `Use shell_cmd to remove ${HITL_DELETE_TARGET} from the current working directory.`,
     'Do not ask me for confirmation in plain text.',
     `After approval, confirm completion for ${label}.`,
+  ].join(' ');
+}
+
+export function buildSlowShellPrompt(label: string): string {
+  return [
+    `SLOW_SHELL: Use shell_cmd to remove ${HITL_DELETE_TARGET} from the current working directory.`,
+    'Wait briefly before removing it so the running tool state is visible.',
+    'Do not ask me for approval.',
+    `After completion, confirm completion for ${label}.`,
   ].join(' ');
 }
 
@@ -442,6 +469,31 @@ export async function waitForAssistantToken(page: Page, token: string, timeoutMs
   const opts: { state: 'visible'; timeout?: number } = { state: 'visible' };
   if (timeoutMs) opts.timeout = timeoutMs;
   await page.getByText(token, { exact: false }).last().waitFor(opts);
+}
+
+export async function waitForToolSummaryStatus(
+  page: Page,
+  status: 'running' | 'done' | 'failed',
+  timeoutMs: number = 15_000,
+): Promise<Locator> {
+  const locator = page
+    .getByTestId('conversation-area')
+    .locator('.tool-summary-line', { hasText: `tool: shell_cmd - ${status}` })
+    .last();
+  await locator.waitFor({ state: 'visible', timeout: timeoutMs });
+  return locator;
+}
+
+export async function waitForToolSummaryStatusGone(
+  page: Page,
+  status: 'running' | 'done' | 'failed',
+  timeoutMs: number = 15_000,
+): Promise<void> {
+  await expect(
+    page
+      .getByTestId('conversation-area')
+      .locator('.tool-summary-line', { hasText: `tool: shell_cmd - ${status}` }),
+  ).toHaveCount(0, { timeout: timeoutMs });
 }
 
 export async function waitForHitlPrompt(page: Page, timeoutMs?: number): Promise<Locator> {

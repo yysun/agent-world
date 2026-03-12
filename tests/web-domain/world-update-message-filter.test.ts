@@ -69,4 +69,29 @@ describe('web world update message chat filtering', () => {
       text: 'hello active chat'
     });
   });
+
+  it('ignores tool-result events for a different chatId', () => {
+    const state = {
+      ...createBaseState(),
+      activeTools: [],
+      pendingStreamUpdates: new Map(),
+      isBusy: false,
+      elapsedIntervalId: null,
+    } as any;
+
+    const nextState = (worldUpdateHandlers['handleToolResult'] as any)(state, {
+      messageId: 'call-2',
+      sender: 'assistant',
+      chatId: 'chat-2',
+      toolExecution: {
+        toolName: 'shell_cmd',
+        toolCallId: 'call-2',
+        input: { command: 'pwd' },
+        result: 'status: success\nexit_code: 0\nstdout_preview:\n/workspace',
+      },
+    });
+
+    expect(nextState).toBe(state);
+    expect(nextState.messages).toHaveLength(0);
+  });
 });

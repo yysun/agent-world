@@ -67,6 +67,42 @@ function resolveRequiredChatId(
   throw new Error(`${callsite}: explicit chatId is required.`);
 }
 
+function buildWorldMessageEvent(params: {
+  content: string;
+  sender: string;
+  messageId: string;
+  chatId: string;
+  replyToMessageId?: string;
+}): WorldMessageEvent {
+  const normalizedSender = normalizeSender(params.sender);
+  const { message: parsedMsg } = parseMessageContent(params.content, 'user');
+
+  let role: string | undefined;
+  if (parsedMsg.role === 'tool') {
+    role = 'tool';
+  } else if (normalizedSender === 'human' || normalizedSender.startsWith('user')) {
+    role = 'user';
+  } else if (normalizedSender === 'system' || normalizedSender === 'world') {
+    role = normalizedSender;
+  } else {
+    role = parsedMsg.role === 'assistant' ? 'assistant' : 'assistant';
+  }
+
+  return {
+    content: params.content,
+    sender: normalizedSender,
+    timestamp: new Date(),
+    messageId: params.messageId,
+    chatId: params.chatId,
+    replyToMessageId: params.replyToMessageId,
+    ...(role ? { role } : {}),
+    ...(Array.isArray((parsedMsg as any).tool_calls) ? { tool_calls: (parsedMsg as any).tool_calls } : {}),
+    ...(typeof (parsedMsg as any).tool_call_id === 'string' && (parsedMsg as any).tool_call_id.trim()
+      ? { tool_call_id: (parsedMsg as any).tool_call_id.trim() }
+      : {}),
+  };
+}
+
 /**
  * Publish event to a specific channel using World.eventEmitter
  */
@@ -130,31 +166,18 @@ export function publishMessage(world: World, content: string, sender: string, ch
     });
   }
 
-  // Determine role based on sender and message type
-  let role: string;
-  if (parsedMsg.role === 'tool') {
-    role = 'tool';
-  } else if (normalizedSender === 'human' || normalizedSender.startsWith('user')) {
-    role = 'user';
-  } else {
-    // Agent senders get role 'assistant'
-    role = 'assistant';
-  }
-
-  const messageEvent: WorldMessageEvent & { role?: string; tool_calls?: any } = {
+  const messageEvent = buildWorldMessageEvent({
     content: finalContent,
     sender: normalizedSender,
-    role,
-    timestamp: new Date(),
     messageId,
     chatId: targetChatId,
-    replyToMessageId
-  };
+    replyToMessageId,
+  });
 
   loggerMemory.debug('[publishMessage] Generated messageId', {
     messageId,
     sender: normalizedSender,
-    role,
+    role: messageEvent.role,
     worldId: world.id,
     chatId: targetChatId,
     hasAgentId: !!targetAgentId,
@@ -164,7 +187,7 @@ export function publishMessage(world: World, content: string, sender: string, ch
   loggerMemory.debug('[publishMessage] Emitting message event', {
     messageId,
     sender: normalizedSender,
-    role,
+    role: messageEvent.role,
     chatId: targetChatId,
     contentPreview: finalContent.substring(0, 100)
   });
@@ -185,15 +208,13 @@ export function publishMessage(world: World, content: string, sender: string, ch
  */
 export function publishMessageWithId(world: World, content: string, sender: string, messageId: string, chatId: string, replyToMessageId?: string): WorldMessageEvent {
   const targetChatId = resolveRequiredChatId(chatId, 'publishMessageWithId');
-  const normalizedSender = normalizeSender(sender);
-  const messageEvent: WorldMessageEvent = {
+  const messageEvent = buildWorldMessageEvent({
     content,
-    sender: normalizedSender,
-    timestamp: new Date(),
+    sender,
     messageId,
     chatId: targetChatId,
-    replyToMessageId
-  };
+    replyToMessageId,
+  });
   world.eventEmitter.emit('message', messageEvent);
   return messageEvent;
 }

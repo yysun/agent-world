@@ -13,6 +13,7 @@ These tests run against an actual Chromium browser, a running Express API server
 | `app-shell.spec.ts` | Smoke test — loads home page, navigates into the seeded world |
 | `chat-flow-matrix.spec.ts` | Chat lifecycle matrix across Loaded Current Chat, Switched Chat, and New Chat categories |
 | `queue.spec.ts` | Queue and processing lifecycle — in-progress indicator, stop, failed item, error overlay |
+| `shell-stream-parity.spec.ts` | Live shell tool card status transition — running tool summary flips to done without refresh |
 | `world-smoke.spec.ts` | World and chat management affordances — create, delete, search, settings |
 
 ### 2. Chat Flow Matrix (`chat-flow-matrix.spec.ts`)

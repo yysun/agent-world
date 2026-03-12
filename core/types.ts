@@ -551,6 +551,16 @@ export interface WorldMessageEvent {
   messageId: string;
   chatId?: string | null;
   replyToMessageId?: string;  // For message threading
+  role?: string;
+  tool_calls?: Array<{
+    id: string;
+    type?: string;
+    function?: {
+      name?: string;
+      arguments?: string | Record<string, unknown>;
+    };
+  }>;
+  tool_call_id?: string;
 }
 
 /**

@@ -7,7 +7,8 @@
  * Key Features:
  * - Tool result rows matched by tool_call_id are attached to the request row
  *   as combinedToolResults and filtered from the top-level array.
- * - Streaming tool rows (isToolStreaming=true) are left standalone.
+ * - Linked streaming tool rows (isToolStreaming=true) are attached to the request row
+ *   as combinedToolStreams and filtered from the top-level array.
  * - Messages without matching results pass through unchanged.
  * - Messages that are not tool-related pass through unchanged.
  *
@@ -15,6 +16,8 @@
  * - Pure function; no I/O, no DOM.
  *
  * Recent Changes:
+ * - 2026-03-11: Added regression coverage for assistant streaming request rows that only carry legacy
+ *   inline `text` (`Calling tool: ...`) before structured `tool_calls` metadata arrives.
  * - 2026-03-06: Added transcript-restore coverage for canonical shell request+result pairs and legacy assistant stdout mirror row compatibility.
  * - 2026-03-01: Initial test file created.
  * - 2026-03-01: Updated expectations so tool request rows always include `combinedToolResults` (empty while running).
@@ -111,15 +114,41 @@ describe('buildCombinedRenderableMessages', () => {
     expect((result[0] as any).combinedToolResults).toHaveLength(0);
   });
 
-  it('does not merge streaming tool rows', () => {
-    const req = makeRequest();
-    const streamingRes = makeResult({ isToolStreaming: true, messageId: 'msgid-stream-1' });
-    const result = buildCombinedRenderableMessages([req, streamingRes]);
+  it('treats assistant streaming request text as a running tool card even before tool_calls metadata arrives', () => {
+    const liveRequest = makeRequest({
+      id: 'req-inline',
+      text: 'Calling tool: shell_cmd (command: "pwd")',
+      content: undefined,
+      tool_calls: undefined,
+      isStreaming: true,
+    });
 
-    // Streaming result stays standalone; request remains in running-card mode.
-    expect(result).toHaveLength(2);
+    const result = buildCombinedRenderableMessages([liveRequest]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('req-inline');
     expect(Array.isArray((result[0] as any).combinedToolResults)).toBe(true);
     expect((result[0] as any).combinedToolResults).toHaveLength(0);
+  });
+
+  it('merges linked streaming tool rows into the request row', () => {
+    const req = makeRequest();
+    const streamingRes = makeResult({
+      id: 'stream-1',
+      isToolStreaming: true,
+      messageId: 'msgid-stream-1',
+      toolCallId: 'call-1',
+      role: 'tool',
+      text: 'line 1',
+    });
+    const result = buildCombinedRenderableMessages([req, streamingRes]);
+
+    expect(result).toHaveLength(1);
+    expect(Array.isArray((result[0] as any).combinedToolResults)).toBe(true);
+    expect((result[0] as any).combinedToolResults).toHaveLength(0);
+    expect(Array.isArray((result[0] as any).combinedToolStreams)).toBe(true);
+    expect((result[0] as any).combinedToolStreams).toHaveLength(1);
+    expect((result[0] as any).combinedToolStreams[0].id).toBe('stream-1');
   });
 
   it('passes non-tool human messages through unchanged', () => {

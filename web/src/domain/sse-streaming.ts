@@ -15,6 +15,7 @@
  * Created: 2025-10-26 - Phase 2: Domain Module Extraction
  * Updated: 2025-11-11 - Removed isWaiting control from stream events
  * Updated: 2026-02-08 - Added createToolStreamState for shell command streaming
+ * Updated: 2026-03-12 - Added tool-stream metadata propagation and terminal cleanup helpers for live web shell rows.
  */
 
 import type { WorldComponentState } from '../types';
@@ -120,9 +121,14 @@ export function createToolStreamState(
     agentName: string;
     content: string;
     stream: 'stdout' | 'stderr';
+    chatId?: string;
+    toolName?: string;
+    toolInput?: any;
+    command?: string;
+    toolCallId?: string;
   }
 ): WorldComponentState {
-  const { messageId, agentName, content, stream } = data;
+  const { messageId, agentName, content, stream, chatId, toolName, toolInput, command, toolCallId } = data;
   const messages = [...(state.messages || [])];
 
   // Find existing tool message (created by handleToolStart or previous stream chunk)
@@ -137,7 +143,12 @@ export function createToolStreamState(
       text: content,
       streamType: stream,
       isToolStreaming: true,
-      toolEventType: 'progress'
+      toolEventType: 'progress',
+      chatId: chatId ?? messages[toolMessageIndex].chatId,
+      toolName: toolName || messages[toolMessageIndex].toolName,
+      toolInput: toolInput ?? messages[toolMessageIndex].toolInput,
+      command: command || messages[toolMessageIndex].command,
+      toolCallId: toolCallId || messages[toolMessageIndex].toolCallId,
     };
   } else {
     // Create new tool message if not found (streaming without tool-start)
@@ -150,6 +161,11 @@ export function createToolStreamState(
       streamType: stream,
       toolEventType: 'progress',
       messageId: messageId,
+      chatId,
+      toolName,
+      toolInput,
+      command,
+      toolCallId,
       createdAt: new Date(),
       type: 'tool-stream'
     } as any);
@@ -159,5 +175,37 @@ export function createToolStreamState(
     ...state,
     messages,
     needScroll: true
+  };
+}
+
+export function finalizeToolStreamState(
+  state: WorldComponentState,
+  messageIds: string[]
+): WorldComponentState {
+  if (!Array.isArray(messageIds) || messageIds.length === 0) {
+    return state;
+  }
+
+  const targetIds = new Set(messageIds.map((messageId) => String(messageId || '').trim()).filter(Boolean));
+  if (targetIds.size === 0) {
+    return state;
+  }
+
+  const messages = (state.messages || []).map((message) => {
+    const messageId = String(message.messageId || '').trim();
+    if (!message.isToolEvent || !message.isToolStreaming || !targetIds.has(messageId)) {
+      return message;
+    }
+
+    return {
+      ...message,
+      isToolStreaming: false,
+      toolEventType: 'result',
+    };
+  });
+
+  return {
+    ...state,
+    messages,
   };
 }

@@ -14,6 +14,8 @@
  * - Uses deterministic in-memory fixtures.
  *
  * Recent Changes:
+ * - 2026-03-11: Added legacy inline `Calling tool:` fallback coverage so live web tool cards still resolve a
+ *   readable tool name before structured request metadata is present.
  * - 2026-03-06: Added JSON-serialized canonical failure coverage so web completed tool cards do not miss failed shell results after reload.
  * - 2026-03-06: Added regression coverage for canonical shell validation/policy failure reasons in merged web tool cards.
  * - 2026-03-01: Initial test coverage added for one-line tool summary labels.
@@ -52,6 +54,16 @@ describe('getToolOneLineSummary', () => {
     });
 
     expect(getToolOneLineSummary(message)).toBe('tool: run_in_terminal - running');
+  });
+
+  it('returns running summary for inline tool-request text without tool_calls metadata', () => {
+    const message = createMessage({
+      role: 'assistant',
+      text: 'Calling tool: shell_cmd (command: "pwd")',
+      combinedToolResults: [],
+    });
+
+    expect(getToolOneLineSummary(message)).toBe('tool: shell_cmd - running');
   });
 
   it('returns failed summary for stderr tool-result rows', () => {

@@ -53,6 +53,8 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2026-03-12: Wired live web shell stdout cleanup through `handleToolStreamEnd` so terminal tool events remove
+ *   transient stream rows and leave the finished merged tool card.
  * - 2026-03-11: Derived the web waiting indicator's `activeAgent` from world activity payloads so the transcript
  *   shows the correct agent name instead of a static fallback.
  * - 2026-03-01: Cleared pending HITL prompt UI during optimistic message-edit application so stale pre-edit prompts do not remain visible.
@@ -124,10 +126,36 @@ import {
   handleToolProgress as handleToolProgressBase,
   handleToolResult as handleToolResultBase,
   handleToolStream as handleToolStreamBase,
+  handleToolStreamEnd as handleToolStreamEndBase,
 } from '../utils/sse-client';
 import type { WorldComponentState, Agent, AgentMessage, Message } from '../types';
 import type { WorldEventName, WorldEventPayload } from '../types/events';
 import toKebabCase from '../utils/toKebabCase';
+
+function parseLiveToolResultEnvelope(content: unknown): {
+  content: string;
+  role?: string;
+  toolCallId?: string;
+} | null {
+  if (typeof content !== 'string') {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(content);
+    if (!parsed || typeof parsed !== 'object' || parsed.__type !== 'tool_result') {
+      return null;
+    }
+
+    return {
+      content: typeof parsed.content === 'string' ? parsed.content : '',
+      role: 'tool',
+      toolCallId: typeof parsed.tool_call_id === 'string' ? parsed.tool_call_id : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
 
 // Utility functions for message processing
 const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): Message => {
@@ -436,6 +464,12 @@ const hasActivity = (state: WorldComponentState): boolean => {
   return state.activeTools.length > 0 || state.pendingStreamUpdates.size > 0;
 };
 
+function shouldIgnoreToolEventForActiveChat(state: WorldComponentState, data: any): boolean {
+  const activeChatId = state.currentChat?.id || null;
+  const incomingChatId = data?.chatId ?? null;
+  return Boolean(activeChatId && (!incomingChatId || incomingChatId !== activeChatId));
+}
+
 // ========================================
 // STREAM & TOOL HANDLERS (with debouncing)
 // ========================================
@@ -448,6 +482,10 @@ const handleStreamError = (state: WorldComponentState, data: any): WorldComponen
  * Handle tool start - track in activeTools and start elapsed timer (Phase 2)
  */
 const handleToolStart = (state: WorldComponentState, data: any): WorldComponentState => {
+  if (shouldIgnoreToolEventForActiveChat(state, data)) {
+    return state;
+  }
+
   // Call base handler for message updates
   let newState = handleToolStartBase(state, data);
 
@@ -479,6 +517,10 @@ const handleToolStart = (state: WorldComponentState, data: any): WorldComponentS
 };
 
 const handleToolProgress = (state: WorldComponentState, data: any): WorldComponentState => {
+  if (shouldIgnoreToolEventForActiveChat(state, data)) {
+    return state;
+  }
+
   const parsedHitlPrompt = HitlDomain.parseHitlPromptFromToolEvent(data);
   const hitlPrompt = parsedHitlPrompt
     ? {
@@ -520,6 +562,10 @@ const handleToolProgress = (state: WorldComponentState, data: any): WorldCompone
  * Handle tool result - remove from activeTools and stop timer if idle (Phase 2)
  */
 const handleToolResult = (state: WorldComponentState, data: any): WorldComponentState => {
+  if (shouldIgnoreToolEventForActiveChat(state, data)) {
+    return state;
+  }
+
   // Call base handler for message updates
   let newState = handleToolResultBase(state, data);
 
@@ -543,6 +589,10 @@ const handleToolResult = (state: WorldComponentState, data: any): WorldComponent
 };
 
 const handleToolError = (state: WorldComponentState, data: any): WorldComponentState => {
+  if (shouldIgnoreToolEventForActiveChat(state, data)) {
+    return state;
+  }
+
   // Tool events are informational - don't control spinner
   // Spinner is controlled by world events (pending count)
   return handleToolErrorBase(state, data);
@@ -573,9 +623,21 @@ const handleStreamChunkDebounced = (state: WorldComponentState, data: any): Worl
 };
 
 const handleToolStream = (state: WorldComponentState, data: any): WorldComponentState => {
+  if (shouldIgnoreToolEventForActiveChat(state, data)) {
+    return state;
+  }
+
   // Tool stream events for real-time shell command output
   // Spinner is controlled by world events (pending count)
   return handleToolStreamBase(state, data);
+};
+
+const handleToolStreamEnd = (state: WorldComponentState, data: any): WorldComponentState => {
+  if (shouldIgnoreToolEventForActiveChat(state, data)) {
+    return state;
+  }
+
+  return handleToolStreamEndBase(state, data);
 };
 
 const normalizeActivityAgentKey = (value: unknown): string => {
@@ -986,20 +1048,7 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
   }
 
   const senderName = messageData.sender;
-
-  // Filter out internal protocol messages (tool results with __type marker)
-  // These are internal protocol messages not meant for display
-  if (messageData.content && typeof messageData.content === 'string') {
-    try {
-      const parsed = JSON.parse(messageData.content);
-      if (parsed.__type === 'tool_result') {
-        // This is an internal tool result message - don't display it
-        return state;
-      }
-    } catch (e) {
-      // Not JSON or parse error - continue normal processing
-    }
-  }
+  const liveToolResult = parseLiveToolResultEnvelope(messageData.content);
 
   // Find and update agent message count
   let fromAgentId: string | undefined;
@@ -1014,15 +1063,16 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
     }
   }
 
-  const messageText = messageData.content || messageData.message || '';
+  const messageText = liveToolResult?.content ?? messageData.content ?? messageData.message ?? '';
 
   // Determine message type based on role field
+  const effectiveRole = liveToolResult?.role ?? messageData.role;
   let messageType: string;
-  if (messageData.role === 'tool') {
+  if (effectiveRole === 'tool') {
     messageType = 'tool';
-  } else if (messageData.role === 'user' || senderName === 'human' || senderName === 'user') {
+  } else if (effectiveRole === 'user' || senderName === 'human' || senderName === 'user') {
     messageType = 'user';
-  } else if (messageData.role === 'assistant') {
+  } else if (effectiveRole === 'assistant') {
     messageType = 'agent';
   } else {
     messageType = messageData.type || 'message';
@@ -1038,11 +1088,14 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
     messageId: messageData.messageId,
     chatId: messageData.chatId,
     replyToMessageId: messageData.replyToMessageId,
-    role: messageData.role, // Preserve role for filtering
+    role: effectiveRole, // Preserve role for filtering
+    tool_calls: messageData.tool_calls,
+    tool_call_id: liveToolResult?.toolCallId ?? messageData.tool_call_id,
   };
 
   const existingMessages = state.messages || [];
   const normalizedSender = (senderName || '').toLowerCase();
+  const normalizedToolCallId = String(newMessage.tool_call_id || '').trim();
 
   // Check if this is a user message that we need to deduplicate or update
   const isUserMessage = normalizedSender === 'human' || normalizedSender === 'user';
@@ -1083,6 +1136,37 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
       return {
         ...state,
         messages: updatedMessages
+      };
+    }
+  }
+
+  if (newMessage.role === 'tool') {
+    const existingToolMessageIndex = existingMessages.findIndex((message) => {
+      const existingToolCallId = String((message as any)?.tool_call_id || (message as any)?.toolCallId || '').trim();
+      if (normalizedToolCallId && existingToolCallId === normalizedToolCallId) {
+        return true;
+      }
+      return Boolean(newMessage.messageId) && message.messageId === newMessage.messageId;
+    });
+
+    if (existingToolMessageIndex !== -1) {
+      const updatedMessages = existingMessages.map((message, index) => {
+        if (index !== existingToolMessageIndex) {
+          return message;
+        }
+
+        return {
+          ...message,
+          ...newMessage,
+          id: message.id || newMessage.id,
+          messageId: newMessage.messageId ?? message.messageId,
+          tool_call_id: normalizedToolCallId || (message as any).tool_call_id,
+        };
+      });
+
+      return {
+        ...state,
+        messages: updatedMessages,
       };
     }
   }
@@ -1384,6 +1468,7 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'handleToolProgress': handleToolProgress,
   'handleToolResult': handleToolResult,
   'handleToolStream': handleToolStream,
+  'handleToolStreamEnd': handleToolStreamEnd,
   'handleWorldActivity': (state: WorldComponentState, activity: any): WorldComponentState | void => {
     return handleWorldActivity(state, activity);
   },

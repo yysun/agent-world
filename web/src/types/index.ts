@@ -18,6 +18,8 @@
  * - SSE event data structures for real-time updates
  * 
  * Changes:
+ * - 2026-03-12: Added shell tool-stream metadata (`toolName`, `toolInput`, `command`, `toolCallId`, `chatId`) and
+ *   tool-stream end payload typing for web shell-stream parity with Electron.
  * - 2026-03-11: Added `viewportMode` chat/history props so responsive control sizing can follow the active world layout mode.
  * - 2026-03-11: Added `chatSearchQuery` world state/props typing so the chat-history filter input can drive visible list filtering.
  * - 2026-02-22: Added responsive right-panel UI state typings (`rightPanelTab`, `isRightPanelOpen`, `viewportMode`) for World page mobile/tablet behavior.
@@ -103,6 +105,15 @@ export interface Message {
   chatId?: string;
   replyToMessageId?: string; // Parent message reference for threading
   role?: string; // Backend role field preserved for sorting
+  tool_calls?: Array<{
+    id: string;
+    type?: string;
+    function?: {
+      name?: string;
+      arguments?: string;
+    };
+  }>;
+  tool_call_id?: string;
   userEntered?: boolean;
   fromAgentId?: string;
   ownerAgentId?: string; // Which agent's memory this message came from (for filtering)
@@ -135,6 +146,10 @@ export interface Message {
   };
   expandable?: boolean;
   resultPreview?: string;
+  toolName?: string;
+  toolInput?: any;
+  command?: string;
+  toolCallId?: string;
 
   // Phase 5: Collapsible tool output
   isToolOutputExpanded?: boolean;
@@ -463,7 +478,17 @@ export interface ToolStreamData {
   content: string;
   stream: 'stdout' | 'stderr';
   accumulatedContent?: string;
+  chatId?: string;
+  toolName?: string;
+  toolInput?: any;
+  command?: string;
+  toolCallId?: string;
   worldName?: string;
+}
+
+export interface ToolStreamEndData {
+  messageIds: string[];
+  chatId?: string;
 }
 
 // ========================================

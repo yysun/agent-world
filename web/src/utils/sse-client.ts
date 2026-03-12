@@ -23,6 +23,8 @@
  * - Extracts error details from log data for better error visibility in UI
  *
  * Recent Changes:
+ * - 2026-03-12: Routed shell assistant stdout SSE (`start/chunk/end`) through the web tool-stream path, preserved
+ *   shell command metadata for live tool rows, and finalized matching shell stream rows on terminal tool events.
  * - 2026-03-11: Forwarded tool-event `chatId` into AppRun handlers so chat-scoped HITL prompts survive switches without
  *   leaking across chats.
  * - 2026-03-11: Preserved optimistic user messages across assistant stream start so the web chat does not lose edit/delete affordances before the backend echo confirms the message ID.
@@ -42,12 +44,15 @@
 
 import app from 'apprun';
 import { apiRequest } from '../api';
+import { createToolStreamState, finalizeToolStreamState } from '../domain/sse-streaming';
 import type {
   SSEComponentState,
   StreamStartData,
   StreamChunkData,
   StreamEndData,
   StreamErrorData,
+  ToolStreamData,
+  ToolStreamEndData,
 } from '../types';
 
 // SSE data structure interfaces
@@ -59,13 +64,19 @@ interface SSEBaseData {
 }
 
 interface SSEStreamEvent {
-  type: 'start' | 'chunk' | 'end' | 'error';
+  type: 'start' | 'chunk' | 'end' | 'error' | 'tool-start' | 'tool-progress' | 'tool-result' | 'tool-error' | 'tool-stream' | 'log';
   messageId?: string;
   sender?: string;
+  agentName?: string;
   content?: string;
   accumulatedContent?: string;
   finalContent?: string;
   error?: string;
+  stream?: 'stdout' | 'stderr';
+  toolName?: string;
+  chatId?: string;
+  toolExecution?: any;
+  tool_calls?: any[];
   worldName?: string;
 }
 
@@ -87,6 +98,8 @@ interface SSEMessageData extends SSEBaseData {
     replyToMessageId?: string; // Threading: parent message reference
     createdAt?: string;
     worldName?: string;
+    tool_calls?: any[];
+    tool_call_id?: string;
   };
 }
 
@@ -136,6 +149,13 @@ interface ActiveStreamMessage {
 interface StreamingState {
   activeMessages: Map<string, ActiveStreamMessage>;
   currentWorldName: string | null;
+  toolExecutionMetadata: Map<string, {
+    toolName: string;
+    toolCallId: string;
+    toolInput?: any;
+    command?: string;
+    chatId?: string;
+  }>;
 }
 
 interface SendChatMessageOptions {
@@ -156,8 +176,138 @@ const publishEvent = (eventName: string, data?: any): void => {
 // Global streaming state
 let streamingState: StreamingState = {
   activeMessages: new Map(),
-  currentWorldName: null
+  currentWorldName: null,
+  toolExecutionMetadata: new Map(),
 };
+
+function normalizeToolInput(value: unknown): any {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return value;
+  }
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
+function readShellCommand(toolInput: unknown): string {
+  if (!toolInput || typeof toolInput !== 'object') {
+    return '';
+  }
+
+  return String((toolInput as Record<string, unknown>).command || '').trim();
+}
+
+function toToolContent(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (value == null) {
+    return '';
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function upsertToolCompletionMessage<T extends SSEComponentState>(
+  state: T,
+  data: any,
+  options?: {
+    streamType?: 'stdout' | 'stderr';
+    fallbackText?: string;
+  }
+): T {
+  const { sender, chatId, toolExecution } = data || {};
+
+  if (!toolExecution || !toolExecution.toolName) {
+    return state;
+  }
+
+  const toolCallId = String(toolExecution.toolCallId || data?.messageId || '').trim();
+  if (!toolCallId) {
+    return state;
+  }
+
+  const normalizedInput = normalizeToolInput(toolExecution.input);
+  const command = readShellCommand(normalizedInput);
+  const contentSource = options?.streamType === 'stderr'
+    ? (toolExecution.error ?? toolExecution.result ?? options?.fallbackText ?? '')
+    : (toolExecution.result ?? toolExecution.preview ?? options?.fallbackText ?? '');
+  const text = toToolContent(contentSource);
+  const messages = [...(state.messages || [])];
+  const existingIndex = messages.findIndex((message) => {
+    const existingToolCallId = String((message as any)?.tool_call_id || (message as any)?.toolCallId || '').trim();
+    return existingToolCallId === toolCallId && String((message as any)?.role || '').trim().toLowerCase() === 'tool';
+  });
+
+  const completionMessage = {
+    id: `tool-complete-${toolCallId}`,
+    type: 'tool',
+    role: 'tool',
+    sender: sender || 'tool',
+    text,
+    content: text,
+    createdAt: new Date(),
+    messageId: toolCallId,
+    chatId,
+    tool_call_id: toolCallId,
+    toolName: String(toolExecution.toolName || '').trim() || 'unknown',
+    toolInput: normalizedInput,
+    command,
+    toolCallId,
+    toolExecution,
+    isToolStreaming: false,
+    ...(options?.streamType ? { streamType: options.streamType } : {}),
+  } as any;
+
+  if (existingIndex !== -1) {
+    messages[existingIndex] = {
+      ...messages[existingIndex],
+      ...completionMessage,
+      id: messages[existingIndex].id || completionMessage.id,
+    };
+  } else {
+    messages.push(completionMessage);
+  }
+
+  return {
+    ...state,
+    messages,
+    needScroll: true,
+  };
+}
+
+function getShellAssistantToolCallId(messageId: string | undefined): string {
+  const normalizedMessageId = String(messageId || '').trim();
+  return normalizedMessageId.endsWith('-stdout')
+    ? normalizedMessageId.slice(0, -'-stdout'.length)
+    : normalizedMessageId;
+}
+
+function isShellAssistantStreamEvent(eventType: string, messageId: string | undefined, toolName: string | undefined): boolean {
+  return String(toolName || '').trim() === 'shell_cmd'
+    && ['start', 'chunk', 'end'].includes(String(eventType || '').trim().toLowerCase())
+    && String(messageId || '').trim().endsWith('-stdout');
+}
+
+function getShellToolStreamTerminalMessageIds(toolCallId: string): string[] {
+  const normalizedToolCallId = String(toolCallId || '').trim();
+  if (!normalizedToolCallId) {
+    return [];
+  }
+
+  return [normalizedToolCallId, `${normalizedToolCallId}-stdout`];
+}
 
 // Main SSE data handler - routes events to appropriate processors
 const handleSSEData = (data: SSEData): void => {
@@ -306,9 +456,40 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
   if (!eventData) return;
   const messageId = eventData.messageId;
   const agentName = eventData.agentName;
+  const eventType = String(eventData.type || '').trim().toLowerCase();
+  const toolName = String(eventData.toolName || eventData.toolExecution?.toolName || '').trim();
+  const isShellAssistantStream = isShellAssistantStreamEvent(eventType, messageId, toolName);
+  const shellToolCallId = isShellAssistantStream ? getShellAssistantToolCallId(messageId) : '';
+  const shellToolMetadata = shellToolCallId
+    ? streamingState.toolExecutionMetadata.get(shellToolCallId)
+    : null;
 
-  switch (eventData.type) {
+  switch (eventType) {
     case 'start':
+      if (isShellAssistantStream) {
+        const streamKey = String(messageId || '').trim();
+        streamingState.activeMessages.set(streamKey, {
+          content: '',
+          sender: agentName,
+          messageId: streamKey,
+          isStreaming: true
+        });
+        publishEvent('handleToolStream', {
+          messageId: streamKey,
+          agentName,
+          chatId: eventData.chatId ?? shellToolMetadata?.chatId,
+          content: '',
+          stream: 'stdout',
+          accumulatedContent: '',
+          toolName: 'shell_cmd',
+          toolInput: shellToolMetadata?.toolInput,
+          command: shellToolMetadata?.command,
+          toolCallId: shellToolCallId,
+          worldName: eventData.worldName || streamingState.currentWorldName
+        } satisfies ToolStreamData);
+        break;
+      }
+
       streamingState.activeMessages.set(messageId, {
         content: '',
         sender: agentName,
@@ -324,6 +505,36 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
       break;
 
     case 'chunk':
+      if (isShellAssistantStream) {
+        const streamKey = String(messageId || '').trim();
+        const stream = streamingState.activeMessages.get(streamKey);
+        const newContent = eventData.accumulatedContent !== undefined
+          ? eventData.accumulatedContent
+          : (stream?.content || '') + (eventData.content || '');
+
+        streamingState.activeMessages.set(streamKey, {
+          content: newContent,
+          sender: agentName,
+          messageId: streamKey,
+          isStreaming: true
+        });
+
+        publishEvent('handleToolStream', {
+          messageId: streamKey,
+          agentName,
+          chatId: eventData.chatId ?? shellToolMetadata?.chatId,
+          content: newContent,
+          stream: 'stdout',
+          accumulatedContent: newContent,
+          toolName: 'shell_cmd',
+          toolInput: shellToolMetadata?.toolInput,
+          command: shellToolMetadata?.command,
+          toolCallId: shellToolCallId,
+          worldName: eventData.worldName || streamingState.currentWorldName
+        } satisfies ToolStreamData);
+        break;
+      }
+
       const stream = streamingState.activeMessages.get(messageId);
       if (stream) {
         const newContent = eventData.accumulatedContent !== undefined
@@ -351,6 +562,16 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
       if (!eventData.toolExecution) {
         console.warn('tool-start event missing toolExecution:', { eventData, messageId, agentName });
       }
+      if (eventData.toolExecution?.toolCallId) {
+        const normalizedToolInput = normalizeToolInput(eventData.toolExecution.input);
+        streamingState.toolExecutionMetadata.set(String(eventData.toolExecution.toolCallId), {
+          toolName: String(eventData.toolExecution.toolName || '').trim() || 'unknown',
+          toolCallId: String(eventData.toolExecution.toolCallId),
+          toolInput: normalizedToolInput,
+          command: readShellCommand(normalizedToolInput),
+          chatId: eventData.chatId,
+        });
+      }
       publishEvent('handleToolStart', {
         messageId,
         sender: agentName,
@@ -375,6 +596,15 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
       if (!eventData.toolExecution) {
         console.warn('tool-result event missing toolExecution:', { eventData, messageId, agentName });
       }
+      if (eventData.toolExecution?.toolCallId) {
+        publishEvent('handleToolStreamEnd', {
+          messageIds: getShellToolStreamTerminalMessageIds(String(eventData.toolExecution.toolCallId)),
+          chatId: eventData.chatId,
+        } satisfies ToolStreamEndData);
+        streamingState.toolExecutionMetadata.delete(String(eventData.toolExecution.toolCallId));
+        streamingState.activeMessages.delete(String(eventData.toolExecution.toolCallId));
+        streamingState.activeMessages.delete(`${String(eventData.toolExecution.toolCallId)}-stdout`);
+      }
       publishEvent('handleToolResult', {
         messageId,
         sender: agentName,
@@ -388,6 +618,15 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
       // Debug: Check if toolExecution is missing
       if (!eventData.toolExecution) {
         console.warn('tool-error event missing toolExecution:', { eventData, messageId, agentName });
+      }
+      if (eventData.toolExecution?.toolCallId) {
+        publishEvent('handleToolStreamEnd', {
+          messageIds: getShellToolStreamTerminalMessageIds(String(eventData.toolExecution.toolCallId)),
+          chatId: eventData.chatId,
+        } satisfies ToolStreamEndData);
+        streamingState.toolExecutionMetadata.delete(String(eventData.toolExecution.toolCallId));
+        streamingState.activeMessages.delete(String(eventData.toolExecution.toolCallId));
+        streamingState.activeMessages.delete(`${String(eventData.toolExecution.toolCallId)}-stdout`);
       }
       publishEvent('handleToolError', {
         messageId,
@@ -413,11 +652,16 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
         publishEvent('handleToolStream', {
           messageId,
           agentName,
+          chatId: eventData.chatId ?? streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.chatId,
           content: newContent,
           stream: eventData.stream || 'stdout',
           accumulatedContent: newContent,
+          toolName: toolName || streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.toolName,
+          toolInput: streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.toolInput,
+          command: streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.command,
+          toolCallId: String(messageId || '').trim() || undefined,
           worldName: eventData.worldName || streamingState.currentWorldName
-        });
+        } satisfies ToolStreamData);
 
         console.log('[tool-stream] Accumulated output:', {
           messageId,
@@ -437,11 +681,16 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
         publishEvent('handleToolStream', {
           messageId,
           agentName,
+          chatId: eventData.chatId ?? streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.chatId,
           content: eventData.content || '',
           stream: eventData.stream || 'stdout',
           accumulatedContent: eventData.content || '',
+          toolName: toolName || streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.toolName,
+          toolInput: streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.toolInput,
+          command: streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.command,
+          toolCallId: String(messageId || '').trim() || undefined,
           worldName: eventData.worldName || streamingState.currentWorldName
-        });
+        } satisfies ToolStreamData);
 
         console.log('[tool-stream] Started new stream:', {
           messageId,
@@ -452,6 +701,15 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
       break;
 
     case 'end':
+      if (isShellAssistantStream) {
+        publishEvent('handleToolStreamEnd', {
+          messageIds: [String(messageId || '').trim()],
+          chatId: eventData.chatId,
+        } satisfies ToolStreamEndData);
+        streamingState.activeMessages.delete(String(messageId || '').trim());
+        break;
+      }
+
       const endStream = streamingState.activeMessages.get(messageId);
       if (endStream) {
         const finalContent = eventData.finalContent !== undefined
@@ -863,6 +1121,33 @@ export const handleToolStart = <T extends SSEComponentState>(state: T, data: any
     return state;
   }
 
+  if (toolExecution.toolName === 'shell_cmd') {
+    const normalizedInput = normalizeToolInput(toolExecution.input);
+    const command = readShellCommand(normalizedInput);
+    const shellMessageIds = getShellToolStreamTerminalMessageIds(String(toolExecution.toolCallId || messageId));
+    const messages = (state.messages || []).map((message: any) => {
+      const candidateId = String(message?.messageId || '').trim();
+      if (!message?.isToolEvent || !shellMessageIds.includes(candidateId)) {
+        return message;
+      }
+
+      return {
+        ...message,
+        chatId: data.chatId ?? message.chatId,
+        toolName: 'shell_cmd',
+        toolInput: normalizedInput,
+        command: command || message.command,
+        toolCallId: String(toolExecution.toolCallId || message.toolCallId || ''),
+      };
+    });
+
+    return {
+      ...state,
+      messages,
+      needScroll: true
+    };
+  }
+
   // Add tool start indicator message
   const toolStartMessage = {
     sender: sender,
@@ -922,6 +1207,13 @@ export const handleToolResult = <T extends SSEComponentState>(state: T, data: an
     return state;
   }
 
+  if (toolExecution.toolName === 'shell_cmd') {
+    const stateWithEndedStream = handleToolStreamEnd(state, {
+      messageIds: getShellToolStreamTerminalMessageIds(String(toolExecution.toolCallId || messageId))
+    });
+    return upsertToolCompletionMessage(stateWithEndedStream, data);
+  }
+
   // Update existing tool message to show completion
   const messages = [...(state.messages || [])];
   const toolMessageIndex = messages.findIndex(msg =>
@@ -958,6 +1250,16 @@ export const handleToolError = <T extends SSEComponentState>(state: T, data: any
   if (!toolExecution || !toolExecution.toolName) {
     console.warn('handleToolError: Missing or invalid toolExecution data', { data, toolExecution });
     return state;
+  }
+
+  if (toolExecution.toolName === 'shell_cmd') {
+    const stateWithEndedStream = handleToolStreamEnd(state, {
+      messageIds: getShellToolStreamTerminalMessageIds(String(toolExecution.toolCallId || messageId))
+    });
+    return upsertToolCompletionMessage(stateWithEndedStream, data, {
+      streamType: 'stderr',
+      fallbackText: toolExecution.error || 'Tool execution failed',
+    });
   }
 
   // Update existing tool message to show error
@@ -1009,16 +1311,22 @@ export const handleToolError = <T extends SSEComponentState>(state: T, data: any
 /**
  * Handle tool stream chunk - Update tool message with streaming output
  */
-export const handleToolStream = <T extends SSEComponentState>(state: T, data: any): T => {
-  const { messageId, agentName, content, stream } = data;
-
-  // Import domain function to maintain separation of concerns
-  const { createToolStreamState } = require('../domain/sse-streaming');
+export const handleToolStream = <T extends SSEComponentState>(state: T, data: ToolStreamData): T => {
+  const { messageId, agentName, content, stream, chatId, toolName, toolInput, command, toolCallId } = data;
 
   return createToolStreamState(state, {
     messageId,
     agentName,
     content,
-    stream: stream || 'stdout'
+    stream: stream || 'stdout',
+    chatId,
+    toolName,
+    toolInput,
+    command,
+    toolCallId,
   });
+};
+
+export const handleToolStreamEnd = <T extends SSEComponentState>(state: T, data: ToolStreamEndData): T => {
+  return finalizeToolStreamState(state, data.messageIds || []);
 };
