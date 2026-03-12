@@ -52,6 +52,7 @@ type DesktopState = {
   sessionIdsByName: Record<string, string>;
   sessions: SessionSummary[];
   agentIds: string[];
+  agentNames: string[];
 };
 
 function requireGoogleApiKey(): void {
@@ -72,6 +73,10 @@ function requireActiveWorkspacePath(): string {
     throw new Error('Electron E2E workspace has not been bootstrapped for this test run.');
   }
   return activeWorkspacePath;
+}
+
+export function getActiveWorkspacePath(): string {
+  return requireActiveWorkspacePath();
 }
 
 function isSqliteBusyBootstrapError(error: unknown): boolean {
@@ -202,6 +207,11 @@ export async function getDesktopState(page: Page): Promise<DesktopState> {
           .map((agent: any) => String(agent?.id || '').trim())
           .filter(Boolean)
         : [],
+      agentNames: Array.isArray(result?.world?.agents)
+        ? result.world.agents
+          .map((agent: any) => String(agent?.name || '').trim())
+          .filter(Boolean)
+        : [],
     };
   });
 }
@@ -300,7 +310,7 @@ export async function waitForHitlPrompt(page: Page, timeoutMs?: number): Promise
   return prompt;
 }
 
-export async function respondToHitlPrompt(page: Page, optionLabel: 'Approve' | 'Decline' = 'Approve', timeoutMs?: number): Promise<void> {
+export async function respondToHitlPrompt(page: Page, optionLabel: string = 'Approve', timeoutMs?: number): Promise<void> {
   const prompt = await waitForHitlPrompt(page, timeoutMs);
   await prompt.getByRole('button', { name: optionLabel }).click();
 }

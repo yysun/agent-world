@@ -1279,6 +1279,7 @@ export function createLoadSkillToolDefinition() {
           const instructionsMarkdown = stripYamlFrontMatter(markdown);
           const skillRoot = path.dirname(sourcePath);
           const scriptPaths = extractReferencedScriptPaths(instructionsMarkdown);
+          const toolPermission = getEnvValueFromText((context?.world as any)?.variables, 'tool_permission') ?? 'auto';
           if (context?.world && !getExplicitContextChatId(context)) {
             const result = buildReadErrorResult(
               requestedSkillId,
@@ -1289,17 +1290,19 @@ export function createLoadSkillToolDefinition() {
               cacheableForRun: false,
             };
           }
-          const isApproved = await requestSkillExecutionApproval({
-            skillId: requestedSkillId,
-            scriptPaths,
-            context,
-          });
-          if (!isApproved) {
-            const result = buildDeclinedResult(requestedSkillId);
-            return {
-              result,
-              cacheableForRun: false,
-            };
+          if (toolPermission === 'ask') {
+            const isApproved = await requestSkillExecutionApproval({
+              skillId: requestedSkillId,
+              scriptPaths,
+              context,
+            });
+            if (!isApproved) {
+              const result = buildDeclinedResult(requestedSkillId);
+              return {
+                result,
+                cacheableForRun: false,
+              };
+            }
           }
           const scriptOutputs = await executeSkillScripts({
             scriptPaths,

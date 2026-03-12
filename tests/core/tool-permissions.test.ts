@@ -4,7 +4,7 @@
  * Purpose:
  * - Validate world-level `tool_permission` enforcement via `world.variables` env key.
  * - Covers all affected built-in tools: write_file, web_fetch, shell_cmd, create_agent, load_skill.
- * - Permission levels: 'read' (block writes/execution), 'ask' (force HITL approval), 'auto' (normal).
+ * - Permission levels: 'read' (block writes/execution), 'ask' (force HITL approval where required), 'auto' (normal).
  *
  * Architecture:
  * - `tool_permission` is stored as env variable in world.variables: `tool_permission=read|ask|auto`
@@ -12,35 +12,29 @@
  * - No dedicated DB column — follows the same pattern as `working_directory`.
  *
  * Recent changes:
- * - 2026-03-12: Initial implementation with world.variables env key pattern.
+ * - 2026-03-12: Expanded coverage to the full documented permission matrix.
  */
 
 import * as fsModule from 'fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Mock requestToolApproval (used by shell_cmd ask-level and load_skill approval)
 const mockRequestToolApproval = vi.hoisted(() => vi.fn());
+const mockRequestWorldOption = vi.hoisted(() => vi.fn());
+const mockExecuteShellCommand = vi.hoisted(() => vi.fn());
+
 vi.mock('../../core/tool-approval.js', () => ({
   requestToolApproval: mockRequestToolApproval,
 }));
 
-// Mock hitl.js (requestWorldOption used by some HITL flows)
 vi.mock('../../core/hitl.js', () => ({
-  requestWorldOption: vi.fn(async () => ({
-    worldId: 'world-1',
-    requestId: 'req-1',
-    chatId: 'chat-1',
-    optionId: 'yes_once',
-    source: 'user',
-  })),
+  requestWorldOption: mockRequestWorldOption,
 }));
 
-// Mock shell-cmd-tool.js exports used by file-tools internals
-// (shell_cmd itself calls its own local functions; these mocks only affect imports in other modules)
 vi.mock('../../core/shell-cmd-tool.js', async (importOriginal) => {
   const actual = await importOriginal() as any;
   return {
     ...actual,
+    executeShellCommand: mockExecuteShellCommand,
     resolveTrustedShellWorkingDirectory: vi.fn((ctx: any) => ctx?.workingDirectory ?? '/workspace'),
     validateShellDirectoryRequest: vi.fn(() => ({ valid: true })),
   };
@@ -95,23 +89,67 @@ import {
 const mockedGetSkill = vi.mocked(getSkill);
 const mockedGetSkillSourcePath = vi.mocked(getSkillSourcePath);
 const mockedWaitForInitialSkillSync = vi.mocked(waitForInitialSkillSync);
-const fs = vi.mocked(fsModule.promises as any);
+
+const fsPromises = fsModule.promises as any;
+const mkdirSpy = vi.fn();
+const writeFileSpy = vi.fn();
+const readFileSpy = vi.fn();
+const statSpy = vi.fn();
+const readdirSpy = vi.fn();
+
+fsPromises.mkdir = mkdirSpy;
+fsPromises.writeFile = writeFileSpy;
+fsPromises.readFile = readFileSpy;
+fsPromises.stat = statSpy;
+fsPromises.readdir = readdirSpy;
+
+function createEnoentError(): Error & { code: string } {
+  return Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+}
 
 describe('tool_permission enforcement via world.variables', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockedWaitForInitialSkillSync.mockResolvedValue({
-      added: 0, updated: 0, removed: 0, unchanged: 0, total: 0,
-    });
-    if (!fs.stat) fs.stat = vi.fn();
-    if (!fs.readdir) fs.readdir = vi.fn();
-    vi.mocked(fs.stat).mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
-    vi.mocked(fs.readdir).mockResolvedValue([]);
-  });
+    vi.unstubAllGlobals();
 
-  // ==========================================
-  // write_file
-  // ==========================================
+    mockedWaitForInitialSkillSync.mockResolvedValue({
+      added: 0,
+      updated: 0,
+      removed: 0,
+      unchanged: 0,
+      total: 0,
+    });
+
+    mockRequestToolApproval.mockResolvedValue({
+      approved: true,
+      reason: 'approved',
+      optionId: 'yes',
+      source: 'user',
+    });
+    mockRequestWorldOption.mockResolvedValue({
+      worldId: 'world-1',
+      requestId: 'req-1',
+      chatId: 'chat-1',
+      optionId: 'dismiss',
+      source: 'user',
+    });
+    mockExecuteShellCommand.mockResolvedValue({
+      exitCode: 0,
+      stdout: 'script executed',
+      stderr: '',
+      error: null,
+      signal: null,
+      command: 'node',
+      parameters: [],
+      workingDirectory: '/workspace',
+    });
+
+    mkdirSpy.mockResolvedValue(undefined as any);
+    writeFileSpy.mockResolvedValue(undefined as any);
+    readFileSpy.mockResolvedValue('' as any);
+    statSpy.mockRejectedValue(createEnoentError());
+    readdirSpy.mockResolvedValue([] as any);
+  });
 
   describe('write_file', () => {
     it('blocks file writes when tool_permission=read', async () => {
@@ -125,20 +163,33 @@ describe('tool_permission enforcement via world.variables', () => {
           world: { variables: 'tool_permission=read' },
         },
       );
+
       expect(String(result)).toContain('blocked');
       expect(String(result)).toContain('permission level (read)');
+      expect(writeFileSpy).not.toHaveBeenCalled();
     });
 
-    it('proceeds to write when tool_permission=auto (default behavior)', async () => {
-      vi.mocked(fsModule.promises.writeFile).mockResolvedValue(undefined as any);
-      vi.mocked(fsModule.promises.mkdir).mockResolvedValue(undefined as any);
-      vi.mocked(fsModule.promises.stat).mockRejectedValue(
-        Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
-      );
-
+    it('allows file writes without HITL when tool_permission=ask', async () => {
       const tool = createWriteFileToolDefinition();
       const result = await tool.execute(
-        { filePath: 'test.txt', content: 'hello' },
+        { filePath: 'test.txt', content: 'hello ask' },
+        undefined,
+        undefined,
+        {
+          workingDirectory: '/workspace',
+          world: { variables: 'tool_permission=ask' },
+        },
+      );
+
+      expect(String(result)).not.toContain('blocked by the current permission level');
+      expect(writeFileSpy).toHaveBeenCalled();
+      expect(mockRequestToolApproval).not.toHaveBeenCalled();
+    });
+
+    it('proceeds to write when tool_permission=auto', async () => {
+      const tool = createWriteFileToolDefinition();
+      const result = await tool.execute(
+        { filePath: 'test.txt', content: 'hello auto' },
         undefined,
         undefined,
         {
@@ -146,13 +197,12 @@ describe('tool_permission enforcement via world.variables', () => {
           world: { variables: '' },
         },
       );
+
       expect(String(result)).not.toContain('blocked by the current permission level');
+      expect(writeFileSpy).toHaveBeenCalled();
+      expect(mockRequestToolApproval).not.toHaveBeenCalled();
     });
   });
-
-  // ==========================================
-  // web_fetch
-  // ==========================================
 
   describe('web_fetch', () => {
     it('blocks fetches when tool_permission=read', async () => {
@@ -163,15 +213,54 @@ describe('tool_permission enforcement via world.variables', () => {
         undefined,
         { world: { id: 'world-1', variables: 'tool_permission=read' } as any },
       );
+
       const parsed = JSON.parse(String(result));
       expect(parsed.ok).toBe(false);
       expect(parsed.error).toContain('permission level (read)');
     });
-  });
 
-  // ==========================================
-  // shell_cmd
-  // ==========================================
+    it('allows fetches without HITL when tool_permission=ask', async () => {
+      const fetchMock = vi.fn(async () => new Response('hello from ask', {
+        status: 200,
+        headers: { 'content-type': 'text/plain; charset=utf-8' },
+      }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const tool = createWebFetchToolDefinition();
+      const result = await tool.execute(
+        { url: 'https://example.com' },
+        undefined,
+        undefined,
+        { world: { id: 'world-1', variables: 'tool_permission=ask' } as any },
+      );
+
+      const parsed = JSON.parse(String(result));
+      expect(parsed.ok).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(mockRequestToolApproval).not.toHaveBeenCalled();
+    });
+
+    it('allows fetches without HITL when tool_permission=auto', async () => {
+      const fetchMock = vi.fn(async () => new Response('hello from auto', {
+        status: 200,
+        headers: { 'content-type': 'text/plain; charset=utf-8' },
+      }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const tool = createWebFetchToolDefinition();
+      const result = await tool.execute(
+        { url: 'https://example.com' },
+        undefined,
+        undefined,
+        { world: { id: 'world-1', variables: '' } as any },
+      );
+
+      const parsed = JSON.parse(String(result));
+      expect(parsed.ok).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(mockRequestToolApproval).not.toHaveBeenCalled();
+    });
+  });
 
   describe('shell_cmd', () => {
     it('blocks command execution when tool_permission=read', async () => {
@@ -185,10 +274,11 @@ describe('tool_permission enforcement via world.variables', () => {
           workingDirectory: '/tmp',
         },
       );
+
       expect(String(result)).toContain('permission level (read)');
     });
 
-    it('forces HITL approval for low-risk command when tool_permission=ask', async () => {
+    it('forces HITL approval for low-risk commands when tool_permission=ask', async () => {
       mockRequestToolApproval.mockResolvedValueOnce({
         approved: false,
         reason: 'user_denied',
@@ -199,7 +289,7 @@ describe('tool_permission enforcement via world.variables', () => {
       const tool = createShellCmdToolDefinition();
       await expect(
         tool.execute(
-          { command: 'ls', parameters: [] },
+          { command: 'pwd', parameters: [] },
           undefined,
           undefined,
           {
@@ -212,11 +302,49 @@ describe('tool_permission enforcement via world.variables', () => {
 
       expect(mockRequestToolApproval).toHaveBeenCalledTimes(1);
     });
-  });
 
-  // ==========================================
-  // create_agent
-  // ==========================================
+    it('executes low-risk commands without HITL when tool_permission=auto', async () => {
+      const tool = createShellCmdToolDefinition();
+      const result = await tool.execute(
+        { command: 'pwd', parameters: [] },
+        undefined,
+        undefined,
+        {
+          world: { id: 'world-1', variables: 'working_directory=/tmp' },
+          workingDirectory: '/tmp',
+          chatId: 'chat-1',
+        },
+      );
+
+      expect(String(result)).not.toContain('permission level (read)');
+      expect(mockRequestToolApproval).not.toHaveBeenCalled();
+    });
+
+    it('keeps risk-tier approval for risky commands when tool_permission=auto', async () => {
+      mockRequestToolApproval.mockResolvedValueOnce({
+        approved: false,
+        reason: 'user_denied',
+        optionId: 'deny',
+        source: 'user',
+      });
+
+      const tool = createShellCmdToolDefinition();
+      await expect(
+        tool.execute(
+          { command: 'rm', parameters: ['target.txt'] },
+          undefined,
+          undefined,
+          {
+            world: { id: 'world-1', variables: 'working_directory=/tmp' },
+            workingDirectory: '/tmp',
+            chatId: 'chat-1',
+          },
+        ),
+      ).rejects.toThrow('not approved');
+
+      expect(mockRequestToolApproval).toHaveBeenCalledTimes(1);
+    });
+  });
 
   describe('create_agent', () => {
     it('blocks agent creation when tool_permission=read', async () => {
@@ -230,19 +358,66 @@ describe('tool_permission enforcement via world.variables', () => {
           chatId: 'chat-1',
         },
       );
+
       const parsed = JSON.parse(String(result));
       expect(parsed.ok).toBe(false);
       expect(parsed.status).toBe('blocked');
       expect(parsed.message).toContain('permission level (read)');
     });
+
+    it('requests approval when tool_permission=ask', async () => {
+      mockRequestToolApproval.mockResolvedValueOnce({
+        approved: false,
+        reason: 'user_denied',
+        optionId: 'no',
+        source: 'user',
+      });
+
+      const tool = createCreateAgentToolDefinition();
+      const result = await tool.execute(
+        { name: 'ask-agent' },
+        undefined,
+        undefined,
+        {
+          world: { id: 'world-1', variables: 'tool_permission=ask' } as any,
+          chatId: 'chat-1',
+        },
+      );
+
+      const parsed = JSON.parse(String(result));
+      expect(parsed.ok).toBe(false);
+      expect(parsed.status).toBe('denied');
+      expect(mockRequestToolApproval).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps approval flow when tool_permission=auto', async () => {
+      mockRequestToolApproval.mockResolvedValueOnce({
+        approved: false,
+        reason: 'user_denied',
+        optionId: 'no',
+        source: 'user',
+      });
+
+      const tool = createCreateAgentToolDefinition();
+      const result = await tool.execute(
+        { name: 'auto-agent' },
+        undefined,
+        undefined,
+        {
+          world: { id: 'world-1', variables: '' } as any,
+          chatId: 'chat-1',
+        },
+      );
+
+      const parsed = JSON.parse(String(result));
+      expect(parsed.ok).toBe(false);
+      expect(parsed.status).toBe('denied');
+      expect(mockRequestToolApproval).toHaveBeenCalledTimes(1);
+    });
   });
 
-  // ==========================================
-  // load_skill (script execution blocking)
-  // ==========================================
-
   describe('load_skill script execution', () => {
-    it('blocks script execution when tool_permission=read but still returns skill instructions', async () => {
+    it('blocks script execution when tool_permission=read without prompting', async () => {
       mockedGetSkill.mockReturnValue({
         skill_id: 'pdf-extract',
         description: 'Extract PDF content',
@@ -250,16 +425,7 @@ describe('tool_permission enforcement via world.variables', () => {
         lastUpdated: '2026-03-12T00:00:00.000Z',
       });
       mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
-      vi.mocked(fsModule.promises.readFile).mockResolvedValue(
-        '# Steps\nRun `scripts/setup.sh` before processing.\n' as any,
-      );
-      // Approve the skill execution (permission check happens inside executeSkillScripts, after approval)
-      mockRequestToolApproval.mockResolvedValueOnce({
-        approved: true,
-        reason: 'approved',
-        optionId: 'yes_once',
-        source: 'user',
-      });
+      readFileSpy.mockResolvedValue('# Steps\nRun `scripts/setup.sh` before processing.\n' as any);
 
       const tool = createLoadSkillToolDefinition();
       const result = await tool.execute(
@@ -269,12 +435,83 @@ describe('tool_permission enforcement via world.variables', () => {
         {
           world: { id: 'world-perm-test', variables: 'tool_permission=read' } as any,
           chatId: 'chat-perm-test',
+          workingDirectory: '/workspace',
         },
       );
-      // Skill instructions are still returned
+
       expect(String(result)).toContain('pdf-extract');
-      // But script output is blocked
       expect(String(result)).toContain('blocked by the current permission level');
+      expect(mockRequestToolApproval).not.toHaveBeenCalled();
+      expect(mockExecuteShellCommand).not.toHaveBeenCalled();
+    });
+
+    it('requests approval for script execution when tool_permission=ask', async () => {
+      mockedGetSkill.mockReturnValue({
+        skill_id: 'pdf-extract',
+        description: 'Extract PDF content',
+        hash: 'abc12345',
+        lastUpdated: '2026-03-12T00:00:00.000Z',
+      });
+      mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
+      readFileSpy.mockResolvedValue('# Steps\nRun `scripts/setup.sh` before processing.\n' as any);
+      statSpy.mockResolvedValue({ isFile: () => true } as any);
+      mockRequestToolApproval.mockResolvedValueOnce({
+        approved: false,
+        reason: 'user_denied',
+        optionId: 'no',
+        source: 'user',
+      });
+
+      const tool = createLoadSkillToolDefinition();
+      const result = await tool.execute(
+        { skill_id: 'pdf-extract' },
+        undefined,
+        undefined,
+        {
+          world: { id: 'world-perm-test', variables: 'tool_permission=ask' } as any,
+          chatId: 'chat-perm-test',
+          workingDirectory: '/workspace',
+        },
+      );
+
+      expect(String(result)).toContain('User declined HITL approval');
+      expect(mockRequestToolApproval).toHaveBeenCalledTimes(1);
+      expect(mockExecuteShellCommand).not.toHaveBeenCalled();
+    });
+
+    it('runs referenced scripts without approval when tool_permission=auto', async () => {
+      mockedGetSkill.mockReturnValue({
+        skill_id: 'pdf-extract',
+        description: 'Extract PDF content',
+        hash: 'abc12345',
+        lastUpdated: '2026-03-12T00:00:00.000Z',
+      });
+      mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
+      readFileSpy.mockResolvedValue('# Steps\nRun `scripts/setup.sh` before processing.\n' as any);
+      statSpy.mockResolvedValue({ isFile: () => true } as any);
+      mockExecuteShellCommand.mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: 'setup complete',
+        stderr: '',
+        error: null,
+        signal: null,
+      });
+
+      const tool = createLoadSkillToolDefinition();
+      const result = await tool.execute(
+        { skill_id: 'pdf-extract' },
+        undefined,
+        undefined,
+        {
+          world: { id: 'world-perm-test', variables: '' } as any,
+          chatId: 'chat-perm-test',
+          workingDirectory: '/workspace',
+        },
+      );
+
+      expect(String(result)).toContain('<script_output source="scripts/setup.sh">');
+      expect(String(result)).not.toContain('blocked by the current permission level');
+      expect(mockRequestToolApproval).not.toHaveBeenCalled();
     });
   });
 });

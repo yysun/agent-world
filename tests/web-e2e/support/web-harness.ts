@@ -48,6 +48,13 @@ export const HITL_DELETE_TARGET = '.e2e-hitl-delete-me.txt';
 export const HITL_SHELL_SUCCESS_MARKER = 'E2E_SHELL_OK';
 export const HITL_SHELL_SUCCESS_TOKEN = `E2E_SHELL_OK: ${HITL_DELETE_TARGET}`;
 export const SLOW_SHELL_SCRIPT_NAME = 'slow-delete.mjs';
+export const WRITE_FILE_TARGET = '.e2e-write-output.txt';
+export const LOAD_SKILL_RUN_MARKER = '.e2e-load-skill-ran.txt';
+export const TOOL_PERMISSION_SKILL_ID = 'e2e-matrix-skill';
+export const TOOL_PERMISSION_SKILL_SCRIPT_NAME = 'mark-load-skill.js';
+export const TOOL_PERMISSION_FETCH_URL = 'http://127.0.0.1:3000/health';
+export const CREATE_AGENT_ASK_NAME = 'E2E Ask Agent';
+export const CREATE_AGENT_AUTO_NAME = 'E2E Auto Agent';
 
 const API_BASE_URL = 'http://127.0.0.1:3000/api';
 
@@ -88,6 +95,8 @@ function requireGoogleApiKey(): void {
 
 function ensureWorkspaceArtifacts(): void {
   fs.mkdirSync(TEST_WORKSPACE_PATH, { recursive: true });
+  fs.rmSync(path.join(TEST_WORKSPACE_PATH, WRITE_FILE_TARGET), { force: true });
+  fs.rmSync(path.join(TEST_WORKSPACE_PATH, LOAD_SKILL_RUN_MARKER), { force: true });
   fs.writeFileSync(
     path.join(TEST_WORKSPACE_PATH, HITL_DELETE_TARGET),
     'Disposable file for real web E2E shell_cmd HITL approval coverage.\n',
@@ -105,6 +114,34 @@ function ensureWorkspaceArtifacts(): void {
       '',
       'await new Promise((resolve) => setTimeout(resolve, 2000));',
       'await fs.unlink(target);',
+    ].join('\n'),
+    'utf8',
+  );
+
+  const skillRoot = path.join(TEST_WORKSPACE_PATH, 'skills', TOOL_PERMISSION_SKILL_ID);
+  fs.mkdirSync(path.join(skillRoot, 'scripts'), { recursive: true });
+  fs.writeFileSync(
+    path.join(skillRoot, 'SKILL.md'),
+    [
+      '---',
+      `name: ${TOOL_PERMISSION_SKILL_ID}`,
+      'description: E2E permission-matrix skill',
+      '---',
+      '',
+      '# E2E Matrix Skill',
+      '',
+      'Run `scripts/mark-load-skill.js` before continuing.',
+      'After the script succeeds, continue with the request.',
+    ].join('\n'),
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(skillRoot, 'scripts', TOOL_PERMISSION_SKILL_SCRIPT_NAME),
+    [
+      "import { promises as fs } from 'node:fs';",
+      '',
+      `await fs.writeFile('${LOAD_SKILL_RUN_MARKER}', 'load skill executed\\n', 'utf8');`,
+      "console.log('E2E_LOAD_SKILL_SCRIPT_OK');",
     ].join('\n'),
     'utf8',
   );
@@ -212,6 +249,22 @@ function buildAgentSystemPrompt(): string {
     'You are the Agent World web E2E assistant.',
     'Rules:',
     '- For normal user messages, reply with one short sentence that starts with "E2E_OK:" and includes the full user message text.',
+    `- If a user message starts with "WRITE_FILE_READ:", call only write_file with filePath "${WRITE_FILE_TARGET}" and content "read should be blocked". If the tool result mentions "permission level (read)", reply exactly "E2E_WRITE_FILE_READ_BLOCKED". Otherwise reply exactly "E2E_WRITE_FILE_READ_UNEXPECTED".`,
+    `- If a user message starts with "WRITE_FILE_ASK:", call only write_file with filePath "${WRITE_FILE_TARGET}" and content "ASK_WRITE_OK". After the tool returns, reply exactly "E2E_WRITE_FILE_ASK_OK".`,
+    `- If a user message starts with "WRITE_FILE_AUTO:", call only write_file with filePath "${WRITE_FILE_TARGET}" and content "AUTO_WRITE_OK". After the tool returns, reply exactly "E2E_WRITE_FILE_AUTO_OK".`,
+    `- If a user message starts with "WEB_FETCH_READ:", call only web_fetch with url "${TOOL_PERMISSION_FETCH_URL}". If the tool result mentions "permission level (read)", reply exactly "E2E_WEB_FETCH_READ_BLOCKED". Otherwise reply exactly "E2E_WEB_FETCH_READ_UNEXPECTED".`,
+    `- If a user message starts with "WEB_FETCH_ASK:", call only web_fetch with url "${TOOL_PERMISSION_FETCH_URL}". After the tool returns, reply exactly "E2E_WEB_FETCH_ASK_OK".`,
+    `- If a user message starts with "WEB_FETCH_AUTO:", call only web_fetch with url "${TOOL_PERMISSION_FETCH_URL}". After the tool returns, reply exactly "E2E_WEB_FETCH_AUTO_OK".`,
+    '- If a user message starts with "SHELL_READ:", call only shell_cmd with command "pwd" and no parameters. If the tool result mentions "permission level (read)", reply exactly "E2E_SHELL_READ_BLOCKED".',
+    '- If a user message starts with "SHELL_ASK:", call only shell_cmd with command "pwd" and no parameters. After the tool returns, reply exactly "E2E_SHELL_ASK_OK".',
+    '- If a user message starts with "SHELL_AUTO:", call only shell_cmd with command "pwd" and no parameters. After the tool returns, reply exactly "E2E_SHELL_AUTO_OK".',
+    `- If a user message starts with "SHELL_RISKY_AUTO:", call only shell_cmd with command "rm" and parameters ["${HITL_DELETE_TARGET}"]. After the tool returns, reply exactly "E2E_SHELL_RISKY_AUTO_OK".`,
+    `- If a user message starts with "CREATE_AGENT_READ:", call only create_agent with name "${CREATE_AGENT_ASK_NAME}", role "E2E coverage agent", and nextAgent "human". If the tool result mentions "permission level (read)", reply exactly "E2E_CREATE_AGENT_READ_BLOCKED".`,
+    `- If a user message starts with "CREATE_AGENT_ASK:", call only create_agent with name "${CREATE_AGENT_ASK_NAME}", role "E2E coverage agent", and nextAgent "human". After the tool returns, reply exactly "E2E_CREATE_AGENT_ASK_OK".`,
+    `- If a user message starts with "CREATE_AGENT_AUTO:", call only create_agent with name "${CREATE_AGENT_AUTO_NAME}", role "E2E coverage agent", and nextAgent "human". After the tool returns, reply exactly "E2E_CREATE_AGENT_AUTO_OK".`,
+    `- If a user message starts with "LOAD_SKILL_READ:", call only load_skill with skill_id "${TOOL_PERMISSION_SKILL_ID}". After the tool returns, reply exactly "E2E_LOAD_SKILL_READ_BLOCKED".`,
+    `- If a user message starts with "LOAD_SKILL_ASK:", call only load_skill with skill_id "${TOOL_PERMISSION_SKILL_ID}". After the tool returns, reply exactly "E2E_LOAD_SKILL_ASK_OK".`,
+    `- If a user message starts with "LOAD_SKILL_AUTO:", call only load_skill with skill_id "${TOOL_PERMISSION_SKILL_ID}". After the tool returns, reply exactly "E2E_LOAD_SKILL_AUTO_OK".`,
     `- If a user message includes the exact filename "${HITL_DELETE_TARGET}" and asks to use shell_cmd, do not call human_intervention_request. Call only shell_cmd with command "rm" and parameters ["${HITL_DELETE_TARGET}"].`,
     `- If a user message starts with "SLOW_SHELL:" and includes the exact filename "${HITL_DELETE_TARGET}", do not ask for approval. Call only shell_cmd with command "node" and parameters ["./${SLOW_SHELL_SCRIPT_NAME}", "${HITL_DELETE_TARGET}"].`,
     `- After that shell_cmd completes successfully, reply with exactly "${HITL_SHELL_SUCCESS_TOKEN}".`,
@@ -506,7 +559,7 @@ export async function waitForHitlPrompt(page: Page, timeoutMs?: number): Promise
   return prompt;
 }
 
-export async function respondToHitlPrompt(page: Page, optionId: 'approve' | 'deny' = 'approve', timeoutMs?: number): Promise<void> {
+export async function respondToHitlPrompt(page: Page, optionId: string = 'approve', timeoutMs?: number): Promise<void> {
   const prompt = await waitForHitlPrompt(page, timeoutMs);
   await prompt.getByTestId(`hitl-option-${optionId}`).click();
 }
@@ -625,4 +678,13 @@ export async function setWorldToolPermission(
     method: 'PATCH',
     body: JSON.stringify({ variables: nextVariables }),
   });
+}
+
+export async function getWorldAgentNames(state: WebBootstrapState): Promise<string[]> {
+  const world = await apiRequest<{ agents?: Array<{ name?: string }> }>(
+    `/worlds/${encodeURIComponent(state.worldName)}`,
+  );
+  return Array.isArray(world?.agents)
+    ? world.agents.map((agent) => String(agent?.name || '').trim()).filter(Boolean)
+    : [];
 }

@@ -16,9 +16,42 @@
  */
 
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const children = [];
 let shuttingDown = false;
+const workspacePath = path.resolve(process.cwd(), '.tmp', 'web-playwright-workspace');
+
+function seedWorkspaceArtifacts() {
+  const skillRoot = path.join(workspacePath, 'skills', 'e2e-matrix-skill');
+  fs.mkdirSync(path.join(skillRoot, 'scripts'), { recursive: true });
+  fs.writeFileSync(
+    path.join(skillRoot, 'SKILL.md'),
+    [
+      '---',
+      'name: e2e-matrix-skill',
+      'description: E2E permission-matrix skill',
+      '---',
+      '',
+      '# E2E Matrix Skill',
+      '',
+      'Run `scripts/mark-load-skill.js` before continuing.',
+      'After the script succeeds, continue with the request.',
+    ].join('\n'),
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(skillRoot, 'scripts', 'mark-load-skill.js'),
+    [
+      "import { promises as fs } from 'node:fs';",
+      '',
+      "await fs.writeFile('.e2e-load-skill-ran.txt', 'load skill executed\\n', 'utf8');",
+      "console.log('E2E_LOAD_SKILL_SCRIPT_OK');",
+    ].join('\n'),
+    'utf8',
+  );
+}
 
 function spawnChild(args) {
   const child = spawn('npm', args, {
@@ -55,5 +88,6 @@ function shutdown(signal) {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
+seedWorkspaceArtifacts();
 spawnChild(['run', 'server:dev']);
 spawnChild(['run', 'web:vite:e2e']);
