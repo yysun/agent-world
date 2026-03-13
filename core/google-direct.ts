@@ -19,6 +19,7 @@
  * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
+ * - 2026-03-12: Reclassified streaming abort logs as info-level cancellations to suppress expected stop/edit noise.
  * - 2026-02-15: Stopped replaying historical tool call/response parts as Google `functionCall`/`functionResponse` in conversation conversion to avoid 400 errors requiring `thought_signature` on replayed calls.
  * - 2026-02-13: Added transport-level AbortSignal wiring to Google SDK request options where supported.
  * - 2026-02-13: Added abort-signal checks for streaming and non-streaming execution paths.
@@ -39,6 +40,16 @@ import { generateId } from './utils.js';
 
 const logger = createCategoryLogger('llm.google');
 const mcpLogger = createCategoryLogger('mcp.execution');
+
+function isAbortLikeError(error: unknown): boolean {
+  if (!error) return false;
+  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  if (error instanceof Error && error.name === 'AbortError') return true;
+
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  return normalized.includes('abort') || normalized.includes('canceled') || normalized.includes('cancelled');
+}
 
 /**
  * Google client factory
@@ -239,6 +250,13 @@ export async function streamGoogleResponse(
     };
 
   } catch (error) {
+    if (abortSignal?.aborted || isAbortLikeError(error)) {
+      logger.info(`Google Direct: Streaming canceled for agent=${agent.id}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+
     logger.error(`Google Direct: Streaming error for agent=${agent.id}:`, error);
     throw error;
   }

@@ -19,6 +19,7 @@
  * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
+ * - 2026-03-12: Reclassified streaming abort logs as info-level cancellations to suppress expected stop/edit noise.
  * - 2026-02-28: Added canonical `llm.anthropic` category emission while preserving legacy `anthropic` logs during migration.
  * - 2026-02-13: Added abort-signal support for streaming and non-streaming calls to enable chat stop cancellation.
  * - 2025-11-09: Phase 3 - Removed ALL tool execution logic (~200 lines)
@@ -60,6 +61,16 @@ const logger = {
   },
 };
 const mcpLogger = createCategoryLogger('mcp.execution');
+
+function isAbortLikeError(error: unknown): boolean {
+  if (!error) return false;
+  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  if (error instanceof Error && error.name === 'AbortError') return true;
+
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  return normalized.includes('abort') || normalized.includes('canceled') || normalized.includes('cancelled');
+}
 
 /**
  * Anthropic client factory
@@ -253,6 +264,13 @@ export async function streamAnthropicResponse(
     };
 
   } catch (error) {
+    if (abortSignal?.aborted || isAbortLikeError(error)) {
+      logger.info(`Anthropic Direct: Streaming canceled for agent=${agent.id}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+
     logger.error(`Anthropic Direct: Streaming error for agent=${agent.id}:`, error);
     throw error;
   }

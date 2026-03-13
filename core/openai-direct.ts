@@ -27,6 +27,7 @@
  * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
+ * - 2026-03-12: Reclassified streaming abort logs as info-level cancellations to suppress expected stop/edit noise.
  * - 2026-02-28: Added canonical `llm.openai` category emission while preserving legacy `openai` logs during migration.
  * - 2026-02-27: Normalized overlong tool-call IDs to OpenAI's 40-char limit and preserved assistant/tool ID linkage in outbound message conversion.
  * - 2026-02-16: Fixed streaming tool-call chunk merge to preserve delayed tool `id`/`name` fields across deltas.
@@ -74,6 +75,16 @@ const logger = {
 };
 const mcpLogger = createCategoryLogger('mcp.execution');
 const OPENAI_TOOL_CALL_ID_MAX_LENGTH = 40;
+
+function isAbortLikeError(error: unknown): boolean {
+  if (!error) return false;
+  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  if (error instanceof Error && error.name === 'AbortError') return true;
+
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  return normalized.includes('abort') || normalized.includes('canceled') || normalized.includes('cancelled');
+}
 
 function fnv1a32(input: string, reverse = false): number {
   let hash = 2166136261;
@@ -515,6 +526,13 @@ export async function streamOpenAIResponse(
     };
 
   } catch (error) {
+    if (abortSignal?.aborted || isAbortLikeError(error)) {
+      logger.info(`OpenAI Direct: Streaming canceled for agent=${agent.id}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+
     logger.error(`OpenAI Direct: Streaming error for agent=${agent.id}:`, error);
     throw error;
   }
