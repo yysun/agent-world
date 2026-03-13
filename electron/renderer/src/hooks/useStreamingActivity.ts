@@ -13,6 +13,7 @@
  * - Keeps manager setup/teardown centralized in one hook.
  *
  * Recent Changes:
+ * - 2026-03-13: Preserved assistant `reasoningContent` on live rows so reasoning-only chunks can render before final answer text arrives.
  * - 2026-03-10: Preserve assistant streaming `chatId` on live rows so selected-chat refresh
  *   reconciliation retains in-progress stream content instead of dropping it until the final message lands.
  * - 2026-02-26: Added stream-error fallback message creation and redundant error-log cleanup so errors render inline without duplicate log rows.
@@ -52,6 +53,7 @@ export function useStreamingActivity({ setMessages }) {
               sender: entry.agentName,
               chatId: entry.chatId || null,
               content: entry.content,
+              reasoningContent: entry.reasoningContent,
               createdAt: entry.createdAt,
               isStreaming: true
             });
@@ -62,6 +64,7 @@ export function useStreamingActivity({ setMessages }) {
             sender: entry.agentName,
             chatId: next[index]?.chatId || entry.chatId || null,
             content: entry.content,
+            reasoningContent: entry.reasoningContent,
             isStreaming: true
           };
           return next;

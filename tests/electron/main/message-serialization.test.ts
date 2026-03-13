@@ -23,7 +23,8 @@ import {
   serializeRealtimeLogEvent,
   serializeRealtimeMessageEvent,
   serializeRealtimeCrudEvent,
-  serializeRealtimeActivityEvent
+  serializeRealtimeActivityEvent,
+  serializeRealtimeSSEEvent
 } from '../../../electron/main-process/message-serialization';
 
 describe('normalizeSessionMessages', () => {
@@ -182,6 +183,31 @@ describe('serializeRealtimeActivityEvent', () => {
 
     expect(payload.chatId).toBeNull();
     expect((payload.activity as any).chatId).toBeNull();
+  });
+});
+
+describe('serializeRealtimeSSEEvent', () => {
+  it('preserves assistant reasoningContent on realtime SSE chunk events', () => {
+    const payload = serializeRealtimeSSEEvent('world-1', 'chat-1', {
+      type: 'chunk',
+      messageId: 'msg-1',
+      agentName: 'a1',
+      content: 'final answer',
+      reasoningContent: 'intermediate chain',
+    });
+
+    expect(payload).toMatchObject({
+      type: 'sse',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      sse: {
+        eventType: 'chunk',
+        messageId: 'msg-1',
+        agentName: 'a1',
+        content: 'final answer',
+        reasoningContent: 'intermediate chain',
+      },
+    });
   });
 });
 

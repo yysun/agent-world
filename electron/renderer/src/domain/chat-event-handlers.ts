@@ -13,6 +13,7 @@
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
+ * - 2026-03-13: Forwarded SSE `reasoningContent` into renderer streaming state so reasoning-only assistant chunks survive transport.
  * - 2026-03-10: Forwarded selected-chat `chatId` into assistant SSE start/chunk streaming-state
  *   calls so live assistant rows remain refresh-safe for the active chat.
  * - 2026-03-10: Structured selected-chat `system` error events now also create transcript rows, while non-error system events remain status-bar-only.
@@ -62,7 +63,7 @@ interface RealtimeRefs {
     getActiveCount: () => number;
     endAllToolStreams: () => string[];
     handleStart: (messageId: string, agentName: string, chatId?: string | null) => void;
-    handleChunk: (messageId: string, content: string, chatId?: string | null) => void;
+    handleChunk: (messageId: string, content: string, chatId?: string | null, reasoningContent?: string) => void;
     handleEnd: (messageId: string) => void;
     handleError: (messageId: string, errorMessage: string) => void;
     handleToolStreamStart: (messageId: string, agentName: string, streamType: 'stdout' | 'stderr', toolName?: string, command?: string) => void;
@@ -325,7 +326,12 @@ export function createChatSubscriptionEventHandler({
           streaming.handleToolStreamChunk(messageId, content, 'stdout', 'shell_cmd', shellCommand);
           ensureToolStreamMessageChatId(messageId, sseChatId);
         } else {
-          streaming.handleChunk(messageId, String(streamPayload.content || ''), sseChatId);
+          streaming.handleChunk(
+            messageId,
+            String(streamPayload.content || ''),
+            sseChatId,
+            String(streamPayload.reasoningContent || ''),
+          );
         }
       } else if (eventType === 'end') {
         if (isShellStdoutSSE) {

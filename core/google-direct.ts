@@ -19,6 +19,7 @@
  * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
+ * - 2026-03-13: Added world-scoped thinking-config mapping and streamed thought-part extraction for reasoning-aware Gemini models.
  * - 2026-03-12: Reclassified streaming abort logs as info-level cancellations to suppress expected stop/edit noise.
  * - 2026-02-15: Stopped replaying historical tool call/response parts as Google `functionCall`/`functionResponse` in conversation conversion to avoid 400 errors requiring `thought_signature` on replayed calls.
  * - 2026-02-13: Added transport-level AbortSignal wiring to Google SDK request options where supported.
@@ -37,9 +38,41 @@ import { World, Agent, ChatMessage, LLMResponse } from './types.js';
 import { getLLMProviderConfig, GoogleConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
+import { getEnvValueFromText } from './utils.js';
 
 const logger = createCategoryLogger('llm.google');
 const mcpLogger = createCategoryLogger('mcp.execution');
+
+function normalizeReasoningEffort(value: string | undefined): 'low' | 'medium' | 'high' {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'low' || normalized === 'high') {
+    return normalized;
+  }
+  return 'medium';
+}
+
+function supportsGoogleThinkingConfig(model: string): boolean {
+  const normalizedModel = String(model || '').trim().toLowerCase();
+  return normalizedModel.includes('gemini-2.5') || normalizedModel.includes('gemini-3');
+}
+
+function buildGoogleThinkingConfig(world: World, model: string): { includeThoughts: true; thinkingBudget: number } | undefined {
+  if (!supportsGoogleThinkingConfig(model)) {
+    return undefined;
+  }
+
+  const effort = normalizeReasoningEffort(getEnvValueFromText(world.variables, 'reasoning_effort'));
+  const budgets: Record<'low' | 'medium' | 'high', number> = {
+    low: 256,
+    medium: 1024,
+    high: 2048,
+  };
+
+  return {
+    includeThoughts: true,
+    thinkingBudget: budgets[effort],
+  };
+}
 
 function isAbortLikeError(error: unknown): boolean {
   if (!error) return false;
@@ -147,17 +180,23 @@ export async function streamGoogleResponse(
   agent: Agent,
   mcpTools: Record<string, any>,
   world: World,
-  onChunk: (content: string) => void,
+  onChunk: (chunk: { content?: string; reasoningContent?: string }) => void,
   messageId: string,
   abortSignal?: AbortSignal
 ): Promise<LLMResponse> {
   const googleTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToGoogle(mcpTools) : undefined;
   const { messages: googleMessages, systemInstruction } = convertMessagesToGoogle(messages);
 
+  const thinkingConfig = buildGoogleThinkingConfig(world, model);
   const generativeModel = client.getGenerativeModel({
     model,
     systemInstruction: systemInstruction || undefined,
-    ...(googleTools && googleTools.length > 0 && { tools: [{ functionDeclarations: googleTools }] })
+    ...(googleTools && googleTools.length > 0 && { tools: [{ functionDeclarations: googleTools }] }),
+    generationConfig: {
+      temperature: agent.temperature,
+      maxOutputTokens: agent.maxTokens,
+      ...(thinkingConfig ? { thinkingConfig } : {}),
+    } as any,
   });
 
   logger.debug(`Google Direct: Starting streaming request for agent=${agent.id}, model=${model}`, {
@@ -182,15 +221,31 @@ export async function streamGoogleResponse(
       if (abortSignal?.aborted) {
         throw new DOMException('Google stream aborted', 'AbortError');
       }
-      const chunkText = chunk.text();
-      if (chunkText) {
-        fullResponse += chunkText;
-        onChunk(chunkText);
+      const parts = Array.isArray(chunk.candidates?.[0]?.content?.parts)
+        ? chunk.candidates[0].content.parts
+        : [];
+      if (parts.length > 0) {
+        for (const part of parts) {
+          if (typeof part?.text === 'string' && part.text.length > 0) {
+            if ((part as any).thought === true) {
+              onChunk({ reasoningContent: part.text });
+            } else {
+              fullResponse += part.text;
+              onChunk({ content: part.text });
+            }
+          }
+        }
+      } else {
+        const chunkText = chunk.text();
+        if (chunkText) {
+          fullResponse += chunkText;
+          onChunk({ content: chunkText });
+        }
       }
 
       // Check for function calls in the chunk
-      if (chunk.candidates?.[0]?.content?.parts) {
-        for (const part of chunk.candidates[0].content.parts) {
+      if (parts.length > 0) {
+        for (const part of parts) {
           if (part.functionCall) {
             functionCalls.push({
               id: generateId(),
@@ -277,6 +332,7 @@ export async function generateGoogleResponse(
 ): Promise<LLMResponse> {
   const googleTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToGoogle(mcpTools) : undefined;
   const { messages: googleMessages, systemInstruction } = convertMessagesToGoogle(messages);
+  const thinkingConfig = buildGoogleThinkingConfig(world, model);
 
   const generativeModel = client.getGenerativeModel({
     model,
@@ -285,6 +341,7 @@ export async function generateGoogleResponse(
     generationConfig: {
       temperature: agent.temperature,
       maxOutputTokens: agent.maxTokens,
+      ...(thinkingConfig ? { thinkingConfig } : {}),
     }
   });
 

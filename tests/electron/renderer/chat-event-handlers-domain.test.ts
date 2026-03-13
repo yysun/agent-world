@@ -11,6 +11,7 @@
  * - Focuses on orchestration behavior, not UI rendering.
  *
  * Recent Changes:
+ * - 2026-03-13: Updated SSE chunk delegation coverage for the reasoning-content streaming argument.
  * - 2026-03-12: Added plain-text selected-chat system-event forwarding coverage for status-bar visibility.
  * - 2026-03-10: Added assistant SSE chatId propagation coverage so live streaming rows stay scoped
  *   to the selected chat during refresh reconciliation.
@@ -538,7 +539,36 @@ describe('createChatSubscriptionEventHandler', () => {
       }
     });
 
-    expect(streamingStateRef.current.handleChunk).toHaveBeenCalledWith('m-1', 'partial response', 'chat-1');
+    expect(streamingStateRef.current.handleChunk).toHaveBeenCalledWith('m-1', 'partial response', 'chat-1', '');
+  });
+
+  it('forwards SSE reasoning content to streaming state manager', () => {
+    const harness = createMessageStateHarness();
+    const streamingStateRef = makeFullStreamingRef();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef,
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
+    });
+
+    handler({
+      type: 'sse',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      sse: {
+        eventType: 'chunk',
+        chatId: 'chat-1',
+        messageId: 'm-1',
+        agentName: 'assistant-1',
+        content: 'partial response',
+        reasoningContent: 'thinking step'
+      }
+    });
+
+    expect(streamingStateRef.current.handleChunk).toHaveBeenCalledWith('m-1', 'partial response', 'chat-1', 'thinking step');
   });
 
   it('propagates tool-start command to subsequent tool-stream chunk', () => {

@@ -94,6 +94,7 @@
  * - Queue-based serialization prevents API rate limits and resource conflicts
  *
  * Recent Changes:
+ * - 2026-03-13: Added streamed `reasoningContent` forwarding and world-variable reasoning-effort propagation for OpenAI-compatible and Google direct providers.
  * - 2026-03-06: Moved `shell_cmd` working-directory prompt guidance into tool-aware system-message injection.
  * - 2026-03-06: Widened queue timeout field typing to `number` so runtime timeout overrides compile cleanly.
  * - 2026-03-05: Added chat-scoped LLM timeout status system events (`taking too long` warning + hard-timeout event), enforced timeout-triggered abort signaling in queue processing, and classified queue timeouts separately from user cancellations.
@@ -823,7 +824,14 @@ async function executeStreamAgentResponse(
         agent,
         mcpTools,
         world,
-        (content: string) => publishSSE(world, { agentName: agent.id, type: 'chunk', content, messageId, chatId }),
+        (chunk) => publishSSE(world, {
+          agentName: agent.id,
+          type: 'chunk',
+          content: chunk.content,
+          reasoningContent: chunk.reasoningContent,
+          messageId,
+          chatId,
+        }),
         messageId,
         abortSignal
       );
@@ -881,7 +889,14 @@ async function executeStreamAgentResponse(
         agent,
         mcpTools,
         world,
-        (content: string) => publishSSE(world, { agentName: agent.id, type: 'chunk', content, messageId, chatId }),
+        (chunk) => publishSSE(world, {
+          agentName: agent.id,
+          type: 'chunk',
+          content: chunk.content,
+          reasoningContent: chunk.reasoningContent,
+          messageId,
+          chatId,
+        }),
         messageId,
         abortSignal
       );

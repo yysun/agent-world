@@ -18,6 +18,7 @@
  * - SSE event data structures for real-time updates
  * 
  * Changes:
+ * - 2026-03-13: Added optional assistant `reasoningContent` to streaming payload/message typings so reasoning-token chunks survive web SSE handling.
  * - 2026-03-12: Added shell tool-stream metadata (`toolName`, `toolInput`, `command`, `toolCallId`, `chatId`) and
  *   tool-stream end payload typing for web shell-stream parity with Electron.
  * - 2026-03-11: Added `viewportMode` chat/history props so responsive control sizing can follow the active world layout mode.
@@ -108,6 +109,7 @@ export interface Message {
   type: string;
   sender: string;
   text: string;
+  reasoningContent?: string;
   createdAt: Date;
   worldName?: string;
   isStreaming?: boolean;
@@ -471,6 +473,7 @@ export interface StreamChunkData {
   messageId: string;
   sender: string;
   content: string;
+  reasoningContent?: string;
   isAccumulated: boolean;
   tool_calls?: Array<{
     id: string;

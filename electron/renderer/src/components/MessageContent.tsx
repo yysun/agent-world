@@ -14,6 +14,7 @@
  *
  * Recent Changes:
  * - 2026-03-13: Flattened tool rows into dot-status transcript lines and removed the in-body tool card shell so collapsed tool rows stay compact.
+ * - 2026-03-13: Rendered streamed assistant `reasoningContent` in a separate muted block so reasoning-only chunks stay visible without polluting answer text.
  * - 2026-03-06: Render persisted tool execution envelope previews in tool bodies and status helpers after reload.
  * - 2026-03-06: Recognize canonical shell `validation_error` and `approval_denied` result reasons as failed tool outcomes in renderer status labels.
  * - 2026-02-28: Added linked tool-request backfill support so tool-result cards render combined `Args` + `Result` even when `tool_calls` live on a separate assistant row.
@@ -342,6 +343,7 @@ export default function MessageContent({
   const isAssistantStreaming = message?.isStreaming === true && !isToolMessage;
   const shouldHideStreamingPlaceholder = isAssistantStreaming && isStreamingPlaceholderContent(message?.content);
   const displayContent = shouldHideStreamingPlaceholder ? '' : String(message?.content || '');
+  const displayReasoningContent = String(message?.reasoningContent || '').trim();
   const shouldShowStreamingDots = isAssistantStreaming && !displayContent;
 
   const renderedContent = useMemo(() => {
@@ -354,6 +356,14 @@ export default function MessageContent({
 
     return renderMarkdown(content);
   }, [displayContent, message.logEvent, isToolMessage]);
+
+  const renderedReasoningContent = useMemo(() => {
+    if (message.logEvent || isToolMessage || !displayReasoningContent) {
+      return '';
+    }
+
+    return renderMarkdown(displayReasoningContent);
+  }, [displayReasoningContent, message.logEvent, isToolMessage]);
 
   if (message.logEvent) {
     const logLineText = `${message.logEvent.category} - ${formatLogMessage(message.logEvent)}`;
@@ -436,6 +446,15 @@ export default function MessageContent({
           className="prose prose-invert max-w-none break-words text-foreground"
           dangerouslySetInnerHTML={{ __html: renderedContent }}
         />
+      ) : null}
+      {displayReasoningContent ? (
+        <div className="rounded-md border border-border/60 bg-muted/40 px-3 py-2">
+          <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Reasoning</div>
+          <div
+            className="prose prose-invert max-w-none break-words text-sm text-muted-foreground"
+            dangerouslySetInnerHTML={{ __html: renderedReasoningContent }}
+          />
+        </div>
       ) : null}
       {shouldShowInlineError ? (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive">

@@ -27,6 +27,7 @@
  * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
+ * - 2026-03-13: Added world-scoped reasoning-effort request mapping and streamed reasoning token extraction (`reasoning_content`, `reasoning`, `thinking`).
  * - 2026-03-12: Reclassified streaming abort logs as info-level cancellations to suppress expected stop/edit noise.
  * - 2026-02-28: Added canonical `llm.openai` category emission while preserving legacy `openai` logs during migration.
  * - 2026-02-27: Normalized overlong tool-call IDs to OpenAI's 40-char limit and preserved assistant/tool ID linkage in outbound message conversion.
@@ -48,6 +49,7 @@ import { World, Agent, ChatMessage, LLMResponse } from './types.js';
 import { getLLMProviderConfig, OpenAIConfig, AzureConfig, OpenAICompatibleConfig, XAIConfig, OllamaConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
 import { generateFallbackId } from './tool-utils.js';
+import { getEnvValueFromText } from './utils.js';
 
 const loggerCanonical = createCategoryLogger('llm.openai');
 const loggerLegacy = createCategoryLogger('openai');
@@ -75,6 +77,54 @@ const logger = {
 };
 const mcpLogger = createCategoryLogger('mcp.execution');
 const OPENAI_TOOL_CALL_ID_MAX_LENGTH = 40;
+
+function normalizeReasoningEffort(value: string | undefined): 'low' | 'medium' | 'high' {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'low' || normalized === 'high') {
+    return normalized;
+  }
+  return 'medium';
+}
+
+function getReasoningEffortForOpenAIProvider(world: World, provider: Agent['provider'], model: string): 'low' | 'medium' | 'high' | undefined {
+  const effort = normalizeReasoningEffort(getEnvValueFromText(world.variables, 'reasoning_effort'));
+  const normalizedModel = String(model || '').trim().toLowerCase();
+
+  if (provider === 'ollama') {
+    return effort;
+  }
+
+  if (provider === 'azure' || provider === 'openai') {
+    const isReasoningCapableModel =
+      normalizedModel.startsWith('o1')
+      || normalizedModel.startsWith('o3')
+      || normalizedModel.startsWith('o4')
+      || normalizedModel.includes('gpt-5');
+    return isReasoningCapableModel ? effort : undefined;
+  }
+
+  return undefined;
+}
+
+function extractReasoningText(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (part && typeof part === 'object' && typeof (part as any).text === 'string') {
+          return (part as any).text;
+        }
+        return '';
+      })
+      .join('');
+  }
+
+  return '';
+}
 
 function isAbortLikeError(error: unknown): boolean {
   if (!error) return false;
@@ -393,7 +443,7 @@ export async function streamOpenAIResponse(
   agent: Agent,
   mcpTools: Record<string, any>,
   world: World,
-  onChunk: (content: string) => void,
+  onChunk: (chunk: { content?: string; reasoningContent?: string }) => void,
   messageId: string,
   abortSignal?: AbortSignal
 ): Promise<LLMResponse> {
@@ -409,6 +459,9 @@ export async function streamOpenAIResponse(
     stream: true,
     temperature: agent.temperature,
     max_completion_tokens: agent.maxTokens,
+    ...(getReasoningEffortForOpenAIProvider(world, agent.provider, model)
+      ? { reasoning_effort: getReasoningEffortForOpenAIProvider(world, agent.provider, model) }
+      : {}),
     ...(openaiTools && { tools: openaiTools }),
   };
 
@@ -432,9 +485,19 @@ export async function streamOpenAIResponse(
       }
       const delta = chunk.choices[0]?.delta;
 
+      const reasoningContent = extractReasoningText(
+        (delta as any)?.reasoning_content
+        ?? (delta as any)?.reasoning
+        ?? (delta as any)?.thinking
+      );
+
+      if (reasoningContent) {
+        onChunk({ reasoningContent });
+      }
+
       if (delta?.content) {
         fullResponse += delta.content;
-        onChunk(delta.content);
+        onChunk({ content: delta.content });
       }
 
       // Handle function calls
@@ -562,6 +625,9 @@ export async function generateOpenAIResponse(
     messages: openaiMessages,
     temperature: agent.temperature,
     max_completion_tokens: agent.maxTokens,
+    ...(getReasoningEffortForOpenAIProvider(world, agent.provider, model)
+      ? { reasoning_effort: getReasoningEffortForOpenAIProvider(world, agent.provider, model) }
+      : {}),
     ...(openaiTools && { tools: openaiTools }),
   };
 

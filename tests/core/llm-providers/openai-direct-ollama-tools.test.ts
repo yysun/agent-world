@@ -102,6 +102,44 @@ describe('openai-direct tool attachment by provider', () => {
     expect(requestParams.tools[0].function.name).toBe('weather_lookup');
   });
 
+  it('adds reasoning_effort for Ollama requests when world variables enable it', async () => {
+    vi.doUnmock('../../../core/openai-direct');
+    vi.doUnmock('../../../core/openai-direct.js');
+    const openaiDirect = await import('../../../core/openai-direct.js');
+    const { client, create } = createFakeNonStreamingClient();
+
+    await openaiDirect.generateOpenAIResponse(
+      client,
+      'qwen3.5:latest',
+      [{ role: 'user', content: 'hello' }],
+      { id: 'agent-ollama', provider: 'ollama', temperature: 0.1, maxTokens: 1000 } as any,
+      mcpTools as any,
+      { id: 'world-1', variables: 'reasoning_effort=high' } as any
+    );
+
+    const requestParams = create.mock.calls[0][0];
+    expect(requestParams.reasoning_effort).toBe('high');
+  });
+
+  it('does not add reasoning_effort for generic openai-compatible providers', async () => {
+    vi.doUnmock('../../../core/openai-direct');
+    vi.doUnmock('../../../core/openai-direct.js');
+    const openaiDirect = await import('../../../core/openai-direct.js');
+    const { client, create } = createFakeNonStreamingClient();
+
+    await openaiDirect.generateOpenAIResponse(
+      client,
+      'compatible-model',
+      [{ role: 'user', content: 'hello' }],
+      { id: 'agent-compatible', provider: 'openai-compatible', temperature: 0.1, maxTokens: 1000 } as any,
+      mcpTools as any,
+      { id: 'world-1', variables: 'reasoning_effort=high' } as any
+    );
+
+    const requestParams = create.mock.calls[0][0];
+    expect('reasoning_effort' in requestParams).toBe(false);
+  });
+
   it('attaches tools for Ollama in streaming requests', async () => {
     vi.doUnmock('../../../core/openai-direct');
     vi.doUnmock('../../../core/openai-direct.js');

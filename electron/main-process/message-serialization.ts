@@ -12,6 +12,7 @@
  * - Runtime validation remains in higher-level handlers.
  *
  * Recent Changes:
+ * - 2026-03-13: Included SSE `reasoningContent` in realtime serialization so renderer streaming state can preserve reasoning tokens.
  * - 2026-03-06: Preserved realtime log `worldId`/`chatId` scope so chat-scoped error logs can route into the selected renderer transcript.
  * - 2026-02-28: Preserved realtime `tool_call_id` on message events so renderer can link tool-result rows back to assistant tool-call requests.
  * - 2026-02-27: Included persisted `tool_calls`, `tool_call_id`, and `toolCallStatus` in session-message serialization so renderer can consolidate tool request/result cards after loading chat history.
@@ -266,6 +267,7 @@ export function serializeRealtimeSSEEvent(
       toolName: event?.toolName || null,
       stream: event?.stream || null,
       content: event?.content || '',
+      reasoningContent: typeof event?.reasoningContent === 'string' ? event.reasoningContent : null,
       error: event?.error || null,
       createdAt: new Date().toISOString(),
       chatId: chatId || null
@@ -313,10 +315,10 @@ export function serializeRealtimeSystemEvent(
 ): Record<string, unknown> {
   const content = event?.content ?? event?.message ?? null;
   const normalizedEventType = typeof content?.eventType === 'string'
-      ? content.eventType
-      : typeof content?.type === 'string'
-        ? content.type
-        : 'system';
+    ? content.eventType
+    : typeof content?.type === 'string'
+      ? content.type
+      : 'system';
 
   const contentObj = content && typeof content === 'object' ? (content as Record<string, unknown>) : null;
   const agentName = contentObj?.agentName != null ? String(contentObj.agentName) : null;

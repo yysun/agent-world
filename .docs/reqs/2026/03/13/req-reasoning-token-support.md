@@ -24,10 +24,10 @@ effort setting.
 
 The system must recognize the following provider-specific reasoning/answer contracts.
 
-| Feature | Ollama (Qwen 3.5 / R1) | ChatGPT / OpenAI (5.x / o-series) | Gemini (3.x series) |
+| Feature | Ollama (Qwen 3.5 / R1) | ChatGPT / OpenAI (5.x / o-series) | Gemini (2.5 / 3.x series) |
 |---|---|---|---|
-| Thinking field | `delta.thinking` and observed `delta.reasoning` | `delta.reasoning_content` | `delta.thought` |
-| Answer field | `delta.content` | `delta.content` | `delta.content` |
+| Thinking field | `delta.thinking` and observed `delta.reasoning` | `delta.reasoning_content` | `candidates[].content.parts[]` where `part.thought === true` and text is in `part.text` |
+| Answer field | `delta.content` | `delta.content` | `candidates[].content.parts[]` where `part.thought` is absent/false and text is in `part.text` |
 | Effort control | normalized `low|medium|high` mapped to provider support | normalized `low|medium|high` mapped to provider support | normalized `low|medium|high` mapped to provider support |
 | Logic type | Raw chain-of-thought stream | Hidden or summarized reasoning stream | Thought summary stream |
 | Overthink fix | `presence_penalty: 1.5` | Managed by OpenAI | Managed by Google |
@@ -38,9 +38,10 @@ The system must recognize the following provider-specific reasoning/answer contr
    - Ollama: `choices[].delta.thinking`
    - Ollama (observed Qwen stream via local OpenAI-compatible endpoint): `choices[].delta.reasoning`
    - OpenAI/ChatGPT: `choices[].delta.reasoning_content`
-   - Gemini: `choices[].delta.thought`
-2. The streaming pipeline MUST continue to treat `choices[].delta.content` as the final-answer
-   channel for all three providers.
+   - Gemini: `candidates[].content.parts[]` entries where `part.thought === true`
+2. The streaming pipeline MUST continue to treat final-answer text as:
+   - `choices[].delta.content` for Ollama and OpenAI/ChatGPT
+   - `candidates[].content.parts[]` entries where `part.thought` is absent or false for Gemini
 3. Reasoning tokens MUST remain distinct from final-answer tokens throughout the runtime and UI
    pipeline.
 4. The UI MUST be able to render reasoning tokens in a separate bubble or secondary container
@@ -76,6 +77,8 @@ The system must recognize the following provider-specific reasoning/answer contr
    - OpenAI/ChatGPT: map normalized effort to provider request fields such as
      `reasoning_effort` when supported.
    - Gemini: map normalized effort to Google thinking configuration when supported.
+    - Generic third-party `openai-compatible` providers are NOT required to receive
+       `reasoning_effort` until that request field is validated against the specific target server.
 7. The UI MUST make it clear that reasoning effort is a world-scoped setting persisted in the
    current world's env text, not a transcript mutation.
 8. Providers that do not support the currently selected effort mode MUST degrade gracefully
@@ -88,21 +91,28 @@ The product should support a unified reasoning-stream interpretation equivalent 
 ```ts
 for await (const chunk of stream) {
   const delta = chunk.choices[0]?.delta;
-  if (!delta) continue;
+   if (delta) {
+      const thinkingToken =
+         (delta as any).thinking
+         || (delta as any).reasoning
+         || (delta as any).reasoning_content;
 
-  const thinkingToken =
-    (delta as any).thinking
-      || (delta as any).reasoning
-    || (delta as any).reasoning_content
-    || (delta as any).thought;
+      if (thinkingToken) {
+         // route to reasoning UI/state
+      }
 
-  if (thinkingToken) {
-    // route to reasoning UI/state
-    continue;
+      if (delta.content) {
+         // route to answer UI/state
+      }
   }
 
-  if (delta.content) {
-    // route to answer UI/state
+   const parts = chunk.candidates?.[0]?.content?.parts || [];
+   for (const part of parts) {
+      if (part?.thought === true && part.text) {
+         // route to reasoning UI/state
+      } else if (part?.text) {
+         // route to answer UI/state
+      }
   }
 }
 ```
@@ -124,15 +134,17 @@ This snippet is illustrative of the required behavior, not a mandated implementa
    a reasoning stream separate from `delta.content`.
 2. When OpenAI/ChatGPT streams `delta.reasoning_content`, the product exposes that as a reasoning
    stream separate from `delta.content`.
-3. When Gemini streams `delta.thought`, the product exposes that as a reasoning stream separate
-   from `delta.content`.
+3. When Gemini streams thought-marked `content.parts`, the product exposes those parts as a
+   reasoning stream separate from non-thought answer parts.
 4. A UI client can render reasoning in a dedicated secondary bubble while the answer continues
    streaming in the main assistant bubble for the same turn.
 5. The message composer shows a reasoning-effort dropdown with `low`, `medium`, and `high`
    options.
 6. Changing the dropdown persists `reasoning_effort` into world `variables`, and the LLM request
    path uses that stored value in a provider-appropriate form.
-7. Existing field-whitelisting transport layers do not drop `reasoningContent` before the UI can
+7. Generic third-party `openai-compatible` providers are not assumed to support
+   `reasoning_effort` unless explicitly validated.
+8. Existing field-whitelisting transport layers do not drop `reasoningContent` before the UI can
    consume it.
-8. Existing non-reasoning streaming behavior remains unchanged for providers that do not emit
+9. Existing non-reasoning streaming behavior remains unchanged for providers that do not emit
    reasoning fields.

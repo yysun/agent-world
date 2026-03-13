@@ -17,6 +17,7 @@
  * - Cleanup method for session switches
  *
  * Recent Changes:
+ * - 2026-03-13: Added assistant `reasoningContent` accumulation so reasoning-token chunks can stream independently from answer text.
  * - 2026-03-10: Added assistant-stream `chatId` propagation so live rows stay scoped across
  *   selected-chat refresh reconciliation instead of disappearing until the final message arrives.
  * - 2026-02-21: Added optional command propagation for tool-stream entries so shell rows can display `Running command: <name>`.
@@ -41,6 +42,7 @@ export interface StreamEntry {
   toolName?: string;
   command?: string;
   content: string;
+  reasoningContent: string;
   isStreaming: boolean;
   hasError: boolean;
   errorMessage: string | null;
@@ -74,7 +76,7 @@ interface PendingToolUpdate {
 
 export interface StreamingStateApi {
   handleStart: (messageId: string, agentName: string, chatId?: string | null) => StreamEntry;
-  handleChunk: (messageId: string, chunk: string, chatId?: string | null) => void;
+  handleChunk: (messageId: string, chunk: string, chatId?: string | null, reasoningChunk?: string) => void;
   handleEnd: (messageId: string) => string | null;
   handleError: (messageId: string, errorMessage: string) => void;
   handleToolStreamStart: (messageId: string, agentName: string, streamType: ToolStreamType, toolName?: string, command?: string) => StreamEntry;
@@ -157,6 +159,7 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
       agentName,
       chatId,
       content: '',
+      reasoningContent: '',
       isStreaming: true,
       hasError: false,
       errorMessage: null,
@@ -168,7 +171,7 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
     return entry;
   }
 
-  function handleChunk(messageId: string, chunk: string, chatId: string | null = null) {
+  function handleChunk(messageId: string, chunk: string, chatId: string | null = null, reasoningChunk = '') {
     const entry = streams.get(messageId);
     if (!entry) {
       const newEntry: StreamEntry = {
@@ -176,6 +179,7 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
         agentName: 'assistant',
         chatId,
         content: chunk,
+        reasoningContent: reasoningChunk,
         isStreaming: true,
         hasError: false,
         errorMessage: null,
@@ -191,6 +195,7 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
       entry.chatId = chatId;
     }
     entry.content += chunk;
+    entry.reasoningContent += reasoningChunk;
     scheduleUpdate(entry);
   }
 
@@ -236,6 +241,7 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
       ...(toolName ? { toolName } : {}),
       ...(command ? { command } : {}),
       content: '',
+      reasoningContent: '',
       isStreaming: false,
       isToolStreaming: true,
       hasError: false,
@@ -260,6 +266,7 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
         ...(toolName ? { toolName } : {}),
         ...(command ? { command } : {}),
         content: chunk,
+        reasoningContent: '',
         isStreaming: false,
         isToolStreaming: true,
         hasError: false,

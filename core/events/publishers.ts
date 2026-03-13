@@ -12,6 +12,7 @@
  * - Emits events synchronously through world-scoped EventEmitter channels
  *
  * Recent Changes:
+ * - 2026-03-13: Preserved optional SSE `reasoningContent` so reasoning tokens survive world-scoped event publication.
  * - 2026-03-06: Required explicit `chatId` for message/system/SSE/tool publication; removed `world.currentChatId` fallback from event emitters.
  * - 2026-02-13: Added optional explicit `chatId` override for `publishEvent` to preserve session context across async flows.
  * - 2026-02-13: Added chat-scoped tool-event propagation (`chatId`) so realtime tool updates remain session-isolated.
@@ -265,6 +266,7 @@ export function publishSSE(world: World, data: Partial<WorldSSEEvent> & { chatId
     agentName: data.agentName!,
     type: data.type!,
     content: data.content,
+    reasoningContent: data.reasoningContent,
     error: data.error,
     messageId: data.messageId || generateId(),
     chatId: targetChatId,

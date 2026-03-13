@@ -9,6 +9,7 @@
  * - Comprehensive LLM provider enumeration (OpenAI, Anthropic, Azure, Google, XAI, Ollama)
  *
  * Recent Changes:
+ * - 2026-03-13: Added optional SSE `reasoningContent` for transport-safe reasoning-token streaming.
  * - 2026-03-12: Added tool_permission enforcement via world.variables env key (no dedicated DB column).
  * - 2026-02-28: Added optional world-level message subscription cleanup handle (`_worldMessagesUnsubscriber`) for refresh-safe title listener rebinds.
  * - 2026-02-13: Added world-level `mainAgent` routing field and agent-level `autoReply` flag.
@@ -134,6 +135,7 @@ export interface SSEEventPayload {
   agentName: string;
   type: 'start' | 'chunk' | 'end' | 'error';
   content?: string;
+  reasoningContent?: string;
   error?: string;
   messageId?: string;
   usage?: {
@@ -551,6 +553,7 @@ export interface WorldSSEEvent {
   agentName: string;
   type: 'start' | 'chunk' | 'end' | 'error' | 'log' | 'tool-stream';
   content?: string;
+  reasoningContent?: string;
   error?: string;
   messageId: string;
   /** Chat ID for concurrency-safe event routing. Events without chatId are broadcast to all sessions. */

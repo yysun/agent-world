@@ -135,6 +135,20 @@ describe('createStreamingState', () => {
       }));
     });
 
+    it('accumulates reasoning content separately from answer text', () => {
+      state.handleStart('msg-1', 'agent-1');
+      state.handleChunk('msg-1', '', null, 'step 1');
+      state.handleChunk('msg-1', 'Answer', null, ' + step 2');
+
+      rafCallback();
+
+      expect(callbacks.onStreamUpdate).toHaveBeenCalledWith(expect.objectContaining({
+        messageId: 'msg-1',
+        content: 'Answer',
+        reasoningContent: 'step 1 + step 2',
+      }));
+    });
+
     it('batches multiple chunks before RAF fires', () => {
       state.handleStart('msg-1', 'agent-1');
       state.handleChunk('msg-1', 'Hello');

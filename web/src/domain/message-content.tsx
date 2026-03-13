@@ -342,6 +342,22 @@ function renderPlainToolOutputText(textContent: string) {
   );
 }
 
+function renderReasoningContent(message: Message) {
+  const reasoningText = String((message as any)?.reasoningContent || '').trim();
+  if (!reasoningText) {
+    return null;
+  }
+
+  return (
+    <div className="mt-2 rounded-md border border-border/60 bg-muted/40 px-3 py-2">
+      <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Reasoning</div>
+      <div className="prose prose-invert max-w-none break-words text-sm text-muted-foreground">
+        {safeHTML(renderMarkdown(reasoningText))}
+      </div>
+    </div>
+  );
+}
+
 function getLiveToolArgsText(message: Message): string {
   const toolInput = stringifyToolInput((message as any)?.toolInput);
   if (toolInput) {
@@ -681,6 +697,7 @@ export function renderMessageContent(message: Message) {
   return (
     <div className="message-content">
       {safeHTML(renderMarkdown(message.text || ''))}
+      {renderReasoningContent(message)}
     </div>
   );
 }

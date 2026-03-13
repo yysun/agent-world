@@ -13,7 +13,8 @@ The stable internal contract will be:
 - provider adapters emit structured chunk payloads rather than a string-only callback contract
 - transport serializers and client typings preserve optional `reasoningContent` end-to-end
 - reasoning effort is a world-scoped env key `reasoning_effort=<low|medium|high>` stored in
-  `world.variables`, updated by UI, and read by the LLM layer at request time
+  `world.variables`, read by the LLM layer at request time, and intended to be updated by UI in a
+  follow-up slice
 
 This avoids overloading final answer text with provider-native reasoning fields and keeps the
 existing `start -> chunk -> end` lifecycle intact.
@@ -67,7 +68,7 @@ existing `start -> chunk -> end` lifecycle intact.
 ### Provider Mapping Decisions
 
 - **Ollama / OpenAI-compatible stream parsing**
-  - Accept `delta.thinking`, observed Ollama `delta.reasoning`, `delta.reasoning_content`, and `delta.thought` if present.
+  - Accept `delta.thinking`, observed Ollama `delta.reasoning`, and `delta.reasoning_content` if present.
   - Continue using `delta.content` for the answer channel.
   - Treat `delta.reasoning` as a verified local Ollama/Qwen streaming field, not just a speculative compatibility alias.
 - **Normalized effort levels**
@@ -75,10 +76,12 @@ existing `start -> chunk -> end` lifecycle intact.
   - Providers with coarser native controls may collapse adjacent levels gracefully.
 - **OpenAI / ChatGPT effort control**
   - Map normalized effort to request fields such as `reasoning_effort` when supported.
+  - Do not assume generic third-party `openai-compatible` targets accept `reasoning_effort`; only send it on validated provider paths.
 - **Gemini effort control**
   - The current code uses the official Google SDK, not an OpenAI shim.
   - Internally map the normalized effort to Google thinking config while still accepting
-    provider-native thought output as reasoning content.
+    provider-native thought-marked `content.parts` as reasoning content.
+  - Preserve `chunk.text()` fallback behavior when the SDK does not surface `content.parts` on a streamed chunk.
 - **Ollama effort control**
   - Map `low` to disabled thinking when supported.
   - Map `medium` / `high` to enabled thinking, collapsing levels gracefully if the provider only
@@ -107,11 +110,14 @@ subsequent LLM requests.
 ## Implementation Phases
 
 - [x] Extend provider chunk callbacks, core SSE contracts, and serializer-whitelisted realtime payloads with normalized reasoning fields.
-- [x] Add a world-scoped `reasoning_effort` env setting with `low`, `medium`, and `high` values, following the existing `working_directory` / `tool_permission` UI-to-world-variables pattern.
+- [x] Consume a world-scoped `reasoning_effort` env setting with `low`, `medium`, and `high` values from `world.variables` during request construction.
 - [x] Read `reasoning_effort` from `world.variables` during LLM request construction instead of introducing per-turn send metadata.
 - [x] Parse provider-native reasoning deltas in OpenAI-compatible and Google streaming adapters.
 - [x] Map normalized effort to provider request controls with graceful fallback behavior.
 - [x] Update Electron streaming state and message rendering to show reasoning separately from answer text.
 - [x] Update web SSE state and message rendering to show reasoning separately from answer text.
-- [x] Add targeted regression tests for provider parsing, chat-event propagation, and composer env-setting persistence.
+- [x] Add targeted regression tests for provider parsing, request-shape guards, and chat-event propagation.
 - [x] Run focused tests, `npm run integration`, and `npm run check`.
+- [ ] Add the composer dropdown/write path that persists `reasoning_effort` into `world.variables` via the existing world-settings UI pattern.
+- [ ] Add targeted UI tests covering the composer/world-settings env write path.
+- [ ] Decide whether `reasoningContent` also needs durable persisted chat-history storage beyond live streaming state.

@@ -23,6 +23,7 @@
  * - Extracts error details from log data for better error visibility in UI
  *
  * Recent Changes:
+ * - 2026-03-13: Preserved streamed assistant `reasoningContent` separately from answer text so reasoning-only chunks do not get dropped.
  * - 2026-03-12: Routed shell assistant stdout SSE (`start/chunk/end`) through the web tool-stream path, preserved
  *   shell command metadata for live tool rows, and finalized matching shell stream rows on terminal tool events.
  * - 2026-03-11: Forwarded tool-event `chatId` into AppRun handlers so chat-scoped HITL prompts survive switches without
@@ -69,6 +70,7 @@ interface SSEStreamEvent {
   sender?: string;
   agentName?: string;
   content?: string;
+  reasoningContent?: string;
   accumulatedContent?: string;
   finalContent?: string;
   error?: string;
@@ -141,6 +143,7 @@ type SSEData =
 // Streaming state management
 interface ActiveStreamMessage {
   content: string;
+  reasoningContent: string;
   sender: string;
   messageId: string;
   isStreaming: boolean;
@@ -470,6 +473,7 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
         const streamKey = String(messageId || '').trim();
         streamingState.activeMessages.set(streamKey, {
           content: '',
+          reasoningContent: '',
           sender: agentName,
           messageId: streamKey,
           isStreaming: true
@@ -492,6 +496,7 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
 
       streamingState.activeMessages.set(messageId, {
         content: '',
+        reasoningContent: '',
         sender: agentName,
         messageId: messageId,
         isStreaming: true
@@ -540,14 +545,17 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
         const newContent = eventData.accumulatedContent !== undefined
           ? eventData.accumulatedContent
           : stream.content + (eventData.content || '');
+        const newReasoningContent = stream.reasoningContent + (eventData.reasoningContent || '');
 
         stream.content = newContent;
+        stream.reasoningContent = newReasoningContent;
         const toolCalls = eventData.tool_calls;
 
         publishEvent('handleStreamChunk', {
           messageId,
           sender: agentName,
           content: newContent,
+          reasoningContent: newReasoningContent || undefined,
           isAccumulated: eventData.accumulatedContent !== undefined,
           worldName: eventData.worldName || streamingState.currentWorldName,
           tool_calls: toolCalls
@@ -987,7 +995,7 @@ export const handleStreamStart = <T extends SSEComponentState>(state: T, data: S
 
 // Update streaming message content
 export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: StreamChunkData): T => {
-  const { messageId, sender, content, tool_calls } = data;
+  const { messageId, sender, content, reasoningContent, tool_calls } = data;
   const messages = [...(state.messages || [])];
   const activeStreamMessageId = (state as any).activeStreamMessageId ?? messageId;
 
@@ -997,6 +1005,7 @@ export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: S
       messages[i] = {
         ...messages[i],
         text: content || '',
+        reasoningContent: reasoningContent || '',
         createdAt: new Date(),
         // Preserve tool_calls if present
         ...(tool_calls && { tool_calls })
@@ -1017,6 +1026,7 @@ export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: S
     messages: [...messages, {
       sender: sender,
       text: content || '',
+      reasoningContent: reasoningContent || '',
       isStreaming: true,
       messageId: activeStreamMessageId,
       // Include tool_calls if present
