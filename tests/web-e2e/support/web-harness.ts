@@ -45,6 +45,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 
 import { renderableSystemErrorTextPatterns } from './error-state.js';
 import { buildHitlOptionIdCandidates } from './hitl-option-id.js';
+import { TOOL_PERMISSION_FETCH_URL } from '../../support/tool-permission-fetch-target.js';
 
 export const TEST_WORLD_NAME = 'e2e-test-web';
 export const TEST_AGENT_NAME = 'e2e-google';
@@ -57,7 +58,6 @@ export const WRITE_FILE_TARGET = '.e2e-write-output.txt';
 export const LOAD_SKILL_RUN_MARKER = '.e2e-load-skill-ran.txt';
 export const TOOL_PERMISSION_SKILL_ID = 'e2e-matrix-skill';
 export const TOOL_PERMISSION_SKILL_SCRIPT_NAME = 'mark-load-skill.js';
-export const TOOL_PERMISSION_FETCH_URL = 'http://127.0.0.1:3000/health';
 export const CREATE_AGENT_ASK_NAME = 'E2E Ask Agent';
 export const CREATE_AGENT_AUTO_NAME = 'E2E Auto Agent';
 

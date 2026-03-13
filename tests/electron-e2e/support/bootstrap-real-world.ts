@@ -31,6 +31,7 @@ import {
   newChat,
 } from '../../../core/index.js';
 import { createStorageFromEnv } from '../../../core/storage/storage-factory.js';
+import { TOOL_PERMISSION_FETCH_URL } from '../../support/tool-permission-fetch-target.js';
 
 const TEST_WORLD_ID = 'e2e-test';
 const TEST_AGENT_ID = 'e2e-google';
@@ -42,7 +43,6 @@ const WRITE_FILE_TARGET = '.e2e-write-output.txt';
 const LOAD_SKILL_RUN_MARKER = '.e2e-load-skill-ran.txt';
 const TOOL_PERMISSION_SKILL_ID = 'e2e-matrix-skill';
 const TOOL_PERMISSION_SKILL_SCRIPT_NAME = 'mark-load-skill.js';
-const TOOL_PERMISSION_FETCH_URL = 'http://127.0.0.1:3000/health';
 const CREATE_AGENT_ASK_NAME = 'E2E Ask Agent';
 const CREATE_AGENT_AUTO_NAME = 'E2E Auto Agent';
 const CHAT_NAMES = {
