@@ -14,6 +14,7 @@
  * - Avoids DOM rendering and external I/O.
  *
  * Recent Changes:
+ * - 2026-03-13: Updated tool-row shadow coverage so flat web tool status rows do not inherit message card chrome.
  * - 2026-03-11: Added coverage for the reserved-indent row class used to align tool cards with avatar-bearing rows.
  * - 2026-03-11: Added coverage for the shared message-surface shadow class used by user, assistant, and tool rows.
  * - 2026-03-11: Added regression coverage for compact web tool-row classification and expand/collapse state handling.
@@ -79,10 +80,10 @@ describe('web/tool message ui', () => {
     expect(getToolToggleLabel(true)).toBe('Collapse');
   });
 
-  it('applies the shared surface shadow to user, assistant, and tool rows only', () => {
+  it('applies the shared surface shadow only to user and assistant rows', () => {
     expect(getMessageSurfaceShadowClass({ senderType: SenderType.HUMAN, isToolRow: false })).toBe('message-surface-shadow');
     expect(getMessageSurfaceShadowClass({ senderType: SenderType.AGENT, isToolRow: false })).toBe('message-surface-shadow');
-    expect(getMessageSurfaceShadowClass({ senderType: SenderType.SYSTEM, isToolRow: true })).toBe('message-surface-shadow');
+    expect(getMessageSurfaceShadowClass({ senderType: SenderType.SYSTEM, isToolRow: true })).toBe('');
     expect(getMessageSurfaceShadowClass({ senderType: SenderType.SYSTEM, isToolRow: false })).toBe('');
   });
 

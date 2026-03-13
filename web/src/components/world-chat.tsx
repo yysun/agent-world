@@ -12,6 +12,7 @@
  * - Message body rendering is delegated to domain helpers to keep this file focused on view composition.
  *
  * Summary of Recent Changes:
+ * - 2026-03-13: Stopped applying shared card shadow chrome to tool transcript rows so web tool activity reads as a flat status line.
  * - 2026-03-11: Simplified the chat legend to title-only so world chats no longer show queue/activity widgets in the legend row.
  * - 2026-03-11: Added responsive legend-title truncation so long chat names do not overwhelm the world layout.
  * - 2026-03-11: Added viewport-driven responsive sizing vars so composer and mobile controls keep readable touch-friendly sizing.
@@ -169,7 +170,7 @@ export function getMessageSurfaceShadowClass(params: {
   isToolRow: boolean;
 }): string {
   if (params.isToolRow) {
-    return 'message-surface-shadow';
+    return '';
   }
 
   return params.senderType === SenderType.HUMAN || params.senderType === SenderType.AGENT
