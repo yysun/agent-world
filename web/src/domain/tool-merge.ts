@@ -16,21 +16,21 @@
  * - Uses Message type from web/src/types
  *
  * Recent Changes:
- * - 2026-03-11: Treat live assistant `text` rows that start with `Calling tool:` as tool-request rows so
- *   streaming web chats render the compact tool card even before structured `tool_calls` metadata arrives.
+ * - 2026-03-13: Aligned split/merge/display paths with Electron renderer:
+ *   - Added isNarratedAssistantToolCallMessage exclusion so assistant prose with tool_calls renders as regular cards.
+ *   - Added assistant-role early return in isToolRelatedMessage to match Electron guard.
+ *   - Unified text access via getMessageText helper to handle both `content` (Electron) and `text` (web) field shapes.
+ *   - Added messageId fallback to tool-result indexing key.
+ *   - Removed inlineToolName filtering in replyToMessageId fallback.
  * - 2026-03-01: Initial implementation for web app tool call merging
  * - 2026-03-01: Emit empty `combinedToolResults` for tool request rows so running cards render immediately before result rows arrive.
  */
 
 import type { Message } from '../types';
 
-function getToolRequestText(message: Message): string {
+/** Read content from either `content` (Electron shape) or `text` (web shape). */
+function getMessageText(message: Message): string {
   return String((message as any)?.content || (message as any)?.text || '').trim();
-}
-
-function parseInlineToolName(message: Message): string {
-  const match = getToolRequestText(message).match(/calling tool\s*:\s*([a-z0-9_.:-]+)/i);
-  return String(match?.[1] || '').trim().toLowerCase();
 }
 
 function collectToolCallIds(message: Message): string[] {
@@ -43,12 +43,38 @@ function collectToolCallIds(message: Message): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Detect assistant messages that carry tool_calls but also have meaningful
+ * prose content (not just "Calling tool: ...").  These "narrated" rows should
+ * render as normal assistant cards, not as compact tool cards.
+ * Ported from electron/renderer MessageListPanel.isNarratedAssistantToolCallMessage.
+ */
+function isNarratedAssistantToolCallMessage(message: Message): boolean {
+  const anyMsg = message as any;
+  const role = String(anyMsg?.role || '').trim().toLowerCase();
+  if (role !== 'assistant') {
+    return false;
+  }
+  const toolCalls = Array.isArray(anyMsg?.tool_calls) ? anyMsg.tool_calls : [];
+  if (toolCalls.length === 0) {
+    return false;
+  }
+  const text = getMessageText(message);
+  if (!text) {
+    return false;
+  }
+  return !/^calling tool\s*:/i.test(text);
+}
+
 function isToolRequestMessage(message: Message): boolean {
+  if (isNarratedAssistantToolCallMessage(message)) {
+    return false;
+  }
   const anyMsg = message as any;
   if (Array.isArray(anyMsg?.tool_calls) && anyMsg.tool_calls.length > 0) {
     return true;
   }
-  return /calling tool\s*:/i.test(getToolRequestText(message));
+  return /calling tool\s*:/i.test(getMessageText(message));
 }
 
 function isToolRelatedMessage(message: Message): boolean {
@@ -60,7 +86,14 @@ function isToolRelatedMessage(message: Message): boolean {
   if (Array.isArray(anyMsg?.tool_calls) && anyMsg.tool_calls.length > 0) {
     return true;
   }
-  return /^calling tool(?::|\s)/i.test(getToolRequestText(message));
+  if (role === 'assistant') {
+    return false;
+  }
+  const text = getMessageText(message);
+  if (!text) {
+    return false;
+  }
+  return /^calling tool(?::|\s)/i.test(text);
 }
 
 export function buildCombinedRenderableMessages(messages: Message[]): Message[] {
@@ -83,7 +116,7 @@ export function buildCombinedRenderableMessages(messages: Message[]): Message[] 
     if (Boolean(anyMsg?.isToolStreaming)) {
       continue;
     }
-    const completionKey = String(anyMsg?.tool_call_id || anyMsg?.toolCallId || '').trim();
+    const completionKey = String(anyMsg?.tool_call_id || anyMsg?.toolCallId || anyMsg?.messageId || '').trim();
     if (!completionKey) {
       continue;
     }
@@ -104,7 +137,6 @@ export function buildCombinedRenderableMessages(messages: Message[]): Message[] 
       const combinedToolResults: Message[] = [];
       const combinedToolStreams: Message[] = [];
       const requestMessageId = String((message as any)?.messageId || '').trim();
-      const inlineToolName = parseInlineToolName(message);
       const combinedMessageIds = new Set<string>();
       const requestedCallIds = collectToolCallIds(message);
       if (requestedCallIds.length > 0) {
@@ -145,13 +177,6 @@ export function buildCombinedRenderableMessages(messages: Message[]): Message[] 
           const candidateMessageId = String((candidate as any)?.messageId || '').trim();
           if (candidateMessageId && combinedMessageIds.has(candidateMessageId)) {
             continue;
-          }
-
-          if (requestedCallIds.length === 0 && inlineToolName) {
-            const candidateToolName = String((candidate as any)?.toolName || (candidate as any)?.toolExecution?.toolName || '').trim().toLowerCase();
-            if (candidateToolName && candidateToolName !== inlineToolName) {
-              continue;
-            }
           }
 
           if (candidateMessageId) {

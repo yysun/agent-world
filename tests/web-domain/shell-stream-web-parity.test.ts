@@ -107,7 +107,10 @@ describe('web shell stream parity', () => {
     ]);
   });
 
-  it('merges a reply-linked tool result into an inline request row without tool_calls metadata', () => {
+  it('passes assistant inline request rows through unchanged when tool_calls metadata is absent (Electron parity)', () => {
+    // In Electron, assistant messages without structured tool_calls are not treated
+    // as tool requests even if their text says "Calling tool:".  The merge only
+    // triggers once tool_calls metadata arrives.
     const result = buildCombinedRenderableMessages([
       {
         id: 'assistant-inline',
@@ -130,13 +133,10 @@ describe('web shell stream parity', () => {
       } as any,
     ]);
 
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({
-      id: 'assistant-inline',
-      combinedToolResults: [
-        expect.objectContaining({ id: 'tool-result' }),
-      ],
-    });
+    expect(result).toHaveLength(2);
+    expect(result[0].id).toBe('assistant-inline');
+    expect((result[0] as any).combinedToolResults).toBeUndefined();
+    expect(result[1].id).toBe('tool-result');
   });
 
   it('merges a linked live shell stream row into the request row', () => {

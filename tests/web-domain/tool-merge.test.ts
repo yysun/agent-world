@@ -114,7 +114,7 @@ describe('buildCombinedRenderableMessages', () => {
     expect((result[0] as any).combinedToolResults).toHaveLength(0);
   });
 
-  it('treats assistant streaming request text as a running tool card even before tool_calls metadata arrives', () => {
+  it('passes assistant streaming text through unchanged when tool_calls metadata has not arrived yet', () => {
     const liveRequest = makeRequest({
       id: 'req-inline',
       text: 'Calling tool: shell_cmd (command: "pwd")',
@@ -127,8 +127,10 @@ describe('buildCombinedRenderableMessages', () => {
 
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe('req-inline');
-    expect(Array.isArray((result[0] as any).combinedToolResults)).toBe(true);
-    expect((result[0] as any).combinedToolResults).toHaveLength(0);
+    // Without tool_calls, the message is not a tool request — it passes through
+    // unchanged, matching Electron behavior where only structured tool_calls
+    // trigger the merge path.
+    expect((result[0] as any).combinedToolResults).toBeUndefined();
   });
 
   it('merges linked streaming tool rows into the request row', () => {
@@ -159,6 +161,43 @@ describe('buildCombinedRenderableMessages', () => {
 
     expect(result).toHaveLength(2);
     expect(result[0].id).toBe('human-1');
+  });
+
+  it('keeps narrated assistant tool-call messages as regular cards when content is in text field (web Message shape)', () => {
+    // Web Messages use `text` (not `content`) — createMessageFromMemory maps content→text.
+    // This reproduces the real-world scenario from chat-1773416220554-68tfbw6py.
+    const narrated = makeRequest({
+      id: 'narrated-web',
+      text: 'I\'ve loaded the yt-dlp skill to search YouTube videos. I will now search for the 10 most recent YouTube videos.',
+      content: undefined,
+      tool_calls: [{ id: 'call-w', type: 'function', function: { name: 'shell_cmd', arguments: '{}' } }],
+    });
+    const res = makeResult({ id: 'res-w', tool_call_id: 'call-w', messageId: 'msgid-res-w' });
+
+    const result = buildCombinedRenderableMessages([narrated, res]);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].id).toBe('narrated-web');
+    expect((result[0] as any).combinedToolResults).toBeUndefined();
+    expect(result[1].id).toBe('res-w');
+  });
+
+  it('keeps narrated assistant tool-call messages as regular cards instead of merging them as tool requests', () => {
+    const narrated = makeRequest({
+      id: 'narrated-1',
+      text: 'I will now run the command for you.',
+      content: 'I will now run the command for you.',
+      tool_calls: [{ id: 'call-n', type: 'function', function: { name: 'shell_cmd', arguments: '{"command":"ls"}' } }],
+    });
+    const res = makeResult({ id: 'res-n', tool_call_id: 'call-n', messageId: 'msgid-res-n' });
+
+    const result = buildCombinedRenderableMessages([narrated, res]);
+
+    // Narrated assistant messages should pass through unchanged; tool result stays standalone
+    expect(result).toHaveLength(2);
+    expect(result[0].id).toBe('narrated-1');
+    expect((result[0] as any).combinedToolResults).toBeUndefined();
+    expect(result[1].id).toBe('res-n');
   });
 
   it('keeps legacy assistant stdout mirror rows visible while still merging the canonical tool result', () => {
