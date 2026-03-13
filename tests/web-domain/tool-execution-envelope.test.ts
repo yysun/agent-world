@@ -12,6 +12,7 @@
  * - Uses pure web-domain helpers with deterministic in-memory fixtures.
  *
  * Recent Changes:
+ * - 2026-03-13: Updated custom-renderer coverage so web YouTube previews no longer resolve to the disabled web YouTube renderer.
  * - 2026-03-06: Added merged-tool renderer resolution coverage so completed cards can recover explicit preview payloads from attached tool-result rows.
  * - 2026-03-06: Initial envelope parsing and preview extraction coverage.
  */
@@ -152,7 +153,7 @@ describe('web tool execution envelope helpers', () => {
     });
   });
 
-  it('matches a custom renderer from merged tool-result rows when the assistant request row has no direct preview', () => {
+  it('does not match a custom renderer for youtube preview payloads in the web app', () => {
     const assistantMessage = {
       id: 'assistant-1',
       type: 'assistant',
@@ -178,7 +179,6 @@ describe('web tool execution envelope helpers', () => {
 
     const match = getCustomRendererMatch(assistantMessage, [resultMessage]);
 
-    expect(match?.renderer.id).toBe('youtube-video');
-    expect(match?.message).toBe(resultMessage);
+    expect(match).toBeUndefined();
   });
 });

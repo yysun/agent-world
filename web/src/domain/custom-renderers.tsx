@@ -11,13 +11,13 @@
  * - Clean extension point for non-demo renderers (charts, PDFs, audio, etc.)
  *
  * Recent Changes:
+ * - 2026-03-13: Disabled the web YouTube embed renderer so YouTube previews fall back to normal tool/message rendering in the browser app.
  * - 2026-03-06: Added renderer-match helper support for merged tool-call cards so completed previews can resolve against attached tool-result rows.
  * - 2026-02-20: Split sheet-music logic into dedicated renderer module and kept this file framework-level.
  */
 
 import type { Message } from '../types';
 import { vexflowToolRenderer } from './renderers/vexflow-tool-renderer';
-import { youtubeRenderer } from './renderers/youtube-renderer';
 import { extractToolPayload, isToolMessageFor } from './renderers/custom-renderer-utils';
 
 export interface CustomRenderer {
@@ -31,7 +31,7 @@ export interface CustomRendererMatch {
   message: Message;
 }
 
-const customRenderers: CustomRenderer[] = [youtubeRenderer, vexflowToolRenderer];
+const customRenderers: CustomRenderer[] = [vexflowToolRenderer];
 
 export { extractToolPayload, isToolMessageFor };
 
