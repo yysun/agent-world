@@ -265,6 +265,105 @@ describe('extracted message utils', () => {
     expect(className).toContain('border-l-red-500/70');
   });
 
+  it('renders narrated assistant tool-call cards with a green left border after linked tool success', () => {
+    const message = {
+      messageId: 'assistant-plan-success-1',
+      role: 'assistant',
+      sender: 'composer',
+      content: 'I will write ./score.musicxml and then ask @engraver to render it.',
+      tool_calls: [
+        {
+          id: 'call_write_success_1',
+          type: 'function',
+          function: {
+            name: 'write_file',
+            arguments: '{"filePath":"./score.musicxml","content":"<xml/>"}',
+          },
+        },
+      ],
+    };
+    const messages = [
+      message,
+      {
+        messageId: 'tool-result-success-1',
+        role: 'tool',
+        tool_call_id: 'call_write_success_1',
+        replyToMessageId: 'assistant-plan-success-1',
+        content: '{"status":"success"}',
+      },
+    ];
+
+    const className = getMessageCardClassName(message, new Map(messages.map((entry) => [entry.messageId, entry])), messages, 0);
+    expect(className).toContain('rounded-lg');
+    expect(className).toContain('border-l-emerald-500/60');
+    expect(className).not.toContain('bg-transparent');
+  });
+
+  it('renders narrated assistant tool-call cards with a red left border after linked tool failure', () => {
+    const message = {
+      messageId: 'assistant-plan-failure-1',
+      role: 'assistant',
+      sender: 'composer',
+      content: 'I will run the command and summarize the result.',
+      tool_calls: [
+        {
+          id: 'call_shell_failure_1',
+          type: 'function',
+          function: {
+            name: 'shell_cmd',
+            arguments: '{"command":"bad-command"}',
+          },
+        },
+      ],
+    };
+    const messages = [
+      message,
+      {
+        messageId: 'tool-result-failure-1',
+        role: 'tool',
+        tool_call_id: 'call_shell_failure_1',
+        replyToMessageId: 'assistant-plan-failure-1',
+        content: 'status: failed\nreason: non_zero_exit',
+      },
+    ];
+
+    const className = getMessageCardClassName(message, new Map(messages.map((entry) => [entry.messageId, entry])), messages, 0);
+    expect(className).toContain('rounded-lg');
+    expect(className).toContain('border-l-red-500/70');
+    expect(className).not.toContain('bg-transparent');
+  });
+
+  it('renders narrated assistant tool-call cards with linked status metadata even when tool rows are hidden', () => {
+    const message = {
+      messageId: 'assistant-plan-hidden-tool-1',
+      role: 'assistant',
+      sender: 'composer',
+      content: 'I will write the file and continue.',
+      tool_calls: [
+        {
+          id: 'call_write_hidden_1',
+          type: 'function',
+          function: {
+            name: 'write_file',
+            arguments: '{"filePath":"./score.musicxml","content":"<xml/>"}',
+          },
+        },
+      ],
+      narratedToolCallResults: [
+        {
+          messageId: 'tool-result-hidden-1',
+          role: 'tool',
+          tool_call_id: 'call_write_hidden_1',
+          content: '{"status":"success"}',
+        },
+      ],
+    };
+
+    const className = getMessageCardClassName(message, new Map([[message.messageId, message]]), [message], 0);
+    expect(className).toContain('border-l-emerald-500/60');
+    expect(className).toContain('rounded-lg');
+  });
+
   it('hides assistant human-intervention tool-call placeholders from renderable rows', () => {
     const hitlToolCallMessage = {
       messageId: 'msg-hitl-1',

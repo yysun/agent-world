@@ -13,6 +13,7 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-03-13: Preserved narrated assistant tool-call status metadata before `showToolMessages=false` filtering so hidden tool rows do not remove success/failure border state from assistant cards.
  * - 2026-03-13: Reserved avatar-column spacing for tool transcript rows so compact tool summaries align with normal message left edges.
  * - 2026-03-13: Suppressed agent avatar chips for tool transcript rows so compact tool status lines do not inherit assistant-avatar chrome.
  * - 2026-03-13: Flattened tool transcript rows into compact dot-status lines and defaulted tool details to collapsed.
@@ -326,6 +327,48 @@ function getToolSummaryDotClassName(statusTone: string): string {
 export function buildCombinedRenderableMessages(messages) {
   const toolResultsByKey = new Map<string, Array<any>>();
 
+  const collectLinkedToolResults = (message) => {
+    if (!isNarratedAssistantToolCallMessage(message)) {
+      return [];
+    }
+
+    const requestedCallIds = collectToolCallIds(message);
+    if (requestedCallIds.length === 0) {
+      return [];
+    }
+
+    const requestMessageId = String(message?.messageId || '').trim();
+    const linkedResults: Array<any> = [];
+    const seenMessageIds = new Set<string>();
+
+    for (const candidate of messages) {
+      const candidateRole = String(candidate?.role || '').trim().toLowerCase();
+      if (candidateRole !== 'tool') {
+        continue;
+      }
+
+      const completionKey = String(candidate?.tool_call_id || candidate?.messageId || '').trim();
+      const replyToMessageId = String(candidate?.replyToMessageId || '').trim();
+      const isLinkedByCallId = completionKey && requestedCallIds.includes(completionKey);
+      const isLinkedByReply = requestMessageId && replyToMessageId === requestMessageId;
+      if (!isLinkedByCallId && !isLinkedByReply) {
+        continue;
+      }
+
+      const candidateMessageId = String(candidate?.messageId || '').trim();
+      if (candidateMessageId) {
+        if (seenMessageIds.has(candidateMessageId)) {
+          continue;
+        }
+        seenMessageIds.add(candidateMessageId);
+      }
+
+      linkedResults.push(candidate);
+    }
+
+    return linkedResults;
+  };
+
   for (const message of messages) {
     const role = String(message?.role || '').trim().toLowerCase();
     if (role !== 'tool') {
@@ -344,6 +387,18 @@ export function buildCombinedRenderableMessages(messages) {
 
   return messages
     .map((message) => {
+      if (isNarratedAssistantToolCallMessage(message)) {
+        const narratedToolCallResults = collectLinkedToolResults(message);
+        if (narratedToolCallResults.length === 0) {
+          return message;
+        }
+
+        return {
+          ...message,
+          narratedToolCallResults,
+        };
+      }
+
       if (!isToolRelatedMessage(message) || !isToolRequestMessage(message)) {
         return message;
       }
@@ -503,18 +558,16 @@ export default function MessageListPanel({
   const inlineDetailText = String(inlineWorkingIndicatorState?.detailText || '').trim();
   const inlineElapsedMs = Number(inlineWorkingIndicatorState?.elapsedMs || 0);
   const renderableMessages = buildCombinedRenderableMessages(
-    messages
-      .filter(isRenderableMessageEntry)
-      .filter((message) => {
-        if (showToolMessages) {
-          return true;
-        }
-        if (isNarratedAssistantToolCallMessage(message)) {
-          return true;
-        }
-        return !isToolRelatedMessage(message);
-      })
-  );
+    messages.filter(isRenderableMessageEntry)
+  ).filter((message) => {
+    if (showToolMessages) {
+      return true;
+    }
+    if (isNarratedAssistantToolCallMessage(message)) {
+      return true;
+    }
+    return !isToolRelatedMessage(message);
+  });
   const shouldShowLoading = messagesLoading && renderableMessages.length === 0;
   const [messageCollapseOverrides, setMessageCollapseOverrides] = useState<Record<string, boolean>>({});
 

@@ -13,6 +13,7 @@
  * - Helper functions are intentionally colocated to preserve behavior parity.
  *
  * Recent Changes:
+ * - 2026-03-13: Added assistant-card border overrides for narrated assistant tool-call rows so Electron can reflect linked tool success/failure without collapsing into tool-row chrome.
  * - 2026-03-10: Added a red left border for structured `system` error transcript rows so durable failed-turn diagnostics are visually distinct from neutral system notices.
  * - 2026-03-06: Restored error-level realtime log rows as renderable transcript entries while keeping non-error logs in the diagnostics panel only.
  * - 2026-03-06: Unwrap persisted tool execution envelopes when deriving tool success/failure card styling after reload.
@@ -51,6 +52,25 @@ function isHitlToolCallPlaceholderMessage(message) {
     const toolName = String(toolCall?.function?.name || toolCall?.name || '').trim().toLowerCase();
     return toolName === 'human_intervention_request';
   });
+}
+
+function isNarratedAssistantToolCallMessage(message) {
+  const role = String(message?.role || '').trim().toLowerCase();
+  if (role !== 'assistant') {
+    return false;
+  }
+
+  const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+  if (toolCalls.length === 0) {
+    return false;
+  }
+
+  const content = String(message?.content || '').trim();
+  if (!content) {
+    return false;
+  }
+
+  return !/^calling tool\s*:/i.test(content);
 }
 
 export function isHumanMessage(message) {
@@ -485,10 +505,72 @@ function isToolMessageSuccess(message) {
   return /status\s*[:=]\s*(success|succeeded|done|completed|ok)/i.test(content);
 }
 
+function getNarratedAssistantToolCallTone(message, messages) {
+  if (!isNarratedAssistantToolCallMessage(message)) {
+    return null;
+  }
+
+  const attachedLinkedResults = Array.isArray(message?.narratedToolCallResults)
+    ? message.narratedToolCallResults
+    : [];
+  if (attachedLinkedResults.some((result) => isToolMessageFailure(result))) {
+    return 'failed';
+  }
+  if (attachedLinkedResults.length > 0) {
+    return 'done';
+  }
+
+  const requestedCallIds = collectToolCallIds(message);
+  if (requestedCallIds.length === 0) {
+    return null;
+  }
+
+  const requestMessageId = String(message?.messageId || '').trim();
+  const linkedResults: any[] = [];
+  const seenMessageIds = new Set();
+
+  for (const candidate of Array.isArray(messages) ? messages : []) {
+    const candidateRole = String(candidate?.role || '').trim().toLowerCase();
+    if (candidateRole !== 'tool') {
+      continue;
+    }
+
+    const completionKey = String(candidate?.tool_call_id || candidate?.messageId || '').trim();
+    const replyToMessageId = String(candidate?.replyToMessageId || '').trim();
+    const isLinkedByCallId = completionKey && requestedCallIds.includes(completionKey);
+    const isLinkedByReply = requestMessageId && replyToMessageId === requestMessageId;
+    if (!isLinkedByCallId && !isLinkedByReply) {
+      continue;
+    }
+
+    const candidateMessageId = String(candidate?.messageId || '').trim();
+    if (candidateMessageId) {
+      if (seenMessageIds.has(candidateMessageId)) {
+        continue;
+      }
+      seenMessageIds.add(candidateMessageId);
+    }
+
+    linkedResults.push(candidate);
+  }
+
+  if (linkedResults.some((result) => isToolMessageFailure(result))) {
+    return 'failed';
+  }
+
+  if (linkedResults.length > 0 && linkedResults.every((result) => !isToolMessageFailure(result))) {
+    return 'done';
+  }
+
+  return null;
+}
+
 export function getMessageCardClassName(message, messagesById, messages, currentIndex, options = {}) {
   const role = String(message?.role || '').toLowerCase();
   const isUser = isHumanMessage(message);
-  const isTool = isToolRelatedMessage(message);
+  const isNarratedToolCall = isNarratedAssistantToolCallMessage(message);
+  const narratedToolCallTone = getNarratedAssistantToolCallTone(message, messages);
+  const isTool = isToolRelatedMessage(message) && !isNarratedToolCall;
   const isSystem = role === 'system' || message?.type === 'log' || Boolean(message?.logEvent);
   const isSystemError = String(message?.systemEvent?.kind || '').trim().toLowerCase() === 'error';
   const isCrossAgent = isCrossAgentAssistantMessage(message, messagesById, messages, currentIndex);
@@ -511,11 +593,15 @@ export function getMessageCardClassName(message, messagesById, messages, current
     ? (fullWidthUserMessage
       ? 'w-full border-l-sidebar-border bg-sidebar-accent'
       : 'ml-auto w-[80%] border-l-sidebar-border bg-sidebar-accent')
-    : isCrossAgent
-      ? 'ml-auto w-[92%] border-l-violet-500/50'
-      : isSystem
-        ? `mr-auto w-[90%] ${isSystemError ? 'border-l-red-500/70 bg-muted/40' : 'border-l-border bg-muted/40'}`
-        : 'ml-auto w-[92%] border-l-sky-500/40';
+    : isNarratedToolCall && narratedToolCallTone === 'failed'
+      ? 'ml-auto w-[92%] border-l-red-500/70'
+      : isNarratedToolCall && narratedToolCallTone === 'done'
+        ? 'ml-auto w-[92%] border-l-emerald-500/60'
+        : isCrossAgent
+          ? 'ml-auto w-[92%] border-l-violet-500/50'
+          : isSystem
+            ? `mr-auto w-[90%] ${isSystemError ? 'border-l-red-500/70 bg-muted/40' : 'border-l-border bg-muted/40'}`
+            : 'ml-auto w-[92%] border-l-sky-500/40';
 
   return `group relative rounded-lg p-3 ${showLeftBorder ? 'border-l' : ''} ${roleClassName}`;
 }

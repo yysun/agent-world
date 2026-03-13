@@ -14,6 +14,8 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { isToolRelatedMessage } from '../../../electron/renderer/src/utils/message-utils';
+
 const { jsxFactory } = vi.hoisted(() => ({
   jsxFactory: (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({
     type,
@@ -155,6 +157,46 @@ describe('MessageListPanel narrated tool-call visibility', () => {
     expect(merged[0]?.messageId).toBe('assistant-plan-1');
     expect(merged[0]?.combinedToolResults).toBeUndefined();
     expect(merged[1]?.messageId).toBe('tool-result-1');
+  });
+
+  it('preserves narrated tool-call result metadata when tool transcript rows are hidden', () => {
+    const assistantPlanWithToolCall = {
+      messageId: 'assistant-plan-hidden-1',
+      role: 'assistant',
+      sender: 'composer',
+      content: 'I will write ./score.musicxml and then ask @engraver to render it.',
+      tool_calls: [
+        {
+          id: 'call_write_hidden_1',
+          type: 'function',
+          function: {
+            name: 'write_file',
+            arguments: '{"filePath":"./score.musicxml","content":"<xml/>"}',
+          },
+        },
+      ],
+    };
+
+    const toolResult = {
+      messageId: 'tool-result-hidden-1',
+      role: 'tool',
+      tool_call_id: 'call_write_hidden_1',
+      replyToMessageId: 'assistant-plan-hidden-1',
+      content: '{"status":"success"}',
+    };
+
+    const visibleMessages = buildCombinedRenderableMessages([assistantPlanWithToolCall, toolResult]).filter((message) => {
+      if (isNarratedAssistantToolCallMessage(message)) {
+        return true;
+      }
+      return !isToolRelatedMessage(message);
+    });
+
+    expect(visibleMessages).toHaveLength(1);
+    expect(visibleMessages[0]?.messageId).toBe('assistant-plan-hidden-1');
+    expect(Array.isArray(visibleMessages[0]?.narratedToolCallResults)).toBe(true);
+    expect(visibleMessages[0]?.narratedToolCallResults).toHaveLength(1);
+    expect(visibleMessages[0]?.narratedToolCallResults?.[0]?.messageId).toBe('tool-result-hidden-1');
   });
 
   it('still merges placeholder calling-tool assistant row with tool result', () => {
