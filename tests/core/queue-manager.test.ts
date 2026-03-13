@@ -16,6 +16,8 @@
  * - Tests are fully deterministic.
  *
  * Recent Changes:
+ * - 2026-03-12: Added regression coverage for sequential completed turns in the same chat so queue
+ *   completion listeners fully detach/re-attach and later rows do not stick in `sending`.
  * - 2026-03-09: Initial tests added as part of queue-manager extraction.
  */
 
@@ -126,12 +128,33 @@ function buildQueueStorageWrappers(queueMessages: any[] = []) {
     getMemory: vi.fn().mockResolvedValue([]),
     // Queue operations
     addQueuedMessage: vi.fn().mockImplementation(async (worldId, chatId, messageId, content, sender) => {
-      queueMessages.push({ worldId, chatId, messageId, content, sender, status: 'queued', retryCount: 0 });
+      queueMessages.push({
+        worldId,
+        chatId,
+        messageId,
+        content,
+        sender,
+        status: 'queued',
+        retryCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
     }),
     getQueuedMessages: vi.fn().mockImplementation(async () => [...queueMessages]),
-    updateMessageQueueStatus: vi.fn().mockResolvedValue(undefined),
+    updateMessageQueueStatus: vi.fn().mockImplementation(async (messageId, status) => {
+      const target = queueMessages.find((entry) => entry.messageId === messageId);
+      if (target) {
+        target.status = status;
+        target.updatedAt = new Date();
+      }
+    }),
     incrementQueueMessageRetry: vi.fn().mockResolvedValue(1),
-    removeQueuedMessage: vi.fn().mockResolvedValue(undefined),
+    removeQueuedMessage: vi.fn().mockImplementation(async (messageId) => {
+      const targetIndex = queueMessages.findIndex((entry) => entry.messageId === messageId);
+      if (targetIndex >= 0) {
+        queueMessages.splice(targetIndex, 1);
+      }
+    }),
     cancelQueuedMessages: vi.fn().mockResolvedValue(undefined),
     deleteQueueForChat: vi.fn().mockResolvedValue(undefined),
     resetQueueMessageForRetry: vi.fn().mockResolvedValue(undefined),
@@ -177,6 +200,73 @@ describe('queue-manager', () => {
       const messages = await getQueueMessages(worldId, chatId);
       expect(messages).toHaveLength(1);
       expect(messages[0].content).toBe(content);
+    });
+
+    it('removes each completed queued turn even when the same chat sends again', async () => {
+      const world = makeWorld({
+        agents: new Map([
+          ['agent-1', {
+            id: 'agent-1',
+            name: 'Agent 1',
+            type: 'assistant',
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            llmCallCount: 0,
+            autoReply: true,
+            status: 'active',
+            memory: [],
+          }],
+        ]),
+      });
+      const chatId = 'chat-add';
+
+      await addToQueue('world-q', chatId, 'first queued turn', 'human', {
+        triggerProcessing: true,
+        targetWorld: world,
+        preassignedMessageId: 'test-msg-queue-1',
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(queueMessages).toHaveLength(1);
+      expect(queueMessages[0]?.status).toBe('sending');
+
+      world.eventEmitter.emit('world', {
+        type: 'response-start',
+        chatId,
+        activeChatIds: [chatId],
+      });
+      world.eventEmitter.emit('world', {
+        type: 'idle',
+        chatId,
+        activeChatIds: [],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(queueMessages).toEqual([]);
+
+      await addToQueue('world-q', chatId, 'second queued turn', 'human', {
+        triggerProcessing: true,
+        targetWorld: world,
+        preassignedMessageId: 'test-msg-queue-2',
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(queueMessages).toHaveLength(1);
+      expect(queueMessages[0]?.status).toBe('sending');
+
+      world.eventEmitter.emit('world', {
+        type: 'response-start',
+        chatId,
+        activeChatIds: [chatId],
+      });
+      world.eventEmitter.emit('world', {
+        type: 'idle',
+        chatId,
+        activeChatIds: [],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(queueMessages).toEqual([]);
     });
   });
 

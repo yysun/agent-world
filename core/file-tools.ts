@@ -40,12 +40,18 @@ import {
 } from './shell-cmd-tool.js';
 import { getSkillSourcePath, getSkills } from './skill-registry.js';
 import { getEnvValueFromText } from './utils.js';
+import { requestToolApproval } from './tool-approval.js';
 
 type ToolContext = {
   workingDirectory?: string;
   world?: {
     variables?: string;
+    [key: string]: unknown;
   };
+  chatId?: string | null;
+  toolCallId?: string;
+  agentName?: string;
+  messages?: Array<Record<string, any>>;
 };
 
 const DEFAULT_READ_LIMIT = 200;
@@ -492,6 +498,28 @@ export function createWriteFileToolDefinition() {
         const toolPermission = getEnvValueFromText((context?.world as any)?.variables, 'tool_permission') ?? 'auto';
         if (toolPermission === 'read') {
           return 'Error: write_file is blocked by the current permission level (read).';
+        }
+
+        if (toolPermission === 'ask' && context?.world) {
+          const approval = await requestToolApproval({
+            world: context.world as any,
+            chatId: typeof context.chatId === 'string' ? context.chatId : null,
+            toolCallId: context.toolCallId,
+            title: 'Approve file write?',
+            message: `write_file wants to write to: ${String(args.filePath ?? args.path ?? '').trim() || '(unknown)'}`,
+            defaultOptionId: 'deny',
+            options: [
+              { id: 'approve', label: 'Approve', description: 'Allow this file write.' },
+              { id: 'deny', label: 'Deny', description: 'Block this file write.' },
+            ],
+            approvedOptionIds: ['approve'],
+            metadata: { tool: 'write_file', filePath: String(args.filePath ?? args.path ?? '').trim() },
+            agentName: context.agentName || null,
+            messages: context.messages as any,
+          });
+          if (!approval.approved) {
+            return `Error: write_file was denied by the user (${approval.reason}).`;
+          }
         }
 
         const trustedWorkingDirectory = getTrustedWorkingDirectory(context);

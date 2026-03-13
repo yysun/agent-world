@@ -14,18 +14,22 @@
  * - Tests provision their own workspace/world state before each launch.
  *
  * Recent Changes:
+ * - 2026-03-12: Restored a long global Electron E2E timeout budget for real-provider desktop flows and exported the timeout constants for regression coverage.
  * - 2026-03-10: Added initial Playwright Electron harness config for real desktop E2E coverage.
  */
 
 import { defineConfig } from '@playwright/test';
 
+export const ELECTRON_E2E_TIMEOUT_MS = 180_000;
+export const ELECTRON_E2E_EXPECT_TIMEOUT_MS = 60_000;
+
 export default defineConfig({
   testDir: './tests/electron-e2e',
   fullyParallel: false,
   workers: 1,
-  timeout: 5_000,
+  timeout: ELECTRON_E2E_TIMEOUT_MS,
   expect: {
-    timeout: 5_000,
+    timeout: ELECTRON_E2E_EXPECT_TIMEOUT_MS,
   },
   reporter: 'list',
   use: {

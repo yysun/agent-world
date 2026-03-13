@@ -22,6 +22,8 @@
  * - All other dependencies (events/index.js, storage-init.ts, etc.) are static.
  *
  * Recent Changes:
+ * - 2026-03-12: Registered queue advance listeners in the detachable listener map so sequential queued
+ *   turns in the same chat can reattach completion cleanup after the previous turn finishes.
  * - 2026-03-10: Treat unresolved persisted HITL prompts as explicit recovery boundaries during stale `sending` recovery so restore does not replay turns that are already waiting for approval.
  * - 2026-03-10: Queue dispatch failures that occur before streaming starts now publish a durable structured `system/error` artifact so failed turns remain visible in the transcript.
  * - 2026-03-10: Split queue-backed user submission from immediate non-user dispatch; queue APIs are now user-turn-only by contract.
@@ -525,6 +527,7 @@ function attachQueueAdvanceListener(world: World, chatId: string): void {
     })();
   }
 
+  queueAdvanceListeners.set(listenerKey, onWorldActivity);
   world.eventEmitter.on('world', onWorldActivity);
 }
 

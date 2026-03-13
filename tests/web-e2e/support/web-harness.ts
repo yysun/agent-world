@@ -16,6 +16,10 @@
  * - Assertions still target visible browser behavior in the actual web app.
  *
  * Recent Changes:
+ * - 2026-03-12: Made HITL option clicks accept normalized label-like IDs (for example `yes once` -> `yes_once`)
+ *   so web E2E specs can target approval buttons using the same human-readable wording shown in the UI.
+ * - 2026-03-12: Hardened API idle polling to require a short stable idle window so follow-up browser actions
+ *   do not race post-idle queue cleanup after shell/HITL turns.
  * - 2026-03-11: Added home-page search/card helpers so smoke tests exercise the new search-driven world-entry flow.
  * - 2026-03-11: Added API-level world-idle polling so chat creation and agent teardown do not race
  *   the final backend persistence step after assistant text appears in the UI.
@@ -40,6 +44,7 @@ import path from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 
 import { renderableSystemErrorTextPatterns } from './error-state.js';
+import { buildHitlOptionIdCandidates } from './hitl-option-id.js';
 
 export const TEST_WORLD_NAME = 'e2e-test-web';
 export const TEST_AGENT_NAME = 'e2e-google';
@@ -57,6 +62,7 @@ export const CREATE_AGENT_ASK_NAME = 'E2E Ask Agent';
 export const CREATE_AGENT_AUTO_NAME = 'E2E Auto Agent';
 
 const API_BASE_URL = 'http://127.0.0.1:3000/api';
+const WORLD_IDLE_STABILITY_MS = 500;
 
 export type WebBootstrapState = {
   worldName: string;
@@ -158,12 +164,24 @@ function getEncodedWorldNameFromUrl(url: string): string | null {
 
 async function waitForWorldApiIdle(worldName: string, timeoutMs: number = 15_000): Promise<void> {
   const startedAt = Date.now();
+  let idleObservedAt = 0;
 
   while (Date.now() - startedAt < timeoutMs) {
     const status = await apiRequest<WorldStatus>(`/worlds/${encodeURIComponent(worldName)}/status`);
-    if (!status?.isProcessing) {
-      return;
+    const isIdle = !status?.isProcessing
+      && (!Array.isArray(status?.activeChatIds) || status.activeChatIds.length === 0)
+      && (!Array.isArray(status?.queuedChatIds) || status.queuedChatIds.length === 0);
+    if (isIdle) {
+      if (idleObservedAt === 0) {
+        idleObservedAt = Date.now();
+      }
+      if (Date.now() - idleObservedAt >= WORLD_IDLE_STABILITY_MS) {
+        return;
+      }
+    } else {
+      idleObservedAt = 0;
     }
+
     await wait(250);
   }
 
@@ -252,7 +270,7 @@ function buildAgentSystemPrompt(): string {
     `- If a user message starts with "WRITE_FILE_READ:", call only write_file with filePath "${WRITE_FILE_TARGET}" and content "read should be blocked". If the tool result mentions "permission level (read)", reply exactly "E2E_WRITE_FILE_READ_BLOCKED". Otherwise reply exactly "E2E_WRITE_FILE_READ_UNEXPECTED".`,
     `- If a user message starts with "WRITE_FILE_ASK:", call only write_file with filePath "${WRITE_FILE_TARGET}" and content "ASK_WRITE_OK". After the tool returns, reply exactly "E2E_WRITE_FILE_ASK_OK".`,
     `- If a user message starts with "WRITE_FILE_AUTO:", call only write_file with filePath "${WRITE_FILE_TARGET}" and content "AUTO_WRITE_OK". After the tool returns, reply exactly "E2E_WRITE_FILE_AUTO_OK".`,
-    `- If a user message starts with "WEB_FETCH_READ:", call only web_fetch with url "${TOOL_PERMISSION_FETCH_URL}". If the tool result mentions "permission level (read)", reply exactly "E2E_WEB_FETCH_READ_BLOCKED". Otherwise reply exactly "E2E_WEB_FETCH_READ_UNEXPECTED".`,
+    `- If a user message starts with "WEB_FETCH_READ:", call only web_fetch with url "${TOOL_PERMISSION_FETCH_URL}". After the tool returns, reply exactly "E2E_WEB_FETCH_READ_OK".`,
     `- If a user message starts with "WEB_FETCH_ASK:", call only web_fetch with url "${TOOL_PERMISSION_FETCH_URL}". After the tool returns, reply exactly "E2E_WEB_FETCH_ASK_OK".`,
     `- If a user message starts with "WEB_FETCH_AUTO:", call only web_fetch with url "${TOOL_PERMISSION_FETCH_URL}". After the tool returns, reply exactly "E2E_WEB_FETCH_AUTO_OK".`,
     '- If a user message starts with "SHELL_READ:", call only shell_cmd with command "pwd" and no parameters. If the tool result mentions "permission level (read)", reply exactly "E2E_SHELL_READ_BLOCKED".',
@@ -561,7 +579,15 @@ export async function waitForHitlPrompt(page: Page, timeoutMs?: number): Promise
 
 export async function respondToHitlPrompt(page: Page, optionId: string = 'approve', timeoutMs?: number): Promise<void> {
   const prompt = await waitForHitlPrompt(page, timeoutMs);
-  await prompt.getByTestId(`hitl-option-${optionId}`).click();
+  for (const candidate of buildHitlOptionIdCandidates(optionId)) {
+    const option = prompt.getByTestId(`hitl-option-${candidate}`);
+    if (await option.count()) {
+      await option.click();
+      return;
+    }
+  }
+
+  throw new Error(`Expected HITL option "${optionId}" to exist in the current prompt.`);
 }
 
 export async function waitForShellHitlCompletion(page: Page, timeoutMs: number = 60_000): Promise<void> {

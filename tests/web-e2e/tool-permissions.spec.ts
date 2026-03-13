@@ -4,24 +4,26 @@
  * Purpose:
  * - Confirm that the world-level tool-permission dropdown renders correctly in the web
  *   composer, persists changes to the API, reflects the stored value on reload, and
- *   enforces the `read` permission level by preventing `shell_cmd` execution.
+ *   enforces the permission matrix across all supported tool types.
  *
  * Key Features:
  * - UI affordance tests (no LLM): dropdown presence, default value, all options, API
  *   persistence on change, and UI reflection of API-set level.
- * - Enforcement test (real LLM): `read` permission blocks `shell_cmd`; the agent relays
- *   the permission-level error phrase back via its text response.
+ * - Enforcement tests (real LLM): `write_file`, `web_fetch`, `shell_cmd`,
+ *   `create_agent`, and `load_skill` are exercised against the documented
+ *   `read` / `ask` / `auto` matrix.
  *
  * Implementation Notes:
  * - UI-only tests use Playwright's `waitForResponse` to assert the correct PATCH call
  *   is emitted when the select changes, then reload and verify the reflected value.
- * - The enforcement test uses `setWorldToolPermission` (API helper) to set `read` before
- *   navigating to the world, then sends a shell_cmd message and waits for the phrase
- *   "permission level" which the tool error always includes.
- * - `read` enforcement resets back to `auto` between tests via fixture bootstrap, which
- *   always tears down and recreates the world with no `tool_permission` key.
+ * - Enforcement cases use `setWorldToolPermission` (API helper) to switch between
+ *   `read`, `ask`, and `auto`, then navigate back to the world before sending
+ *   tool-specific prompts through the real UI.
+ * - Bootstrap resets the world between tests, so every test starts from a clean
+ *   `auto` default when the `tool_permission` key is absent.
  *
  * Recent Changes:
+ * - 2026-03-12: Updated header docs to match the full permission-matrix coverage already implemented in this spec.
  * - 2026-03-12: Initial file — web e2e coverage for tool-permission UI and enforcement.
  */
 
@@ -37,13 +39,14 @@ import {
   TEST_WORKSPACE_PATH,
   WRITE_FILE_TARGET,
   getWorldAgentNames,
-  gotoWorld,
-  respondToHitlPrompt,
-  sendComposerMessage,
-  setWorldToolPermission,
-  waitForHitlPrompt,
-  waitForAssistantToken,
-} from './support/web-harness.js';
+    gotoWorld,
+    respondToHitlPrompt,
+    sendComposerMessage,
+    setWorldToolPermission,
+    waitForHitlPrompt,
+    waitForAssistantToken,
+    waitForWorldIdle,
+  } from './support/web-harness.js';
 
 const PERMISSION_FLOW_TIMEOUT_MS = 60_000;
 
@@ -160,8 +163,9 @@ test.describe('Tool permission enforcement', () => {
 
     await reloadWorldWithPermission(page, bootstrapState, 'ask');
     await sendComposerMessage(page, 'WRITE_FILE_ASK: exercise the ask path.');
+    await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
+    await respondToHitlPrompt(page, 'approve', PERMISSION_FLOW_TIMEOUT_MS);
     await waitForAssistantToken(page, 'E2E_WRITE_FILE_ASK_OK', PERMISSION_FLOW_TIMEOUT_MS);
-    await expect(page.getByTestId('hitl-prompt')).toBeHidden();
     await expect(fs.readFile(writeTargetPath, 'utf8')).resolves.toContain('ASK_WRITE_OK');
 
     await reloadWorldWithPermission(page, bootstrapState, 'auto');
@@ -177,20 +181,21 @@ test.describe('Tool permission enforcement', () => {
   }) => {
     await reloadWorldWithPermission(page, bootstrapState, 'read');
     await sendComposerMessage(page, 'WEB_FETCH_READ: exercise the read block path.');
-    await waitForAssistantToken(page, 'E2E_WEB_FETCH_READ_BLOCKED', PERMISSION_FLOW_TIMEOUT_MS);
+    await waitForAssistantToken(page, 'E2E_WEB_FETCH_READ_OK', PERMISSION_FLOW_TIMEOUT_MS);
+    await waitForWorldIdle(page, PERMISSION_FLOW_TIMEOUT_MS);
     await expect(page.getByTestId('hitl-prompt')).toBeHidden();
 
     await reloadWorldWithPermission(page, bootstrapState, 'ask');
     await sendComposerMessage(page, 'WEB_FETCH_ASK: exercise the ask path.');
-    await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
-    await respondToHitlPrompt(page, 'yes', PERMISSION_FLOW_TIMEOUT_MS);
     await waitForAssistantToken(page, 'E2E_WEB_FETCH_ASK_OK', PERMISSION_FLOW_TIMEOUT_MS);
+    await waitForWorldIdle(page, PERMISSION_FLOW_TIMEOUT_MS);
+    await expect(page.getByTestId('hitl-prompt')).toBeHidden();
 
     await reloadWorldWithPermission(page, bootstrapState, 'auto');
     await sendComposerMessage(page, 'WEB_FETCH_AUTO: exercise the auto path.');
-    await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
-    await respondToHitlPrompt(page, 'yes', PERMISSION_FLOW_TIMEOUT_MS);
     await waitForAssistantToken(page, 'E2E_WEB_FETCH_AUTO_OK', PERMISSION_FLOW_TIMEOUT_MS);
+    await waitForWorldIdle(page, PERMISSION_FLOW_TIMEOUT_MS);
+    await expect(page.getByTestId('hitl-prompt')).toBeHidden();
   });
 
   test('shell_cmd follows the read/ask/auto matrix', async ({
@@ -212,10 +217,12 @@ test.describe('Tool permission enforcement', () => {
     await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
     await respondToHitlPrompt(page, 'approve', PERMISSION_FLOW_TIMEOUT_MS);
     await waitForAssistantToken(page, 'E2E_SHELL_ASK_OK', PERMISSION_FLOW_TIMEOUT_MS);
+    await waitForWorldIdle(page, PERMISSION_FLOW_TIMEOUT_MS);
 
     await reloadWorldWithPermission(page, bootstrapState, 'auto');
     await sendComposerMessage(page, 'SHELL_AUTO: exercise the auto low-risk path.');
     await waitForAssistantToken(page, 'E2E_SHELL_AUTO_OK', PERMISSION_FLOW_TIMEOUT_MS);
+    await waitForWorldIdle(page, PERMISSION_FLOW_TIMEOUT_MS);
     await expect(page.getByTestId('hitl-prompt')).toBeHidden();
 
     await resetWorkspaceFile(
@@ -227,6 +234,7 @@ test.describe('Tool permission enforcement', () => {
     await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
     await respondToHitlPrompt(page, 'approve', PERMISSION_FLOW_TIMEOUT_MS);
     await waitForAssistantToken(page, 'E2E_SHELL_RISKY_AUTO_OK', PERMISSION_FLOW_TIMEOUT_MS);
+    await waitForWorldIdle(page, PERMISSION_FLOW_TIMEOUT_MS);
     await expect(pathExists(deleteTargetPath)).resolves.toBe(false);
   });
 
@@ -273,7 +281,7 @@ test.describe('Tool permission enforcement', () => {
     await reloadWorldWithPermission(page, bootstrapState, 'read');
     await sendComposerMessage(page, 'LOAD_SKILL_READ: exercise the read block path.');
     await waitForToolSummary(page, 'load_skill');
-    await page.waitForTimeout(2_000);
+    await waitForWorldIdle(page, PERMISSION_FLOW_TIMEOUT_MS);
     await expect(page.getByTestId('hitl-prompt')).toBeHidden();
     await expect(pathExists(markerPath)).resolves.toBe(false);
   });
@@ -284,8 +292,10 @@ test.describe('Tool permission enforcement', () => {
   }) => {
     await reloadWorldWithPermission(page, bootstrapState, 'ask');
     await sendComposerMessage(page, 'LOAD_SKILL_ASK: exercise the ask path.');
-    await waitForToolSummary(page, 'load_skill');
+    await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
+    await respondToHitlPrompt(page, 'yes once', PERMISSION_FLOW_TIMEOUT_MS);
     await waitForAssistantToken(page, 'E2E_LOAD_SKILL_ASK_OK', PERMISSION_FLOW_TIMEOUT_MS);
+    await waitForWorldIdle(page, PERMISSION_FLOW_TIMEOUT_MS);
   });
 
   test('load_skill runs scripts without approval at auto', async ({
@@ -296,6 +306,7 @@ test.describe('Tool permission enforcement', () => {
     await sendComposerMessage(page, 'LOAD_SKILL_AUTO: exercise the auto path.');
     await waitForToolSummary(page, 'load_skill');
     await waitForAssistantToken(page, 'E2E_LOAD_SKILL_AUTO_OK', PERMISSION_FLOW_TIMEOUT_MS);
+    await waitForWorldIdle(page, PERMISSION_FLOW_TIMEOUT_MS);
     await expect(page.getByTestId('hitl-prompt')).toBeHidden();
   });
 });

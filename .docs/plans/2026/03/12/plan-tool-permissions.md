@@ -70,7 +70,7 @@ flowchart TD
 All changes read `getEnvValueFromText((context?.world as any)?.variables, 'tool_permission') ?? 'auto'`.
 
 - [x] **2.1** `core/file-tools.ts` — `write_file`: blocks on `'read'` with error string
-- [x] **2.2** `core/web-fetch-tool.ts` — `web_fetch`: blocks on `'read'` with JSON error
+- [x] **2.2** `core/web-fetch-tool.ts` — `web_fetch`: remains allowed at all permission levels (existing local/private approval logic unchanged)
 - [x] **2.3** `core/shell-cmd-tool.ts`: blocks on `'read'`; forces HITL on `'ask'` for every invocation
 - [x] **2.4** `core/load-skill-tool.ts`: blocks script execution on `'read'` with inline note; `'ask'` covered by existing per-skill HITL approval before scripts run
 - [x] **2.5** `core/create-agent-tool.ts`: blocks on `'read'`
@@ -95,14 +95,12 @@ All changes read `getEnvValueFromText((context?.world as any)?.variables, 'tool_
 
 ### Phase 5 — Unit Tests
 
-- [x] **5.1** Created `tests/core/tool-permissions.test.ts` — 7 cases, all passing:
-  - `write_file` at `read`: blocked
-  - `write_file` at `auto`: proceeds (regression)
-  - `web_fetch` at `read`: blocked JSON error
-  - `shell_cmd` at `read`: blocked error result
-  - `shell_cmd` at `ask`: forces HITL; denied → throws `not approved`
-  - `create_agent` at `read`: blocked
-  - `load_skill` at `read`: instructions returned, scripts blocked
+- [x] **5.1** Created `tests/core/tool-permissions.test.ts` — expanded to 16 cases covering the documented matrix:
+  - `write_file`: `read` blocked, `ask` HITL, `auto` proceeds
+  - `web_fetch`: `read`/`ask`/`auto` allowed
+  - `shell_cmd`: `read` blocked, `ask` HITL every call, `auto` risk-tier logic
+  - `create_agent`: `read` blocked, `ask`/`auto` keep approval flow
+  - `load_skill` scripts: `read` blocked, `ask` per-skill HITL, `auto` proceeds
 
 ---
 
@@ -113,6 +111,8 @@ All changes read `getEnvValueFromText((context?.world as any)?.variables, 'tool_
 | `tool_permission` stored in `world.variables` (not a DB column) | Avoids migration; follows `working_directory` pattern; frontend already has `upsertEnvVariable`/`getEnvValueFromText` helpers |
 | `toolPermission` defaults to `'auto'` (key absent → `?? 'auto'`) | REQ-6: must not break existing worlds |
 | Read through `getEnvValueFromText(world.variables, 'tool_permission')` in each tool | Context `world` is already threaded; zero new architecture needed |
+| `write_file` at `ask` routes through HITL | Matches the final permission matrix and keeps write operations explicit outside `auto` |
+| `web_fetch` stays allowed at `read`/`ask`/`auto` | Final matrix treats web_fetch like a read-only retrieval tool, with SSRF/private-network approval logic unchanged |
 | `shell_cmd` at `ask` always routes to HITL regardless of risk tier | REQ-2 explicit: "bypassing its existing risk-tier `allow` path" |
 | `create_agent` under `ask/auto` is unchanged (already HITL-gated) | REQ-2: "it already does; this stays active in Ask and Auto" |
 | `load_skill` at `read`: instructions load, scripts blocked with inline note | REQ-2: "load_skill MUST load skill instructions into context but MUST block any script execution step" |
@@ -149,6 +149,7 @@ All changes read `getEnvValueFromText((context?.world as any)?.variables, 'tool_
 ## Risk & Assumptions
 
 - **Risk**: `shell_cmd` at `ask` level — existing tests that rely on `allow`-tier paths may fail. Mitigation: tests check for `auto` level (default), so existing tests are unaffected.
+- **Risk**: Long-running real-provider E2E cases can exceed a short global Playwright timeout. Mitigation: Electron Playwright config now uses a long global timeout budget.
 - **Assumption**: `context.world` is always non-null inside `execute()` when running inside the agent loop. The world reference is injected by `managers.ts` before tool dispatch.
 - **Assumption**: Memory-storage (`memory-storage.ts`) is used in tests; it must also default `toolPermission` to `'auto'`.
 - **Non-goal**: ~~Electron UI~~ — Electron dropdown implemented on 2026-03-12 using the same `world.variables` env key pattern.

@@ -2,7 +2,7 @@
 
 This directory contains Playwright E2E tests that launch the real compiled Electron application and exercise desktop flows with actual LLM API calls.
 
-The current desktop suite covers 47 real-app tests across app shell, chat-flow matrix, queue lifecycle, and tool-permission scenarios.
+The current desktop suite covers 62 real-app tests across app shell, chat-flow matrix, queue lifecycle, and tool-permission scenarios.
 
 ## Prerequisites
 
@@ -64,7 +64,7 @@ The current desktop suite covers 47 real-app tests across app shell, chat-flow m
 
 ### 4. Tool Permission Controls (`tool-permissions.spec.ts`)
 
-**Validates the world-level tool-permission dropdown in the ComposerBar and enforces the `read` level.**
+**Validates the world-level tool-permission dropdown in the ComposerBar and exercises the full permission matrix.**
 
 | Test | LLM | What it checks |
 |---|---|---|
@@ -73,7 +73,11 @@ The current desktop suite covers 47 real-app tests across app shell, chat-flow m
 | All three options present | No | `read`, `ask`, `auto` option elements all exist |
 | Change to read updates world variables | No | `selectOption('read')` → bridge `loadWorld` returns variables with `tool_permission=read` |
 | Select reflects read set via bridge | No | `setDesktopToolPermission('read')` → world reload → UI shows `read` |
-| read blocks shell_cmd (agent response) | **Yes** | Tool returns blocked error; agent response includes `"permission level"` |
+| `write_file` follows read/ask/auto | **Yes** | `read` blocked, `ask` requires HITL, `auto` writes immediately |
+| `web_fetch` follows read/ask/auto | **Yes** | Allowed at all levels with no extra approval prompts |
+| `shell_cmd` follows read/ask/auto | **Yes** | `read` blocked, `ask` always HITL, `auto` keeps risk-tier logic |
+| `create_agent` follows read/ask/auto | **Yes** | `read` blocked; `ask` and `auto` keep the existing approval flow |
+| `load_skill` scripts follow read/ask/auto | **Yes** | `read` blocks script execution, `ask` requires per-skill approval, `auto` runs scripts directly |
 
 ## Running the Tests
 
@@ -116,7 +120,7 @@ Executed in a child Node process before Electron launches. It:
 
 ### Electron Harness (`support/electron-harness.ts`)
 High-level desktop helpers used by spec files:
-- `launchAndPrepare` — selects the `e2e-test` world and waits for the shell to settle
+- `launchAndPrepare` — waits for the shell, waits for the seeded world list, selects `e2e-test`, and confirms the seeded agent exists before continuing
 - `sendComposerMessage` — types and submits a message via the chat composer
 - `waitForAssistantToken` — polls transcript until a token appears in an assistant bubble
 - `editLatestUserMessage` — triggers inline edit on the most recent user turn
@@ -134,13 +138,18 @@ High-level desktop helpers used by spec files:
 - Lets the harness wait for actual desktop session selection to settle before the next action runs
 - Covered by a unit regression test at `tests/electron/e2e/electron-harness-session-resolution.test.ts`
 
+### World Selection Helper (`support/world-selection.ts`)
+- Pure helper used by the Electron harness to classify retryable world-selector re-render failures and detect when the seeded world is already selected
+- Keeps `launchAndPrepare()` resilient when the world dropdown re-renders during selection
+- Covered by a unit regression test at `tests/electron/e2e/electron-harness-world-selection.test.ts`
+
 ## Configuration
 
 The Playwright Electron config lives at [`playwright.electron.config.ts`](../../playwright.electron.config.ts):
 - `testDir`: `tests/electron-e2e`
 - `workers: 1` — serial execution (one Electron instance at a time)
-- `timeout: 180 000 ms` per test (real LLM calls can be slow)
-- `expect.timeout: 30 000 ms`
+- `timeout: 180 000 ms` per test
+- `expect.timeout: 60 000 ms`
 - Traces, screenshots, and video retained on failure
 
 ## Debugging Failures

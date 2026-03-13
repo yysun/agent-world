@@ -5,6 +5,8 @@
  * Supports world/agent/chat management with optimized serialization and error handling.
  *
  * Changes:
+ * - 2026-03-12: World status now keeps the current chat in `queuedChatIds` while a durable `queued`/`sending`
+ *   message_queue row still exists, preventing false-idle status during post-response queue cleanup.
  * - 2026-03-12: Trailing comma cleanup in WorldUpdateSchema; tool_permission is stored in world.variables env key — no dedicated API schema field needed.
  * - 2026-03-06: Removed runtime `world.currentChatId` fallback from message send routes; chat-scoped sends now require explicit `chatId`.
  * - 2026-03-06: Added `/tool-artifact` for stable, restorable adopted-tool preview URLs limited to approved world working directories and registered skill roots.
@@ -96,6 +98,7 @@ import {
   stopMessageProcessing,
   submitWorldHitlResponse,
   listPendingHitlPromptEventsFromMessages,
+  getQueueMessages,
   getActiveProcessingChatIds,
   getActiveAgentNames,
   type World,
@@ -131,6 +134,20 @@ function isUserSender(sender: string): boolean {
   const normalized = String(sender || '').trim().toLowerCase();
   return normalized === 'human' || normalized.startsWith('user');
 }
+
+async function hasPendingCurrentChatQueueMessage(world: World): Promise<boolean> {
+  const currentChatId = String(world.currentChatId || '').trim();
+  if (!currentChatId) {
+    return false;
+  }
+
+  const queuedMessages = await getQueueMessages(world.id, currentChatId);
+  return queuedMessages.some((entry) => {
+    const status = String(entry?.status || '').trim().toLowerCase();
+    return status === 'queued' || status === 'sending';
+  });
+}
+
 const DEFAULT_WORLD_NAME = 'Default World';
 
 type WorldContext = {
@@ -481,8 +498,14 @@ router.get('/worlds/:worldName', validateWorld, async (req: Request, res: Respon
 router.get('/worlds/:worldName/status', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
     const world = (req as any).world as World;
+    const includeCurrentChatQueue = await hasPendingCurrentChatQueueMessage(world);
     const activeChatIds = [...getActiveProcessingChatIds(world)];
-    const queuedChatIds = [...(world._queuedChatIds ?? [])];
+    const queuedChatIds = [
+      ...new Set([
+        ...(world._queuedChatIds ?? []),
+        ...(includeCurrentChatQueue && world.currentChatId ? [world.currentChatId] : []),
+      ]),
+    ];
     const activeAgentNames = getActiveAgentNames(world);
     res.json({
       worldId: world.id,

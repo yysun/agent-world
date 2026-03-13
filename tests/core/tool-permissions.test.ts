@@ -12,7 +12,7 @@
  * - No dedicated DB column — follows the same pattern as `working_directory`.
  *
  * Recent changes:
- * - 2026-03-12: Expanded coverage to the full documented permission matrix.
+ * - 2026-03-12: Updated write_file/web_fetch coverage to match the documented permission matrix.
  */
 
 import * as fsModule from 'fs';
@@ -169,7 +169,7 @@ describe('tool_permission enforcement via world.variables', () => {
       expect(writeFileSpy).not.toHaveBeenCalled();
     });
 
-    it('allows file writes without HITL when tool_permission=ask', async () => {
+    it('requires HITL approval before file writes when tool_permission=ask', async () => {
       const tool = createWriteFileToolDefinition();
       const result = await tool.execute(
         { filePath: 'test.txt', content: 'hello ask' },
@@ -178,12 +178,13 @@ describe('tool_permission enforcement via world.variables', () => {
         {
           workingDirectory: '/workspace',
           world: { variables: 'tool_permission=ask' },
+          chatId: 'chat-1',
         },
       );
 
       expect(String(result)).not.toContain('blocked by the current permission level');
       expect(writeFileSpy).toHaveBeenCalled();
-      expect(mockRequestToolApproval).not.toHaveBeenCalled();
+      expect(mockRequestToolApproval).toHaveBeenCalledTimes(1);
     });
 
     it('proceeds to write when tool_permission=auto', async () => {
@@ -205,7 +206,13 @@ describe('tool_permission enforcement via world.variables', () => {
   });
 
   describe('web_fetch', () => {
-    it('blocks fetches when tool_permission=read', async () => {
+    it('allows fetches without HITL when tool_permission=read', async () => {
+      const fetchMock = vi.fn(async () => new Response('hello from read', {
+        status: 200,
+        headers: { 'content-type': 'text/plain; charset=utf-8' },
+      }));
+      vi.stubGlobal('fetch', fetchMock);
+
       const tool = createWebFetchToolDefinition();
       const result = await tool.execute(
         { url: 'https://example.com' },
@@ -215,8 +222,9 @@ describe('tool_permission enforcement via world.variables', () => {
       );
 
       const parsed = JSON.parse(String(result));
-      expect(parsed.ok).toBe(false);
-      expect(parsed.error).toContain('permission level (read)');
+      expect(parsed.ok).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(mockRequestToolApproval).not.toHaveBeenCalled();
     });
 
     it('allows fetches without HITL when tool_permission=ask', async () => {

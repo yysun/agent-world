@@ -12,6 +12,10 @@
  * Implementation Notes:
  * - Route handlers are extracted from the router's stack for direct invocation.
  * - getActiveProcessingChatIds and getActiveAgentNames are mocked on core/index.js.
+ *
+ * Recent Changes:
+ * - 2026-03-12: Added regression coverage for durable current-chat queue rows so status does not report false-idle
+ *   while post-response queue cleanup is still removing a `sending` message_queue row.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -19,6 +23,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const getWorldMock = vi.fn();
 const getActiveProcessingChatIdsMock = vi.fn();
 const getActiveAgentNamesMock = vi.fn();
+const getQueueMessagesMock = vi.fn();
 
 vi.mock('../../core/index.js', () => {
   const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -52,6 +57,7 @@ vi.mock('../../core/index.js', () => {
     listPendingHitlPromptEventsFromMessages: vi.fn(async () => []),
     enqueueAndProcessUserTurn: vi.fn(),
     dispatchImmediateChatMessage: vi.fn(),
+    getQueueMessages: getQueueMessagesMock,
     getActiveProcessingChatIds: getActiveProcessingChatIdsMock,
     getActiveAgentNames: getActiveAgentNamesMock,
     subscribeWorld: vi.fn(),
@@ -149,6 +155,7 @@ describe('GET /worlds/:worldName/status', () => {
     getWorldMock.mockResolvedValue(createWorldRecord());
     getActiveProcessingChatIdsMock.mockReturnValue(new Set<string>());
     getActiveAgentNamesMock.mockReturnValue([]);
+    getQueueMessagesMock.mockResolvedValue([]);
   });
 
   it('returns correct shape with all required fields', async () => {
@@ -209,6 +216,33 @@ describe('GET /worlds/:worldName/status', () => {
     expect(res2.body.activeChatIds).toEqual(['chat-active-1']);
     expect(res2.body.activeAgentNames).toEqual(['alice']);
     expect(res2.body.sendingCount).toBe(1);
+  });
+
+  it('keeps the current chat queued while a durable sending row still exists', async () => {
+    getQueueMessagesMock.mockResolvedValue([
+      {
+        worldId: 'world-1',
+        chatId: 'chat-1',
+        messageId: 'q-sending-1',
+        content: 'pending user turn',
+        sender: 'human',
+        status: 'sending',
+      },
+    ]);
+
+    const { default: router } = await import('../../server/api.js');
+    const [validateWorld, routeHandler] = getRouteHandlers(router, 'get', '/worlds/:worldName/status');
+
+    const req: any = { params: { worldName: 'world-1' }, body: {} };
+    const res = createMockResponse();
+    await invokeMiddleware(validateWorld, req, res);
+
+    const res2 = createMockResponse();
+    await invokeMiddleware(routeHandler, req, res2);
+
+    expect(getQueueMessagesMock).toHaveBeenCalledWith('world-1', 'chat-1');
+    expect(res2.body.queuedChatIds).toEqual(['chat-1']);
+    expect(res2.body.queueDepth).toBe(1);
   });
 
   it('returns 404 when world is not found', async () => {

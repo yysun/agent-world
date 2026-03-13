@@ -11,6 +11,7 @@
  * - Mocks global fetch to avoid real network calls
  *
  * Recent Changes:
+ * - 2026-03-12: Added regression coverage for blocked private targets without world context so execute never falls through to an uncontrolled network fetch.
  * - 2026-02-28: Added initial unit coverage for built-in web_fetch tool.
  * - 2026-03-01: Added coverage for includeLinks=false behavior to ensure anchor text is preserved without markdown links.
  * - 2026-03-05: Added timeout-abort coverage to enforce deterministic `timeout_error` mapping.
@@ -127,6 +128,13 @@ describe('web_fetch tool', () => {
     const result = await tool.execute({ url: 'https://internal.example.com' });
 
     expect(String(result)).toContain('Error: web_fetch failed - blocked_target');
+  });
+
+  it('blocks localhost targets when no world context is available for approval', async () => {
+    const tool = createWebFetchToolDefinition();
+    const result = await tool.execute({ url: 'http://localhost:3000' });
+
+    expect(String(result)).toContain('Error: web_fetch failed - blocked_target: local/private hostnames are not allowed');
   });
 
   it('requests HITL approval and allows localhost fetch when approved', async () => {

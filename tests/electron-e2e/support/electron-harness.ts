@@ -14,6 +14,7 @@
  * - Assertions still target visible desktop behavior in the actual Electron window.
  *
  * Recent Changes:
+ * - 2026-03-12: Hardened seeded-world selection against dropdown re-render detaches and made launch preparation wait for the seeded agent before continuing.
  * - 2026-03-10: Added initial helper set for the real Electron Playwright E2E harness.
  * - 2026-03-10: Switched workspace bootstrapping to per-run isolated directories to avoid SQLite/user-data lock collisions.
  * - 2026-03-12: Added `setDesktopToolPermission` helper to update tool_permission env key via the preload bridge.
@@ -27,10 +28,14 @@ import { createRequire } from 'node:module';
 import { promisify } from 'node:util';
 import { expect, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { resolveCreatedSessionId } from './session-resolution.js';
+import { isRetryableWorldSelectionError, isTargetWorldSelected } from './world-selection.js';
 
 const execFileAsync = promisify(execFile);
 const electronWorkspaceRequire = createRequire(path.resolve(process.cwd(), 'electron/package.json'));
 const ELECTRON_E2E_QUEUE_NO_RESPONSE_FALLBACK_MS = process.env.AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS || '5000';
+const WORLD_SELECTION_TIMEOUT_MS = 15_000;
+const WORLD_SELECTION_MAX_ATTEMPTS = 4;
+const SEEDED_AGENT_NAME = 'E2E Google';
 
 export const TEST_WORLD_ID = 'e2e-test';
 export const TEST_WORLD_NAME = 'e2e-test';
@@ -154,10 +159,79 @@ export async function waitForAppShell(page: Page): Promise<void> {
   await page.getByTestId('world-selector').waitFor({ state: 'visible' });
 }
 
+async function listAvailableWorldIds(page: Page): Promise<string[]> {
+  return await page.evaluate(async () => {
+    const api = (window as any).agentWorldDesktop;
+    const worlds = await api.listWorlds();
+    return Array.isArray(worlds)
+      ? worlds
+        .map((world: any) => String(world?.id || '').trim())
+        .filter(Boolean)
+      : [];
+  });
+}
+
+async function readWorldSelectorLabel(page: Page): Promise<string> {
+  return await page.getByTestId('world-selector').innerText();
+}
+
+async function waitForSeededWorldList(page: Page): Promise<void> {
+  await expect.poll(async () => {
+    return await listAvailableWorldIds(page);
+  }, {
+    timeout: WORLD_SELECTION_TIMEOUT_MS,
+    message: `Expected seeded world "${TEST_WORLD_ID}" to be available in the Electron world list.`,
+  }).toContain(TEST_WORLD_ID);
+}
+
+async function waitForSeededAgent(page: Page): Promise<void> {
+  await expect.poll(async () => {
+    return await page.evaluate(async (worldId: string) => {
+      const api = (window as any).agentWorldDesktop;
+      const result = await api.loadWorld(worldId);
+      return Array.isArray(result?.world?.agents)
+        ? result.world.agents
+          .map((agent: any) => String(agent?.name || '').trim())
+          .filter(Boolean)
+        : [];
+    }, TEST_WORLD_ID);
+  }, {
+    timeout: WORLD_SELECTION_TIMEOUT_MS,
+    message: `Expected seeded agent "${SEEDED_AGENT_NAME}" to exist before continuing with Electron E2E steps.`,
+  }).toContain(SEEDED_AGENT_NAME);
+}
+
 export async function selectSeededWorld(page: Page): Promise<void> {
-  await page.getByTestId('world-selector').click();
-  await page.getByTestId(`world-item-${TEST_WORLD_ID}`).click();
-  await page.getByText(TEST_WORLD_NAME, { exact: true }).first().waitFor({ state: 'visible' });
+  await waitForSeededWorldList(page);
+
+  if (isTargetWorldSelected(await readWorldSelectorLabel(page), TEST_WORLD_NAME)) {
+    return;
+  }
+
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < WORLD_SELECTION_MAX_ATTEMPTS; attempt += 1) {
+    await page.getByTestId('world-selector').click();
+    const worldItem = page.getByTestId(`world-item-${TEST_WORLD_ID}`);
+    await worldItem.waitFor({ state: 'visible', timeout: WORLD_SELECTION_TIMEOUT_MS });
+
+    try {
+      await worldItem.click();
+      await expect(page.getByTestId('world-selector')).toContainText(TEST_WORLD_NAME, {
+        timeout: WORLD_SELECTION_TIMEOUT_MS,
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableWorldSelectionError(error)) {
+        throw error;
+      }
+      await page.keyboard.press('Escape').catch(() => {});
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Failed to select seeded world "${TEST_WORLD_ID}" after ${WORLD_SELECTION_MAX_ATTEMPTS} attempts.`);
 }
 
 export async function getDesktopState(page: Page): Promise<DesktopState> {
@@ -400,6 +474,7 @@ export async function waitForQueueStatus(page: Page, statusLabel: 'Queued' | 'Pr
 export async function launchAndPrepare(page: Page): Promise<void> {
   await waitForAppShell(page);
   await selectSeededWorld(page);
+  await waitForSeededAgent(page);
 }
 
 export async function closeElectronApp(app: ElectronApplication): Promise<void> {

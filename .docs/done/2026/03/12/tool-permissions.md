@@ -4,7 +4,7 @@
 **Branch**: `feature/tool-permissions`  
 **REQ**: `.docs/reqs/2026/03/11/req-tool-permissions.md`  
 **Plan**: `.docs/plans/2026/03/12/plan-tool-permissions.md`  
-**Tests**: 7/7 passing (`tests/core/tool-permissions.test.ts`)
+**Tests**: 16/16 passing (`tests/core/tool-permissions.test.ts`)
 
 **Electron**: Permission dropdown added to `ComposerBar` (2026-03-12)
 
@@ -31,8 +31,8 @@ The permission level is stored as the env key `tool_permission=<value>` inside `
 
 | Level | `write_file` | `web_fetch` | `shell_cmd` | `create_agent` | `load_skill` scripts |
 |---|---|---|---|---|---|
-| `read` | ❌ blocked | ❌ blocked | ❌ blocked | ❌ blocked | ❌ blocked |
-| `ask` | ✅ auto | ✅ auto | 🔔 HITL every call | ✅ HITL (existing) | ✅ HITL (existing per-skill) |
+| `read` | ❌ blocked | ✅ allowed | ❌ blocked | ❌ blocked | ❌ blocked |
+| `ask` | 🔔 HITL every call | ✅ allowed | 🔔 HITL every call | ✅ HITL (existing) | ✅ HITL (existing per-skill) |
 | `auto` | ✅ auto | ✅ auto | ✅ risk-tier logic | ✅ HITL (existing) | ✅ auto |
 
 ---
@@ -42,8 +42,8 @@ The permission level is stored as the env key `tool_permission=<value>` inside `
 | File | Change |
 |---|---|
 | `core/types.ts` | Header comment updated |
-| `core/file-tools.ts` | `write_file`: blocks on `read` |
-| `core/web-fetch-tool.ts` | `web_fetch`: blocks on `read` with JSON error |
+| `core/file-tools.ts` | `write_file`: blocks on `read`, HITL on `ask`, automatic on `auto` |
+| `core/web-fetch-tool.ts` | `web_fetch`: remains allowed at `read`/`ask`/`auto` (existing private-network approval flow unchanged) |
 | `core/shell-cmd-tool.ts` | Blocks on `read`; forces HITL on `ask` for every invocation |
 | `core/load-skill-tool.ts` | Script execution blocked on `read`; `ask` covered by existing per-skill HITL |
 | `core/create-agent-tool.ts` | Blocks on `read` |
@@ -56,21 +56,30 @@ The permission level is stored as the env key `tool_permission=<value>` inside `
 | `electron/renderer/src/hooks/useAppActionHandlers.ts` | Added `onSetToolPermission`: `upsertEnvVariable` → `api.updateWorld({ variables })` |
 | `electron/renderer/src/App.tsx` | Derives `toolPermission` from `getEnvValueFromText(loadedWorld?.variables, 'tool_permission')` |
 | `electron/renderer/src/utils/app-layout-props.ts` | Added `toolPermission`/`onSetToolPermission` to `createMainContentComposerProps` |
-| `tests/core/tool-permissions.test.ts` | New — 7 unit tests, all passing |
+| `tests/core/tool-permissions.test.ts` | Expanded — 16 unit tests, all passing |
 
 ---
 
 ## Tests
 
-All 7 unit tests pass:
+All 16 unit tests pass:
 
-1. `write_file` → `read`: returns error containing `'blocked'`
-2. `write_file` → `auto`: proceeds to write (regression)
-3. `web_fetch` → `read`: returns `{ ok: false, error: '...permission level (read)...' }`
-4. `shell_cmd` → `read`: returns result containing `'permission level (read)'`
-5. `shell_cmd` → `ask`: forces HITL regardless of risk tier; denied → throws `'not approved'`
-6. `create_agent` → `read`: returns `{ ok: false, status: 'blocked' }`
-7. `load_skill` → `read`: returns instructions; scripts blocked with inline note
+1. `write_file` → `read`: returns a blocked error
+2. `write_file` → `ask`: requires HITL approval before writing
+3. `write_file` → `auto`: proceeds to write
+4. `web_fetch` → `read`: remains allowed
+5. `web_fetch` → `ask`: remains allowed
+6. `web_fetch` → `auto`: remains allowed
+7. `shell_cmd` → `read`: returns a blocked error result
+8. `shell_cmd` → `ask`: forces HITL regardless of risk tier
+9. `shell_cmd` → `auto`: keeps low-risk automatic execution
+10. `shell_cmd` → `auto` risky path: still requires approval
+11. `create_agent` → `read`: returns `{ ok: false, status: 'blocked' }`
+12. `create_agent` → `ask`: keeps approval flow
+13. `create_agent` → `auto`: keeps approval flow
+14. `load_skill` → `read`: returns instructions; scripts blocked with inline note
+15. `load_skill` → `ask`: requires per-skill approval before scripts run
+16. `load_skill` → `auto`: runs referenced scripts without extra approval
 
 ---
 
@@ -78,8 +87,8 @@ All 7 unit tests pass:
 
 | # | Criterion | Status |
 |---|---|---|
-| 1 | `read`: `shell_cmd`/`web_fetch`/`write_file`/`create_agent` blocked with clear error | ✅ |
-| 2 | `ask`: `shell_cmd` always prompts HITL; `web_fetch`/`write_file` auto; HITL flow end-to-end | ✅ |
+| 1 | `read`: `shell_cmd`/`write_file`/`create_agent` blocked; `web_fetch` allowed; blocked calls return clear errors | ✅ |
+| 2 | `ask`: `write_file`/`shell_cmd` always prompt HITL; `web_fetch` auto; HITL flow end-to-end | ✅ |
 | 3 | `auto`: all tools run with no new restrictions | ✅ |
 | 4 | Web composer shows dropdown; updates world on change | ✅ |
 | 4b | Electron composer shows dropdown; updates world on change | ✅ |

@@ -19,41 +19,46 @@ A dropdown to select the level is added to the web frontend composer toolbar, pl
 ## Permission Levels
 
 ### Read
-Agents may only passively inspect project content and load skill instructions. All write, network, and execution tools are blocked.
+Agents may only passively inspect project content, fetch public web content, and load skill instructions. Write, shell execution, agent creation, and skill script execution are blocked.
 
 **Allowed tools (automatic):**
 - `read_file` — read project files
 - `list_files` — list directory contents
 - `grep` — search file contents
+- `web_fetch` — fetch public web content (existing SSRF/private-network guards still apply)
 - `load_skill` — load skill instruction text into agent context (read phase only; skill script execution is blocked)
 - `send_message` — agent-to-agent messaging (unrelated to file/web/shell)
 - `human_intervention_request` — HITL is always available
 
 **Blocked tools (returns an error / refused at dispatch):**
 - `write_file`
-- `web_fetch`
 - `shell_cmd`
 - `create_agent`
 - Any skill script/action triggered via `load_skill`
 
 ### Ask
-Agents may inspect files, write files, and fetch web docs automatically. They must get user approval before every shell command and before executing any skill action or script. Creating agents also requires approval.
+Agents may inspect files and fetch web docs automatically. They must get user approval before every file write, every shell command, and every skill action or script. Creating agents also requires approval.
 
 **Allowed tools (automatic):**
 - All Read-level tools ✓
-- `write_file` — file writes within the working directory
 - `web_fetch` — URL fetch (SSRF guards still apply)
 
 **Tools requiring per-invocation approval (HITL):**
+- `write_file` — each write requires user approval
 - `shell_cmd` — every invocation requires user approval regardless of risk tier
 - `load_skill` action/script execution — each script step requires user approval
 - `create_agent` — requires user approval
 
 ### Auto
-Agents may use all built-in tools automatically without per-invocation approval. The existing project-scope (`working_directory`) and SSRF safety guards remain active.
+Agents may use all built-in tools according to their existing automatic behavior. The existing project-scope (`working_directory`), shell risk-tier logic, create-agent HITL flow, and SSRF safety guards remain active.
 
-**Allowed tools (automatic):**
-- All built-in tools: `read_file`, `list_files`, `grep`, `write_file`, `web_fetch`, `shell_cmd`, `load_skill` (including script execution), `create_agent`, `send_message`, `human_intervention_request`
+**Behavior summary:**
+- `write_file` — automatic
+- `web_fetch` — automatic
+- `shell_cmd` — existing risk-tier logic
+- `load_skill` (including script execution) — automatic
+- `create_agent` — existing approval flow remains active
+- `read_file`, `list_files`, `grep`, `send_message`, `human_intervention_request` — unchanged
 
 ---
 
@@ -71,15 +76,19 @@ Agents may use all built-in tools automatically without per-invocation approval.
 
 - Each built-in tool's execution path **MUST** check the owning world's `toolPermission` level.
 - **Read level:**
-  - `write_file`, `web_fetch`, `shell_cmd`, `create_agent`, and skill script execution **MUST** return an error result (not throw) with a message indicating the tool is blocked by the current permission level.
+  - `write_file`, `shell_cmd`, `create_agent`, and skill script execution **MUST** return an error result (not throw) with a message indicating the tool is blocked by the current permission level.
+  - `web_fetch` **MUST** remain allowed at `read`.
   - `load_skill` **MUST** load skill instructions into context but **MUST** block any script execution step.
 - **Ask level:**
+  - `write_file` **MUST** route every invocation through HITL approval.
   - `shell_cmd` **MUST** route every invocation through HITL approval, bypassing its existing risk-tier `allow` path.
   - `load_skill` script execution steps **MUST** route through HITL approval.
   - `create_agent` **MUST** route through HITL approval (it already does; this stays active in Ask and Auto).
-  - `write_file` and `web_fetch` run automatically (no additional approval beyond existing SSRF guards).
+  - `web_fetch` runs automatically (no additional approval beyond existing SSRF guards).
 - **Auto level:**
-  - All tools run as currently implemented (no new restrictions added).
+  - All tools run as currently implemented.
+  - `shell_cmd` keeps its existing risk-tier gating.
+  - `create_agent` keeps its existing approval flow.
 
 ### REQ-3: REST API Exposure
 
@@ -117,9 +126,9 @@ Agents may use all built-in tools automatically without per-invocation approval.
 
 ## Acceptance Criteria
 
-1. Setting a world to `read`: agents cannot execute `shell_cmd`, `web_fetch`, `write_file`, or `create_agent`; blocked calls return a clear error message.
-2. Setting a world to `ask`: `shell_cmd` always prompts for user approval; `web_fetch` and `write_file` run automatically; HITL approval flow works end-to-end.
+1. Setting a world to `read`: agents cannot execute `shell_cmd`, `write_file`, `create_agent`, or skill scripts; `web_fetch` remains available; blocked calls return a clear error message.
+2. Setting a world to `ask`: `write_file` and `shell_cmd` always prompt for user approval; `web_fetch` runs automatically; HITL approval flow works end-to-end.
 3. Setting a world to `auto`: all tools run with no new restrictions.
 4. The web composer shows the dropdown and updates the world on change.
 5. Existing worlds without a persisted level default to `auto` with no behavior change.
-6. Unit tests cover tool dispatch enforcement for all three levels across `shell_cmd`, `web_fetch`, `write_file`, and `load_skill`.
+6. Unit tests cover tool dispatch enforcement for all three levels across `shell_cmd`, `web_fetch`, `write_file`, `create_agent`, and `load_skill`.

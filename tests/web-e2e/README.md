@@ -14,12 +14,12 @@ These tests run against an actual Chromium browser, a running Express API server
 | `chat-flow-matrix.spec.ts` | Chat lifecycle matrix across Loaded Current Chat, Switched Chat, and New Chat categories |
 | `queue.spec.ts` | Queue and processing lifecycle — in-progress indicator, stop, failed item, error overlay |
 | `shell-stream-parity.spec.ts` | Live shell tool card status transition — running tool summary flips to done without refresh |
-| `tool-permissions.spec.ts` | Tool-permission dropdown UI affordances and `read` enforcement — select presence, default value, PATCH persistence, and real-LLM block verification |
+| `tool-permissions.spec.ts` | Tool-permission dropdown UI affordances and full permission-matrix coverage for `write_file`, `web_fetch`, `shell_cmd`, `create_agent`, and `load_skill` |
 | `world-smoke.spec.ts` | World and chat management affordances — create, delete, search, settings |
 
 ### 5. Tool Permission Controls (`tool-permissions.spec.ts`)
 
-**Validates the world-level tool-permission dropdown in the composer bar and enforces the `read` level.**
+**Validates the world-level tool-permission dropdown in the composer bar and exercises the full permission matrix.**
 
 | Test | LLM | What it checks |
 |---|---|---|
@@ -29,7 +29,11 @@ These tests run against an actual Chromium browser, a running Express API server
 | Change to read fires PATCH + persists | No | UI select change intercepts PATCH `/worlds/:name`; reload reflects `read` |
 | Select reflects ask set via API | No | `setWorldToolPermission('ask')` → navigate → UI shows `ask` |
 | Select reflects read set via API | No | `setWorldToolPermission('read')` → navigate → UI shows `read` |
-| read blocks shell_cmd (agent response) | **Yes** | Tool returns blocked error; agent response includes `"permission level"` |
+| `write_file` follows read/ask/auto | **Yes** | `read` blocked, `ask` requires HITL, `auto` writes immediately |
+| `web_fetch` follows read/ask/auto | **Yes** | Allowed at all levels with no extra approval prompts |
+| `shell_cmd` follows read/ask/auto | **Yes** | `read` blocked, `ask` always HITL, `auto` keeps risk-tier logic |
+| `create_agent` follows read/ask/auto | **Yes** | `read` blocked; `ask` and `auto` keep the existing approval flow |
+| `load_skill` scripts follow read/ask/auto | **Yes** | `read` blocks script execution, `ask` requires per-skill approval, `auto` runs scripts directly |
 
 ---
 
