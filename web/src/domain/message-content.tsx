@@ -17,6 +17,7 @@
  * - Keeps helper logic local to this domain module for focused maintenance
  *
  * Recent Changes:
+ * - 2026-03-13: Resolved restored/result-only tool rows through linked assistant requests and envelope metadata so web summary labels match Electron.
  * - 2026-03-12: Merged attached live tool-stream output into the request card body so running shell output does not
  *   render as a second standalone tool box.
  * - 2026-03-12: Reused one bounded scroll viewport for live and completed plain-text tool output and surfaced
@@ -182,6 +183,11 @@ function resolveToolDisplayName(message: Message): string {
     return executionToolName;
   }
 
+  const envelopeToolName = String(getToolExecutionEnvelope(message)?.tool || '').trim();
+  if (envelopeToolName) {
+    return envelopeToolName;
+  }
+
   const toolCalls: any[] = Array.isArray((message as any)?.tool_calls) ? (message as any).tool_calls : [];
   if (toolCalls.length > 0) {
     const primaryName = String(toolCalls[0]?.function?.name || toolCalls[0]?.name || '').trim() || 'unknown';
@@ -189,6 +195,42 @@ function resolveToolDisplayName(message: Message): string {
       return primaryName;
     }
     return `${primaryName} +${toolCalls.length - 1} more`;
+  }
+
+  const linkedToolCalls: any[] = Array.isArray((message as any)?.linkedToolRequest?.tool_calls)
+    ? (message as any).linkedToolRequest.tool_calls
+    : [];
+  if (linkedToolCalls.length > 0) {
+    const preferredToolCallId = String((message as any)?.tool_call_id || (message as any)?.toolCallId || '').trim();
+    if (preferredToolCallId) {
+      const exactMatch = linkedToolCalls.find((toolCall: any) => String(toolCall?.id || '').trim() === preferredToolCallId);
+      const exactName = String(exactMatch?.function?.name || exactMatch?.name || '').trim();
+      if (exactName) {
+        return exactName;
+      }
+    }
+
+    const primaryName = String(linkedToolCalls[0]?.function?.name || linkedToolCalls[0]?.name || '').trim() || 'unknown';
+    if (linkedToolCalls.length === 1) {
+      return primaryName;
+    }
+    return `${primaryName} +${linkedToolCalls.length - 1} more`;
+  }
+
+  const combinedToolResults: Message[] = Array.isArray((message as any)?.combinedToolResults)
+    ? (message as any).combinedToolResults
+    : [];
+  if (combinedToolResults.length > 0) {
+    const firstResultName = String(
+      (combinedToolResults[0] as any)?.toolName
+      || (combinedToolResults[0] as any)?.tool_name
+      || (combinedToolResults[0] as any)?.toolExecution?.toolName
+      || getToolExecutionEnvelope(combinedToolResults[0])?.tool
+      || '',
+    ).trim();
+    if (firstResultName) {
+      return firstResultName;
+    }
   }
 
   const inlineToolName = parseToolNameFromRequestText(getToolRequestText(message));

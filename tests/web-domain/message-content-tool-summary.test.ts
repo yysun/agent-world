@@ -14,6 +14,7 @@
  * - Uses deterministic in-memory fixtures.
  *
  * Recent Changes:
+ * - 2026-03-13: Added regression coverage for standalone tool-result rows that resolve their name from a linked assistant request.
  * - 2026-03-11: Added legacy inline `Calling tool:` fallback coverage so live web tool cards still resolve a
  *   readable tool name before structured request metadata is present.
  * - 2026-03-06: Added JSON-serialized canonical failure coverage so web completed tool cards do not miss failed shell results after reload.
@@ -150,5 +151,29 @@ describe('getToolOneLineSummary', () => {
     });
 
     expect(getToolOneLineSummary(message)).toBe('tool: shell_cmd - failed');
+  });
+
+  it('returns done summary for standalone tool rows using linked assistant request metadata', () => {
+    const message = createMessage({
+      type: 'tool',
+      role: 'tool',
+      text: '{"status":"success"}',
+      linkedToolRequest: {
+        role: 'assistant',
+        tool_calls: [
+          {
+            id: 'call-standalone',
+            type: 'function',
+            function: {
+              name: 'shell_cmd',
+              arguments: '{"command":"pwd"}',
+            },
+          },
+        ],
+      },
+      tool_call_id: 'call-standalone',
+    });
+
+    expect(getToolOneLineSummary(message)).toBe('tool: shell_cmd - done');
   });
 });

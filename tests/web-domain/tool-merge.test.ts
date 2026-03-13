@@ -16,6 +16,7 @@
  * - Pure function; no I/O, no DOM.
  *
  * Recent Changes:
+ * - 2026-03-13: Added regression coverage for standalone/restored tool rows inheriting tool metadata from their linked assistant request.
  * - 2026-03-11: Added regression coverage for assistant streaming request rows that only carry legacy
  *   inline `text` (`Calling tool: ...`) before structured `tool_calls` metadata arrives.
  * - 2026-03-06: Added transcript-restore coverage for canonical shell request+result pairs and legacy assistant stdout mirror row compatibility.
@@ -231,5 +232,29 @@ describe('buildCombinedRenderableMessages', () => {
     expect((result[0] as any).combinedToolResults).toHaveLength(1);
     expect(result[1].id).toBe('legacy-stdout');
     expect(result[1].text).toContain('file-a');
+  });
+
+  it('backfills linked assistant request metadata onto standalone tool rows', () => {
+    const req = makeRequest({
+      id: 'req-linked',
+      messageId: 'msg-req-linked',
+      text: 'Calling tool: shell_cmd',
+      tool_calls: [{ id: 'call-linked', type: 'function', function: { name: 'shell_cmd', arguments: '{"command":"pwd"}' } }],
+    });
+    const res = makeResult({
+      id: 'res-linked',
+      messageId: 'msg-res-linked',
+      tool_call_id: 'call-linked',
+      toolName: '',
+      replyToMessageId: 'msg-req-linked',
+      text: '{"status":"success"}',
+      content: '{"status":"success"}',
+    });
+
+    const result = buildCombinedRenderableMessages([req, res]);
+
+    expect(result).toHaveLength(1);
+    const merged = result[0] as any;
+    expect(merged.toolName).toBe('shell_cmd');
   });
 });

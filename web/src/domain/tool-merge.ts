@@ -16,6 +16,7 @@
  * - Uses Message type from web/src/types
  *
  * Recent Changes:
+ * - 2026-03-13: Backfilled linked assistant tool requests and resolved tool names onto standalone web tool rows so restored/result-only rows match Electron labels.
  * - 2026-03-13: Aligned split/merge/display paths with Electron renderer:
  *   - Added isNarratedAssistantToolCallMessage exclusion so assistant prose with tool_calls renders as regular cards.
  *   - Added assistant-role early return in isToolRelatedMessage to match Electron guard.
@@ -41,6 +42,167 @@ function collectToolCallIds(message: Message): string[] {
   return anyMsg.tool_calls
     .map((toolCall: any) => String(toolCall?.id || '').trim())
     .filter(Boolean);
+}
+
+function messageIncludesToolCallId(message: Message | null | undefined, toolCallId: string): boolean {
+  if (!message || !toolCallId) {
+    return false;
+  }
+
+  return collectToolCallIds(message).includes(toolCallId);
+}
+
+function messageHasToolCalls(message: Message | null | undefined): boolean {
+  return collectToolCallIds(message as Message).length > 0;
+}
+
+function extractToolNameFromToolCalls(message: Message | null | undefined, preferredToolCallId = ''): string {
+  const anyMsg = message as any;
+  const toolCalls = Array.isArray(anyMsg?.tool_calls) ? anyMsg.tool_calls : [];
+  if (toolCalls.length === 0) {
+    return '';
+  }
+
+  const normalizedPreferredToolCallId = String(preferredToolCallId || '').trim();
+  if (normalizedPreferredToolCallId) {
+    const exactMatch = toolCalls.find((toolCall: any) => String(toolCall?.id || '').trim() === normalizedPreferredToolCallId);
+    const exactToolName = String(exactMatch?.function?.name || exactMatch?.name || '').trim();
+    if (exactToolName) {
+      return exactToolName;
+    }
+  }
+
+  return String(toolCalls[0]?.function?.name || toolCalls[0]?.name || '').trim();
+}
+
+function findToolRequestMessageForToolResult(
+  message: Message,
+  messagesById: Map<string, Message>,
+  messages: Message[],
+  currentIndex: number,
+): Message | null {
+  const role = String((message as any)?.role || '').trim().toLowerCase();
+  if (role !== 'tool' && !Boolean((message as any)?.isToolStreaming)) {
+    return null;
+  }
+
+  const toolCallId = String((message as any)?.tool_call_id || (message as any)?.toolCallId || '').trim();
+
+  const replyToMessageId = String((message as any)?.replyToMessageId || '').trim();
+  if (replyToMessageId) {
+    const parent = messagesById.get(replyToMessageId) || null;
+    if (toolCallId && messageIncludesToolCallId(parent, toolCallId)) {
+      return parent;
+    }
+    if (!toolCallId && messageHasToolCalls(parent)) {
+      return parent;
+    }
+  }
+
+  if (!toolCallId) {
+    const resultToolName = String((message as any)?.toolName || (message as any)?.tool_name || '').trim().toLowerCase();
+    if (resultToolName) {
+      const nameMatches: Message[] = [];
+      for (let index = currentIndex - 1; index >= 0; index -= 1) {
+        const candidate = messages[index];
+        const candidateRole = String((candidate as any)?.role || '').trim().toLowerCase();
+        if (candidateRole !== 'assistant') {
+          continue;
+        }
+
+        const toolCalls = Array.isArray((candidate as any)?.tool_calls) ? (candidate as any).tool_calls : [];
+        const nameMatch = toolCalls.some((toolCall: any) => {
+          const toolName = String(toolCall?.function?.name || toolCall?.name || '').trim().toLowerCase();
+          return toolName === resultToolName;
+        });
+
+        if (nameMatch) {
+          nameMatches.push(candidate);
+        }
+      }
+
+      if (nameMatches.length === 1) {
+        return nameMatches[0];
+      }
+    }
+
+    return null;
+  }
+
+  const directByToolCallId = messagesById.get(toolCallId) || null;
+  if (messageIncludesToolCallId(directByToolCallId, toolCallId)) {
+    return directByToolCallId;
+  }
+
+  for (let index = currentIndex - 1; index >= 0; index -= 1) {
+    const candidate = messages[index];
+    const candidateRole = String((candidate as any)?.role || '').trim().toLowerCase();
+    if (candidateRole !== 'assistant') {
+      continue;
+    }
+
+    if (messageIncludesToolCallId(candidate, toolCallId)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function resolveToolNameForMessage(
+  message: Message,
+  messagesById: Map<string, Message>,
+  messages: Message[],
+  currentIndex: number,
+): string {
+  const directToolName = String((message as any)?.toolName || (message as any)?.tool_name || (message as any)?.toolExecution?.toolName || '').trim();
+  if (directToolName && directToolName.toLowerCase() !== 'unknown') {
+    return directToolName;
+  }
+
+  const toolCallId = String((message as any)?.tool_call_id || (message as any)?.toolCallId || '').trim();
+
+  const ownToolName = extractToolNameFromToolCalls(message, toolCallId);
+  if (ownToolName) {
+    return ownToolName;
+  }
+
+  const replyToMessageId = String((message as any)?.replyToMessageId || '').trim();
+  if (replyToMessageId) {
+    const parent = messagesById.get(replyToMessageId) || null;
+    const parentToolName = extractToolNameFromToolCalls(parent, toolCallId);
+    if (parentToolName) {
+      return parentToolName;
+    }
+  }
+
+  if (toolCallId) {
+    const directByToolCallId = messagesById.get(toolCallId) || null;
+    const directMappedToolName = extractToolNameFromToolCalls(directByToolCallId, toolCallId);
+    if (directMappedToolName) {
+      return directMappedToolName;
+    }
+
+    for (let index = currentIndex - 1; index >= 0; index -= 1) {
+      const candidate = messages[index];
+      const role = String((candidate as any)?.role || '').trim().toLowerCase();
+      if (role !== 'assistant') {
+        continue;
+      }
+
+      const candidateToolName = extractToolNameFromToolCalls(candidate, toolCallId);
+      if (candidateToolName) {
+        return candidateToolName;
+      }
+    }
+  }
+
+  const callingToolMatch = getMessageText(message).match(/calling tool\s*:\s*([a-z0-9_.:-]+)/i);
+  if (callingToolMatch?.[1]) {
+    return callingToolMatch[1];
+  }
+
+  return directToolName;
 }
 
 /**
@@ -97,6 +259,19 @@ function isToolRelatedMessage(message: Message): boolean {
 }
 
 export function buildCombinedRenderableMessages(messages: Message[]): Message[] {
+  const messagesById = new Map<string, Message>();
+  for (const message of messages) {
+    const messageId = String((message as any)?.messageId || '').trim();
+    if (messageId) {
+      messagesById.set(messageId, message);
+    }
+
+    const toolCallIds = collectToolCallIds(message);
+    for (const toolCallId of toolCallIds) {
+      messagesById.set(toolCallId, message);
+    }
+  }
+
   const toolResultsByKey = new Map<string, Message[]>();
   const toolStreamsByKey = new Map<string, Message[]>();
 
@@ -129,9 +304,24 @@ export function buildCombinedRenderableMessages(messages: Message[]): Message[] 
   const consumedToolStreamIds = new Set<string>();
 
   return messages
-    .map((message) => {
+    .map((message, currentIndex) => {
       if (!isToolRelatedMessage(message) || !isToolRequestMessage(message)) {
-        return message;
+        const linkedToolRequest = findToolRequestMessageForToolResult(message, messagesById, messages, currentIndex);
+        const resolvedToolName = resolveToolNameForMessage(message, messagesById, messages, currentIndex);
+
+        if (!linkedToolRequest && !resolvedToolName) {
+          return message;
+        }
+
+        let nextMessage = message as any;
+        if (linkedToolRequest && !(Array.isArray((message as any)?.tool_calls) && (message as any).tool_calls.length > 0)) {
+          nextMessage = { ...nextMessage, linkedToolRequest };
+        }
+        if (resolvedToolName && !String((message as any)?.toolName || '').trim()) {
+          nextMessage = { ...nextMessage, toolName: resolvedToolName };
+        }
+
+        return nextMessage as Message;
       }
 
       const combinedToolResults: Message[] = [];
@@ -189,7 +379,13 @@ export function buildCombinedRenderableMessages(messages: Message[]): Message[] 
       // Keep request rows in tool-card mode even before completion rows exist.
       // This matches Electron behavior where tool execution appears as `running`
       // immediately instead of waiting for final tool results.
-      return { ...message, combinedToolResults, combinedToolStreams } as Message;
+      const resolvedToolName = resolveToolNameForMessage(message, messagesById, messages, currentIndex);
+      return {
+        ...message,
+        ...(resolvedToolName && !String((message as any)?.toolName || '').trim() ? { toolName: resolvedToolName } : {}),
+        combinedToolResults,
+        combinedToolStreams,
+      } as Message;
     })
     .filter((message) => {
       const anyMsg = message as any;
