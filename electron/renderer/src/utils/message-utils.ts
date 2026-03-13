@@ -13,6 +13,7 @@
  * - Helper functions are intentionally colocated to preserve behavior parity.
  *
  * Recent Changes:
+ * - 2026-03-13: Added `fullWidthMessage` card-style flag so non-chat Electron views can remove chat-era left offsets when avatars are hidden.
  * - 2026-03-13: Added assistant-card border overrides for narrated assistant tool-call rows so Electron can reflect linked tool success/failure without collapsing into tool-row chrome.
  * - 2026-03-10: Added a red left border for structured `system` error transcript rows so durable failed-turn diagnostics are visually distinct from neutral system notices.
  * - 2026-03-06: Restored error-level realtime log rows as renderable transcript entries while keeping non-error logs in the diagnostics panel only.
@@ -578,30 +579,44 @@ export function getMessageCardClassName(message, messagesById, messages, current
     isToolCallPending?: boolean;
     showLeftBorder?: boolean;
     fullWidthUserMessage?: boolean;
+    fullWidthMessage?: boolean;
   };
   const isToolCallPending = typeof normalizedOptions.isToolCallPending === 'boolean'
     ? normalizedOptions.isToolCallPending
     : undefined;
   const showLeftBorder = normalizedOptions.showLeftBorder !== false;
   const fullWidthUserMessage = normalizedOptions.fullWidthUserMessage === true;
+  const fullWidthMessage = normalizedOptions.fullWidthMessage === true;
 
   if (isTool) {
-    return 'group relative ml-auto w-full rounded-none border-0 bg-transparent p-0 shadow-none';
+    return `group relative ${fullWidthMessage ? 'w-full' : 'ml-auto w-full'} rounded-none border-0 bg-transparent p-0 shadow-none`;
   }
 
-  const roleClassName = isUser
-    ? (fullWidthUserMessage
+  const roleClassName = fullWidthMessage
+    ? isUser
       ? 'w-full border-l-sidebar-border bg-sidebar-accent'
-      : 'ml-auto w-[80%] border-l-sidebar-border bg-sidebar-accent')
-    : isNarratedToolCall && narratedToolCallTone === 'failed'
-      ? 'ml-auto w-[92%] border-l-red-500/70'
-      : isNarratedToolCall && narratedToolCallTone === 'done'
-        ? 'ml-auto w-[92%] border-l-emerald-500/60'
-        : isCrossAgent
-          ? 'ml-auto w-[92%] border-l-violet-500/50'
-          : isSystem
-            ? `mr-auto w-[90%] ${isSystemError ? 'border-l-red-500/70 bg-muted/40' : 'border-l-border bg-muted/40'}`
-            : 'ml-auto w-[92%] border-l-sky-500/40';
+      : isNarratedToolCall && narratedToolCallTone === 'failed'
+        ? 'w-full border-l-red-500/70'
+        : isNarratedToolCall && narratedToolCallTone === 'done'
+          ? 'w-full border-l-emerald-500/60'
+          : isCrossAgent
+            ? 'w-full border-l-violet-500/50'
+            : isSystem
+              ? `w-full ${isSystemError ? 'border-l-red-500/70 bg-muted/40' : 'border-l-border bg-muted/40'}`
+              : 'w-full border-l-sky-500/40'
+    : isUser
+      ? (fullWidthUserMessage
+        ? 'w-full border-l-sidebar-border bg-sidebar-accent'
+        : 'ml-auto w-[80%] border-l-sidebar-border bg-sidebar-accent')
+      : isNarratedToolCall && narratedToolCallTone === 'failed'
+        ? 'ml-auto w-[92%] border-l-red-500/70'
+        : isNarratedToolCall && narratedToolCallTone === 'done'
+          ? 'ml-auto w-[92%] border-l-emerald-500/60'
+          : isCrossAgent
+            ? 'ml-auto w-[92%] border-l-violet-500/50'
+            : isSystem
+              ? `mr-auto w-[90%] ${isSystemError ? 'border-l-red-500/70 bg-muted/40' : 'border-l-border bg-muted/40'}`
+              : 'ml-auto w-[92%] border-l-sky-500/40';
 
   return `group relative rounded-lg p-3 ${showLeftBorder ? 'border-l' : ''} ${roleClassName}`;
 }

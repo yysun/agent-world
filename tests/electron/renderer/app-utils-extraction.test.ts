@@ -12,6 +12,7 @@
  * - No filesystem or network dependencies.
  *
  * Recent Changes:
+ * - 2026-03-13: Added regression coverage ensuring non-chat message cards remove chat-era left offsets and render full-width when avatars are hidden.
  * - 2026-03-06: Added regression coverage ensuring only error-level realtime log rows remain renderable in the transcript.
  * - 2026-02-28: Added regression coverage for tool-name resolution so assistant `shell_cmd` rows do not inherit earlier `list_files`/`grep` labels.
  * - 2026-02-28: Added regression coverage for locating assistant tool-request metadata from tool-result rows by `tool_call_id`.
@@ -247,6 +248,25 @@ describe('extracted message utils', () => {
     const className = getMessageCardClassName(message, new Map(), [message], 0, { fullWidthUserMessage: true });
     expect(className).toContain('w-full');
     expect(className).not.toContain('w-[80%]');
+  });
+
+  it('renders non-chat assistant and tool cards full width without left auto margins', () => {
+    const assistantMessage = { messageId: 'msg-3a', role: 'assistant', sender: 'Agent A' };
+    const toolMessage = { messageId: 'msg-3b', role: 'tool', sender: 'shell_cmd' };
+
+    const assistantClassName = getMessageCardClassName(assistantMessage, new Map(), [assistantMessage], 0, {
+      showLeftBorder: false,
+      fullWidthMessage: true,
+    });
+    const toolClassName = getMessageCardClassName(toolMessage, new Map(), [toolMessage], 0, {
+      showLeftBorder: false,
+      fullWidthMessage: true,
+    });
+
+    expect(assistantClassName).toContain('w-full');
+    expect(assistantClassName).not.toContain('ml-auto');
+    expect(toolClassName).toContain('w-full');
+    expect(toolClassName).not.toContain('ml-auto');
   });
 
   it('renders structured system error transcript rows with a red left border', () => {

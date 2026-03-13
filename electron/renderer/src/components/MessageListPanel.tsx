@@ -13,6 +13,7 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-03-13: Removed chat-era left offsets from non-chat message cards so hidden avatars do not leave unused gutter space in Electron world views.
  * - 2026-03-13: Preserved narrated assistant tool-call status metadata before `showToolMessages=false` filtering so hidden tool rows do not remove success/failure border state from assistant cards.
  * - 2026-03-13: Reserved avatar-column spacing for tool transcript rows so compact tool summaries align with normal message left edges.
  * - 2026-03-13: Suppressed agent avatar chips for tool transcript rows so compact tool status lines do not inherit assistant-avatar chrome.
@@ -666,6 +667,7 @@ export default function MessageListPanel({
           className={`min-w-0 ${getMessageCardClassName(message, messagesById, sourceMessages, messageIndex, {
             isToolCallPending: isPendingToolCallRequest,
             showLeftBorder: showChatMessageChrome,
+            fullWidthMessage: !showChatMessageChrome,
             fullWidthUserMessage: !showChatMessageChrome && isHuman,
           })} ${isStreamingAssistantMessage ? 'agent-streaming-card' : ''}`}
           data-testid={messageKey ? `message-card-${messageKey}` : undefined}
