@@ -256,21 +256,6 @@ export interface Chat {
 }
 
 /**
- * World chat for full state capture
- */
-export interface WorldChat {
-  world: World;
-  agents: Agent[];
-  messages: AgentMessage[];
-  metadata: {
-    capturedAt: Date;
-    version: string;
-    totalMessages: number;
-    activeAgents: number;
-  };
-}
-
-/**
  * Chat creation parameters
  */
 export interface CreateChatParams {
@@ -430,12 +415,6 @@ export interface StorageAPI {
   listChats(worldId: string): Promise<Chat[]>;
   updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<Chat | null>;
   updateChatNameIfCurrent?(worldId: string, chatId: string, expectedName: string, nextName: string): Promise<boolean>;
-
-  // Chat operations
-  saveWorldChat(worldId: string, chatId: string, chat: WorldChat): Promise<void>;
-  loadWorldChat(worldId: string, chatId: string): Promise<WorldChat | null>;
-  loadWorldChatFull(worldId: string, chatId: string): Promise<WorldChat | null>;
-  restoreFromWorldChat(worldId: string, chat: WorldChat): Promise<boolean>;
 
   // Integrity operations
   validateIntegrity(worldId: string, agentId?: string): Promise<boolean>;

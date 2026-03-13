@@ -47,10 +47,6 @@ const sqliteStorageMocks = vi.hoisted(() => ({
   listChatHistories: vi.fn(async () => []),
   updateChatData: vi.fn(async () => null),
   updateChatNameIfCurrent: vi.fn(async () => false),
-  saveWorldChat: vi.fn(async () => undefined),
-  loadWorldChat: vi.fn(async () => null),
-  loadWorldChatFull: vi.fn(async () => null),
-  restoreFromWorldChat: vi.fn(async () => true),
   archiveAgentMemory: vi.fn(async () => undefined),
   deleteMemoryByChatId: vi.fn(async () => 0),
   getMemory: vi.fn(async () => []),
@@ -100,9 +96,6 @@ const worldStorageMocks = vi.hoisted(() => ({
   listChatHistories: vi.fn(async () => []),
   updateChatData: vi.fn(async () => null),
   updateChatNameIfCurrent: vi.fn(async () => false),
-  saveWorldChat: vi.fn(async () => undefined),
-  loadWorldChat: vi.fn(async () => null),
-  loadWorldChatFull: vi.fn(async () => null),
   worldExists: vi.fn(async () => true),
 }));
 
@@ -151,8 +144,6 @@ describe('storage-factory runtime selection', () => {
     worldStorageMocks.listWorlds.mockResolvedValue([]);
     worldStorageMocks.loadChatData.mockResolvedValue(null);
     worldStorageMocks.listChatHistories.mockResolvedValue([]);
-    worldStorageMocks.loadWorldChat.mockResolvedValue(null);
-    worldStorageMocks.loadWorldChatFull.mockResolvedValue(null);
     worldStorageMocks.worldExists.mockResolvedValue(true);
     worldStorageMocks.getMemory.mockResolvedValue([]);
 
@@ -290,17 +281,13 @@ describe('storage-factory runtime selection', () => {
     }
   });
 
-  it('normalizes wrapped chat and world-chat storage errors', async () => {
+  it('normalizes wrapped chat storage errors', async () => {
     const storage = {
       saveChatData: vi.fn().mockRejectedValue(new Error('save failed')),
       loadChatData: vi.fn().mockRejectedValue(new Error('load failed')),
       deleteChatData: vi.fn().mockRejectedValue(new Error('delete failed')),
       listChats: vi.fn().mockRejectedValue(new Error('list failed')),
       updateChatData: vi.fn().mockRejectedValue(new Error('update failed')),
-      saveWorldChat: vi.fn().mockRejectedValue(new Error('save world chat failed')),
-      loadWorldChat: vi.fn().mockRejectedValue(new Error('load world chat failed')),
-      loadWorldChatFull: vi.fn().mockRejectedValue(new Error('load world chat full failed')),
-      restoreFromWorldChat: vi.fn().mockRejectedValue(new Error('restore world chat failed')),
     } as any;
     const wrapped = createStorageWrappers(storage);
 
@@ -316,18 +303,6 @@ describe('storage-factory runtime selection', () => {
     await expect(wrapped.listChats('world-1')).rejects.toThrow('Failed to list chats: list failed');
     await expect(wrapped.updateChatData('world-1', 'chat-1', { name: 'Renamed' })).rejects.toThrow(
       'Failed to update chat history: update failed',
-    );
-    await expect(wrapped.saveWorldChat('world-1', 'chat-1', { id: 'chat-1' } as any)).rejects.toThrow(
-      'Failed to save world chat: save world chat failed',
-    );
-    await expect(wrapped.loadWorldChat('world-1', 'chat-1')).rejects.toThrow(
-      'Failed to load world chat: load world chat failed',
-    );
-    await expect(wrapped.loadWorldChatFull('world-1', 'chat-1')).rejects.toThrow(
-      'Failed to load full world chat: load world chat full failed',
-    );
-    await expect(wrapped.restoreFromWorldChat('world-1', { id: 'chat-1' } as any)).rejects.toThrow(
-      'Failed to restore from world chat: restore world chat failed',
     );
   });
 
@@ -446,8 +421,6 @@ describe('storage-factory runtime selection', () => {
     worldStorageMocks.listChatHistories.mockResolvedValue([{ id: 'chat-1' }]);
     worldStorageMocks.updateChatData.mockResolvedValue({ id: 'chat-1', name: 'New' });
     worldStorageMocks.updateChatNameIfCurrent.mockResolvedValue(true);
-    worldStorageMocks.loadWorldChat.mockResolvedValue({ id: 'chat-1' });
-    worldStorageMocks.loadWorldChatFull.mockResolvedValue({ id: 'chat-1', meta: true });
 
     const storage = await createStorage({ type: 'file', rootPath });
     expect((storage as any).eventStorage).toEqual({ backend: 'file-events' });
@@ -475,10 +448,6 @@ describe('storage-factory runtime selection', () => {
       'Old',
       'New',
     );
-
-    await storage.saveWorldChat('world-1', 'chat-1', { id: 'chat-1' } as any);
-    expect(await storage.loadWorldChat('world-1', 'chat-1')).toEqual({ id: 'chat-1' });
-    expect(await storage.loadWorldChatFull('world-1', 'chat-1')).toEqual({ id: 'chat-1', meta: true });
     expect(await storage.worldExists('world-1')).toBe(true);
   });
 
@@ -592,7 +561,6 @@ describe('storage-factory runtime selection', () => {
       expect(await storage.updateChatNameIfCurrent('world-1', 'chat-1', 'Old', 'New')).toBe(true);
       await storage.saveAgentMemory('world-1', 'agent-1', [{ role: 'user', content: 'x', sender: 'human' } as any]);
       await storage.archiveMemory('world-1', 'agent-1', []);
-      expect(await storage.restoreFromWorldChat('world-1', { id: 'chat-1' } as any)).toBe(false);
       expect(await storage.deleteMemoryByChatId('world-1', 'chat-1')).toBe(0);
       expect(warnSpy).toHaveBeenCalled();
     } finally {

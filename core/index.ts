@@ -18,7 +18,7 @@
  * - Agent Management: getAgent, updateAgent, deleteAgent, listAgents, clearAgentMemory
  * - Chat Management: createChatData, getChatData, restoreWorldChat
  * - Event System: publishMessage, enableStreaming, disableStreaming
- * - Core Types: World, Agent, AgentMessage, WorldChat, ChatData, WorldInfo, LLMProvider, LoggerConfig, LogLevel
+ * - Core Types: World, Agent, AgentMessage, ChatData, WorldInfo, LLMProvider, LoggerConfig, LogLevel
  * - Utilities: logger, createCategoryLogger, loggers, generateId, toKebabCase
  * - Subscription System: subscribeWorld, ClientConnection (for server API)
  *

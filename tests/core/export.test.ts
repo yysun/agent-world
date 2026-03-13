@@ -8,7 +8,6 @@
 import { describe, test, it, expect, beforeEach, afterEach, vi, type MockedFunction } from 'vitest';
 import { exportWorldToMarkdown } from '../../core/export.js';
 import * as managers from '../../core/managers.js';
-import * as storageFactory from '../../core/storage/storage-factory.js';
 import { LLMProvider } from '../../core/types.js';
 import { EventEmitter } from 'events';
 
@@ -18,11 +17,6 @@ vi.mock('../../core/managers.js', () => ({
   listAgents: vi.fn(),
   getAgent: vi.fn(),
   getMemory: vi.fn(),
-}));
-
-// Mock the storage factory
-vi.mock('../../core/storage/storage-factory.js', () => ({
-  createStorageWithWrappers: vi.fn(),
 }));
 
 describe('Export Module', () => {
@@ -125,18 +119,11 @@ describe('Export Module', () => {
         },
       };
 
-      // Mock storage
-      const mockStorage = {
-        loadWorldChatFull: vi.fn(),
-      } as any;
-      mockStorage.loadWorldChatFull.mockResolvedValue(mockWorldChat);
-
       // Setup mocks
       (managers.getWorld as MockedFunction<typeof managers.getWorld>).mockResolvedValue(mockWorld);
       (managers.listAgents as MockedFunction<typeof managers.listAgents>).mockResolvedValue(mockAgents);
       (managers.getAgent as MockedFunction<typeof managers.getAgent>).mockResolvedValue(mockAgents[0]);
       (managers.getMemory as MockedFunction<typeof managers.getMemory>).mockResolvedValue(mockAgents[0].memory);
-      (storageFactory.createStorageWithWrappers as MockedFunction<typeof storageFactory.createStorageWithWrappers>).mockResolvedValue(mockStorage as any);
 
       // Execute export
       const result = await exportWorldToMarkdown('test-world');
@@ -207,15 +194,9 @@ describe('Export Module', () => {
         chats: new Map(),
       };
 
-      const mockStorage = {
-        loadWorldChatFull: vi.fn(),
-      } as any;
-      mockStorage.loadWorldChatFull.mockResolvedValue(null);
-
       (managers.getWorld as MockedFunction<typeof managers.getWorld>).mockResolvedValue(mockWorld);
       (managers.listAgents as MockedFunction<typeof managers.listAgents>).mockResolvedValue([]);
       (managers.getMemory as MockedFunction<typeof managers.getMemory>).mockResolvedValue([]);
-      (storageFactory.createStorageWithWrappers as MockedFunction<typeof storageFactory.createStorageWithWrappers>).mockResolvedValue(mockStorage as any);
 
       const result = await exportWorldToMarkdown('empty-world');
 
@@ -254,16 +235,10 @@ describe('Export Module', () => {
         },
       ];
 
-      const mockStorage = {
-        loadWorldChatFull: vi.fn(),
-      } as any;
-      mockStorage.loadWorldChatFull.mockResolvedValue(null);
-
       (managers.getWorld as MockedFunction<typeof managers.getWorld>).mockResolvedValue(mockWorld);
       (managers.listAgents as MockedFunction<typeof managers.listAgents>).mockResolvedValue(mockAgents);
       (managers.getAgent as MockedFunction<typeof managers.getAgent>).mockResolvedValue(mockAgents[0]);
       (managers.getMemory as MockedFunction<typeof managers.getMemory>).mockResolvedValue([]);
-      (storageFactory.createStorageWithWrappers as MockedFunction<typeof storageFactory.createStorageWithWrappers>).mockResolvedValue(mockStorage as any);
 
       const result = await exportWorldToMarkdown('test-world');
 
@@ -327,17 +302,10 @@ describe('Export Module', () => {
         },
       ];
 
-      // Mock storage 
-      const mockStorage = {
-        loadWorldChatFull: vi.fn(),
-      } as any;
-      mockStorage.loadWorldChatFull.mockResolvedValue(null);
-
       (managers.getWorld as MockedFunction<typeof managers.getWorld>).mockResolvedValue(mockWorld);
       (managers.listAgents as MockedFunction<typeof managers.listAgents>).mockResolvedValue(mockAgents);
       (managers.getAgent as MockedFunction<typeof managers.getAgent>).mockResolvedValue(mockAgents[0]);
       (managers.getMemory as MockedFunction<typeof managers.getMemory>).mockResolvedValue(mockAgents[0].memory);
-      (storageFactory.createStorageWithWrappers as MockedFunction<typeof storageFactory.createStorageWithWrappers>).mockResolvedValue(mockStorage as any);
 
       const result = await exportWorldToMarkdown('test-world');
 
@@ -413,17 +381,11 @@ describe('Export Module', () => {
           createdAt: new Date('2025-01-01T10:02:00.000Z')
         }
       ];
-
-      const mockStorage = {
-        createStorageWithWrappers: vi.fn()
-      };
-
       // Setup mocks
       (managers.getWorld as MockedFunction<typeof managers.getWorld>).mockResolvedValue(mockWorld as any);
       (managers.listAgents as MockedFunction<typeof managers.listAgents>).mockResolvedValue(mockAgents);
       (managers.getAgent as MockedFunction<typeof managers.getAgent>).mockResolvedValue(mockAgents[0]);
       (managers.getMemory as MockedFunction<typeof managers.getMemory>).mockResolvedValue(mockMessages);
-      (storageFactory.createStorageWithWrappers as MockedFunction<typeof storageFactory.createStorageWithWrappers>).mockResolvedValue(mockStorage as any);
 
       const result = await exportWorldToMarkdown('test-world');
 
@@ -531,18 +493,12 @@ describe('Export Module', () => {
           createdAt: new Date('2025-01-01T10:00:02.000Z')
         }
       ];
-
-      const mockStorage = {
-        loadWorldChatFull: vi.fn()
-      } as any;
-
       (managers.getWorld as MockedFunction<typeof managers.getWorld>).mockResolvedValue(mockWorld as any);
       (managers.listAgents as MockedFunction<typeof managers.listAgents>).mockResolvedValue(mockAgents);
       (managers.getAgent as MockedFunction<typeof managers.getAgent>).mockImplementation(async (worldId, agentId) => {
         return mockAgents.find(a => a.id === agentId) || null;
       });
       (managers.getMemory as MockedFunction<typeof managers.getMemory>).mockResolvedValue(mockMessages);
-      (storageFactory.createStorageWithWrappers as MockedFunction<typeof storageFactory.createStorageWithWrappers>).mockResolvedValue(mockStorage as any);
 
       const result = await exportWorldToMarkdown('test-world');
 
@@ -739,18 +695,12 @@ describe('Export Module', () => {
           createdAt: new Date('2025-10-27T17:25:57.572Z')
         }
       ];
-
-      const mockStorage = {
-        loadWorldChatFull: vi.fn()
-      } as any;
-
       (managers.getWorld as MockedFunction<typeof managers.getWorld>).mockResolvedValue(mockWorld as any);
       (managers.listAgents as MockedFunction<typeof managers.listAgents>).mockResolvedValue(mockAgents);
       (managers.getAgent as MockedFunction<typeof managers.getAgent>).mockImplementation(async (worldId, agentId) => {
         return mockAgents.find(a => a.id === agentId) || null;
       });
       (managers.getMemory as MockedFunction<typeof managers.getMemory>).mockResolvedValue(mockMessages);
-      (storageFactory.createStorageWithWrappers as MockedFunction<typeof storageFactory.createStorageWithWrappers>).mockResolvedValue(mockStorage as any);
 
       const result = await exportWorldToMarkdown('cross-agent-world');
 
@@ -892,15 +842,12 @@ describe('Export Module', () => {
           createdAt: new Date('2025-01-01T10:02:00.000Z')
         }
       ];
-
-      const mockStorage = {} as any;
       (managers.getWorld as MockedFunction<typeof managers.getWorld>).mockResolvedValue(mockWorld as any);
       (managers.listAgents as MockedFunction<typeof managers.listAgents>).mockResolvedValue(mockAgents);
       (managers.getAgent as MockedFunction<typeof managers.getAgent>).mockImplementation(async (worldId, agentId) => {
         return mockAgents.find(a => a.id === agentId) || null;
       });
       (managers.getMemory as MockedFunction<typeof managers.getMemory>).mockResolvedValue(mockMessages);
-      (storageFactory.createStorageWithWrappers as MockedFunction<typeof storageFactory.createStorageWithWrappers>).mockResolvedValue(mockStorage as any);
 
       const result = await exportWorldToMarkdown('no-messageid-world');
 
@@ -983,7 +930,6 @@ describe('Export Module', () => {
       (managers.getWorld as MockedFunction<typeof managers.getWorld>).mockResolvedValue(mockWorld as any);
       (managers.listAgents as MockedFunction<typeof managers.listAgents>).mockResolvedValue([]);
       (managers.getMemory as MockedFunction<typeof managers.getMemory>).mockResolvedValue([]);
-      (storageFactory.createStorageWithWrappers as MockedFunction<typeof storageFactory.createStorageWithWrappers>).mockResolvedValue({} as any);
 
       const result = await exportWorldToMarkdown('test-world');
 
@@ -1020,7 +966,6 @@ describe('Export Module', () => {
 
       (managers.getWorld as MockedFunction<typeof managers.getWorld>).mockResolvedValue(mockWorld as any);
       (managers.listAgents as MockedFunction<typeof managers.listAgents>).mockResolvedValue([]);
-      (storageFactory.createStorageWithWrappers as MockedFunction<typeof storageFactory.createStorageWithWrappers>).mockResolvedValue({} as any);
 
       const result = await exportWorldToMarkdown('test-world');
 

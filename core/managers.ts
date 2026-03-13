@@ -116,7 +116,7 @@ import {
 // Type imports
 import type {
   World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams,
-  AgentMessage, Chat, CreateChatParams, UpdateChatParams, WorldChat, LLMProvider,
+  AgentMessage, Chat, CreateChatParams, UpdateChatParams, LLMProvider,
 } from './types.js';
 
 // Per-module state

@@ -110,11 +110,6 @@ vi.mock('./core/storage/world-storage', () => ({
   loadWorldData: vi.fn<any>().mockResolvedValue({}),
   deleteWorldData: vi.fn<any>().mockResolvedValue(true),
   listWorldData: vi.fn<any>().mockResolvedValue([]),
-  saveWorldChat: vi.fn<any>().mockResolvedValue(undefined),
-  loadWorldChat: vi.fn<any>().mockResolvedValue(null),
-  loadWorldChatFull: vi.fn<any>().mockResolvedValue(null),
-  deleteWorldChat: vi.fn<any>().mockResolvedValue(true),
-  listWorldChats: vi.fn<any>().mockResolvedValue([])
 }));
 
 // Mock storage-factory to use shared MemoryStorage instance

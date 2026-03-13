@@ -33,6 +33,7 @@
  * Changes:
  * - 2026-03-05: Added bounded retry fallback for wrapper-level `loadAgent`/`loadAgentWithRetry` to tolerate transient storage read/consistency failures, while treating `null` loads as terminal not-found (no retry-delay penalty).
  * - 2026-03-05: Switched storage retry/timeout constants to shared reliability config.
+ * - 2026-03-12: Removed dormant world-chat snapshot wrapper surface; chat persistence now uses metadata plus aggregated agent memory only.
  * - 2026-02-13: Added compare-and-set chat title helper wiring (`updateChatNameIfCurrent`) across wrappers and backends.
  * - 2025-08-07: Added memory storage for non-Node environments
  * - 2025-08-05: Consolidated code and removed redundant comments
@@ -40,7 +41,7 @@
  * - 2025-07-27: Changed default storage type to SQLite
  * - 2025-10-31: Updated to structured logging (storage.init category)
  */
-import type { StorageAPI, Chat, UpdateChatParams, WorldChat, Agent, AgentMessage, World } from '../types.js';
+import type { StorageAPI, Chat, UpdateChatParams, Agent, AgentMessage, World } from '../types.js';
 import { validateAgentMessageIds } from './validation.js';
 import { createCategoryLogger } from '../logger.js';
 import { SQLiteConfig } from './sqlite-schema.js';
@@ -298,42 +299,6 @@ export function createStorageWrappers(storageInstance: StorageAPI | null): Stora
       }
       const updated = await storageInstance.updateChatData(worldId, chatId, { name: nextName });
       return !!updated;
-    },
-
-    async saveWorldChat(worldId: string, chatId: string, chat: WorldChat): Promise<void> {
-      if (!storageInstance) return;
-      try {
-        return await storageInstance.saveWorldChat(worldId, chatId, chat);
-      } catch (err) {
-        throw new Error(`Failed to save world chat: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    },
-
-    async loadWorldChat(worldId: string, chatId: string): Promise<WorldChat | null> {
-      if (!storageInstance) return null;
-      try {
-        return await storageInstance.loadWorldChat(worldId, chatId);
-      } catch (err) {
-        throw new Error(`Failed to load world chat: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    },
-
-    async loadWorldChatFull(worldId: string, chatId: string): Promise<WorldChat | null> {
-      if (!storageInstance) return null;
-      try {
-        return await storageInstance.loadWorldChatFull(worldId, chatId);
-      } catch (err) {
-        throw new Error(`Failed to load full world chat: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    },
-
-    async restoreFromWorldChat(worldId: string, chat: WorldChat): Promise<boolean> {
-      if (!storageInstance) return false;
-      try {
-        return await storageInstance.restoreFromWorldChat(worldId, chat);
-      } catch (err) {
-        throw new Error(`Failed to restore from world chat: ${err instanceof Error ? err.message : String(err)}`);
-      }
     },
 
     async archiveMemory(worldId: string, agentId: string, memory: any[]): Promise<void> {
@@ -679,31 +644,6 @@ function createFileStorageAdapter(rootPath: string): StorageAPI {
       const updated = await this.updateChatData(worldId, chatId, { name: nextName });
       return !!updated;
     },
-    async saveWorldChat(worldId: string, chatId: string, chat: WorldChat): Promise<void> {
-      await ensureModulesLoaded();
-      if (worldStorage?.saveWorldChat) {
-        return worldStorage.saveWorldChat(rootPath, worldId, chatId, chat);
-      }
-    },
-    async loadWorldChat(worldId: string, chatId: string): Promise<WorldChat | null> {
-      await ensureModulesLoaded();
-      if (worldStorage?.loadWorldChat) {
-        return worldStorage.loadWorldChat(rootPath, worldId, chatId);
-      }
-      return null;
-    },
-    async loadWorldChatFull(worldId: string, chatId: string): Promise<WorldChat | null> {
-      await ensureModulesLoaded();
-      if (worldStorage?.loadWorldChatFull) {
-        return worldStorage.loadWorldChatFull(rootPath, worldId, chatId);
-      }
-      return null;
-    },
-    async restoreFromWorldChat(worldId: string, chat: WorldChat): Promise<boolean> {
-      await ensureModulesLoaded();
-      console.warn('[file-storage] World chat restoration not yet implemented for file storage');
-      return false;
-    },
     async loadAgentWithRetry(worldId: string, agentId: string, options?: any): Promise<Agent | null> {
       await ensureModulesLoaded();
       let retries = options?.retries || 3;
@@ -853,10 +793,6 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
       listChatHistories,
       updateChatData,
       updateChatNameIfCurrent,
-      saveWorldChat,
-      loadWorldChat,
-      loadWorldChatFull,
-      restoreFromWorldChat,
       archiveAgentMemory,
       deleteMemoryByChatId,
       getMemory,
@@ -900,12 +836,6 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
       updateChatData: (worldId: string, chatId: string, updates: any) => updateChatData(ctx, worldId, chatId, updates),
       updateChatNameIfCurrent: (worldId: string, chatId: string, expectedName: string, nextName: string) =>
         updateChatNameIfCurrent(ctx, worldId, chatId, expectedName, nextName),
-      saveWorldChat: (worldId: string, chatId: string, chat: any) => saveWorldChat(ctx, worldId, chatId, chat),
-      loadWorldChat: (worldId: string, chatId: string) => loadWorldChat(ctx, worldId, chatId),
-      loadWorldChatFull: (worldId: string, chatId: string) => loadWorldChatFull(ctx, worldId, chatId),
-      restoreFromWorldChat: async (worldId: string, chat: any) => {
-        return await restoreFromWorldChat(ctx, worldId, chat);
-      },
 
       // Additional methods for consistency with StorageAPI
       worldExists: async (worldId: string) => {

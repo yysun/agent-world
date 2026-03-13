@@ -26,6 +26,7 @@
  * 
  * Changes:
  * - 2026-02-13: Added compare-and-set chat title update helper (`updateChatNameIfCurrent`) for race-safe title commits.
+ * - 2026-03-12: Removed dormant world-chat snapshot storage; chats persist as metadata plus aggregated agent memory only.
  * - 2025-11-01: Exclude runtime properties from saveWorld to prevent storing EventEmitter and Map instances
  * - Batch operations with atomic-like behavior
  * - Memory archiving and cleanup operations
@@ -51,7 +52,6 @@ import type {
   Agent,
   Chat,
   UpdateChatParams,
-  WorldChat,
   AgentMessage,
   EditErrorLog,
   QueueMessageStatus,
@@ -122,7 +122,6 @@ export class MemoryStorage implements StorageAPI {
   private worlds = new Map<string, World>();
   private agents = new Map<string, Map<string, Agent>>(); // worldId -> agentId -> Agent
   private chats = new Map<string, Map<string, Chat>>(); // worldId -> chatId -> Chat
-  private worldChats = new Map<string, Map<string, WorldChat>>(); // worldId -> chatId -> WorldChat
   private archivedMemory = new Map<string, Map<string, AgentMessage[]>>(); // worldId -> agentId -> archived messages
   private editErrors = new Map<string, EditErrorLog[]>(); // worldId -> EditErrorLog[]
   private queuedMessages = new Map<string, Map<string, QueuedMessage[]>>(); // worldId -> chatId -> QueuedMessage[]
@@ -160,7 +159,6 @@ export class MemoryStorage implements StorageAPI {
       // Clean up related data
       this.agents.delete(worldId);
       this.chats.delete(worldId);
-      this.worldChats.delete(worldId);
       this.archivedMemory.delete(worldId);
       this.queuedMessages.delete(worldId);
     }
@@ -379,12 +377,6 @@ export class MemoryStorage implements StorageAPI {
 
     const deleted = worldChats.delete(chatId);
     if (deleted) {
-      // Also clean up world chat snapshots
-      const worldChatSnapshots = this.worldChats.get(worldId);
-      if (worldChatSnapshots) {
-        worldChatSnapshots.delete(chatId);
-      }
-
       // Clean up memory associated with this chat
       await this.deleteMemoryByChatId(worldId, chatId);
       await this.deleteQueueForChat?.(worldId, chatId);
@@ -575,46 +567,6 @@ export class MemoryStorage implements StorageAPI {
     return true;
   }
 
-  // World chat operations
-  async saveWorldChat(worldId: string, chatId: string, chat: WorldChat): Promise<void> {
-    if (!this.worldChats.has(worldId)) {
-      this.worldChats.set(worldId, new Map());
-    }
-
-    const worldChatSnapshots = this.worldChats.get(worldId)!;
-    worldChatSnapshots.set(chatId, deepClone(chat));
-  }
-
-  async loadWorldChat(worldId: string, chatId: string): Promise<WorldChat | null> {
-    const worldChatSnapshots = this.worldChats.get(worldId);
-    if (!worldChatSnapshots) return null;
-
-    const worldChat = worldChatSnapshots.get(chatId);
-    return worldChat ? deepClone(worldChat) : null;
-  }
-
-  async loadWorldChatFull(worldId: string, chatId: string): Promise<WorldChat | null> {
-    // For memory storage, full and regular load are the same
-    return this.loadWorldChat(worldId, chatId);
-  }
-
-  async restoreFromWorldChat(worldId: string, chat: WorldChat): Promise<boolean> {
-    try {
-      // Restore world state
-      await this.saveWorld(chat.world);
-
-      // Restore agents
-      for (const agent of chat.agents) {
-        await this.saveAgent(worldId, agent);
-      }
-
-      return true;
-    } catch (error) {
-      console.error('[memory-storage] Failed to restore from world chat:', error);
-      return false;
-    }
-  }
-
   // Integrity operations
   async validateIntegrity(worldId: string, agentId?: string): Promise<boolean> {
     try {
@@ -655,7 +607,6 @@ export class MemoryStorage implements StorageAPI {
     this.worlds.clear();
     this.agents.clear();
     this.chats.clear();
-    this.worldChats.clear();
     this.archivedMemory.clear();
     this.editErrors.clear();
     this.queuedMessages.clear();
@@ -669,13 +620,11 @@ export class MemoryStorage implements StorageAPI {
     worlds: number;
     totalAgents: number;
     totalChats: number;
-    totalWorldChats: number;
     totalArchivedMemory: number;
     totalQueuedMessages: number;
   } {
     let totalAgents = 0;
     let totalChats = 0;
-    let totalWorldChats = 0;
     let totalArchivedMemory = 0;
     let totalQueuedMessages = 0;
 
@@ -685,10 +634,6 @@ export class MemoryStorage implements StorageAPI {
 
     for (const worldChats of this.chats.values()) {
       totalChats += worldChats.size;
-    }
-
-    for (const worldChatSnapshots of this.worldChats.values()) {
-      totalWorldChats += worldChatSnapshots.size;
     }
 
     for (const worldMemory of this.archivedMemory.values()) {
@@ -705,7 +650,6 @@ export class MemoryStorage implements StorageAPI {
       worlds: this.worlds.size,
       totalAgents,
       totalChats,
-      totalWorldChats,
       totalArchivedMemory,
       totalQueuedMessages,
     };

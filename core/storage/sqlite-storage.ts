@@ -5,8 +5,7 @@
  *
  * Features:
  * - Full implementation of StorageAPI interface for SQLite backend
- * - Complete chat operations with proper TypeScript types (WorldChat, ChatData, etc.)
- * - Enhanced snapshot operations for world state preservation and restoration
+ * - Chat metadata persistence aligned with aggregated agent-memory chat state
  * - Enhanced archive management with rich metadata and search capabilities
  * - Optimized queries with prepared statements and transactions
  * - Data integrity with foreign key constraints and validation
@@ -15,7 +14,6 @@
  *
  * Enhanced Chat Features:
  * - Full CRUD operations for world chats with proper type safety
- * - Snapshot storage and restoration with atomic transactions
  * - Foreign key relationships ensuring data consistency
  * - Efficient querying with indexed columns
  *
@@ -35,6 +33,7 @@
  * - Complete type safety with proper TypeScript interfaces
  *
  * Recent Changes:
+ * - 2026-03-12: Removed dormant chat snapshot reads/writes; SQLite chat metadata now matches file and memory backends.
  * - 2026-02-25: Fixed `listAgents` memory hydration to parse aliased `toolCalls`/`toolCallId` fields so runtime agent memory preserves persisted tool-call metadata.
  * - 2026-02-13: Added atomic compare-and-set chat title update helper (`updateChatNameIfCurrent`).
  * - 2026-02-13: Fixed migration directory resolution so Electron runtimes launched from `electron/` still run root `migrations/`.
@@ -61,7 +60,7 @@ import { runMigrations } from './migration-runner.js';
 import * as path from 'path';
 import * as fs from 'fs';
 import { fileURLToPath } from 'url';
-import type { StorageAPI, World, Agent, AgentMessage, Chat, CreateChatParams, UpdateChatParams, WorldChat, QueuedMessage, QueueMessageStatus } from '../types.js';
+import type { StorageAPI, World, Agent, AgentMessage, Chat, CreateChatParams, UpdateChatParams, QueuedMessage, QueueMessageStatus } from '../types.js';
 import { toKebabCase } from '../utils.js';
 
 /**
@@ -529,28 +528,11 @@ export async function loadChatData(ctx: SQLiteStorageContext, worldId: string, c
 
   if (!result) return null;
 
-  // Load chat if exists
-  const chat = await get(ctx, `
-    SELECT snapshot_data as snapshotData, captured_at as capturedAt, version
-    FROM chat_snapshots
-    WHERE chat_id = ? AND world_id = ?
-    ORDER BY captured_at DESC
-    LIMIT 1
-  `, chatId, worldId);
-
   return {
     ...result,
     createdAt: new Date(result.createdAt),
     updatedAt: new Date(result.updatedAt),
     tags: JSON.parse(result.tags || '[]'),
-    chat: chat ? {
-      ...JSON.parse(chat.snapshotData),
-      metadata: {
-        ...JSON.parse(chat.snapshotData).metadata,
-        capturedAt: new Date(chat.capturedAt),
-        version: chat.version
-      }
-    } : undefined
   };
 }
 
@@ -632,152 +614,7 @@ export async function updateChatNameIfCurrent(
     SET name = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ? AND world_id = ? AND name = ?
   `, nextName, chatId, worldId, expectedName);
-  return (result.changes || 0) > 0;
-}
-
-// CHAT OPERATIONS
-export async function saveWorldChat(ctx: SQLiteStorageContext, worldId: string, chatId: string, chat: WorldChat): Promise<void> {
-  await ensureInitialized(ctx);
-  await run(ctx, `
-    INSERT INTO chat_snapshots (chat_id, world_id, snapshot_data, version)
-    VALUES (?, ?, ?, ?)
-  `, chatId, worldId, JSON.stringify(chat), chat.metadata?.version || '1.0');
-}
-
-export async function loadWorldChatFull(ctx: SQLiteStorageContext, worldId: string, chatId: string): Promise<WorldChat | null> {
-  await ensureInitialized(ctx);
-
-  // Get the chat metadata
-  const result = await get(ctx, `
-    SELECT id, name, description, message_count as messageCount,
-           tags, created_at as createdAt, updated_at as updatedAt
-    FROM world_chats
-    WHERE id = ? AND world_id = ?
-  `, chatId, worldId);
-
-  if (!result) return null;
-
-  // Get the chat snapshot data
-  const chat = await get(ctx, `
-    SELECT snapshot_data as snapshotData, captured_at as capturedAt, version
-    FROM chat_snapshots
-    WHERE chat_id = ? AND world_id = ?
-    ORDER BY captured_at DESC
-    LIMIT 1
-  `, chatId, worldId);
-
-  if (!chat) return null; // No snapshot data found
-
-  const snapshotData = JSON.parse(chat.snapshotData);
-
-  // Return merged WorldChat with snapshot fields accessible directly
-  // This matches the web interface expectation
-  return {
-    // Chat metadata (ChatInfo + worldId)
-    id: result.id,
-    worldId: worldId,
-    name: result.name,
-    description: result.description,
-    createdAt: new Date(result.createdAt),
-    updatedAt: new Date(result.updatedAt),
-    messageCount: result.messageCount,
-    tags: JSON.parse(result.tags || '[]'),
-
-    // Snapshot data (core WorldChat fields)
-    world: snapshotData.world,
-    agents: snapshotData.agents,
-    messages: snapshotData.messages,
-    metadata: {
-      ...snapshotData.metadata,
-      capturedAt: new Date(chat.capturedAt),
-      version: chat.version
-    }
-  } as any; // Use 'as any' since this is a merged type that differs between web and core
-}
-
-export async function loadWorldChat(ctx: SQLiteStorageContext, worldId: string, chatId: string): Promise<WorldChat | null> {
-  await ensureInitialized(ctx);
-  const result = await get(ctx, `
-    SELECT snapshot_data as snapshotData, captured_at as capturedAt, version
-    FROM chat_snapshots
-    WHERE chat_id = ? AND world_id = ?
-    ORDER BY captured_at DESC
-    LIMIT 1
-  `, chatId, worldId);
-
-  if (!result) return null;
-
-  const chat = JSON.parse(result.snapshotData);
-  return {
-    ...chat,
-    metadata: {
-      ...chat.metadata,
-      capturedAt: new Date(result.capturedAt),
-      version: result.version
-    }
-  };
-}
-
-export async function restoreFromWorldChat(ctx: SQLiteStorageContext, worldId: string, chat: WorldChat): Promise<boolean> {
-  await ensureInitialized(ctx);
-
-  try {
-    // Begin transaction for atomic restore
-    await run(ctx, 'BEGIN TRANSACTION');
-
-    // Restore world data
-    if (chat.world) {
-      await run(ctx, `
-        UPDATE worlds
-        SET name = ?, description = ?, turn_limit = ?, main_agent = ?, chat_llm_provider = ?, chat_llm_model = ?
-        WHERE id = ?
-      `, chat.world.name, chat.world.description, chat.world.turnLimit,
-        chat.world.mainAgent, chat.world.chatLLMProvider, chat.world.chatLLMModel, worldId);
-    }
-
-    // Clear existing agents for this world
-    await run(ctx, 'DELETE FROM agents WHERE world_id = ?', worldId);
-
-    // Restore agents
-    if (chat.agents && chat.agents.length > 0) {
-      for (const agent of chat.agents) {
-        await run(ctx, `
-          INSERT INTO agents (
-            id, world_id, name, type, status, provider, model, system_prompt,
-            temperature, max_tokens, auto_reply, created_at, last_active, llm_call_count, last_llm_call
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, agent.id, worldId, agent.name, agent.type, agent.status || 'active',
-          agent.provider, agent.model, agent.systemPrompt, agent.temperature,
-          agent.maxTokens, agent.autoReply === false ? 0 : 1,
-          agent.createdAt instanceof Date ? agent.createdAt.toISOString() : agent.createdAt,
-          agent.lastActive instanceof Date ? agent.lastActive.toISOString() : agent.lastActive,
-          agent.llmCallCount || 0,
-          agent.lastLLMCall instanceof Date ? agent.lastLLMCall.toISOString() : agent.lastLLMCall);
-
-        // Clear and restore agent memory
-        await run(ctx, 'DELETE FROM agent_memory WHERE agent_id = ? AND world_id = ?', agent.id, worldId);
-
-        if (agent.memory && agent.memory.length > 0) {
-          for (const message of agent.memory) {
-            await run(ctx, `
-              INSERT INTO agent_memory (agent_id, world_id, role, content, sender, chat_id, message_id, reply_to_message_id, tool_calls, tool_call_id, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `, agent.id, worldId, message.role, message.content, message.sender, message.chatId, message.messageId, message.replyToMessageId,
-              message.tool_calls ? JSON.stringify(message.tool_calls) : null,
-              message.tool_call_id || null,
-              message.createdAt instanceof Date ? message.createdAt.toISOString() : (message.createdAt || new Date().toISOString()));
-          }
-        }
-      }
-    }
-
-    await run(ctx, 'COMMIT');
-    return true;
-  } catch (error) {
-    await run(ctx, 'ROLLBACK');
-    console.error('[sqlite-storage] Failed to restore from world chat:', error);
-    return false;
-  }
+  return ((result as { changes?: number }).changes ?? 0) > 0;
 }
 
 // ARCHIVE OPERATIONS

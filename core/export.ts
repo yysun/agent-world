@@ -102,25 +102,12 @@
 // Core module imports
 import { createCategoryLogger } from './logger.js';
 import { getWorld, listAgents, getAgent, getMemory } from './managers.js';
-import { type StorageAPI, createStorageWithWrappers } from './storage/storage-factory.js';
 
 // Type imports
-import type { World, Agent, Chat, AgentMessage, WorldChat } from './types.js';
+import type { World, Agent, Chat, AgentMessage } from './types.js';
 
-// Initialize logger and storage
+// Initialize logger
 const logger = createCategoryLogger('core.export');
-let storageWrappers: StorageAPI | null = null;
-
-async function initializeModules() {
-  // Skip storage initialization in test environment to prevent SQLite errors
-  // Tests use mocked storage from vitest-setup.ts
-  if (process.env.NODE_ENV === 'test') {
-    return;
-  }
-  storageWrappers = await createStorageWithWrappers();
-}
-
-const moduleInitialization = initializeModules();
 
 async function buildAgentMap(worldId: string, agentSummaries?: Agent[]): Promise<Map<string, Agent>> {
   const summaries = agentSummaries ?? await listAgents(worldId);
@@ -157,8 +144,6 @@ function formatSenderLabel(message: AgentMessage, agentsMap: Map<string, Agent>)
  * Export world configuration, agents, and chats to Markdown format
  */
 export async function exportWorldToMarkdown(worldName: string): Promise<string> {
-  await moduleInitialization;
-
   // Load world configuration
   const worldData = await getWorld(worldName);
   if (!worldData) {
@@ -677,8 +662,6 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
 }
 
 export async function exportChatToMarkdown(worldId: string, chatId: string): Promise<string> {
-  await moduleInitialization;
-
   const worldData = await getWorld(worldId);
   if (!worldData) {
     throw new Error(`World '${worldId}' not found`);

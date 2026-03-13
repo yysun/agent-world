@@ -8,7 +8,7 @@
  */
 import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createMemoryStorage } from '../../../core/storage/memory-storage.js';
-import type { StorageAPI, World, Agent, Chat, WorldChat } from '../../../core/types.js';
+import type { StorageAPI, World, Agent, Chat } from '../../../core/types.js';
 import { LLMProvider } from '../../../core/types.js';
 import { EventEmitter } from 'events';
 import { ensureAgentMessageIds } from '../shared/test-data-builders.js';
@@ -373,50 +373,6 @@ describe('Memory Storage', () => {
 
       const loaded = await storage.loadChatData('test-world', 'test-chat');
       expect(loaded).toBeNull();
-    });
-  });
-
-  describe('World Chat Operations', () => {
-    const testWorldChat: WorldChat = {
-      world: {
-        id: 'test-world',
-        name: 'Test World',
-        description: 'Test',
-        turnLimit: 3,
-        createdAt: new Date(),
-        lastUpdated: new Date(),
-        totalAgents: 0,
-        totalMessages: 0,
-        eventEmitter: new EventEmitter(),
-        agents: new Map(),
-        chats: new Map()
-      },
-      agents: [],
-      messages: [],
-      metadata: {
-        capturedAt: new Date(),
-        version: '1.0.0',
-        totalMessages: 0,
-        activeAgents: 0
-      }
-    };
-
-    test('should save and load world chat', async () => {
-      await storage.saveWorldChat('test-world', 'test-chat', testWorldChat);
-      const loaded = await storage.loadWorldChat('test-world', 'test-chat');
-
-      expect(loaded).toEqual(testWorldChat);
-    });
-
-    test('should restore from world chat', async () => {
-      const result = await storage.restoreFromWorldChat('test-world', testWorldChat);
-      expect(result).toBe(true);
-
-      const restoredWorld = await storage.loadWorld('test-world');
-      // Compare only persistable fields (runtime properties are excluded from storage)
-      expect(restoredWorld?.id).toBe(testWorldChat.world.id);
-      expect(restoredWorld?.name).toBe(testWorldChat.world.name);
-      expect(restoredWorld?.description).toBe(testWorldChat.world.description);
     });
   });
 

@@ -177,12 +177,6 @@ export class WorldTestBuilder {
       listChats: vi.fn(),
       updateChatData: vi.fn(),
 
-      // World chat operations
-      saveWorldChat: vi.fn(),
-      loadWorldChat: vi.fn(),
-      loadWorldChatFull: vi.fn(),
-      restoreFromWorldChat: vi.fn(),
-
       // Integrity operations
       validateIntegrity: vi.fn(),
       repairData: vi.fn(),

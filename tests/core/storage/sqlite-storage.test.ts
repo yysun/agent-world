@@ -35,12 +35,9 @@ import {
   initializeWithDefaults,
   loadChatData,
   loadWorld,
-  loadWorldChat,
-  loadWorldChatFull,
   loadAgentsBatch,
   listChatHistories,
   listAgents,
-  restoreFromWorldChat,
   listWorlds,
   repairData,
   loadAgent,
@@ -49,7 +46,6 @@ import {
   saveChatData,
   saveAgentMemory,
   saveWorld,
-  saveWorldChat,
   searchArchives,
   updateChatData,
   updateChatNameIfCurrent,
@@ -461,13 +457,7 @@ describe('sqlite-storage behavior', () => {
     expect(notUpdated).toBe(false);
   });
 
-  it('loads chat snapshots, updates chat metadata, and lists histories', async () => {
-    const snapshotData = {
-      world: { id: 'world-1', name: 'World', description: '', turnLimit: 5 },
-      agents: [],
-      messages: [],
-      metadata: { capturedBy: 'test' },
-    };
+  it('loads chat metadata without querying dormant snapshots, updates chat metadata, and lists histories', async () => {
     const mock = createMockDb({
       onGet: (sql) => {
         if (sql.includes('FROM world_chats')) {
@@ -480,13 +470,6 @@ describe('sqlite-storage behavior', () => {
             tags: '["a","b"]',
             createdAt: '2026-02-27T10:00:00.000Z',
             updatedAt: '2026-02-27T11:00:00.000Z',
-          };
-        }
-        if (sql.includes('FROM chat_snapshots')) {
-          return {
-            snapshotData: JSON.stringify(snapshotData),
-            capturedAt: '2026-02-27T11:10:00.000Z',
-            version: '2.0',
           };
         }
         return null;
@@ -522,8 +505,7 @@ describe('sqlite-storage behavior', () => {
 
     const loaded = await loadChatData(ctx, 'world-1', 'chat-1');
     expect(loaded?.tags).toEqual(['a', 'b']);
-    expect(loaded?.chat?.metadata.version).toBe('2.0');
-    expect(loaded?.chat?.metadata.capturedAt).toBeInstanceOf(Date);
+    expect(mock.getCalls.some((call) => call.sql.includes('FROM chat_snapshots'))).toBe(false);
 
     const noOpUpdate = await updateChatData(ctx, 'world-1', 'chat-1', {});
     expect(noOpUpdate?.id).toBe('chat-1');
@@ -545,96 +527,6 @@ describe('sqlite-storage behavior', () => {
 
     const histories = await listChatHistories(ctx, 'world-1');
     expect(histories.length).toBeGreaterThan(0);
-  });
-
-  it('handles world chat snapshot save/load and restore transactions', async () => {
-    const snapshot = {
-      world: {
-        name: 'Restored',
-        description: 'd',
-        turnLimit: 7,
-        mainAgent: null,
-        chatLLMProvider: null,
-        chatLLMModel: null,
-      },
-      agents: [
-        {
-          id: 'agent-1',
-          name: 'Agent',
-          type: 'assistant',
-          provider: 'openai',
-          model: 'gpt-4',
-          systemPrompt: 'prompt',
-          temperature: 0.2,
-          maxTokens: 100,
-          autoReply: true,
-          createdAt: new Date('2026-02-27T10:00:00.000Z'),
-          lastActive: new Date('2026-02-27T10:00:00.000Z'),
-          llmCallCount: 1,
-          memory: [
-            {
-              role: 'user',
-              content: 'hello',
-              sender: 'human',
-              messageId: 'msg-1',
-              chatId: 'chat-1',
-              createdAt: new Date('2026-02-27T10:00:00.000Z'),
-            },
-          ],
-        },
-      ],
-      messages: [],
-      metadata: { version: '2.0' },
-    };
-
-    const successMock = createMockDb({
-      onGet: (sql) => {
-        if (sql.includes('FROM world_chats')) {
-          return {
-            id: 'chat-1',
-            name: 'Chat 1',
-            description: 'Desc',
-            messageCount: 1,
-            tags: '[]',
-            createdAt: '2026-02-27T10:00:00.000Z',
-            updatedAt: '2026-02-27T10:30:00.000Z',
-          };
-        }
-        if (sql.includes('FROM chat_snapshots')) {
-          return {
-            snapshotData: JSON.stringify(snapshot),
-            capturedAt: '2026-02-27T10:31:00.000Z',
-            version: '2.0',
-          };
-        }
-        return null;
-      },
-    });
-    const successCtx = createCtx(successMock.db, true);
-
-    await saveWorldChat(successCtx, 'world-1', 'chat-1', snapshot as any);
-    const compact = await loadWorldChat(successCtx, 'world-1', 'chat-1');
-    expect(compact?.metadata.version).toBe('2.0');
-
-    const full = await loadWorldChatFull(successCtx, 'world-1', 'chat-1');
-    expect(full?.id).toBe('chat-1');
-    expect(full?.world?.name).toBe('Restored');
-
-    await expect(restoreFromWorldChat(successCtx, 'world-1', snapshot as any)).resolves.toBe(true);
-    expect(successMock.runCalls.some((call) => call.sql === 'BEGIN TRANSACTION')).toBe(true);
-    expect(successMock.runCalls.some((call) => call.sql === 'COMMIT')).toBe(true);
-
-    const failMock = createMockDb({
-      onRun: (sql) => {
-        if (sql.includes('INSERT INTO agents')) return { error: new Error('insert fail') };
-        return {};
-      },
-    });
-    const failCtx = createCtx(failMock.db, true);
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    await expect(restoreFromWorldChat(failCtx, 'world-1', snapshot as any)).resolves.toBe(false);
-    consoleErrorSpy.mockRestore();
-    expect(failMock.runCalls.some((call) => call.sql === 'ROLLBACK')).toBe(true);
   });
 
   it('archives/searches/exports memory and validates integrity/statistics', async () => {
