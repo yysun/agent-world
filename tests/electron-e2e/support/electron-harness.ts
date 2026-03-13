@@ -14,6 +14,8 @@
  * - Assertions still target visible desktop behavior in the actual Electron window.
  *
  * Recent Changes:
+ * - 2026-03-13: Prunes stale `run-*` workspace directories before bootstrapping new Electron
+ *   E2E runs so late-suite launches do not degrade under temp-directory buildup.
  * - 2026-03-12: Hardened seeded-world selection against dropdown re-render detaches and made launch preparation wait for the seeded agent before continuing.
  * - 2026-03-10: Added initial helper set for the real Electron Playwright E2E harness.
  * - 2026-03-10: Switched workspace bootstrapping to per-run isolated directories to avoid SQLite/user-data lock collisions.
@@ -28,15 +30,18 @@ import { createRequire } from 'node:module';
 import { promisify } from 'node:util';
 import { expect, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { resolveCreatedSessionId } from './session-resolution.js';
+import { pruneWorkspaceRuns } from './workspace-pruning.js';
 import { isRetryableWorldSelectionError, isTargetWorldSelected } from './world-selection.js';
+import {
+  TEST_AGENT_NAME,
+  createSeededAgentPayload,
+} from './seeded-agent.js';
 
 const execFileAsync = promisify(execFile);
 const electronWorkspaceRequire = createRequire(path.resolve(process.cwd(), 'electron/package.json'));
 const ELECTRON_E2E_QUEUE_NO_RESPONSE_FALLBACK_MS = process.env.AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS || '5000';
 const WORLD_SELECTION_TIMEOUT_MS = 15_000;
 const WORLD_SELECTION_MAX_ATTEMPTS = 4;
-const SEEDED_AGENT_NAME = 'E2E Google';
-
 export const TEST_WORLD_ID = 'e2e-test';
 export const TEST_WORLD_NAME = 'e2e-test';
 export const TEST_WORKSPACE_ROOT = path.resolve(process.cwd(), '.tmp', 'electron-playwright-workspace');
@@ -93,6 +98,7 @@ function isSqliteBusyBootstrapError(error: unknown): boolean {
 export async function bootstrapWorkspace(): Promise<void> {
   requireGoogleApiKey();
   fs.mkdirSync(TEST_WORKSPACE_ROOT, { recursive: true });
+  pruneWorkspaceRuns(TEST_WORKSPACE_ROOT);
   let lastError: unknown = null;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -197,8 +203,39 @@ async function waitForSeededAgent(page: Page): Promise<void> {
     }, TEST_WORLD_ID);
   }, {
     timeout: WORLD_SELECTION_TIMEOUT_MS,
-    message: `Expected seeded agent "${SEEDED_AGENT_NAME}" to exist before continuing with Electron E2E steps.`,
-  }).toContain(SEEDED_AGENT_NAME);
+    message: `Expected seeded agent "${TEST_AGENT_NAME}" to exist before continuing with Electron E2E steps.`,
+  }).toContain(TEST_AGENT_NAME);
+}
+
+async function ensureSeededAgent(page: Page): Promise<void> {
+  const state = await getDesktopState(page);
+  if (!state.worldId) {
+    throw new Error('Unable to resolve the current world while ensuring the seeded test agent.');
+  }
+
+  await page.evaluate(
+    async ({ worldId, existingAgentIds, payload }) => {
+      const api = (window as any).agentWorldDesktop;
+      for (const agentId of existingAgentIds) {
+        await api.deleteAgent(worldId, agentId);
+      }
+      await api.createAgent(worldId, payload);
+    },
+    {
+      worldId: state.worldId,
+      existingAgentIds: state.agentIds,
+      payload: createSeededAgentPayload(),
+    },
+  );
+
+  await reloadSeededWorld(page);
+  await expect.poll(async () => (await getDesktopState(page)).agentNames, {
+    timeout: WORLD_SELECTION_TIMEOUT_MS,
+    message: `Expected seeded agent "${TEST_AGENT_NAME}" to be visible in the loaded Electron world state.`,
+  }).toContain(TEST_AGENT_NAME);
+  await expect(
+    page.getByRole('button', { name: `Edit agent ${TEST_AGENT_NAME}` }),
+  ).toBeVisible({ timeout: WORLD_SELECTION_TIMEOUT_MS });
 }
 
 export async function selectSeededWorld(page: Page): Promise<void> {
@@ -232,6 +269,35 @@ export async function selectSeededWorld(page: Page): Promise<void> {
   throw lastError instanceof Error
     ? lastError
     : new Error(`Failed to select seeded world "${TEST_WORLD_ID}" after ${WORLD_SELECTION_MAX_ATTEMPTS} attempts.`);
+}
+
+async function reloadSeededWorld(page: Page): Promise<void> {
+  await waitForSeededWorldList(page);
+
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < WORLD_SELECTION_MAX_ATTEMPTS; attempt += 1) {
+    await page.getByTestId('world-selector').click();
+    const worldItem = page.getByTestId(`world-item-${TEST_WORLD_ID}`);
+    await worldItem.waitFor({ state: 'visible', timeout: WORLD_SELECTION_TIMEOUT_MS });
+
+    try {
+      await worldItem.click();
+      await expect(page.getByTestId('world-selector')).toContainText(TEST_WORLD_NAME, {
+        timeout: WORLD_SELECTION_TIMEOUT_MS,
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableWorldSelectionError(error)) {
+        throw error;
+      }
+      await page.keyboard.press('Escape').catch(() => {});
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Failed to reload seeded world "${TEST_WORLD_ID}" after ${WORLD_SELECTION_MAX_ATTEMPTS} attempts.`);
 }
 
 export async function getDesktopState(page: Page): Promise<DesktopState> {
@@ -474,6 +540,7 @@ export async function waitForQueueStatus(page: Page, statusLabel: 'Queued' | 'Pr
 export async function launchAndPrepare(page: Page): Promise<void> {
   await waitForAppShell(page);
   await selectSeededWorld(page);
+  await ensureSeededAgent(page);
   await waitForSeededAgent(page);
 }
 

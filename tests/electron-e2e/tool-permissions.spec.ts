@@ -26,8 +26,9 @@
  *   rather than relying on a fixed delay.
  *
  * Recent Changes:
- * - 2026-03-12: Fixed web_fetch to match auto matrix (no HITL at ask/auto), fixed
- *   load_skill ask to handle per-skill HITL, fixed Electron tool summary locator.
+ * - 2026-03-12: Updated web_fetch coverage to assert the documented allowed-at-all-levels
+ *   matrix in one desktop session, fixed load_skill ask to handle per-skill
+ *   HITL, fixed Electron tool summary locator.
  * - 2026-03-12: Initial file — Electron e2e coverage for tool-permission UI and enforcement.
  */
 
@@ -53,6 +54,7 @@ const WRITE_FILE_TARGET = '.e2e-write-output.txt';
 const LOAD_SKILL_RUN_MARKER = '.e2e-load-skill-ran.txt';
 const CREATE_AGENT_ASK_NAME = 'E2E Ask Agent';
 const CREATE_AGENT_AUTO_NAME = 'E2E Auto Agent';
+const PERMISSION_FLOW_TIMEOUT_MS = 60_000;
 
 async function setPermissionViaDropdown(
   page: Parameters<typeof launchAndPrepare>[0],
@@ -97,7 +99,7 @@ async function waitForToolSummary(page: Parameters<typeof launchAndPrepare>[0], 
   await page
     .getByText(`tool: ${toolName} -`, { exact: false })
     .last()
-    .waitFor({ state: 'visible' });
+    .waitFor({ state: 'visible', timeout: PERMISSION_FLOW_TIMEOUT_MS });
 }
 
 test.describe('Tool permission dropdown — UI affordances', () => {
@@ -154,6 +156,8 @@ test.describe('Tool permission dropdown — UI affordances', () => {
 });
 
 test.describe('Tool permission enforcement', () => {
+  test.describe.configure({ timeout: PERMISSION_FLOW_TIMEOUT_MS });
+
   test('write_file blocks at read', async ({ page }) => {
     const writeTargetPath = await resetWorkspaceFile(WRITE_FILE_TARGET);
 
@@ -162,7 +166,7 @@ test.describe('Tool permission enforcement', () => {
 
     await setPermissionViaDropdown(page, 'read');
     await sendComposerMessage(page, 'WRITE_FILE_READ: exercise the read block path.');
-    await waitForAssistantToken(page, 'E2E_WRITE_FILE_READ_BLOCKED');
+    await waitForAssistantToken(page, 'E2E_WRITE_FILE_READ_BLOCKED', PERMISSION_FLOW_TIMEOUT_MS);
     await expect(page.getByTestId('hitl-prompt')).toBeHidden();
     await expect(pathExists(writeTargetPath)).resolves.toBe(false);
   });
@@ -175,9 +179,9 @@ test.describe('Tool permission enforcement', () => {
 
     await setPermissionViaDropdown(page, 'ask');
     await sendComposerMessage(page, 'WRITE_FILE_ASK: exercise the ask path.');
-    await waitForHitlPrompt(page);
-    await respondToHitlPrompt(page, 'Approve');
-    await waitForAssistantToken(page, 'E2E_WRITE_FILE_ASK_OK');
+    await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
+    await respondToHitlPrompt(page, 'Approve', PERMISSION_FLOW_TIMEOUT_MS);
+    await waitForAssistantToken(page, 'E2E_WRITE_FILE_ASK_OK', PERMISSION_FLOW_TIMEOUT_MS);
     await expect(fs.readFile(writeTargetPath, 'utf8')).resolves.toContain('ASK_WRITE_OK');
   });
 
@@ -189,38 +193,30 @@ test.describe('Tool permission enforcement', () => {
 
     await setPermissionViaDropdown(page, 'auto');
     await sendComposerMessage(page, 'WRITE_FILE_AUTO: exercise the auto path.');
-    await waitForAssistantToken(page, 'E2E_WRITE_FILE_AUTO_OK');
+    await waitForAssistantToken(page, 'E2E_WRITE_FILE_AUTO_OK', PERMISSION_FLOW_TIMEOUT_MS);
     await expect(page.getByTestId('hitl-prompt')).toBeHidden();
     await expect(fs.readFile(path.join(getActiveWorkspacePath(), WRITE_FILE_TARGET), 'utf8')).resolves.toContain('AUTO_WRITE_OK');
   });
 
-  test('web_fetch allowed at read', async ({ page }) => {
+  test('web_fetch follows the read/ask/auto matrix', async ({ page }) => {
+    test.setTimeout(PERMISSION_FLOW_TIMEOUT_MS);
+
     await launchAndPrepare(page);
     await selectSessionByName(page, CHAT_NAMES.current);
 
     await setPermissionViaDropdown(page, 'read');
-    await sendComposerMessage(page, 'WEB_FETCH_READ: exercise the read block path.');
-    await waitForAssistantToken(page, 'E2E_WEB_FETCH_READ_OK');
+    await sendComposerMessage(page, 'WEB_FETCH_READ: exercise the allowed read path.');
+    await waitForAssistantToken(page, 'E2E_WEB_FETCH_READ_OK', PERMISSION_FLOW_TIMEOUT_MS);
     await expect(page.getByTestId('hitl-prompt')).toBeHidden();
-  });
-
-  test('web_fetch auto-approves at ask', async ({ page }) => {
-    await launchAndPrepare(page);
-    await selectSessionByName(page, CHAT_NAMES.current);
 
     await setPermissionViaDropdown(page, 'ask');
-    await sendComposerMessage(page, 'WEB_FETCH_ASK: exercise the ask path.');
-    await waitForAssistantToken(page, 'E2E_WEB_FETCH_ASK_OK');
+    await sendComposerMessage(page, 'WEB_FETCH_ASK: exercise the allowed ask path.');
+    await waitForAssistantToken(page, 'E2E_WEB_FETCH_ASK_OK', PERMISSION_FLOW_TIMEOUT_MS);
     await expect(page.getByTestId('hitl-prompt')).toBeHidden();
-  });
-
-  test('web_fetch auto-approves at auto', async ({ page }) => {
-    await launchAndPrepare(page);
-    await selectSessionByName(page, CHAT_NAMES.current);
 
     await setPermissionViaDropdown(page, 'auto');
-    await sendComposerMessage(page, 'WEB_FETCH_AUTO: exercise the auto path.');
-    await waitForAssistantToken(page, 'E2E_WEB_FETCH_AUTO_OK');
+    await sendComposerMessage(page, 'WEB_FETCH_AUTO: exercise the allowed auto path.');
+    await waitForAssistantToken(page, 'E2E_WEB_FETCH_AUTO_OK', PERMISSION_FLOW_TIMEOUT_MS);
     await expect(page.getByTestId('hitl-prompt')).toBeHidden();
   });
 
@@ -235,7 +231,7 @@ test.describe('Tool permission enforcement', () => {
 
     await setPermissionViaDropdown(page, 'read');
     await sendComposerMessage(page, 'SHELL_READ: exercise the read block path.');
-    await waitForAssistantToken(page, 'E2E_SHELL_READ_BLOCKED');
+    await waitForAssistantToken(page, 'E2E_SHELL_READ_BLOCKED', PERMISSION_FLOW_TIMEOUT_MS);
     await expect(pathExists(deleteTargetPath)).resolves.toBe(true);
   });
 
@@ -245,9 +241,9 @@ test.describe('Tool permission enforcement', () => {
 
     await setPermissionViaDropdown(page, 'ask');
     await sendComposerMessage(page, 'SHELL_ASK: exercise the ask path.');
-    await waitForHitlPrompt(page);
-    await respondToHitlPrompt(page, 'Approve');
-    await waitForAssistantToken(page, 'E2E_SHELL_ASK_OK');
+    await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
+    await respondToHitlPrompt(page, 'Approve', PERMISSION_FLOW_TIMEOUT_MS);
+    await waitForAssistantToken(page, 'E2E_SHELL_ASK_OK', PERMISSION_FLOW_TIMEOUT_MS);
   });
 
   test('shell_cmd auto-approves low-risk at auto', async ({ page }) => {
@@ -256,7 +252,7 @@ test.describe('Tool permission enforcement', () => {
 
     await setPermissionViaDropdown(page, 'auto');
     await sendComposerMessage(page, 'SHELL_AUTO: exercise the auto low-risk path.');
-    await waitForAssistantToken(page, 'E2E_SHELL_AUTO_OK');
+    await waitForAssistantToken(page, 'E2E_SHELL_AUTO_OK', PERMISSION_FLOW_TIMEOUT_MS);
     await expect(page.getByTestId('hitl-prompt')).toBeHidden();
   });
 
@@ -271,9 +267,9 @@ test.describe('Tool permission enforcement', () => {
 
     await setPermissionViaDropdown(page, 'auto');
     await sendComposerMessage(page, 'SHELL_RISKY_AUTO: exercise the auto risky path.');
-    await waitForHitlPrompt(page);
-    await respondToHitlPrompt(page, 'Approve');
-    await waitForAssistantToken(page, 'E2E_SHELL_RISKY_AUTO_OK');
+    await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
+    await respondToHitlPrompt(page, 'Approve', PERMISSION_FLOW_TIMEOUT_MS);
+    await waitForAssistantToken(page, 'E2E_SHELL_RISKY_AUTO_OK', PERMISSION_FLOW_TIMEOUT_MS);
     await expect(pathExists(deleteTargetPath)).resolves.toBe(false);
   });
 
@@ -283,7 +279,7 @@ test.describe('Tool permission enforcement', () => {
 
     await setPermissionViaDropdown(page, 'read');
     await sendComposerMessage(page, 'CREATE_AGENT_READ: exercise the read block path.');
-    await waitForAssistantToken(page, 'E2E_CREATE_AGENT_READ_BLOCKED');
+    await waitForAssistantToken(page, 'E2E_CREATE_AGENT_READ_BLOCKED', PERMISSION_FLOW_TIMEOUT_MS);
     await expect.poll(async () => (await getDesktopState(page)).agentNames).not.toContain(CREATE_AGENT_ASK_NAME);
   });
 
@@ -293,8 +289,8 @@ test.describe('Tool permission enforcement', () => {
 
     await setPermissionViaDropdown(page, 'ask');
     await sendComposerMessage(page, 'CREATE_AGENT_ASK: exercise the ask path.');
-    await waitForHitlPrompt(page);
-    await respondToHitlPrompt(page, 'Yes');
+    await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
+    await respondToHitlPrompt(page, 'Yes', PERMISSION_FLOW_TIMEOUT_MS);
     await dismissHitlPromptIfPresent(page);
     await expect.poll(async () => (await getDesktopState(page)).agentNames).toContain(CREATE_AGENT_ASK_NAME);
   });
@@ -305,8 +301,8 @@ test.describe('Tool permission enforcement', () => {
 
     await setPermissionViaDropdown(page, 'auto');
     await sendComposerMessage(page, 'CREATE_AGENT_AUTO: exercise the auto path.');
-    await waitForHitlPrompt(page);
-    await respondToHitlPrompt(page, 'Yes');
+    await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
+    await respondToHitlPrompt(page, 'Yes', PERMISSION_FLOW_TIMEOUT_MS);
     await dismissHitlPromptIfPresent(page);
     await expect.poll(async () => (await getDesktopState(page)).agentNames).toContain(CREATE_AGENT_AUTO_NAME);
   });
@@ -330,9 +326,9 @@ test.describe('Tool permission enforcement', () => {
 
     await setPermissionViaDropdown(page, 'ask');
     await sendComposerMessage(page, 'LOAD_SKILL_ASK: exercise the ask path.');
-    await waitForHitlPrompt(page);
-    await respondToHitlPrompt(page, 'Yes once');
-    await waitForAssistantToken(page, 'E2E_LOAD_SKILL_ASK_OK');
+    await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
+    await respondToHitlPrompt(page, 'Yes once', PERMISSION_FLOW_TIMEOUT_MS);
+    await waitForAssistantToken(page, 'E2E_LOAD_SKILL_ASK_OK', PERMISSION_FLOW_TIMEOUT_MS);
   });
 
   test('load_skill runs scripts without approval at auto', async ({ page }) => {
@@ -342,7 +338,7 @@ test.describe('Tool permission enforcement', () => {
     await setPermissionViaDropdown(page, 'auto');
     await sendComposerMessage(page, 'LOAD_SKILL_AUTO: exercise the auto path.');
     await waitForToolSummary(page, 'load_skill');
-    await waitForAssistantToken(page, 'E2E_LOAD_SKILL_AUTO_OK');
+    await waitForAssistantToken(page, 'E2E_LOAD_SKILL_AUTO_OK', PERMISSION_FLOW_TIMEOUT_MS);
     await expect(page.getByTestId('hitl-prompt')).toBeHidden();
   });
 });

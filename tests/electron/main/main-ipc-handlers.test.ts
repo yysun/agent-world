@@ -11,6 +11,8 @@
  * - Mocks the Electron `dialog` module virtually to avoid runtime Electron dependency.
  *
  * Recent Changes:
+ * - 2026-03-13: Added coverage that `agent:create` refreshes the subscribed
+ *   world runtime so Electron-created agents become live responders.
  * - 2026-03-10: Added a chat-flow scenario matrix covering new/current/switched chat
  *   send and edit lifecycles, including replay-safe pending HITL prompt recovery.
  * - 2026-03-10: Added coverage that edit/delete restore chat state in mutation mode without triggering auto-resume.
@@ -248,6 +250,50 @@ describe('createMainIpcHandlers.deleteMessageFromChat', () => {
       success: true,
       messagesRemovedTotal: 2,
       refreshWarning: 'refresh failed'
+    });
+  });
+});
+
+describe('createMainIpcHandlers.createWorldAgent', () => {
+  it('refreshes the world subscription after creating an agent', async () => {
+    const createAgent = vi.fn(async () => ({
+      id: 'e2e-google',
+      name: 'E2E Google',
+      type: 'assistant',
+      provider: 'google',
+      model: 'gemini-2.5-flash',
+      autoReply: true,
+    }));
+    const getWorld = vi.fn(async () => ({
+      id: 'world-1',
+      chatLLMProvider: 'google',
+      chatLLMModel: 'gemini-2.5-flash',
+    }));
+    const refreshWorldSubscription = vi.fn(async () => null);
+    const { handlers } = await createHandlers({
+      createAgent,
+      getWorld,
+      refreshWorldSubscription,
+    });
+
+    const result = await handlers.createWorldAgent({
+      worldId: 'world-1',
+      name: 'E2E Google',
+      provider: 'google',
+      model: 'gemini-2.5-flash',
+      autoReply: true,
+    });
+
+    expect(createAgent).toHaveBeenCalledWith('world-1', expect.objectContaining({
+      name: 'E2E Google',
+      provider: 'google',
+      model: 'gemini-2.5-flash',
+      autoReply: true,
+    }));
+    expect(refreshWorldSubscription).toHaveBeenCalledWith('world-1');
+    expect(result).toMatchObject({
+      id: 'e2e-google',
+      name: 'E2E Google',
     });
   });
 });

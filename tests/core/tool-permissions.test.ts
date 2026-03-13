@@ -12,7 +12,8 @@
  * - No dedicated DB column — follows the same pattern as `working_directory`.
  *
  * Recent changes:
- * - 2026-03-12: Updated write_file/web_fetch coverage to match the documented permission matrix.
+ * - 2026-03-12: Consolidated web_fetch coverage into an explicit allowed-at-all-levels
+ *   matrix regression and updated write_file coverage to match the documented permission matrix.
  */
 
 import * as fsModule from 'fs';
@@ -206,8 +207,15 @@ describe('tool_permission enforcement via world.variables', () => {
   });
 
   describe('web_fetch', () => {
-    it('allows fetches without HITL when tool_permission=read', async () => {
-      const fetchMock = vi.fn(async () => new Response('hello from read', {
+    it.each([
+      { level: 'read', variables: 'tool_permission=read', responseText: 'hello from read' },
+      { level: 'ask', variables: 'tool_permission=ask', responseText: 'hello from ask' },
+      { level: 'auto', variables: '', responseText: 'hello from auto' },
+    ])('allows public fetches without HITL when tool_permission=$level', async ({
+      variables,
+      responseText,
+    }) => {
+      const fetchMock = vi.fn(async () => new Response(responseText, {
         status: 200,
         headers: { 'content-type': 'text/plain; charset=utf-8' },
       }));
@@ -218,49 +226,7 @@ describe('tool_permission enforcement via world.variables', () => {
         { url: 'https://example.com' },
         undefined,
         undefined,
-        { world: { id: 'world-1', variables: 'tool_permission=read' } as any },
-      );
-
-      const parsed = JSON.parse(String(result));
-      expect(parsed.ok).toBe(true);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(mockRequestToolApproval).not.toHaveBeenCalled();
-    });
-
-    it('allows fetches without HITL when tool_permission=ask', async () => {
-      const fetchMock = vi.fn(async () => new Response('hello from ask', {
-        status: 200,
-        headers: { 'content-type': 'text/plain; charset=utf-8' },
-      }));
-      vi.stubGlobal('fetch', fetchMock);
-
-      const tool = createWebFetchToolDefinition();
-      const result = await tool.execute(
-        { url: 'https://example.com' },
-        undefined,
-        undefined,
-        { world: { id: 'world-1', variables: 'tool_permission=ask' } as any },
-      );
-
-      const parsed = JSON.parse(String(result));
-      expect(parsed.ok).toBe(true);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(mockRequestToolApproval).not.toHaveBeenCalled();
-    });
-
-    it('allows fetches without HITL when tool_permission=auto', async () => {
-      const fetchMock = vi.fn(async () => new Response('hello from auto', {
-        status: 200,
-        headers: { 'content-type': 'text/plain; charset=utf-8' },
-      }));
-      vi.stubGlobal('fetch', fetchMock);
-
-      const tool = createWebFetchToolDefinition();
-      const result = await tool.execute(
-        { url: 'https://example.com' },
-        undefined,
-        undefined,
-        { world: { id: 'world-1', variables: '' } as any },
+        { world: { id: 'world-1', variables } as any },
       );
 
       const parsed = JSON.parse(String(result));

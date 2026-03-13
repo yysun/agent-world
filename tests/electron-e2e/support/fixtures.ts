@@ -14,6 +14,8 @@
  * - Each test starts from a fresh `e2e-test` world reset to avoid state bleed.
  *
  * Recent Changes:
+ * - 2026-03-12: Increased Electron first-window wait to 60s so late-suite launches do not
+ *   fail before the real desktop shell opens.
  * - 2026-03-10: Added initial fixture layer for Electron Playwright E2E tests.
  */
 
@@ -36,7 +38,7 @@ export const test = base.extend<ElectronFixtures>({
     }
   },
   page: async ({ electronApp }, use) => {
-    const page = await electronApp.firstWindow();
+    const page = await electronApp.firstWindow({ timeout: 60_000 });
     await waitForAppShell(page);
     await use(page);
   },

@@ -12,6 +12,8 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-03-13: Refreshed subscribed world runtimes after `agent:create` so
+ *   Electron IPC-created E2E agents become live responders immediately.
  * - 2026-03-10: Rebound `sendChatMessage` queue dispatch to the post-restore subscribed runtime so user sends stream on the active world emitter after chat activation.
  * - 2026-03-10: Switched `sendChatMessage` to the queue-only `enqueueAndProcessUserTurn` core API.
  * - 2026-03-08: Added `readSkillContent` and `saveSkillContent` IPC handlers for reading/writing SKILL.md content from the renderer skill editor.
@@ -687,7 +689,15 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     }
 
     const created = await createAgent(worldId, params);
-    return serializeAgentSummary(created);
+    const refreshWarning = await refreshWorldSubscription(worldId);
+    const serialized = serializeAgentSummary(created);
+    if (refreshWarning) {
+      return {
+        ...serialized,
+        refreshWarning,
+      };
+    }
+    return serialized;
   }
 
   async function updateWorldAgent(payload: any) {

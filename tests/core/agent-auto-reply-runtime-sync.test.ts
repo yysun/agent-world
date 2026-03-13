@@ -99,7 +99,6 @@ describe('updateAgent runtime sync', () => {
 
   it('syncs createAgent into active subscribed runtime world', async () => {
     vi.resetModules();
-
     const activeWorld = {
       id: 'world-1',
       name: 'World 1',

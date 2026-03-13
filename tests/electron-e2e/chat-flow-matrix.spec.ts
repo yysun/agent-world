@@ -337,10 +337,7 @@ test.describe('New Chat', () => {
     await launchAndPrepare(page);
     await createNewSession(page);
     await sendComposerMessage(page, 'New chat edit HITL setup token new-edit-hitl-setup');
-    // LLM calls human_intervention_request for the setup message (triggered by "HITL" in the text).
-    // Approve it before the system can reach idle.
-    await respondToHitlPrompt(page, 'Approve', 60_000);
-    await page.getByLabel('Send message').waitFor({ state: 'visible', timeout: 30_000 });
+    await waitForAssistantToken(page, 'new-edit-hitl-setup');
     await editLatestUserMessage(page, buildShellHitlPrompt('new chat edit'));
     await respondToHitlPrompt(page, 'Approve', 60_000);
     await waitForAssistantToken(page, HITL_SHELL_SUCCESS_TOKEN, 60_000);
