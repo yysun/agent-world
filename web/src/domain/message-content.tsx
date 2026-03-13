@@ -17,6 +17,7 @@
  * - Keeps helper logic local to this domain module for focused maintenance
  *
  * Recent Changes:
+ * - 2026-03-13: Excluded narrated assistant tool-call messages from compact tool-row classification so assistant-card border styling can render in web chat.
  * - 2026-03-13: Resolved restored/result-only tool rows through linked assistant requests and envelope metadata so web summary labels match Electron.
  * - 2026-03-12: Merged attached live tool-stream output into the request card body so running shell output does not
  *   render as a second standalone tool box.
@@ -60,6 +61,26 @@ export function isToolResultMessage(message: Message): boolean {
 
 export type ToolSummaryStatus = 'running' | 'done' | 'failed';
 
+function isNarratedAssistantToolCallMessage(message: Message): boolean {
+  const anyMessage = message as any;
+  const role = String(anyMessage?.role || '').trim().toLowerCase();
+  if (role !== 'assistant') {
+    return false;
+  }
+
+  const toolCalls = Array.isArray(anyMessage?.tool_calls) ? anyMessage.tool_calls : [];
+  if (toolCalls.length === 0) {
+    return false;
+  }
+
+  const content = String(anyMessage?.content || anyMessage?.text || '').trim();
+  if (!content) {
+    return false;
+  }
+
+  return !/^calling tool\s*:/i.test(content);
+}
+
 export function isToolRenderableMessage(message: Message): boolean {
   const anyMessage = message as any;
   if (Array.isArray(anyMessage?.combinedToolResults)) {
@@ -73,6 +94,9 @@ export function isToolRenderableMessage(message: Message): boolean {
   }
   if (isToolResultMessage(message)) {
     return true;
+  }
+  if (isNarratedAssistantToolCallMessage(message)) {
+    return false;
   }
   if (Array.isArray(anyMessage?.tool_calls) && anyMessage.tool_calls.length > 0) {
     return true;

@@ -1416,6 +1416,15 @@ legend {
   color: var(--text-primary);
 }
 
+/* Narrated assistant tool-call cards keep assistant bubble chrome while reflecting final tool outcomes. */
+.agent-message-narrated-tool-done {
+  border-left: 3px solid #81c784 !important;
+}
+
+.agent-message-narrated-tool-failed {
+  border-left: 3px solid #e57373 !important;
+}
+
 /* Tool message styling */
 .tool-row-message {
   align-self: stretch;

@@ -14,6 +14,9 @@
  * - Avoids DOM rendering and external I/O.
  *
  * Recent Changes:
+ * - 2026-03-13: Refreshed narrated assistant tool-call styling coverage while lightening the success/failure border treatment.
+ * - 2026-03-13: Added regression coverage so narrated assistant tool-call messages stay on assistant-card layout instead of compact tool rows.
+ * - 2026-03-13: Added narrated assistant tool-call border coverage so assistant-shaped planning rows can reflect final tool success/failure.
  * - 2026-03-13: Updated tool-row shadow coverage so flat web tool status rows do not inherit message card chrome.
  * - 2026-03-11: Added coverage for the reserved-indent row class used to align tool cards with avatar-bearing rows.
  * - 2026-03-11: Added coverage for the shared message-surface shadow class used by user, assistant, and tool rows.
@@ -22,7 +25,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { getToolToggleLabel, isToolRenderableMessage } from '../../web/src/domain/message-content';
-import { getMessageSurfaceShadowClass, getToolRowContainerClass } from '../../web/src/components/world-chat';
+import { getMessageSurfaceShadowClass, getNarratedToolCallBorderClass, getToolRowContainerClass } from '../../web/src/components/world-chat';
 import { worldUpdateHandlers } from '../../web/src/pages/World.update';
 import { SenderType } from '../../web/src/utils/sender-type';
 
@@ -58,6 +61,36 @@ describe('web/tool message ui', () => {
     expect(isToolRenderableMessage(plainAssistantReply)).toBe(false);
   });
 
+  it('keeps narrated assistant tool-call rows on assistant-card layout instead of compact tool rows', () => {
+    const narratedAssistantToolCallRow = {
+      id: 'assistant-narrated-1',
+      type: 'assistant',
+      role: 'assistant',
+      sender: 'agent-a',
+      text: 'I\'ve loaded the yt-dlp skill and will now search for recent videos.',
+      tool_calls: [
+        {
+          id: 'call-narrated-1',
+          type: 'function',
+          function: {
+            name: 'load_skill',
+            arguments: '{"skill":"yt-dlp"}',
+          },
+        },
+      ],
+      narratedToolCallResults: [{
+        id: 'tool-done',
+        type: 'tool',
+        role: 'tool',
+        sender: 'agent-a',
+        text: 'status: success',
+        createdAt: new Date(),
+      }],
+    } as any;
+
+    expect(isToolRenderableMessage(narratedAssistantToolCallRow)).toBe(false);
+  });
+
   it('classifies standalone streaming tool rows as tool renderable', () => {
     const streamingToolRow = {
       id: 'tool-stream-1',
@@ -90,6 +123,51 @@ describe('web/tool message ui', () => {
   it('adds a reserved-indent row class for tool rows only', () => {
     expect(getToolRowContainerClass(true)).toBe('message-row-tool message-row-reserved-indent');
     expect(getToolRowContainerClass(false)).toBe('');
+  });
+
+  it('adds a green/red assistant-card border class for narrated tool-call rows based on linked tool result status', () => {
+    expect(getNarratedToolCallBorderClass({
+      id: 'narrated-done',
+      type: 'assistant',
+      role: 'assistant',
+      sender: 'agent-a',
+      text: 'I will run the command.',
+      createdAt: new Date(),
+      narratedToolCallResults: [{
+        id: 'tool-done',
+        type: 'tool',
+        role: 'tool',
+        sender: 'agent-a',
+        text: 'status: success',
+        createdAt: new Date(),
+      } as any],
+    } as any)).toBe('agent-message-narrated-tool-done');
+
+    expect(getNarratedToolCallBorderClass({
+      id: 'narrated-failed',
+      type: 'assistant',
+      role: 'assistant',
+      sender: 'agent-a',
+      text: 'I will run the command.',
+      createdAt: new Date(),
+      narratedToolCallResults: [{
+        id: 'tool-failed',
+        type: 'tool',
+        role: 'tool',
+        sender: 'agent-a',
+        text: 'status: failed\nreason: non_zero_exit',
+        createdAt: new Date(),
+      } as any],
+    } as any)).toBe('agent-message-narrated-tool-failed');
+
+    expect(getNarratedToolCallBorderClass({
+      id: 'plain-assistant',
+      type: 'assistant',
+      role: 'assistant',
+      sender: 'agent-a',
+      text: 'Regular assistant reply',
+      createdAt: new Date(),
+    } as any)).toBe('');
   });
 
   it('toggles tool output expansion only for the targeted message', () => {

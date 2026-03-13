@@ -16,6 +16,7 @@
  * - Uses Message type from web/src/types
  *
  * Recent Changes:
+ * - 2026-03-13: Attached linked tool result rows to narrated assistant tool-call messages so assistant-card styling can reflect final tool success or failure.
  * - 2026-03-13: Backfilled linked assistant tool requests and resolved tool names onto standalone web tool rows so restored/result-only rows match Electron labels.
  * - 2026-03-13: Aligned split/merge/display paths with Electron renderer:
  *   - Added isNarratedAssistantToolCallMessage exclusion so assistant prose with tool_calls renders as regular cards.
@@ -258,6 +259,54 @@ function isToolRelatedMessage(message: Message): boolean {
   return /^calling tool(?::|\s)/i.test(text);
 }
 
+function collectLinkedToolResults(
+  message: Message,
+  messages: Message[],
+  toolResultsByKey: Map<string, Message[]>,
+): Message[] {
+  const combinedToolResults: Message[] = [];
+  const combinedMessageIds = new Set<string>();
+  const requestMessageId = String((message as any)?.messageId || '').trim();
+  const requestedCallIds = collectToolCallIds(message);
+
+  for (const callId of requestedCallIds) {
+    const matches = toolResultsByKey.get(callId) || [];
+    for (const match of matches) {
+      const matchMessageId = String((match as any)?.messageId || '').trim();
+      if (matchMessageId) {
+        combinedMessageIds.add(matchMessageId);
+      }
+      combinedToolResults.push(match);
+    }
+  }
+
+  if (requestMessageId) {
+    for (const candidate of messages) {
+      const candidateRole = String((candidate as any)?.role || '').trim().toLowerCase();
+      if (candidateRole !== 'tool') {
+        continue;
+      }
+
+      const replyToMessageId = String((candidate as any)?.replyToMessageId || '').trim();
+      if (!replyToMessageId || replyToMessageId !== requestMessageId) {
+        continue;
+      }
+
+      const candidateMessageId = String((candidate as any)?.messageId || '').trim();
+      if (candidateMessageId && combinedMessageIds.has(candidateMessageId)) {
+        continue;
+      }
+
+      if (candidateMessageId) {
+        combinedMessageIds.add(candidateMessageId);
+      }
+      combinedToolResults.push(candidate);
+    }
+  }
+
+  return combinedToolResults;
+}
+
 export function buildCombinedRenderableMessages(messages: Message[]): Message[] {
   const messagesById = new Map<string, Message>();
   for (const message of messages) {
@@ -306,14 +355,20 @@ export function buildCombinedRenderableMessages(messages: Message[]): Message[] 
   return messages
     .map((message, currentIndex) => {
       if (!isToolRelatedMessage(message) || !isToolRequestMessage(message)) {
+        const narratedToolCallResults = isNarratedAssistantToolCallMessage(message)
+          ? collectLinkedToolResults(message, messages, toolResultsByKey)
+          : [];
         const linkedToolRequest = findToolRequestMessageForToolResult(message, messagesById, messages, currentIndex);
         const resolvedToolName = resolveToolNameForMessage(message, messagesById, messages, currentIndex);
 
-        if (!linkedToolRequest && !resolvedToolName) {
+        if (!linkedToolRequest && !resolvedToolName && narratedToolCallResults.length === 0) {
           return message;
         }
 
         let nextMessage = message as any;
+        if (narratedToolCallResults.length > 0) {
+          nextMessage = { ...nextMessage, narratedToolCallResults };
+        }
         if (linkedToolRequest && !(Array.isArray((message as any)?.tool_calls) && (message as any).tool_calls.length > 0)) {
           nextMessage = { ...nextMessage, linkedToolRequest };
         }

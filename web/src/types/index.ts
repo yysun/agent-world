@@ -169,6 +169,7 @@ export interface Message {
   toolInput?: any;
   command?: string;
   toolCallId?: string;
+  narratedToolCallResults?: Message[];
 
   // Phase 5: Collapsible tool output
   isToolOutputExpanded?: boolean;

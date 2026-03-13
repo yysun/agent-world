@@ -16,6 +16,7 @@
  * - Pure function; no I/O, no DOM.
  *
  * Recent Changes:
+ * - 2026-03-13: Added regression coverage for narrated assistant tool-call rows inheriting linked result rows without becoming compact tool cards.
  * - 2026-03-13: Added regression coverage for standalone/restored tool rows inheriting tool metadata from their linked assistant request.
  * - 2026-03-11: Added regression coverage for assistant streaming request rows that only carry legacy
  *   inline `text` (`Calling tool: ...`) before structured `tool_calls` metadata arrives.
@@ -199,6 +200,31 @@ describe('buildCombinedRenderableMessages', () => {
     expect(result[0].id).toBe('narrated-1');
     expect((result[0] as any).combinedToolResults).toBeUndefined();
     expect(result[1].id).toBe('res-n');
+  });
+
+  it('attaches linked tool results to narrated assistant tool-call rows without converting them into merged tool rows', () => {
+    const narrated = makeRequest({
+      id: 'narrated-status',
+      messageId: 'msg-narrated-status',
+      text: 'I will now run the command for you.',
+      content: 'I will now run the command for you.',
+      tool_calls: [{ id: 'call-status', type: 'function', function: { name: 'shell_cmd', arguments: '{"command":"ls"}' } }],
+    });
+    const res = makeResult({
+      id: 'res-status',
+      messageId: 'msg-res-status',
+      tool_call_id: 'call-status',
+      text: 'status: failed\nreason: non_zero_exit',
+      content: 'status: failed\nreason: non_zero_exit',
+    });
+
+    const result = buildCombinedRenderableMessages([narrated, res]);
+
+    expect(result).toHaveLength(2);
+    expect((result[0] as any).combinedToolResults).toBeUndefined();
+    expect(Array.isArray((result[0] as any).narratedToolCallResults)).toBe(true);
+    expect((result[0] as any).narratedToolCallResults).toHaveLength(1);
+    expect((result[0] as any).narratedToolCallResults[0].id).toBe('res-status');
   });
 
   it('keeps legacy assistant stdout mirror rows visible while still merging the canonical tool result', () => {

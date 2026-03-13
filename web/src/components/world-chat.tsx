@@ -12,6 +12,7 @@
  * - Message body rendering is delegated to domain helpers to keep this file focused on view composition.
  *
  * Summary of Recent Changes:
+ * - 2026-03-13: Added narrated assistant tool-call success/failure border variants so planning cards stay assistant-shaped while reflecting final tool outcomes.
  * - 2026-03-13: Stopped applying shared card shadow chrome to tool transcript rows so web tool activity reads as a flat status line.
  * - 2026-03-11: Simplified the chat legend to title-only so world chats no longer show queue/activity widgets in the legend row.
  * - 2026-03-11: Added responsive legend-title truncation so long chat names do not overwhelm the world layout.
@@ -39,7 +40,7 @@ import type { WorldChatProps, Message, WorldViewportMode } from '../types';
 import toKebabCase from '../utils/toKebabCase';
 import { SenderType, getSenderType } from '../utils/sender-type.js';
 import { shouldHideWorldChatMessage } from '../domain/message-visibility';
-import { isToolRenderableMessage, renderMessageContent } from '../domain/message-content';
+import { getToolSummaryStatus, isToolRenderableMessage, renderMessageContent } from '../domain/message-content';
 import { buildCombinedRenderableMessages } from '../domain/tool-merge';
 import { ActivityPulse, ElapsedTimeCounter } from './activity-indicators';
 import { AgentQueueDisplay } from './agent-queue-display';
@@ -180,6 +181,20 @@ export function getMessageSurfaceShadowClass(params: {
 
 export function getToolRowContainerClass(isToolRow: boolean): string {
   return isToolRow ? 'message-row-tool message-row-reserved-indent' : '';
+}
+
+export function getNarratedToolCallBorderClass(message: Message): string {
+  const narratedToolCallResults = Array.isArray((message as any)?.narratedToolCallResults)
+    ? (message as any).narratedToolCallResults as Message[]
+    : [];
+  if (narratedToolCallResults.length === 0) {
+    return '';
+  }
+
+  const hasFailedToolResult = narratedToolCallResults.some((result) => getToolSummaryStatus(result) === 'failed');
+  return hasFailedToolResult
+    ? 'agent-message-narrated-tool-failed'
+    : 'agent-message-narrated-tool-done';
 }
 
 export function isBranchableAgentMessage(message: Message): boolean {
@@ -533,8 +548,9 @@ export default function WorldChat(props: WorldChatProps) {
               const crossAgentClass = isCrossAgentMessage && !isMemoryOnlyMessage && senderType !== SenderType.HUMAN ? 'cross-agent-message' : '';
               const memoryOnlyClass = isMemoryOnlyMessage ? 'memory-only-message' : '';
               const toolClass = isToolRow ? 'tool-message' : '';
+              const narratedToolCallBorderClass = isToolRow ? '' : getNarratedToolCallBorderClass(message);
               const shadowClass = getMessageSurfaceShadowClass({ senderType, isToolRow });
-              const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass} ${memoryOnlyClass} ${toolClass} ${shadowClass}`.trim();
+              const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass} ${memoryOnlyClass} ${toolClass} ${narratedToolCallBorderClass} ${shadowClass}`.trim();
               const rowAlignmentClass = isToolRow ? 'message-row-left' : getMessageRowAlignmentClass(senderType, isCrossAgentMessage);
               const isHumanAvatar = senderType === SenderType.HUMAN;
               const avatarSpriteIndex = getMessageAvatarSpriteIndex(message);
