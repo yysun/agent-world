@@ -6,6 +6,8 @@
  *   not merged away into tool result cards.
  *
  * Recent changes:
+ * - 2026-03-13: Added coverage for reserving avatar spacing on tool transcript rows.
+ * - 2026-03-13: Added coverage for suppressing avatar chrome on tool transcript rows.
  * - 2026-03-04: Added view-mode coverage ensuring message chrome only appears in `Chat View`.
  * - 2026-03-01: Added coverage for narrated assistant tool-call rows remaining as assistant messages.
  */
@@ -43,6 +45,8 @@ import {
   getBoardLaneContainerClassName,
   getLatestUserMessageEntry,
   isNarratedAssistantToolCallMessage,
+  shouldReserveToolAvatarSpace,
+  shouldShowMessageAvatar,
   shouldRenderNonChatSectionLabels,
   shouldShowMessageChrome,
 } from '../../../electron/renderer/src/components/MessageListPanel';
@@ -54,6 +58,19 @@ describe('MessageListPanel narrated tool-call visibility', () => {
     expect(shouldShowMessageChrome('grid')).toBe(false);
     expect(shouldShowMessageChrome('canvas')).toBe(false);
     expect(shouldShowMessageChrome('unsupported')).toBe(true);
+  });
+
+  it('suppresses avatar chrome for tool transcript rows only', () => {
+    expect(shouldShowMessageAvatar(true, true, false)).toBe(true);
+    expect(shouldShowMessageAvatar(true, true, true)).toBe(false);
+    expect(shouldShowMessageAvatar(false, true, false)).toBe(false);
+    expect(shouldShowMessageAvatar(true, false, false)).toBe(false);
+  });
+
+  it('reserves avatar spacing for tool transcript rows in chat view', () => {
+    expect(shouldReserveToolAvatarSpace(true, true)).toBe(true);
+    expect(shouldReserveToolAvatarSpace(true, false)).toBe(false);
+    expect(shouldReserveToolAvatarSpace(false, true)).toBe(false);
   });
 
   it('selects only the latest user message for non-chat top row', () => {

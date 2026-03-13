@@ -485,39 +485,6 @@ function isToolMessageSuccess(message) {
   return /status\s*[:=]\s*(success|succeeded|done|completed|ok)/i.test(content);
 }
 
-function getToolMessageBorderClassName(message, isToolCallPending) {
-  const role = String(message?.role || '').trim().toLowerCase();
-  const hasToolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
-  const hasExplicitPendingFlag = typeof isToolCallPending === 'boolean';
-  const inferredPendingFromToolCalls = role === 'assistant' && hasToolCalls;
-  const isPendingOrRunning = Boolean(message?.isToolStreaming)
-    || (hasExplicitPendingFlag ? isToolCallPending : inferredPendingFromToolCalls);
-
-  if (isPendingOrRunning) {
-    return 'border-l-amber-500/50';
-  }
-
-  if (isToolMessageFailure(message)) {
-    return 'border-l-red-500/60';
-  }
-
-  if (isToolMessageSuccess(message)) {
-    return 'border-l-green-500/60';
-  }
-
-  // Tool result rows default to "done" in the header when no failure is detected.
-  // Keep border color consistent with that completed state.
-  if (role === 'tool' && !isPendingOrRunning && !isToolMessageFailure(message)) {
-    return 'border-l-green-500/60';
-  }
-
-  if (role === 'assistant' && hasToolCalls && hasExplicitPendingFlag && isToolCallPending === false) {
-    return 'border-l-green-500/60';
-  }
-
-  return 'border-l-amber-500/50';
-}
-
 export function getMessageCardClassName(message, messagesById, messages, currentIndex, options = {}) {
   const role = String(message?.role || '').toLowerCase();
   const isUser = isHumanMessage(message);
@@ -536,17 +503,19 @@ export function getMessageCardClassName(message, messagesById, messages, current
   const showLeftBorder = normalizedOptions.showLeftBorder !== false;
   const fullWidthUserMessage = normalizedOptions.fullWidthUserMessage === true;
 
+  if (isTool) {
+    return 'group relative ml-auto w-full rounded-none border-0 bg-transparent p-0 shadow-none';
+  }
+
   const roleClassName = isUser
     ? (fullWidthUserMessage
       ? 'w-full border-l-sidebar-border bg-sidebar-accent'
       : 'ml-auto w-[80%] border-l-sidebar-border bg-sidebar-accent')
-    : isTool
-        ? `ml-auto w-[92%] ${getToolMessageBorderClassName(message, isToolCallPending)}`
-      : isCrossAgent
-        ? 'ml-auto w-[92%] border-l-violet-500/50'
-        : isSystem
-          ? `mr-auto w-[90%] ${isSystemError ? 'border-l-red-500/70 bg-muted/40' : 'border-l-border bg-muted/40'}`
-          : 'ml-auto w-[92%] border-l-sky-500/40';
+    : isCrossAgent
+      ? 'ml-auto w-[92%] border-l-violet-500/50'
+      : isSystem
+        ? `mr-auto w-[90%] ${isSystemError ? 'border-l-red-500/70 bg-muted/40' : 'border-l-border bg-muted/40'}`
+        : 'ml-auto w-[92%] border-l-sky-500/40';
 
   return `group relative rounded-lg p-3 ${showLeftBorder ? 'border-l' : ''} ${roleClassName}`;
 }

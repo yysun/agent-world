@@ -2,10 +2,10 @@
  * MessageListPanel Default Collapse Policy Tests
  *
  * Purpose:
- * - Verify collapsible message cards render expanded by default.
+ * - Verify tool transcript rows collapse by default while assistant cards stay expanded.
  *
  * Recent changes:
- * - 2026-03-01: Added regression coverage for default-expanded tool/assistant message cards.
+ * - 2026-03-13: Updated regression coverage so tool rows default to collapsed and assistant cards remain expanded.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -37,13 +37,13 @@ vi.mock('react/jsx-dev-runtime', () => ({
 import { getInitialMessageCollapsedState } from '../../../electron/renderer/src/components/MessageListPanel';
 
 describe('MessageListPanel default collapse policy', () => {
-  it('defaults collapsible tool rows to expanded', () => {
+  it('defaults collapsible tool rows to collapsed', () => {
     const toolMessage = {
       role: 'tool',
       content: '{"status":"done"}',
     };
 
-    expect(getInitialMessageCollapsedState(toolMessage, true)).toBe(false);
+    expect(getInitialMessageCollapsedState(toolMessage, true)).toBe(true);
   });
 
   it('defaults collapsible assistant rows to expanded', () => {

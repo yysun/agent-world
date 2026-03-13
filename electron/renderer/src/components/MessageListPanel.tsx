@@ -13,6 +13,9 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-03-13: Reserved avatar-column spacing for tool transcript rows so compact tool summaries align with normal message left edges.
+ * - 2026-03-13: Suppressed agent avatar chips for tool transcript rows so compact tool status lines do not inherit assistant-avatar chrome.
+ * - 2026-03-13: Flattened tool transcript rows into compact dot-status lines and defaulted tool details to collapsed.
  * - 2026-03-10: Keep edit/delete action chrome visible on the latest failed user turn when only diagnostic error rows follow it.
  * - 2026-03-04: Board agent lanes now stretch to full available height with per-lane internal scrolling.
  * - 2026-03-04: Board view now renders per-agent vertical lanes in a horizontal lane strip.
@@ -55,7 +58,7 @@
  */
 
 import { useState } from 'react';
-import MessageContent, { getToolStatusLabel } from './MessageContent';
+import MessageContent, { getToolStatusLabel, getToolStatusTone } from './MessageContent';
 import ElapsedTimeCounter from './ElapsedTimeCounter';
 import { compactSkillDescription, formatTime } from '../utils/formatting';
 import {
@@ -81,6 +84,14 @@ import {
 
 export function shouldShowMessageChrome(worldViewMode: unknown): boolean {
   return normalizeWorldViewMode(worldViewMode) === 'chat';
+}
+
+export function shouldShowMessageAvatar(showChatMessageChrome: boolean, hasMessageAvatar: boolean, isToolMessage: boolean): boolean {
+  return showChatMessageChrome && hasMessageAvatar && !isToolMessage;
+}
+
+export function shouldReserveToolAvatarSpace(showChatMessageChrome: boolean, isToolMessage: boolean): boolean {
+  return showChatMessageChrome && isToolMessage;
 }
 
 export function shouldRenderNonChatSectionLabels(): boolean {
@@ -288,13 +299,28 @@ function hasPendingToolCalls(message, messages, currentIndex) {
   return hasPendingToolCallsForMessage(message, messages, currentIndex);
 }
 
-export function getInitialMessageCollapsedState(_message: any, isCollapsible: boolean): boolean {
+export function getInitialMessageCollapsedState(message: any, isCollapsible: boolean): boolean {
   if (!isCollapsible) {
     return false;
   }
 
-  // Default to expanded; explicit user toggles are tracked in messageCollapseOverrides.
+  const isToolRow = isToolRelatedMessage(message) && !isNarratedAssistantToolCallMessage(message);
+  if (isToolRow) {
+    return true;
+  }
+
+  // Assistant cards remain expanded by default; explicit user toggles are tracked in messageCollapseOverrides.
   return false;
+}
+
+function getToolSummaryDotClassName(statusTone: string): string {
+  if (statusTone === 'failed') {
+    return 'bg-red-400';
+  }
+  if (statusTone === 'done') {
+    return 'bg-emerald-400';
+  }
+  return 'bg-amber-400 animate-pulse';
 }
 
 export function buildCombinedRenderableMessages(messages) {
@@ -548,6 +574,7 @@ export default function MessageListPanel({
     const isToolCallRequestMessage = isToolRequestMessage(message);
     const isPendingToolCallRequest = isToolCallRequestMessage && hasPendingToolCalls(message, sourceMessages, messageIndex);
     const toolStatusLabel = isToolMessage ? getToolStatusLabel(message, isPendingToolCallRequest, resolvedToolName) : '';
+    const toolStatusTone = isToolMessage ? getToolStatusTone(message, isPendingToolCallRequest) : 'done';
     const linkedToolRequestMessage = isToolMessage
       ? findToolRequestMessageForToolResult(message, messagesById, sourceMessages, messageIndex)
       : null;
@@ -570,7 +597,7 @@ export default function MessageListPanel({
         className={`flex min-w-0 w-full items-start gap-2 ${shouldRightAlignMessage ? 'justify-end' : 'justify-start'}`}
         data-testid={messageKey ? `message-row-${messageKey}` : undefined}
       >
-        {showChatMessageChrome && messageAvatar ? (
+        {shouldShowMessageAvatar(showChatMessageChrome, Boolean(messageAvatar), isToolMessage) ? (
           <div
             className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-secondary text-[10px] font-semibold text-secondary-foreground"
             title={messageAvatar.name}
@@ -578,6 +605,8 @@ export default function MessageListPanel({
           >
             {messageAvatar.initials}
           </div>
+        ) : shouldReserveToolAvatarSpace(showChatMessageChrome, isToolMessage) ? (
+          <div className="mt-1 h-8 w-8 shrink-0" aria-hidden="true" />
         ) : null}
 
         <article
@@ -585,14 +614,14 @@ export default function MessageListPanel({
             isToolCallPending: isPendingToolCallRequest,
             showLeftBorder: showChatMessageChrome,
             fullWidthUserMessage: !showChatMessageChrome && isHuman,
-          })} ${isStreamingAssistantMessage ? 'agent-streaming-card' : ''} ${isActiveToolMessage ? 'agent-tool-active-card' : ''}`}
+          })} ${isStreamingAssistantMessage ? 'agent-streaming-card' : ''}`}
           data-testid={messageKey ? `message-card-${messageKey}` : undefined}
         >
           <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
             {isToolMessage ? (
-              <span className="flex items-center gap-2">
-                <span>{senderLabel}</span>
-                <span className="font-medium text-foreground/80">{toolStatusLabel}</span>
+              <span className="flex min-w-0 items-center gap-2">
+                <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${getToolSummaryDotClassName(toolStatusTone)}`} aria-hidden="true" />
+                <span className="truncate font-medium text-foreground/80">{toolStatusLabel}</span>
               </span>
             ) : (
               <span>{isHuman ? 'You' : senderLabel}</span>

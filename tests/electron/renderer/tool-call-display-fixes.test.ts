@@ -58,10 +58,10 @@ describe('isToolRelatedMessage: assistant messages with tool_calls', () => {
   });
 });
 
-// ─── Tool card border colors by status ──────────────────────────────────
+// ─── Tool transcript rows no longer use card chrome ─────────────────────
 
-describe('getMessageCardClassName: tool status borders', () => {
-  it('uses red left border for failed tool result cards', () => {
+describe('getMessageCardClassName: tool transcript chrome', () => {
+  it('renders tool rows without card chrome while keeping full-width alignment', () => {
     const message = {
       role: 'tool',
       content: '{"status":"failed","reason":"execution_error"}',
@@ -69,70 +69,22 @@ describe('getMessageCardClassName: tool status borders', () => {
     };
 
     const className = getMessageCardClassName(message, new Map(), [message], 0);
-    expect(className).toContain('border-l-red-500/60');
+    expect(className).toContain('w-full');
+    expect(className).toContain('bg-transparent');
+    expect(className).toContain('rounded-none');
+    expect(className).toContain('p-0');
+    expect(className).toContain('border-0');
   });
 
-  it('uses green left border for successful tool result cards', () => {
+  it('keeps assistant cards using normal card chrome', () => {
     const message = {
-      role: 'tool',
-      content: '{"status":"success","exit_code":0}',
-      isToolStreaming: false,
+      role: 'assistant',
+      content: 'Here is the answer.',
     };
 
     const className = getMessageCardClassName(message, new Map(), [message], 0);
-    expect(className).toContain('border-l-green-500/60');
-  });
-
-  it('uses green left border for completed tool result cards without explicit status field', () => {
-    const message = {
-      role: 'tool',
-      content: '{"requestId":"call_1::load_skill_approval","optionId":"yes_in_session","source":"user","skillId":"playwright-cli"}',
-      isToolStreaming: false,
-    };
-
-    const className = getMessageCardClassName(message, new Map(), [message], 0);
-    expect(className).toContain('border-l-green-500/60');
-  });
-
-  it('keeps amber left border for pending tool request cards', () => {
-    const message = {
-      role: 'assistant',
-      content: 'Calling tool: shell_cmd',
-      tool_calls: [
-        {
-          id: 'call_1',
-          type: 'function',
-          function: { name: 'shell_cmd', arguments: '{"command":"pwd"}' },
-        },
-      ],
-    };
-
-    const className = getMessageCardClassName(message, new Map(), [message], 0, { isToolCallPending: true });
-    expect(className).toContain('border-l-amber-500/50');
-  });
-
-  it('uses green left border for completed assistant tool request cards marked done', () => {
-    const message = {
-      role: 'assistant',
-      content: 'Calling tool: load_skill',
-      tool_calls: [
-        {
-          id: 'call_1',
-          type: 'function',
-          function: { name: 'load_skill', arguments: '{"name":"apprun-skills"}' },
-        },
-      ],
-      combinedToolResults: [
-        {
-          role: 'tool',
-          content: '{"status":"done","exit_code":0}',
-        },
-      ],
-      isToolStreaming: false,
-    };
-
-    const className = getMessageCardClassName(message, new Map(), [message], 0, { isToolCallPending: false });
-    expect(className).toContain('border-l-green-500/60');
+    expect(className).toContain('rounded-lg');
+    expect(className).toContain('p-3');
   });
 });
 

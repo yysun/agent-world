@@ -13,6 +13,7 @@
  * - Helper functions are scoped to this module because only this component uses them.
  *
  * Recent Changes:
+ * - 2026-03-13: Flattened tool rows into dot-status transcript lines and removed the in-body tool card shell so collapsed tool rows stay compact.
  * - 2026-03-06: Render persisted tool execution envelope previews in tool bodies and status helpers after reload.
  * - 2026-03-06: Recognize canonical shell `validation_error` and `approval_denied` result reasons as failed tool outcomes in renderer status labels.
  * - 2026-02-28: Added linked tool-request backfill support so tool-result cards render combined `Args` + `Result` even when `tool_calls` live on a separate assistant row.
@@ -48,7 +49,6 @@ import {
   parseToolExecutionEnvelopeContent,
   stringifyToolEnvelopeResult,
 } from '../utils/tool-execution-envelope';
-import ThinkingIndicator from './ThinkingIndicator';
 
 function isStreamingPlaceholderContent(content) {
   const normalized = String(content || '').trim();
@@ -179,11 +179,16 @@ function isFailedToolResultContent(content) {
 }
 
 export function getToolStatusLabel(message, isToolCallPending = false, resolvedToolName = '') {
+  const statusLabel = getToolStatusTone(message, isToolCallPending);
+  const toolName = String(resolvedToolName || extractToolNameFromMessage(message)).trim() || 'unknown';
+
+  return `tool: ${toolName} - ${statusLabel}`;
+}
+
+export function getToolStatusTone(message, isToolCallPending = false) {
   const content = String(message?.content || '');
   const hasToolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
   const isToolCallRequest = hasToolCalls || /calling tool\s*:/i.test(content);
-  const hasCombinedResult = Array.isArray(message?.combinedToolResults) && message.combinedToolResults.length > 0;
-  const toolName = String(resolvedToolName || extractToolNameFromMessage(message)).trim();
   const streamType = String(message?.streamType || '').toLowerCase();
   const combinedResults = Array.isArray(message?.combinedToolResults) ? message.combinedToolResults : [];
   const hasCombinedError = combinedResults.some((result) => {
@@ -191,16 +196,21 @@ export function getToolStatusLabel(message, isToolCallPending = false, resolvedT
     return streamIsError || isFailedToolResultContent(result?.content);
   });
   const hasMessageFailure = String(streamType || '').toLowerCase() === 'stderr' || isFailedToolResultContent(message?.content);
-  const statusLabel = message?.isToolStreaming === true || isToolCallPending
+  const statusLabel = message?.isToolStreaming === true || isToolCallPending || (isToolCallRequest && combinedResults.length === 0)
     ? 'running'
     : (hasCombinedError || hasMessageFailure ? 'failed' : 'done');
 
-  const normalizedToolName = toolName || 'unknown';
-  if (hasCombinedResult || isToolCallRequest) {
-    return `tool: ${normalizedToolName} - ${statusLabel}`;
-  }
+  return statusLabel;
+}
 
-  return `tool: ${normalizedToolName} - ${statusLabel}`;
+function getToolStatusDotClassName(statusTone) {
+  if (statusTone === 'failed') {
+    return 'bg-red-400';
+  }
+  if (statusTone === 'done') {
+    return 'bg-emerald-400';
+  }
+  return 'bg-amber-400 animate-pulse';
 }
 
 function isToolCallRequestMessage(message) {
@@ -375,32 +385,30 @@ export default function MessageContent({
     const isTruncated = toolContent.length > MAX_TOOL_OUTPUT_LENGTH;
     const visibleContent = isTruncated ? toolContent.slice(0, MAX_TOOL_OUTPUT_LENGTH) : toolContent;
     const toolHeaderLabel = `⚙️ ${getToolStatusLabel(message, isToolCallPending)}`;
-    const toolName = extractToolNameFromMessage(message);
-    const isToolStreaming = message?.isToolStreaming === true;
-    const shouldShowToolWorkingIndicator = isToolStreaming;
-    const toolIndicatorText = toolName ? `${toolName} running` : 'Tool running';
+    const toolStatusTone = getToolStatusTone(message, isToolCallPending);
+    const shouldRenderToolHeader = showToolHeader;
+
+    if (collapsed && !shouldRenderToolHeader) {
+      return null;
+    }
 
     return (
       <div className="flex flex-col gap-2">
-        {showToolHeader ? (
-          <div className="text-xs font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
-            {toolHeaderLabel}
-          </div>
-        ) : null}
-        {shouldShowToolWorkingIndicator ? (
-          <div className="agent-tool-indicator rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1">
-            <ThinkingIndicator text={toolIndicatorText} className="text-xs text-amber-200" />
+        {shouldRenderToolHeader ? (
+          <div className="flex items-center gap-2 text-xs font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
+            <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${getToolStatusDotClassName(toolStatusTone)}`} aria-hidden="true" />
+            <span className="truncate">{toolHeaderLabel}</span>
           </div>
         ) : null}
         {!collapsed ? (
-          <div className="rounded-md overflow-hidden border border-border bg-muted">
+          <div className="ml-3 border-l border-border/40 pl-3">
             <pre
-              className="text-xs p-3 font-mono whitespace-pre-wrap break-all text-foreground"
+              className="text-xs py-2 font-mono whitespace-pre-wrap break-all text-foreground"
             >
               {visibleContent || (message.isToolStreaming ? '(waiting for output...)' : '(no output)')}
             </pre>
             {isTruncated ? (
-              <div className="border-t border-border/40 px-3 py-2 text-[11px] text-amber-400">
+              <div className="border-t border-border/40 py-2 text-[11px] text-amber-400">
                 ⚠️ Output truncated (exceeded 50,000 characters)
               </div>
             ) : null}
