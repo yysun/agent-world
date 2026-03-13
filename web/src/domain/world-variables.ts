@@ -11,13 +11,17 @@
  * - Output uses newline-joined text compatible with existing world variable persistence.
  *
  * Summary of Recent Changes:
+ * - 2026-03-13: Switched reasoning-effort control to `default`/`none`, where `default` removes the override and `none` persists as an explicit provider hint.
+ * - 2026-03-13: Added reasoning-effort normalization/default helpers for composer dropdown persistence.
  * - 2026-02-21: Added for web Project-button parity so `working_directory` can be updated like Electron.
  * - 2026-03-12: Added tool-permission event normalization for AppRun select handlers.
  */
 
 export type ToolPermissionLevel = 'read' | 'ask' | 'auto';
+export type ReasoningEffortLevel = 'default' | 'none' | 'low' | 'medium' | 'high';
 
 const VALID_TOOL_PERMISSION_LEVELS = new Set<ToolPermissionLevel>(['read', 'ask', 'auto']);
+const VALID_REASONING_EFFORT_LEVELS = new Set<ReasoningEffortLevel>(['default', 'none', 'low', 'medium', 'high']);
 
 export function getEnvValueFromText(
   variablesText: string | undefined,
@@ -106,6 +110,49 @@ export function upsertEnvVariable(
   return updatedLines.join('\n');
 }
 
+export function removeEnvVariable(
+  variablesText: string | undefined,
+  key: string
+): string {
+  const normalizedKey = String(key || '').trim();
+  const sourceText = String(variablesText || '');
+  const lines = sourceText ? sourceText.split(/\r?\n/) : [];
+
+  if (!normalizedKey) {
+    return lines.join('\n');
+  }
+
+  const updatedLines: string[] = [];
+
+  for (const rawLine of lines) {
+    const line = String(rawLine || '');
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) {
+      updatedLines.push(line);
+      continue;
+    }
+
+    const eqIndex = line.indexOf('=');
+    if (eqIndex <= 0) {
+      updatedLines.push(line);
+      continue;
+    }
+
+    const envKey = line.slice(0, eqIndex).trim();
+    if (envKey === normalizedKey) {
+      continue;
+    }
+
+    updatedLines.push(line);
+  }
+
+  while (updatedLines.length > 0 && updatedLines[updatedLines.length - 1].trim() === '') {
+    updatedLines.pop();
+  }
+
+  return updatedLines.join('\n');
+}
+
 export function getToolPermissionLevelFromInput(payload: unknown): ToolPermissionLevel | null {
   if (typeof payload === 'string') {
     const normalized = payload.trim().toLowerCase() as ToolPermissionLevel;
@@ -122,4 +169,30 @@ export function getToolPermissionLevelFromInput(payload: unknown): ToolPermissio
   }
 
   return null;
+}
+
+function normalizeReasoningEffortLevel(value: unknown): ReasoningEffortLevel | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase() as ReasoningEffortLevel;
+  return VALID_REASONING_EFFORT_LEVELS.has(normalized) ? normalized : null;
+}
+
+export function getReasoningEffortLevel(variablesText: string | undefined): ReasoningEffortLevel {
+  return normalizeReasoningEffortLevel(getEnvValueFromText(variablesText, 'reasoning_effort')) || 'default';
+}
+
+export function getReasoningEffortLevelFromInput(payload: unknown): ReasoningEffortLevel | null {
+  if (typeof payload === 'string') {
+    return normalizeReasoningEffortLevel(payload);
+  }
+
+  const targetValue =
+    payload && typeof payload === 'object' && 'target' in payload
+      ? (payload as { target?: { value?: unknown } }).target?.value
+      : undefined;
+
+  return normalizeReasoningEffortLevel(targetValue);
 }

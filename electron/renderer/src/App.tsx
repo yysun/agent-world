@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-03-13: Added `reasoningEffort` derived from `world.variables` and wired it into the Electron composer dropdown.
  * - 2026-03-12: Added `toolPermission` derived from `world.variables` env key and `onSetToolPermission` wired to composer props for the Electron tool permission dropdown.
  * - 2026-03-10: Reconcile selected-chat refresh results with live optimistic/streaming/system-error rows so history reloads do not wipe authoritative transient state.
  * - 2026-03-10: Rehydrate persisted selected-chat system error events into the transcript on chat refresh so failed-turn diagnostics survive restart without moving raw logs out of the logs panel.
@@ -95,6 +96,7 @@ import {
   getAgentInitials,
   getDefaultWorldForm,
   getEnvValueFromText,
+  getReasoningEffortLevel,
   getWorldFormFromWorld,
   parseOptionalInteger,
 } from './utils/app-helpers';
@@ -932,6 +934,7 @@ function AppContent({ api }: { api: DesktopApi }) {
   }, [loadedWorld?.id, loadedWorld?.variables]);
 
   const toolPermission = (getEnvValueFromText(loadedWorld?.variables, 'tool_permission') as 'read' | 'ask' | 'auto') || 'auto';
+  const reasoningEffort = getReasoningEffortLevel(loadedWorld?.variables);
 
   useEffect(() => {
     if (loadedWorld?.id) return;
@@ -1077,6 +1080,7 @@ function AppContent({ api }: { api: DesktopApi }) {
     onUpdateAgent,
     onDeleteAgent,
     onSelectProject,
+    onSetReasoningEffort,
     onSetToolPermission,
     onComposerKeyDown,
   } = useAppActionHandlers({
@@ -1333,6 +1337,8 @@ function AppContent({ api }: { api: DesktopApi }) {
     onComposerKeyDown,
     onSelectProject,
     selectedProjectPath,
+    reasoningEffort,
+    onSetReasoningEffort,
     toolPermission,
     onSetToolPermission,
     canStopCurrentSession,

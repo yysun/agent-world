@@ -34,6 +34,7 @@ import { describe, expect, it } from 'vitest';
 import {
   normalizeStringList,
   normalizeSystemSettings,
+  removeEnvVariable,
   sortSessionsByNewest,
   upsertEnvVariable,
 } from '../../../electron/renderer/src/utils/data-transform';
@@ -98,6 +99,14 @@ describe('extracted data-transform utils', () => {
     const initial = 'FOO=bar\nBAZ=qux';
     expect(upsertEnvVariable(initial, 'FOO', '/tmp/work')).toContain('FOO=/tmp/work');
     expect(upsertEnvVariable(initial, 'NEW_KEY', 'value')).toContain('NEW_KEY=value');
+  });
+
+  it('upserts env variable into empty text without a leading blank line', () => {
+    expect(upsertEnvVariable('', 'NEW_KEY', 'value')).toBe('NEW_KEY=value');
+  });
+
+  it('removes env variables without leaving trailing blank lines', () => {
+    expect(removeEnvVariable('FOO=bar\n\nreasoning_effort=none', 'reasoning_effort')).toBe('FOO=bar');
   });
 });
 

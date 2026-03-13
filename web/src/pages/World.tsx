@@ -15,6 +15,7 @@
  * - Custom CSS for agent sprites, animations, and message styling
  * 
  * Recent Changes:
+ * - 2026-03-13: Passed world-scoped reasoning-effort selection into chat and dashboard composers.
  * - 2026-03-11: Made right-panel close actions resolve against the live viewport width so the mobile close button still works after viewport mismatches.
  * - 2026-03-11: Reduced the world-page top inset so the compressed agent row sits closer to the viewport edge.
  * - 2026-03-11: Compressed the top world row by driving agent-strip height, sprite size, and action-button size from shared viewport vars.
@@ -51,7 +52,7 @@ import WorldChatHistory from '../components/world-chat-history';
 import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
 import { selectHitlPromptForChat } from '../domain/hitl';
-import { getEnvValueFromText } from '../domain/world-variables';
+import { getEnvValueFromText, getReasoningEffortLevel } from '../domain/world-variables';
 import { worldUpdateHandlers } from './World.update';
 
 const DESKTOP_PANEL_BREAKPOINT = 1024;
@@ -215,6 +216,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
     const activeHitlPrompt = selectHitlPromptForChat(state.hitlPromptQueue || [], state.currentChat?.id || null);
     const isDesktopViewport = state.viewportMode === 'desktop';
     const isRightPanelOpen = isDesktopViewport ? true : state.isRightPanelOpen;
+    const reasoningEffort = getReasoningEffortLevel(state.world?.variables);
 
     // Guard clauses for loading and error states
     // if (state.loading) {
@@ -365,6 +367,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
                 dashboardShowHistory={state.dashboardShowHistory}
                 activeHitlPrompt={activeHitlPrompt}
                 submittingHitlRequestId={state.submittingHitlRequestId}
+                reasoningEffort={reasoningEffort}
               />
             ) : (
               <WorldChat
@@ -383,6 +386,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
                 currentChatId={state.currentChat?.id || null}
                 selectedProjectPath={state.selectedProjectPath}
                 systemStatus={state.systemStatus}
+                reasoningEffort={reasoningEffort}
                 toolPermission={(getEnvValueFromText(state.world?.variables, 'tool_permission') as 'read' | 'ask' | 'auto') || 'auto'}
                 editingMessageId={state.editingMessageId}
                 editingText={state.editingText}

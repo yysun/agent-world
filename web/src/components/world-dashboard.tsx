@@ -8,17 +8,18 @@
  * Key features:
  * - Data-driven zone layout from world.dashboardZones config
  * - Reuses existing message rendering pipeline (including VexFlow)
- * - Includes composer input for user messages
+ * - Includes composer input for user messages and world-scoped reasoning control
  * - Toggle to switch to full chat history view
  *
  * Notes:
  * - This is an AppRun functional component (no class, no internal state)
  * - All state comes from WorldComponentState via props
  * - Zone content is resolved from the messages array using dashboard-zones.ts
+ * - Composer dropdown labels intentionally match the chat composer wording.
  */
 
 import { app } from 'apprun';
-import type { DashboardZone, DashboardZoneState, Message, WorldChatProps } from '../types';
+import type { DashboardZone, DashboardZoneState, Message } from '../types';
 import { renderMessageContent } from '../domain/message-content';
 import { getComposerActionState } from './world-chat';
 
@@ -36,6 +37,7 @@ export interface WorldDashboardProps {
   dashboardShowHistory: boolean;
   activeHitlPrompt?: any;
   submittingHitlRequestId?: string | null;
+  reasoningEffort?: 'default' | 'none' | 'low' | 'medium' | 'high';
 }
 
 /**
@@ -106,6 +108,7 @@ export default function WorldDashboard(props: WorldDashboardProps) {
     isBusy,
     activeHitlPrompt,
     submittingHitlRequestId = null,
+    reasoningEffort = 'default',
   } = props;
 
   const { composerDisabled, actionButtonDisabled, actionButtonClass, actionButtonLabel, canStopCurrentSession } =
@@ -165,6 +168,19 @@ export default function WorldDashboard(props: WorldDashboardProps) {
             />
             <div className="composer-toolbar">
               <div className="composer-toolbar-left">
+                <select
+                  className="composer-reasoning-effort-select"
+                  $onchange='set-reasoning-effort'
+                  aria-label="Reasoning effort"
+                  title="Reasoning effort"
+                  data-testid="composer-reasoning-effort"
+                >
+                  <option value="default" selected={reasoningEffort === 'default'}>Not set</option>
+                  <option value="none" selected={reasoningEffort === 'none'}>None</option>
+                  <option value="low" selected={reasoningEffort === 'low'}>Low</option>
+                  <option value="medium" selected={reasoningEffort === 'medium'}>Medium</option>
+                  <option value="high" selected={reasoningEffort === 'high'}>High</option>
+                </select>
                 {activeHitlPrompt ? (
                   <div className="hitl-inline-actions hitl-inline-option-actions">
                     <span className="text-xs text-gray-600 mr-2">

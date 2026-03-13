@@ -55,6 +55,7 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2026-03-13: Added `set-reasoning-effort` composer handler to persist world-scoped `reasoning_effort` env state.
  * - 2026-03-12: Wired live web shell stdout cleanup through `handleToolStreamEnd` so terminal tool events remove
  *   transient stream rows and leave the finished merged tool card.
  * - 2026-03-11: Derived the web waiting indicator's `activeAgent` from world activity payloads so the transcript
@@ -121,7 +122,13 @@ import {
   retainWorldSystemStatusForContext,
   WORLD_SYSTEM_STATUS_TTL_MS,
 } from '../domain/system-status';
-import { getEnvValueFromText, getToolPermissionLevelFromInput, upsertEnvVariable } from '../domain/world-variables';
+import {
+  getEnvValueFromText,
+  getReasoningEffortLevelFromInput,
+  getToolPermissionLevelFromInput,
+  removeEnvVariable,
+  upsertEnvVariable,
+} from '../domain/world-variables';
 import { pickProjectFolderPath } from '../domain/project-folder-picker';
 import {
   sendChatMessage,
@@ -1407,6 +1414,26 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
       return { ...state, world: mergedWorld, error: null };
     } catch (error: any) {
       return { ...state, error: error?.message || 'Failed to update tool permission.' };
+    }
+  },
+
+  'set-reasoning-effort': async (state: WorldComponentState, payload: unknown): Promise<WorldComponentState> => {
+    if (!state.world?.name) return state;
+    const reasoningEffort = getReasoningEffortLevelFromInput(payload);
+    if (!reasoningEffort) return state;
+    const nextVariables = reasoningEffort === 'default'
+      ? removeEnvVariable(state.world.variables || '', 'reasoning_effort')
+      : upsertEnvVariable(
+        state.world.variables || '',
+        'reasoning_effort',
+        reasoningEffort
+      );
+    try {
+      const updatedWorld = await api.updateWorld(state.worldName, { variables: nextVariables });
+      const mergedWorld = mergeUpdatedWorldWithUiState(state.world, updatedWorld);
+      return { ...state, world: mergedWorld, error: null };
+    } catch (error: any) {
+      return { ...state, error: error?.message || 'Failed to update reasoning effort.' };
     }
   },
 

@@ -2004,7 +2004,8 @@ legend {
   height: 1.05rem;
 }
 
-.composer-tool-permission-select {
+.composer-tool-permission-select,
+.composer-reasoning-effort-select {
   height: var(--interactive-control-height, 2rem);
   -webkit-appearance: none;
   appearance: none;
@@ -2024,12 +2025,13 @@ legend {
 .doodle .composer-textarea,
 .doodle .composer-action-icon-button,
 .doodle .composer-project-button,
+.doodle .composer-reasoning-effort-select,
 .doodle .composer-tool-permission-select {
   border: none !important;
   border-image: none !important;
 }
 
-/* Override doodle.css select styles (border-image, caret.svg, font, color) for permission dropdown */
+.doodle .composer-reasoning-effort-select,
 .doodle .composer-tool-permission-select {
   border-style: none !important;
   border-width: 0 !important;
@@ -2046,6 +2048,7 @@ legend {
 .doodle .composer-textarea,
 .doodle .composer-action-icon-button,
 .doodle .composer-project-button,
+.doodle .composer-reasoning-effort-select,
 .doodle .composer-submit-button,
 .doodle .new-chat-btn {
   font-size: var(--interactive-control-font-size, 1rem) !important;

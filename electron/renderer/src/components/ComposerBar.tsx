@@ -11,6 +11,9 @@
  * - Keeps action-button sizing and iconography consistent with desktop UI updates
  *
  * Recent Changes:
+ * - 2026-03-13: Removed reasoning/permission prefixes from dropdown option labels and capitalized the visible text.
+ * - 2026-03-13: Switched composer reasoning-effort options to `default`/`none` so users can distinguish omission from an explicit no-reasoning hint.
+ * - 2026-03-13: Added world-scoped reasoning-effort dropdown to the composer toolbar.
  * - 2026-03-12: Added tool permission `<select>` dropdown after the Project button to expose world-level read/ask/auto permission control.
  * - 2026-02-20: Disabled new-message composer actions while a HITL prompt is pending.
  * - 2026-02-14: Extracted from App.jsx to simplify renderer orchestration logic.
@@ -31,6 +34,8 @@ export default function ComposerBar({
   isCurrentSessionSending,
   hasActiveHitlPrompt,
   onAddToQueue,
+  reasoningEffort = 'default',
+  onSetReasoningEffort,
   toolPermission = 'auto',
   onSetToolPermission,
 }) {
@@ -92,15 +97,29 @@ export default function ComposerBar({
               <span>Project</span>
             </button>
             <select
+              value={reasoningEffort}
+              onChange={(e) => onSetReasoningEffort?.(e.target.value)}
+              className="h-7 rounded-lg bg-transparent px-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none"
+              aria-label="Reasoning effort"
+              title="Reasoning effort"
+              data-testid="composer-reasoning-effort"
+            >
+              <option value="default">Not set</option>
+              <option value="none">None</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+            <select
               value={toolPermission}
               onChange={(e) => onSetToolPermission?.(e.target.value)}
               className="h-7 rounded-lg bg-transparent px-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none"
               aria-label="Tool permission level"
               title="Tool permission level"
             >
-              <option value="read">permission: read</option>
-              <option value="ask">permission: ask</option>
-              <option value="auto">permission: auto</option>
+              <option value="read">Read</option>
+              <option value="ask">Ask</option>
+              <option value="auto">Auto</option>
             </select>
           </div>
           <button

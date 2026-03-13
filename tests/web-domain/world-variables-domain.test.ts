@@ -13,7 +13,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   getEnvValueFromText,
+  getReasoningEffortLevel,
+  getReasoningEffortLevelFromInput,
   getToolPermissionLevelFromInput,
+  removeEnvVariable,
   upsertEnvVariable,
 } from '../../web/src/domain/world-variables';
 
@@ -52,6 +55,11 @@ describe('web/world-variables domain', () => {
     expect(next).toBe('working_directory=/Users/me/work');
   });
 
+  it('removes env keys cleanly when clearing a world override', () => {
+    const text = 'project_name=agent-world\n\nreasoning_effort=none';
+    expect(removeEnvVariable(text, 'reasoning_effort')).toBe('project_name=agent-world');
+  });
+
   it('normalizes tool permission levels from raw select values', () => {
     expect(getToolPermissionLevelFromInput(' ask ')).toBe('ask');
     expect(getToolPermissionLevelFromInput('invalid')).toBeNull();
@@ -63,5 +71,23 @@ describe('web/world-variables domain', () => {
         value: 'read',
       },
     })).toBe('read');
+  });
+
+  it('defaults reasoning effort to default when env key is absent or invalid', () => {
+    expect(getReasoningEffortLevel('working_directory=/tmp/project')).toBe('default');
+    expect(getReasoningEffortLevel('reasoning_effort=extreme')).toBe('default');
+    expect(getReasoningEffortLevel('reasoning_effort=none')).toBe('none');
+  });
+
+  it('normalizes reasoning effort levels from raw values and AppRun change events', () => {
+    expect(getReasoningEffortLevelFromInput(' high ')).toBe('high');
+    expect(getReasoningEffortLevelFromInput(' default ')).toBe('default');
+    expect(getReasoningEffortLevelFromInput(' none ')).toBe('none');
+    expect(getReasoningEffortLevelFromInput({
+      target: {
+        value: 'low',
+      },
+    })).toBe('low');
+    expect(getReasoningEffortLevelFromInput('invalid')).toBeNull();
   });
 });

@@ -13,6 +13,8 @@
  * - Keep defaults aligned with existing renderer constants.
  *
  * Recent Changes:
+ * - 2026-03-13: Switched renderer reasoning-effort parsing to `default`/`none`, where `default` means no world override.
+ * - 2026-03-13: Added renderer reasoning-effort env parsing with `medium` fallback for composer UI.
  * - 2026-02-22: Removed inline agent-name fallback for activity summaries with no resolved active agents to prevent random-agent labels on invalid @mentions.
  * - 2026-02-22: Added `getProcessedAgentsStatusText` to format end-of-run status-bar summaries with agent processed counts.
  * - 2026-02-22: Suppressed fallback agent status text when no concrete active/done/pending agents are present to avoid false `a1: streaming response...` attribution on invalid mentions.
@@ -84,6 +86,11 @@ export function getEnvValueFromText(variablesText: unknown, key: string): string
     return line.slice(eqIndex + 1).trim();
   }
   return undefined;
+}
+
+export function getReasoningEffortLevel(variablesText: unknown): 'default' | 'none' | 'low' | 'medium' | 'high' {
+  const value = String(getEnvValueFromText(variablesText, 'reasoning_effort') || '').trim().toLowerCase();
+  return value === 'none' || value === 'low' || value === 'high' ? value : value === 'medium' ? 'medium' : 'default';
 }
 
 export function getDefaultWorldForm() {

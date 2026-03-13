@@ -102,7 +102,7 @@ describe('openai-direct tool attachment by provider', () => {
     expect(requestParams.tools[0].function.name).toBe('weather_lookup');
   });
 
-  it('adds reasoning_effort for Ollama requests when world variables enable it', async () => {
+  it('adds reasoning config for Ollama requests when world variables enable it', async () => {
     vi.doUnmock('../../../core/openai-direct');
     vi.doUnmock('../../../core/openai-direct.js');
     const openaiDirect = await import('../../../core/openai-direct.js');
@@ -118,10 +118,10 @@ describe('openai-direct tool attachment by provider', () => {
     );
 
     const requestParams = create.mock.calls[0][0];
-    expect(requestParams.reasoning_effort).toBe('high');
+    expect(requestParams.reasoning).toEqual({ effort: 'high' });
   });
 
-  it('does not add reasoning_effort for generic openai-compatible providers', async () => {
+  it('adds reasoning config for generic openai-compatible providers', async () => {
     vi.doUnmock('../../../core/openai-direct');
     vi.doUnmock('../../../core/openai-direct.js');
     const openaiDirect = await import('../../../core/openai-direct.js');
@@ -137,7 +137,45 @@ describe('openai-direct tool attachment by provider', () => {
     );
 
     const requestParams = create.mock.calls[0][0];
-    expect('reasoning_effort' in requestParams).toBe(false);
+    expect(requestParams.reasoning).toEqual({ effort: 'high' });
+  });
+
+  it('sends an explicit none reasoning config when the world sets reasoning to none', async () => {
+    vi.doUnmock('../../../core/openai-direct');
+    vi.doUnmock('../../../core/openai-direct.js');
+    const openaiDirect = await import('../../../core/openai-direct.js');
+    const { client, create } = createFakeNonStreamingClient();
+
+    await openaiDirect.generateOpenAIResponse(
+      client,
+      'compatible-model',
+      [{ role: 'user', content: 'hello' }],
+      { id: 'agent-compatible', provider: 'openai-compatible', temperature: 0.1, maxTokens: 1000 } as any,
+      mcpTools as any,
+      { id: 'world-1', variables: 'reasoning_effort=none' } as any
+    );
+
+    const requestParams = create.mock.calls[0][0];
+    expect(requestParams.reasoning).toEqual({ effort: 'none' });
+  });
+
+  it('omits reasoning config when the world uses default behavior', async () => {
+    vi.doUnmock('../../../core/openai-direct');
+    vi.doUnmock('../../../core/openai-direct.js');
+    const openaiDirect = await import('../../../core/openai-direct.js');
+    const { client, create } = createFakeNonStreamingClient();
+
+    await openaiDirect.generateOpenAIResponse(
+      client,
+      'compatible-model',
+      [{ role: 'user', content: 'hello' }],
+      { id: 'agent-compatible', provider: 'openai-compatible', temperature: 0.1, maxTokens: 1000 } as any,
+      mcpTools as any,
+      { id: 'world-1', variables: '' } as any
+    );
+
+    const requestParams = create.mock.calls[0][0];
+    expect('reasoning' in requestParams).toBe(false);
   });
 
   it('attaches tools for Ollama in streaming requests', async () => {

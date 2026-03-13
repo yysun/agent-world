@@ -19,7 +19,7 @@
  * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
- * - 2026-03-13: Added world-scoped thinking-config mapping and streamed thought-part extraction for reasoning-aware Gemini models.
+ * - 2026-03-13: Switched world reasoning overrides to `default`/`none`, where `default` omits thinking config and `none` uses a zero-budget explicit override.
  * - 2026-03-12: Reclassified streaming abort logs as info-level cancellations to suppress expected stop/edit noise.
  * - 2026-02-15: Stopped replaying historical tool call/response parts as Google `functionCall`/`functionResponse` in conversation conversion to avoid 400 errors requiring `thought_signature` on replayed calls.
  * - 2026-02-13: Added transport-level AbortSignal wiring to Google SDK request options where supported.
@@ -42,27 +42,23 @@ import { getEnvValueFromText } from './utils.js';
 
 const logger = createCategoryLogger('llm.google');
 const mcpLogger = createCategoryLogger('mcp.execution');
+type GoogleReasoningEffort = 'none' | 'low' | 'medium' | 'high';
 
-function normalizeReasoningEffort(value: string | undefined): 'low' | 'medium' | 'high' {
+function normalizeReasoningEffort(value: string | undefined): 'default' | GoogleReasoningEffort {
   const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'low' || normalized === 'high') {
+  if (normalized === 'none' || normalized === 'low' || normalized === 'high' || normalized === 'medium') {
     return normalized;
   }
-  return 'medium';
+  return 'default';
 }
 
-function supportsGoogleThinkingConfig(model: string): boolean {
-  const normalizedModel = String(model || '').trim().toLowerCase();
-  return normalizedModel.includes('gemini-2.5') || normalizedModel.includes('gemini-3');
-}
-
-function buildGoogleThinkingConfig(world: World, model: string): { includeThoughts: true; thinkingBudget: number } | undefined {
-  if (!supportsGoogleThinkingConfig(model)) {
+function buildGoogleThinkingConfig(world: World): { includeThoughts: true; thinkingBudget: number } | undefined {
+  const effort = normalizeReasoningEffort(getEnvValueFromText(world.variables, 'reasoning_effort'));
+  if (effort === 'default') {
     return undefined;
   }
-
-  const effort = normalizeReasoningEffort(getEnvValueFromText(world.variables, 'reasoning_effort'));
-  const budgets: Record<'low' | 'medium' | 'high', number> = {
+  const budgets: Record<GoogleReasoningEffort, number> = {
+    none: 0,
     low: 256,
     medium: 1024,
     high: 2048,
@@ -187,7 +183,7 @@ export async function streamGoogleResponse(
   const googleTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToGoogle(mcpTools) : undefined;
   const { messages: googleMessages, systemInstruction } = convertMessagesToGoogle(messages);
 
-  const thinkingConfig = buildGoogleThinkingConfig(world, model);
+  const thinkingConfig = buildGoogleThinkingConfig(world);
   const generativeModel = client.getGenerativeModel({
     model,
     systemInstruction: systemInstruction || undefined,
@@ -332,7 +328,7 @@ export async function generateGoogleResponse(
 ): Promise<LLMResponse> {
   const googleTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToGoogle(mcpTools) : undefined;
   const { messages: googleMessages, systemInstruction } = convertMessagesToGoogle(messages);
-  const thinkingConfig = buildGoogleThinkingConfig(world, model);
+  const thinkingConfig = buildGoogleThinkingConfig(world);
 
   const generativeModel = client.getGenerativeModel({
     model,

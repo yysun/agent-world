@@ -25,6 +25,7 @@
  * ```
  * 
  * Changes:
+ * - 2026-03-13: Added `set-reasoning-effort` event typing for the world-scoped composer reasoning dropdown.
  * - 2026-03-12: Added `handleToolStreamEnd` event typing for terminal cleanup of live web shell tool rows.
  * - 2026-03-11: Added `update-chat-search` event typing for the web chat-history filter input.
  * - 2026-02-22: Added responsive right-panel events (`open-right-panel`, `close-right-panel`, `toggle-right-panel`, `switch-right-panel-tab`, `sync-right-panel-viewport`).
@@ -85,6 +86,9 @@ export type WorldEvents =
 
   /** Open project-folder picker and persist world `working_directory` */
   | { name: 'select-project-folder'; payload: void }
+
+  /** Persist world-scoped reasoning effort from composer dropdown */
+  | { name: 'set-reasoning-effort'; payload: { target: { value: string } } | string }
 
   /** Open right panel with optional tab selection */
   | { name: 'open-right-panel'; payload: 'chats' | 'world' | void }

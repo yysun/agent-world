@@ -19,6 +19,7 @@
  * 
  * Changes:
  * - 2026-03-13: Added optional assistant `reasoningContent` to streaming payload/message typings so reasoning-token chunks survive web SSE handling.
+ * - 2026-03-13: Added composer `reasoningEffort` prop typing for world-scoped reasoning dropdown selection.
  * - 2026-03-12: Added shell tool-stream metadata (`toolName`, `toolInput`, `command`, `toolCallId`, `chatId`) and
  *   tool-stream end payload typing for web shell-stream parity with Electron.
  * - 2026-03-11: Added `viewportMode` chat/history props so responsive control sizing can follow the active world layout mode.
@@ -293,6 +294,7 @@ export interface WorldChatProps {
   currentChatId?: string | null;
   selectedProjectPath?: string | null;
   systemStatus?: WorldSystemStatusEntry | null;
+  reasoningEffort?: 'default' | 'none' | 'low' | 'medium' | 'high';
   toolPermission?: 'read' | 'ask' | 'auto';
   editingMessageId?: string | null;
   editingText?: string;

@@ -12,6 +12,8 @@
  * - Message body rendering is delegated to domain helpers to keep this file focused on view composition.
  *
  * Summary of Recent Changes:
+ * - 2026-03-13: Simplified composer dropdown labels to plain capitalized text and renamed the default reasoning option to `Not set`.
+ * - 2026-03-13: Added world-scoped reasoning-effort dropdown to the composer toolbar.
  * - 2026-03-13: Added narrated assistant tool-call success/failure border variants so planning cards stay assistant-shaped while reflecting final tool outcomes.
  * - 2026-03-13: Stopped applying shared card shadow chrome to tool transcript rows so web tool activity reads as a flat status line.
  * - 2026-03-11: Simplified the chat legend to title-only so world chats no longer show queue/activity widgets in the legend row.
@@ -269,6 +271,7 @@ export default function WorldChat(props: WorldChatProps) {
     currentChatId = null,
     selectedProjectPath = null,
     systemStatus = null,
+    reasoningEffort = 'default',
     toolPermission = 'auto',
     editingMessageId = null,
     editingText = '',
@@ -838,14 +841,27 @@ export default function WorldChat(props: WorldChatProps) {
                   <span>Project</span>
                 </button>
                 <select
+                  className="composer-reasoning-effort-select"
+                  $onchange='set-reasoning-effort'
+                  aria-label="Reasoning effort"
+                  title="Reasoning effort"
+                  data-testid="composer-reasoning-effort"
+                >
+                  <option value="default" selected={reasoningEffort === 'default'}>Not set</option>
+                  <option value="none" selected={reasoningEffort === 'none'}>None</option>
+                  <option value="low" selected={reasoningEffort === 'low'}>Low</option>
+                  <option value="medium" selected={reasoningEffort === 'medium'}>Medium</option>
+                  <option value="high" selected={reasoningEffort === 'high'}>High</option>
+                </select>
+                <select
                   className="composer-tool-permission-select"
                   $onchange='set-tool-permission'
                   aria-label="Tool permission level"
                   title="Tool permission level"
                 >
-                  <option value="read" selected={toolPermission === 'read'}>permission: read</option>
-                  <option value="ask" selected={toolPermission === 'ask'}>permission: ask</option>
-                  <option value="auto" selected={toolPermission === 'auto'}>permission: auto</option>
+                  <option value="read" selected={toolPermission === 'read'}>Read</option>
+                  <option value="ask" selected={toolPermission === 'ask'}>Ask</option>
+                  <option value="auto" selected={toolPermission === 'auto'}>Auto</option>
                 </select>
               </div>
               <button

@@ -13,6 +13,8 @@
  * - Uses dependency injection for state setters and collaborators.
  *
  * Recent Changes:
+ * - 2026-03-13: Switched reasoning-effort persistence to `default`/`none`, where `default` clears the env override.
+ * - 2026-03-13: Added `onSetReasoningEffort` handler that persists `reasoning_effort` env state via updateWorld.
  * - 2026-03-12: Added `onSetToolPermission` handler that persists tool_permission env key via upsertEnvVariable → updateWorld.
  * - 2026-02-27: Updated Enter-key stop/send gating to include status-registry `working` state so keyboard behavior matches stop-button visibility.
  * - 2026-02-28: Updated settings-header action to toggle the right panel closed when settings mode is already active.
@@ -34,7 +36,7 @@ import {
 import { computeCanStopCurrentSession } from '../domain/chat-stop-state';
 import { safeMessage } from '../domain/desktop-api';
 import { getChatStatus, getRegistry } from '../domain/status-registry';
-import { upsertEnvVariable } from '../utils/data-transform';
+import { removeEnvVariable, upsertEnvVariable } from '../utils/data-transform';
 import { getRefreshWarning } from '../utils/formatting';
 import { validateAgentForm } from '../utils/validation';
 
@@ -351,6 +353,23 @@ export function useAppActionHandlers({
     }
   }, [api, loadedWorld, setLoadedWorld, setStatusText]);
 
+  const onSetReasoningEffort = useCallback(async (reasoningEffort: string) => {
+    if (!loadedWorld?.id) return;
+    const validLevels = ['default', 'none', 'low', 'medium', 'high'];
+    if (!validLevels.includes(reasoningEffort)) return;
+    try {
+      const nextVariables = reasoningEffort === 'default'
+        ? removeEnvVariable(loadedWorld.variables || '', 'reasoning_effort')
+        : upsertEnvVariable(loadedWorld.variables || '', 'reasoning_effort', reasoningEffort);
+      const updated = await api.updateWorld(loadedWorld.id, { variables: nextVariables });
+      const updatedWorld = { ...updated };
+      delete updatedWorld.refreshWarning;
+      setLoadedWorld(updatedWorld);
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to update reasoning effort.'), 'error');
+    }
+  }, [api, loadedWorld, setLoadedWorld, setStatusText]);
+
   const onComposerKeyDown = useCallback((event) => {
     if (event.nativeEvent?.isComposing || event.keyCode === 229) {
       return;
@@ -410,6 +429,7 @@ export function useAppActionHandlers({
     onUpdateAgent,
     onDeleteAgent,
     onSelectProject,
+    onSetReasoningEffort,
     onSetToolPermission,
     onComposerKeyDown,
   };

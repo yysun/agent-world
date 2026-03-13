@@ -14,6 +14,8 @@
  * - Returned objects/arrays are newly allocated to avoid mutation bugs.
  *
  * Recent Changes:
+ * - 2026-03-13: Added `removeEnvVariable` so world-level overrides like reasoning can be cleared back to provider defaults.
+ * - 2026-03-13: Prevented `upsertEnvVariable` from inserting a leading blank line when the source env text is empty.
  * - 2026-02-27: Normalized persisted `showToolMessages` setting with default `true` for desktop tool-row visibility control.
  * - 2026-02-16: Extracted from App.jsx into dedicated utility module.
  */
@@ -59,7 +61,8 @@ function getSessionTimestamp(session) {
 }
 
 export function upsertEnvVariable(variablesText, key, value) {
-  const lines = String(variablesText || '').split(/\r?\n/);
+  const sourceText = String(variablesText || '');
+  const lines = sourceText ? sourceText.split(/\r?\n/) : [];
   const updatedLines = [];
   let replaced = false;
 
@@ -94,6 +97,40 @@ export function upsertEnvVariable(variablesText, key, value) {
       updatedLines.push('');
     }
     updatedLines.push(`${key}=${value}`);
+  }
+
+  return updatedLines.join('\n');
+}
+
+export function removeEnvVariable(variablesText, key) {
+  const sourceText = String(variablesText || '');
+  const lines = sourceText ? sourceText.split(/\r?\n/) : [];
+  const updatedLines = [];
+
+  for (const rawLine of lines) {
+    const line = String(rawLine);
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) {
+      updatedLines.push(line);
+      continue;
+    }
+
+    const eqIndex = line.indexOf('=');
+    if (eqIndex <= 0) {
+      updatedLines.push(line);
+      continue;
+    }
+
+    const envKey = line.slice(0, eqIndex).trim();
+    if (envKey === key) {
+      continue;
+    }
+
+    updatedLines.push(line);
+  }
+
+  while (updatedLines.length > 0 && updatedLines[updatedLines.length - 1].trim() === '') {
+    updatedLines.pop();
   }
 
   return updatedLines.join('\n');

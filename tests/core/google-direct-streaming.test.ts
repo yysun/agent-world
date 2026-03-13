@@ -15,7 +15,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { streamGoogleResponse } from '../../core/google-direct.js';
+import { generateGoogleResponse, streamGoogleResponse } from '../../core/google-direct.js';
 import type { Agent, ChatMessage, World } from '../../core/types.js';
 
 function createAgent(): Agent {
@@ -32,7 +32,7 @@ function createAgent(): Agent {
   };
 }
 
-function createWorld(): World {
+function createWorld(variables = 'reasoning_effort=medium'): World {
   return {
     id: 'world-1',
     name: 'world-1',
@@ -44,7 +44,7 @@ function createWorld(): World {
     eventEmitter: {} as any,
     agents: new Map(),
     chats: new Map(),
-    variables: 'reasoning_effort=medium',
+    variables,
   } as World;
 }
 
@@ -131,5 +131,95 @@ describe('google direct streaming', () => {
       type: 'text',
       content: 'final answer',
     });
+  });
+
+  it('adds thinkingConfig even for models previously treated as unsupported', async () => {
+    const response = {
+      response: {
+        text: () => 'ok',
+        candidates: [{ content: { parts: [{ text: 'ok' }] } }],
+      },
+    };
+    const generateContent = vi.fn().mockResolvedValue(response);
+    const getGenerativeModel = vi.fn().mockReturnValue({ generateContent });
+    const fakeClient = { getGenerativeModel } as any;
+
+    await generateGoogleResponse(
+      fakeClient,
+      'gemini-1.5-flash',
+      [{ role: 'user', content: 'hello' } as ChatMessage],
+      createAgent(),
+      {},
+      createWorld('reasoning_effort=high')
+    );
+
+    expect(getGenerativeModel).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'gemini-1.5-flash',
+      generationConfig: expect.objectContaining({
+        thinkingConfig: {
+          includeThoughts: true,
+          thinkingBudget: 2048,
+        },
+      }),
+    }));
+  });
+
+  it('sends a zero-budget thinkingConfig when the world sets reasoning to none', async () => {
+    const response = {
+      response: {
+        text: () => 'ok',
+        candidates: [{ content: { parts: [{ text: 'ok' }] } }],
+      },
+    };
+    const generateContent = vi.fn().mockResolvedValue(response);
+    const getGenerativeModel = vi.fn().mockReturnValue({ generateContent });
+    const fakeClient = { getGenerativeModel } as any;
+
+    await generateGoogleResponse(
+      fakeClient,
+      'gemini-1.5-flash',
+      [{ role: 'user', content: 'hello' } as ChatMessage],
+      createAgent(),
+      {},
+      createWorld('reasoning_effort=none')
+    );
+
+    expect(getGenerativeModel).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'gemini-1.5-flash',
+      generationConfig: expect.objectContaining({
+        thinkingConfig: {
+          includeThoughts: true,
+          thinkingBudget: 0,
+        },
+      }),
+    }));
+  });
+
+  it('omits thinkingConfig when the world uses default reasoning behavior', async () => {
+    const response = {
+      response: {
+        text: () => 'ok',
+        candidates: [{ content: { parts: [{ text: 'ok' }] } }],
+      },
+    };
+    const generateContent = vi.fn().mockResolvedValue(response);
+    const getGenerativeModel = vi.fn().mockReturnValue({ generateContent });
+    const fakeClient = { getGenerativeModel } as any;
+
+    await generateGoogleResponse(
+      fakeClient,
+      'gemini-1.5-flash',
+      [{ role: 'user', content: 'hello' } as ChatMessage],
+      createAgent(),
+      {},
+      createWorld('')
+    );
+
+    expect(getGenerativeModel).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'gemini-1.5-flash',
+      generationConfig: expect.not.objectContaining({
+        thinkingConfig: expect.anything(),
+      }),
+    }));
   });
 });
