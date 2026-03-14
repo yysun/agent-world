@@ -13,6 +13,7 @@
  * - Keeps manager setup/teardown centralized in one hook.
  *
  * Recent Changes:
+ * - 2026-03-13: Keep completed assistant live rows in place at stream end so the final message upsert preserves renderer-only reasoning content.
  * - 2026-03-13: Preserved assistant `reasoningContent` on live rows so reasoning-only chunks can render before final answer text arrives.
  * - 2026-03-10: Preserve assistant streaming `chatId` on live rows so selected-chat refresh
  *   reconciliation retains in-progress stream content instead of dropping it until the final message lands.
@@ -30,7 +31,11 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import { createStreamingState } from '../streaming-state';
-import { removeRedundantErrorLogMessages, upsertMessageList } from '../domain/message-updates';
+import {
+  finalizeStreamingMessage,
+  removeRedundantErrorLogMessages,
+  upsertMessageList
+} from '../domain/message-updates';
 
 export function useStreamingActivity({ setMessages }) {
   const streamingStateRef = useRef(null);
@@ -72,11 +77,7 @@ export function useStreamingActivity({ setMessages }) {
       },
       onStreamEnd: (messageId) => {
         setMessages((existing) => {
-          const normalizedId = String(messageId || '');
-          return existing.filter((message) => {
-            const sameMessageId = String(message.messageId || '') === normalizedId;
-            return !(sameMessageId && message.isStreaming === true);
-          });
+          return finalizeStreamingMessage(existing, String(messageId || ''));
         });
       },
       onStreamError: (messageId, errorMessage) => {

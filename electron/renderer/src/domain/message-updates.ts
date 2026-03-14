@@ -13,6 +13,7 @@
  * - Messages without canonical `messageId` are ignored by upsert logic.
  *
  * Recent Changes:
+ * - 2026-03-13: Added assistant stream-finalization helper that keeps finalized live rows in place so renderer-only reasoning content survives the final message upsert.
  * - 2026-03-10: Prevented refresh from reapplying stale live streaming rows over canonical refreshed messages and canonicalized durable system-error transcript rows by triggering user turn.
  * - 2026-03-10: Added selected-chat refresh reconciliation for optimistic/live streaming/system-error rows and normalized persisted system-event timestamps from both `Date` and `string`.
  * - 2026-03-10: Delegated generic chat-tail trim semantics to core and kept the renderer wrapper for transcript-specific usage.
@@ -578,6 +579,42 @@ export function preserveLiveSystemErrorMessages(
   chatId: string | null,
 ): MessageLike[] {
   return reconcileRefreshedMessagesWithLiveState(refreshedMessages, liveMessages, chatId);
+}
+
+export function finalizeStreamingMessage(
+  existingMessages: MessageLike[],
+  messageId: string,
+): MessageLike[] {
+  const normalizedMessageId = normalizeMessageId(messageId);
+  if (!normalizedMessageId) {
+    return existingMessages;
+  }
+
+  const existingIndex = existingMessages.findIndex(
+    (message) => normalizeMessageId(message?.messageId) === normalizedMessageId
+  );
+  if (existingIndex < 0) {
+    return existingMessages;
+  }
+
+  const existingMessage = existingMessages[existingIndex];
+  if (existingMessage?.isStreaming !== true) {
+    return existingMessages;
+  }
+
+  const hasReasoningContent = String(existingMessage?.reasoningContent || '').trim().length > 0;
+  const createdAtMs = new Date(String(existingMessage?.createdAt || '')).getTime();
+  const reasoningDurationMs = hasReasoningContent && Number.isFinite(createdAtMs)
+    ? Math.max(0, Date.now() - createdAtMs)
+    : undefined;
+
+  const next = [...existingMessages];
+  next[existingIndex] = {
+    ...existingMessage,
+    isStreaming: false,
+    ...(reasoningDurationMs !== undefined ? { reasoningDurationMs } : {}),
+  };
+  return next;
 }
 
 export function trimChatMessagesFromCutoff(

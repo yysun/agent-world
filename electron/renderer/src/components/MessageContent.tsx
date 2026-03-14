@@ -13,6 +13,8 @@
  * - Helper functions are scoped to this module because only this component uses them.
  *
  * Recent Changes:
+ * - 2026-03-13: Switched the reasoning header to regular-weight text and removed visible `Open` / `Collapse` toggle labels so the control stays arrow-only.
+ * - 2026-03-13: Added a separate assistant reasoning toggle so completed messages keep reasoning available in a collapsed section instead of dropping it after stream finalization.
  * - 2026-03-13: Flattened tool rows into dot-status transcript lines and removed the in-body tool card shell so collapsed tool rows stay compact.
  * - 2026-03-13: Rendered streamed assistant `reasoningContent` in a separate muted block so reasoning-only chunks stay visible without polluting answer text.
  * - 2026-03-06: Render persisted tool execution envelope previews in tool bodies and status helpers after reload.
@@ -41,7 +43,7 @@
  * - 2026-02-16: Extracted from `App.jsx` as part of renderer refactor Phase 2.
  */
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { renderMarkdown } from '../utils/markdown';
 import { formatLogMessage } from '../utils/formatting';
 import { isToolRelatedMessage } from '../utils/message-utils';
@@ -307,6 +309,54 @@ function buildCombinedRequestAndResultContent(message, combinedResults) {
   return `Args:\n${requestText}\n\nResult:\n${resultText}`;
 }
 
+export function getInitialReasoningCollapsedState(message) {
+  const reasoningText = String(message?.reasoningContent || '').trim();
+  if (!reasoningText) {
+    return false;
+  }
+
+  return message?.isStreaming !== true;
+}
+
+export function formatReasoningDuration(elapsedMs) {
+  const normalizedMs = Number.isFinite(Number(elapsedMs)) ? Math.max(0, Number(elapsedMs)) : 0;
+  const totalSeconds = Math.floor(normalizedMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds}s`;
+}
+
+export function getReasoningElapsedMs(message, nowMs = Date.now()) {
+  const storedDurationMs = Number(message?.reasoningDurationMs);
+  if (Number.isFinite(storedDurationMs) && storedDurationMs >= 0) {
+    return storedDurationMs;
+  }
+
+  if (message?.isStreaming !== true) {
+    return 0;
+  }
+
+  const startedAtMs = new Date(String(message?.createdAt || '')).getTime();
+  if (!Number.isFinite(startedAtMs)) {
+    return 0;
+  }
+
+  return Math.max(0, nowMs - startedAtMs);
+}
+
+export function getReasoningHeaderLabel(message, elapsedMs) {
+  const reasoningText = String(message?.reasoningContent || '').trim();
+  if (!reasoningText) {
+    return '';
+  }
+
+  if (message?.isStreaming === true) {
+    return 'Thinking ...';
+  }
+
+  return `Thought for ${formatReasoningDuration(elapsedMs)}`;
+}
+
 export function getToolBodyContent(message) {
   const combinedToolResults = Array.isArray(message?.combinedToolResults) ? message.combinedToolResults : [];
   const hasCombinedResult = combinedToolResults.length > 0;
@@ -333,6 +383,8 @@ export function getToolBodyContent(message) {
 export default function MessageContent({
   message,
   collapsed = false,
+  reasoningCollapsed = false,
+  onToggleReasoningCollapsed,
   isToolCallPending = false,
   showToolHeader = true,
   streamingDotsLabel = 'model',
@@ -345,6 +397,24 @@ export default function MessageContent({
   const displayContent = shouldHideStreamingPlaceholder ? '' : String(message?.content || '');
   const displayReasoningContent = String(message?.reasoningContent || '').trim();
   const shouldShowStreamingDots = isAssistantStreaming && !displayContent;
+  const [reasoningNowMs, setReasoningNowMs] = useState(() => Date.now());
+  const reasoningElapsedMs = getReasoningElapsedMs(message, reasoningNowMs);
+  const reasoningHeaderLabel = getReasoningHeaderLabel(message, reasoningElapsedMs);
+
+  useEffect(() => {
+    if (!displayReasoningContent || message?.isStreaming !== true) {
+      return undefined;
+    }
+
+    setReasoningNowMs(Date.now());
+    const intervalId = window.setInterval(() => {
+      setReasoningNowMs(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [displayReasoningContent, message?.isStreaming]);
 
   const renderedContent = useMemo(() => {
     if (message.logEvent || isToolMessage) {
@@ -449,11 +519,36 @@ export default function MessageContent({
       ) : null}
       {displayReasoningContent ? (
         <div className="rounded-md border border-border/60 bg-muted/40 px-3 py-2">
-          <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Reasoning</div>
-          <div
-            className="prose prose-invert max-w-none break-words text-sm text-muted-foreground"
-            dangerouslySetInnerHTML={{ __html: renderedReasoningContent }}
-          />
+          <button
+            type="button"
+            onClick={onToggleReasoningCollapsed}
+            disabled={!onToggleReasoningCollapsed}
+            className="flex w-full items-center justify-between gap-2 text-left disabled:cursor-default"
+            aria-expanded={!reasoningCollapsed}
+            aria-label={reasoningCollapsed ? 'Open reasoning' : 'Collapse reasoning'}
+          >
+            <div className="text-[11px] text-muted-foreground">{reasoningHeaderLabel}</div>
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground transition-colors hover:text-foreground">
+              {message?.isStreaming === true ? (
+                <span className="tabular-nums">{formatReasoningDuration(reasoningElapsedMs)}</span>
+              ) : null}
+              {reasoningCollapsed ? (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3" aria-hidden="true">
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3" aria-hidden="true">
+                  <path d="m18 15-6-6-6 6" />
+                </svg>
+              )}
+            </div>
+          </button>
+          {!reasoningCollapsed ? (
+            <div
+              className="prose prose-invert mt-1 max-w-none break-words text-sm text-muted-foreground"
+              dangerouslySetInnerHTML={{ __html: renderedReasoningContent }}
+            />
+          ) : null}
         </div>
       ) : null}
       {shouldShowInlineError ? (

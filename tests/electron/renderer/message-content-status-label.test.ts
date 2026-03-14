@@ -34,6 +34,8 @@ const { jsxFactory } = vi.hoisted(() => ({
 vi.mock('react', () => ({
   useMemo: (fn: () => unknown) => fn(),
   useCallback: (fn: unknown) => fn,
+  useEffect: () => undefined,
+  useState: (initial: unknown) => [initial, vi.fn()],
 }), { virtual: true });
 
 vi.mock('react/jsx-runtime', () => ({
@@ -47,7 +49,54 @@ vi.mock('react/jsx-dev-runtime', () => ({
   jsxDEV: jsxFactory,
 }), { virtual: true });
 
-import { getToolBodyContent, getToolStatusLabel } from '../../../electron/renderer/src/components/MessageContent';
+import {
+  default as MessageContent,
+  formatReasoningDuration,
+  getReasoningElapsedMs,
+  getReasoningHeaderLabel,
+  getInitialReasoningCollapsedState,
+  getToolBodyContent,
+  getToolStatusLabel
+} from '../../../electron/renderer/src/components/MessageContent';
+
+function findNode(root: any, predicate: (node: any) => boolean): any {
+  if (!root || typeof root !== 'object') {
+    return null;
+  }
+
+  if (predicate(root)) {
+    return root;
+  }
+
+  const children = root?.props?.children;
+  if (Array.isArray(children)) {
+    for (const child of children) {
+      const found = findNode(child, predicate);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  }
+
+  return findNode(children, predicate);
+}
+
+function collectRenderedText(root: any): string {
+  if (typeof root === 'string') {
+    return root;
+  }
+  if (!root || typeof root !== 'object') {
+    return '';
+  }
+
+  const children = root?.props?.children;
+  if (Array.isArray(children)) {
+    return children.map((child) => collectRenderedText(child)).join('');
+  }
+
+  return collectRenderedText(children);
+}
 
 describe('message content tool status label', () => {
   it('formats label as tool-name-status when direct tool name exists', () => {
@@ -191,5 +240,65 @@ describe('message content tool status label', () => {
     expect(content).toContain('Result:');
     expect(content).toContain('preview only');
     expect(content).not.toContain('tool_execution_envelope');
+  });
+
+  it('defaults completed assistant reasoning panels to collapsed but keeps streaming reasoning expanded', () => {
+    expect(getInitialReasoningCollapsedState({
+      role: 'assistant',
+      isStreaming: false,
+      reasoningContent: 'step 1',
+    })).toBe(true);
+
+    expect(getInitialReasoningCollapsedState({
+      role: 'assistant',
+      isStreaming: true,
+      reasoningContent: 'step 1',
+    })).toBe(false);
+  });
+
+  it('formats live and completed reasoning labels with elapsed time', () => {
+    expect(formatReasoningDuration(65000)).toBe('1m 5s');
+    expect(getReasoningElapsedMs({
+      isStreaming: true,
+      createdAt: '2026-03-13T10:00:00.000Z',
+    }, new Date('2026-03-13T10:01:05.000Z').getTime())).toBe(65000);
+
+    expect(getReasoningHeaderLabel({
+      isStreaming: true,
+      reasoningContent: 'step 1',
+    }, 65000)).toBe('Thinking ...');
+
+    expect(getReasoningHeaderLabel({
+      isStreaming: false,
+      reasoningContent: 'step 1',
+      reasoningDurationMs: 65000,
+    }, 65000)).toBe('Thought for 1m 5s');
+  });
+
+  it('renders an arrow-only reasoning toggle with regular-weight header text', () => {
+    const tree = MessageContent({
+      message: {
+        role: 'assistant',
+        isStreaming: false,
+        reasoningContent: 'step 1',
+        reasoningDurationMs: 65000,
+      },
+      collapsed: false,
+      reasoningCollapsed: true,
+      onToggleReasoningCollapsed: vi.fn(),
+      isToolCallPending: false,
+      showToolHeader: true,
+      streamingDotsLabel: 'model',
+      streamingInputPreview: '',
+    });
+
+    const toggleButton = findNode(tree, (node) => node?.type === 'button' && node?.props?.['aria-label'] === 'Open reasoning');
+    const labelNode = findNode(tree, (node) => node?.props?.className === 'text-[11px] text-muted-foreground');
+
+    expect(toggleButton).toBeTruthy();
+    expect(collectRenderedText(toggleButton)).not.toContain('Open');
+    expect(collectRenderedText(toggleButton)).not.toContain('Collapse');
+    expect(labelNode).toBeTruthy();
+    expect(String(labelNode?.props?.className || '')).not.toContain('font-medium');
   });
 });

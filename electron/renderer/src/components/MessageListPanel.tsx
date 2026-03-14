@@ -13,6 +13,7 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-03-13: Keep completed assistant reasoning in a separate collapsed panel so reasoning stays available after stream completion without expanding the whole card by default.
  * - 2026-03-13: Removed chat-era left offsets from non-chat message cards so hidden avatars do not leave unused gutter space in Electron world views.
  * - 2026-03-13: Preserved narrated assistant tool-call status metadata before `showToolMessages=false` filtering so hidden tool rows do not remove success/failure border state from assistant cards.
  * - 2026-03-13: Reserved avatar-column spacing for tool transcript rows so compact tool summaries align with normal message left edges.
@@ -60,7 +61,11 @@
  */
 
 import { useState } from 'react';
-import MessageContent, { getToolStatusLabel, getToolStatusTone } from './MessageContent';
+import MessageContent, {
+  getInitialReasoningCollapsedState,
+  getToolStatusLabel,
+  getToolStatusTone
+} from './MessageContent';
 import ElapsedTimeCounter from './ElapsedTimeCounter';
 import { compactSkillDescription, formatTime } from '../utils/formatting';
 import {
@@ -571,9 +576,17 @@ export default function MessageListPanel({
   });
   const shouldShowLoading = messagesLoading && renderableMessages.length === 0;
   const [messageCollapseOverrides, setMessageCollapseOverrides] = useState<Record<string, boolean>>({});
+  const [reasoningCollapseOverrides, setReasoningCollapseOverrides] = useState<Record<string, boolean>>({});
 
   const toggleMessageCollapsed = (messageId: string, currentCollapsed: boolean) => {
     setMessageCollapseOverrides((prev) => ({
+      ...prev,
+      [messageId]: !currentCollapsed,
+    }));
+  };
+
+  const toggleReasoningCollapsed = (messageId: string, currentCollapsed: boolean) => {
+    setReasoningCollapseOverrides((prev) => ({
       ...prev,
       [messageId]: !currentCollapsed,
     }));
@@ -585,6 +598,15 @@ export default function MessageListPanel({
       return Boolean(messageCollapseOverrides[messageKey]);
     }
     return getInitialMessageCollapsedState(message, isCollapsible);
+  };
+  const isReasoningCollapsed = (message, messageKey: string | null) => {
+    if (!messageKey || !String(message?.reasoningContent || '').trim()) {
+      return false;
+    }
+    if (Object.prototype.hasOwnProperty.call(reasoningCollapseOverrides, messageKey)) {
+      return Boolean(reasoningCollapseOverrides[messageKey]);
+    }
+    return getInitialReasoningCollapsedState(message);
   };
   const shouldShowWelcome = !messagesLoading && !hasConversationMessages;
   const partitionedMessages = partitionWorldViewMessages(renderableMessages);
@@ -642,6 +664,7 @@ export default function MessageListPanel({
     const isAssistantMessage = messageRole === 'assistant' && !isToolMessage;
     const isCollapsible = isToolMessage || (isAssistantMessage && Boolean(messageKey));
     const isCollapsed = isMessageCollapsed(message, messageKey, isCollapsible);
+    const reasoningCollapsed = isReasoningCollapsed(message, messageKey);
     const normalizedEditedText = editingText.trim();
     const normalizedOriginalText = String(message?.content || '').trim();
     const isEditChanged = Boolean(normalizedEditedText) && normalizedEditedText !== normalizedOriginalText;
@@ -754,6 +777,10 @@ export default function MessageListPanel({
                 return nextMessage;
               })()}
               collapsed={isCollapsed}
+              reasoningCollapsed={reasoningCollapsed}
+              onToggleReasoningCollapsed={messageKey
+                ? () => toggleReasoningCollapsed(messageKey, reasoningCollapsed)
+                : undefined}
               isToolCallPending={isPendingToolCallRequest}
               showToolHeader={!isToolMessage}
               streamingDotsLabel={messageModelLabel}

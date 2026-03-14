@@ -18,12 +18,13 @@
  * - 2026-02-12: Added Phase 5 tests for extracted message update domain module.
 */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   clearChatTransientErrors,
   createSystemErrorMessage,
   createOptimisticUserMessage,
   createLogMessage,
+  finalizeStreamingMessage,
   getMessageTimestamp,
   mergeStoredSystemErrorEvents,
   reconcileRefreshedMessagesWithLiveState,
@@ -392,6 +393,29 @@ describe('message-updates domain helpers', () => {
     expect(next).toHaveLength(1);
     expect(next[0].content).toBe('final answer');
     expect(next[0].isStreaming).toBe(false);
+  });
+
+  it('finalizes live assistant rows in place so reasoning content survives final message upserts', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-13T10:00:05.000Z'));
+
+    const next = finalizeStreamingMessage([{
+      messageId: 'assistant-1',
+      role: 'assistant',
+      sender: 'gpt5',
+      chatId: 'chat-1',
+      content: 'final answer',
+      reasoningContent: 'hidden chain of thought',
+      createdAt: '2026-03-13T10:00:00.000Z',
+      isStreaming: true,
+    }], 'assistant-1');
+
+    expect(next).toHaveLength(1);
+    expect(next[0].isStreaming).toBe(false);
+    expect(next[0].reasoningContent).toBe('hidden chain of thought');
+    expect(next[0].reasoningDurationMs).toBe(5000);
+
+    vi.useRealTimers();
   });
 
   it('trims the edited chat tail including structured system error rows', () => {
