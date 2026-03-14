@@ -15,6 +15,8 @@
  * - This module does not persist world config changes.
  *
  * Recent Changes:
+ * - 2026-03-14: Start/restart now return an explicit outcome so IPC callers can reject
+ *   silent cron no-op starts instead of reporting success while status stays stopped.
  * - 2026-03-06: Heartbeat jobs now require explicit chat scope; jobs no longer infer session routing from world state.
  * - 2026-03-04: Added initial world heartbeat job manager.
  */
@@ -47,6 +49,12 @@ export interface HeartbeatJobView {
   runCount: number;
 }
 
+export interface HeartbeatJobStartResult {
+  started: boolean;
+  reason: string | null;
+  job: HeartbeatJobView | null;
+}
+
 interface HeartbeatJobEntry {
   worldId: string;
   worldName: string;
@@ -65,8 +73,8 @@ interface HeartbeatManagerDeps {
 }
 
 export interface HeartbeatManager {
-  startJob: (world: WorldLike, chatId: string) => void;
-  restartJob: (world: WorldLike, chatId: string) => void;
+  startJob: (world: WorldLike, chatId: string) => HeartbeatJobStartResult;
+  restartJob: (world: WorldLike, chatId: string) => HeartbeatJobStartResult;
   pauseJob: (worldId: string) => void;
   resumeJob: (worldId: string) => void;
   stopJob: (worldId: string) => void;
@@ -95,6 +103,49 @@ function normalizeChatId(chatId: string | null | undefined): string | null {
   return normalized || null;
 }
 
+function toJobView(entry: HeartbeatJobEntry | null | undefined): HeartbeatJobView | null {
+  if (!entry) {
+    return null;
+  }
+
+  return {
+    worldId: entry.worldId,
+    worldName: entry.worldName,
+    interval: entry.interval,
+    status: entry.status,
+    runCount: entry.runCount,
+  };
+}
+
+function getStartFailureReason(
+  world: WorldLike,
+  chatId: string | null,
+  deps: HeartbeatManagerDeps
+): string | null {
+  if (world?.heartbeatEnabled !== true) {
+    return 'Heartbeat is disabled for this world.';
+  }
+
+  const interval = toInterval(world);
+  if (!interval) {
+    return 'Heartbeat interval is required.';
+  }
+
+  if (!deps.isValidCronExpression(interval)) {
+    return 'Heartbeat interval is invalid.';
+  }
+
+  if (!toPrompt(world)) {
+    return 'Heartbeat prompt is required.';
+  }
+
+  if (!chatId) {
+    return 'Chat ID is required.';
+  }
+
+  return null;
+}
+
 export function createHeartbeatManager(deps: HeartbeatManagerDeps): HeartbeatManager {
   const jobs = new Map<string, HeartbeatJobEntry>();
 
@@ -103,9 +154,16 @@ export function createHeartbeatManager(deps: HeartbeatManagerDeps): HeartbeatMan
     entry.handle = null;
   }
 
-  function startJob(world: WorldLike, chatId: string): void {
+  function startJob(world: WorldLike, chatId: string): HeartbeatJobStartResult {
     const worldId = String(world?.id || '').trim();
-    if (!worldId) return;
+    if (!worldId) {
+      return {
+        started: false,
+        reason: 'World ID is required.',
+        job: null,
+      };
+    }
+
     const targetChatId = normalizeChatId(chatId);
 
     const existing = jobs.get(worldId);
@@ -127,8 +185,21 @@ export function createHeartbeatManager(deps: HeartbeatManagerDeps): HeartbeatMan
 
     jobs.set(worldId, nextEntry);
 
-    if (!isStartableWorld(world, deps) || !targetChatId) {
-      return;
+    if (!targetChatId) {
+      return {
+        started: false,
+        reason: 'Chat ID is required.',
+        job: toJobView(nextEntry),
+      };
+    }
+
+    const failureReason = getStartFailureReason(world, targetChatId, deps);
+    if (failureReason) {
+      return {
+        started: false,
+        reason: failureReason,
+        job: toJobView(nextEntry),
+      };
     }
 
     const handle = deps.startHeartbeat(world, targetChatId, {
@@ -137,15 +208,24 @@ export function createHeartbeatManager(deps: HeartbeatManagerDeps): HeartbeatMan
       }
     });
     if (!handle) {
-      return;
+      return {
+        started: false,
+        reason: 'Heartbeat scheduler could not start.',
+        job: toJobView(nextEntry),
+      };
     }
 
     nextEntry.status = 'running';
     nextEntry.handle = handle;
+    return {
+      started: true,
+      reason: null,
+      job: toJobView(nextEntry),
+    };
   }
 
-  function restartJob(world: WorldLike, chatId: string): void {
-    startJob(world, chatId);
+  function restartJob(world: WorldLike, chatId: string): HeartbeatJobStartResult {
+    return startJob(world, chatId);
   }
 
   function pauseJob(worldId: string): void {
@@ -197,13 +277,7 @@ export function createHeartbeatManager(deps: HeartbeatManagerDeps): HeartbeatMan
 
   function listJobs(): HeartbeatJobView[] {
     return Array.from(jobs.values())
-      .map((entry) => ({
-        worldId: entry.worldId,
-        worldName: entry.worldName,
-        interval: entry.interval,
-        status: entry.status,
-        runCount: entry.runCount,
-      }))
+      .map((entry) => toJobView(entry)!)
       .sort((a, b) => a.worldName.localeCompare(b.worldName));
   }
 

@@ -14,6 +14,7 @@
  * - Uses mocked node-cron schedule callback for deterministic tick execution.
  *
  * Recent Changes:
+ * - 2026-03-14: Added regression coverage for runtime heartbeat datetime placeholder expansion.
  * - 2026-03-14: Heartbeat ticks now emit env-controlled `heartbeat` logger events instead of direct console logs.
  * - 2026-03-06: Heartbeat start now requires explicit `chatId`; scheduler no longer reads `world.currentChatId`.
  */
@@ -54,6 +55,7 @@ describe('core heartbeat', () => {
     enqueueAndProcessUserTurnMock.mockReset();
     scheduleMock.mockReset();
     validateMock.mockReset();
+    vi.useRealTimers();
     createCategoryLoggerMock.mockClear();
     heartbeatLogger.trace.mockReset();
     heartbeatLogger.debug.mockReset();
@@ -142,6 +144,40 @@ describe('core heartbeat', () => {
     stopHeartbeat(handle);
     expect(task.stop).toHaveBeenCalledTimes(1);
     expect(task.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('formats single-brace datetime placeholders in heartbeat prompts at tick time', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-14T05:06:07'));
+    validateMock.mockReturnValue(true);
+    enqueueAndProcessUserTurnMock.mockResolvedValue({ messageId: 'hb-msg-2', status: 'queued' });
+
+    let tickHandler: (() => void) | null = null;
+    scheduleMock.mockImplementation((_expr: string, callback: () => void) => {
+      tickHandler = callback;
+      return { stop: vi.fn(), destroy: vi.fn(), start: vi.fn() };
+    });
+
+    const { startHeartbeat } = await import('../../core/heartbeat.js');
+
+    startHeartbeat({
+      id: 'world-1',
+      isProcessing: false,
+      heartbeatEnabled: true,
+      heartbeatInterval: '*/5 * * * *',
+      heartbeatPrompt: 'Run started at {yyyy-mm-dd hh:mm:ss}',
+    } as any, 'chat-1');
+
+    tickHandler?.();
+    await Promise.resolve();
+
+    expect(enqueueAndProcessUserTurnMock).toHaveBeenCalledWith(
+      'world-1',
+      'chat-1',
+      'Run started at 2026-03-14 05:06:07',
+      'world',
+      expect.any(Object),
+    );
   });
 
   it('skips tick when _queuedChatIds contains currentChatId', async () => {

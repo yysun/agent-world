@@ -8,6 +8,11 @@
 
 Implemented world heartbeat as a persisted world-level feature with Electron runtime job management, strict cron validation, and renderer form support.
 
+Follow-up changes after the initial rollout adjusted two runtime details:
+
+- saving world settings no longer auto-restarts heartbeat jobs; restart is explicit
+- heartbeat prompt text can include runtime-formatted datetime placeholders such as `{yyyy-mm-dd hh:mm:ss}`
+
 ## Completed Scope
 
 - Added heartbeat world fields to core model:
@@ -24,7 +29,7 @@ Implemented world heartbeat as a persisted world-level feature with Electron run
 - Added Electron main heartbeat manager `electron/main-process/heartbeat-manager.ts`.
 - Integrated heartbeat manager into main runtime:
   - startup/list world reconciliation
-  - world update restart behavior
+  - explicit run/pause/stop behavior with save-time stop semantics
   - world delete stop behavior
   - runtime reset stop-all behavior
 - Added heartbeat IPC routes/contracts/handlers:
@@ -71,5 +76,6 @@ Code review of current uncommitted changes found no high-priority correctness/se
 
 ## Follow-up
 
-- Optional backlog item from plan remains:
-  - Settings-panel runtime controls for heartbeat job list/run/pause/stop UI.
+- The settings-panel runtime controls were added later.
+- Current runtime behavior is explicit-start: editing world settings persists the new cron/prompt but stops any running job until the user starts it again.
+- Heartbeat prompt text also supports single-brace runtime datetime formatting, for example `{yyyy-mm-dd hh:mm:ss}`.

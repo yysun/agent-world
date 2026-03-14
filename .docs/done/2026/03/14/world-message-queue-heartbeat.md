@@ -11,6 +11,11 @@ Updated world-originated messages so they follow the same queue-backed ingress a
 
 Also replaced heartbeat cron `console` output with categorized structured logger events so diagnostics can be enabled via environment configuration, for example `LOG_HEARTBEAT=debug`.
 
+Follow-up heartbeat runtime polish also landed on the same day:
+
+- heartbeat prompts can now expand single-brace datetime placeholders such as `{yyyy-mm-dd hh:mm:ss}` at tick time
+- saving world settings no longer auto-starts or auto-restarts the cron job; users must explicitly start it again after editing settings
+
 During CR, one metadata inconsistency was found and fixed before close-out: persisted event metadata still marked `world` messages as non-human even though routing had already been changed to treat them as human-like ingress.
 
 ## Root Cause
@@ -20,6 +25,8 @@ During CR, one metadata inconsistency was found and fixed before close-out: pers
 - Agent response logic also treated `world` as a blanket always-respond sender, so it did not honor the same paragraph-beginning mention rules used for human messages.
 - Heartbeat cron diagnostics were emitted directly with `console.log`, which bypassed the repo's category/env logger controls.
 - After the runtime change, persistence metadata still used the old `human|user` check and drifted from the new semantics.
+- Heartbeat prompt text previously sent stored prompt text verbatim, so there was no runtime way to include the current tick timestamp in the message body.
+- Saving world heartbeat settings reused the same runtime reconciliation path as explicit heartbeat start, which silently restarted cron jobs after form edits.
 
 ## Implemented Changes
 
@@ -51,6 +58,13 @@ During CR, one metadata inconsistency was found and fixed before close-out: pers
   - enqueue failure
 - This keeps heartbeat diagnostics behind env-based logger control rather than always printing to stdout.
 
+  ### Heartbeat follow-up behavior fixes
+
+  - Heartbeat prompt text now expands single-brace datetime patterns at runtime for the current tick.
+  - Supported tokens are `yyyy`, `MM`, `dd`, `hh`, `mm`, and `ss`, so prompts such as `Run started at {yyyy-mm-dd hh:mm:ss}` resolve to a concrete timestamp before queueing.
+  - Saving world settings now always stops the runtime heartbeat job instead of auto-restarting it from the update handler.
+  - This keeps cron start behavior explicit: configuration changes persist immediately, but the user must use the existing Start control to run the updated schedule/prompt.
+
 ### Persistence alignment fix from CR
 
 - Updated persistence metadata so stored `isHumanMessage` is also true for `world` senders.
@@ -66,6 +80,8 @@ Added or updated targeted tests for:
 - world mention behavior in `shouldAgentRespond`
 - main-agent routing for `world` messages
 - heartbeat queueing and heartbeat logger diagnostics
+- heartbeat prompt datetime placeholder formatting
+- no-auto-start heartbeat save behavior in Electron world settings
 - persisted metadata for world messages
 - default event metadata generation for `world`
 
@@ -77,6 +93,7 @@ Passed:
 - `npm run integration`
 - `npm test -- tests/core/heartbeat.test.ts`
 - `npm test -- tests/core/event-persistence-enhanced.test.ts tests/core/event-validation.test.ts tests/core/heartbeat.test.ts`
+- `npm test -- tests/electron/main/main-ipc-handlers.test.ts`
 
 ## Result
 
@@ -84,4 +101,6 @@ Passed:
 - World message response targeting now supports the same mention semantics as human messages.
 - Heartbeat-generated prompts no longer bypass queue processing.
 - Heartbeat diagnostics are env-controlled through the structured logger.
+- Heartbeat prompts can include runtime-formatted timestamps via single-brace datetime placeholders.
+- Editing world settings no longer implicitly starts cron; restarting heartbeat is an explicit user action.
 - Persisted metadata now matches the updated runtime semantics for `world` messages.

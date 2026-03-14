@@ -174,7 +174,6 @@ export function createLeftSidebarProps<T extends PropBag>(input: T) {
     onOpenWorldEditPanel: input.onOpenWorldEditPanel,
     onDeleteWorld: input.onDeleteWorld,
     onStartHeartbeat: input.onStartHeartbeat,
-    onPauseHeartbeat: input.onPauseHeartbeat,
     onStopHeartbeat: input.onStopHeartbeat,
     onCreateSession: input.onCreateSession,
     sessionSearch: input.sessionSearch,

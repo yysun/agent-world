@@ -102,7 +102,6 @@ describe('electron/renderer world-heartbeat domain', () => {
       isActionPending: false,
     })).toEqual(expect.objectContaining({
       canStart: false,
-      canPause: false,
       canStop: false,
     }));
 
@@ -112,9 +111,20 @@ describe('electron/renderer world-heartbeat domain', () => {
       selectedChatId: 'chat-1',
       isActionPending: false,
     })).toEqual(expect.objectContaining({
-      canStart: true,
-      canPause: true,
+      canStart: false,
       canStop: true,
+    }));
+  });
+
+  it('treats paused runtime as not running for the remaining visible controls', () => {
+    expect(deriveHeartbeatControlState({
+      configured: true,
+      status: 'paused',
+      selectedChatId: 'chat-1',
+      isActionPending: false,
+    })).toEqual(expect.objectContaining({
+      canStart: true,
+      canStop: false,
     }));
   });
 });

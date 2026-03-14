@@ -45,7 +45,6 @@ export default function LeftSidebarPanel({
   onOpenWorldEditPanel,
   onDeleteWorld,
   onStartHeartbeat,
-  onPauseHeartbeat,
   onStopHeartbeat,
   onCreateSession,
   sessionSearch,
@@ -247,7 +246,6 @@ export default function LeftSidebarPanel({
           onDeleteWorld={onDeleteWorld}
           selectedSessionId={selectedSessionId}
           onStartHeartbeat={onStartHeartbeat}
-          onPauseHeartbeat={onPauseHeartbeat}
           onStopHeartbeat={onStopHeartbeat}
         />
       ) : availableWorlds.length > 0 ? (

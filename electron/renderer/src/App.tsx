@@ -608,25 +608,6 @@ function AppContent({ api }: { api: DesktopApi }) {
     }
   }, [api, heartbeatSummary.configured, loadedWorld?.id, refreshHeartbeatJobs, selectedSessionId, setStatusText]);
 
-  const onPauseHeartbeat = useCallback(async () => {
-    const worldId = String(loadedWorld?.id || '').trim();
-    if (!worldId) {
-      setStatusText('No world loaded to pause cron.', 'error');
-      return;
-    }
-
-    setHeartbeatAction('pause');
-    try {
-      await api.pauseHeartbeat(worldId);
-      await refreshHeartbeatJobs({ silent: true });
-      setStatusText('Cron paused.', 'success');
-    } catch (error) {
-      setStatusText(safeMessage(error, 'Failed to pause cron.'), 'error');
-    } finally {
-      setHeartbeatAction((current) => (current === 'pause' ? null : current));
-    }
-  }, [api, loadedWorld?.id, refreshHeartbeatJobs, setStatusText]);
-
   const onStopHeartbeat = useCallback(async () => {
     const worldId = String(loadedWorld?.id || '').trim();
     if (!worldId) {
@@ -1536,7 +1517,6 @@ function AppContent({ api }: { api: DesktopApi }) {
     onOpenWorldEditPanel,
     onDeleteWorld,
     onStartHeartbeat,
-    onPauseHeartbeat,
     onStopHeartbeat,
     onCreateSession,
     sessionSearch,

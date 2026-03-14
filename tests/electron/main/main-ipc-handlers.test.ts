@@ -11,6 +11,10 @@
  * - Mocks the Electron `dialog` module virtually to avoid runtime Electron dependency.
  *
  * Recent Changes:
+ * - 2026-03-14: Added regression coverage for explicit heartbeat starts so the
+ *   IPC layer syncs persisted config onto the runtime world and rejects silent no-op starts.
+ * - 2026-03-14: Added regression coverage that saving world settings stops heartbeat
+ *   runtime state instead of auto-starting or auto-restarting cron jobs.
  * - 2026-03-13: Added coverage that `agent:create` refreshes the subscribed
  *   world runtime so Electron-created agents become live responders.
  * - 2026-03-10: Added a chat-flow scenario matrix covering new/current/switched chat
@@ -79,8 +83,28 @@ function createDependencies(overrides: Record<string, unknown> = {}) {
     removeMessagesFrom: vi.fn(async () => ({ success: true, messagesRemovedTotal: 3 })),
     resumeChatQueue: vi.fn(async () => ({})),
     heartbeatManager: {
-      startJob: vi.fn(),
-      restartJob: vi.fn(),
+      startJob: vi.fn(() => ({
+        started: true,
+        reason: null,
+        job: {
+          worldId: 'world-1',
+          worldName: 'World 1',
+          interval: '*/5 * * * *',
+          status: 'running',
+          runCount: 0,
+        },
+      })),
+      restartJob: vi.fn(() => ({
+        started: true,
+        reason: null,
+        job: {
+          worldId: 'world-1',
+          worldName: 'World 1',
+          interval: '*/5 * * * *',
+          status: 'running',
+          runCount: 0,
+        },
+      })),
       pauseJob: vi.fn(),
       resumeJob: vi.fn(),
       stopJob: vi.fn(),
@@ -1030,7 +1054,7 @@ describe('createMainIpcHandlers chat-flow scenario matrix', () => {
 });
 
 describe('createMainIpcHandlers.updateWorkspaceWorld heartbeat mapping', () => {
-  it('maps heartbeat fields and restarts heartbeat job with subscribed world and explicit chatId', async () => {
+  it('maps heartbeat fields but does not auto-start heartbeat job when saving world settings', async () => {
     const updateWorld = vi.fn(async () => ({
       id: 'world-1',
       name: 'World 1',
@@ -1074,8 +1098,9 @@ describe('createMainIpcHandlers.updateWorkspaceWorld heartbeat mapping', () => {
       heartbeatPrompt: 'tick',
     }));
     expect(refreshWorldSubscription).toHaveBeenCalledWith('world-1');
-    expect(ensureWorldSubscribed).toHaveBeenCalledWith('world-1');
-    expect(heartbeatManager.restartJob).toHaveBeenCalledWith(runtimeWorld, 'chat-9');
+    expect(ensureWorldSubscribed).not.toHaveBeenCalled();
+    expect(heartbeatManager.restartJob).not.toHaveBeenCalled();
+    expect(heartbeatManager.stopJob).toHaveBeenCalledWith('world-1');
   });
 
   it('stops heartbeat runtime when heartbeat config updates without explicit chatId', async () => {
@@ -1115,6 +1140,108 @@ describe('createMainIpcHandlers.updateWorkspaceWorld heartbeat mapping', () => {
     });
 
     expect(heartbeatManager.restartJob).not.toHaveBeenCalled();
+    expect(ensureWorldSubscribed).not.toHaveBeenCalled();
     expect(heartbeatManager.stopJob).toHaveBeenCalledWith('world-1');
+  });
+});
+
+describe('createMainIpcHandlers.runHeartbeatJob', () => {
+  it('syncs persisted heartbeat config onto the subscribed runtime world before starting cron', async () => {
+    const runtimeWorld = {
+      id: 'world-1',
+      name: 'Runtime World',
+      heartbeatEnabled: false,
+      heartbeatInterval: null,
+      heartbeatPrompt: null,
+    };
+    const getWorld = vi.fn(async () => ({
+      id: 'world-1',
+      name: 'Persisted World',
+      heartbeatEnabled: true,
+      heartbeatInterval: '*/5 * * * *',
+      heartbeatPrompt: 'tick',
+    }));
+    const ensureWorldSubscribed = vi.fn(async () => runtimeWorld);
+    const heartbeatManager = {
+      startJob: vi.fn(),
+      restartJob: vi.fn((world) => ({
+        started: true,
+        reason: null,
+        job: {
+          worldId: world.id,
+          worldName: world.name,
+          interval: world.heartbeatInterval,
+          status: 'running',
+          runCount: 0,
+        },
+      })),
+      pauseJob: vi.fn(),
+      resumeJob: vi.fn(),
+      stopJob: vi.fn(),
+      stopAll: vi.fn(),
+      listJobs: vi.fn(() => []),
+    };
+
+    const { handlers } = await createHandlers({
+      getWorld,
+      ensureWorldSubscribed,
+      heartbeatManager,
+    });
+
+    await expect(handlers.runHeartbeatJob({ worldId: 'world-1', chatId: 'chat-1' })).resolves.toEqual({
+      ok: true,
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      status: 'running',
+    });
+
+    expect(ensureWorldSubscribed).toHaveBeenCalledWith('world-1');
+    expect(heartbeatManager.restartJob).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'world-1',
+      name: 'Persisted World',
+      heartbeatEnabled: true,
+      heartbeatInterval: '*/5 * * * *',
+      heartbeatPrompt: 'tick',
+    }), 'chat-1');
+  });
+
+  it('throws when heartbeat start does not produce a running job', async () => {
+    const getWorld = vi.fn(async () => ({
+      id: 'world-1',
+      name: 'World 1',
+      heartbeatEnabled: true,
+      heartbeatInterval: '*/5 * * * *',
+      heartbeatPrompt: 'tick',
+    }));
+    const ensureWorldSubscribed = vi.fn(async () => ({ id: 'world-1' }));
+    const heartbeatManager = {
+      startJob: vi.fn(),
+      restartJob: vi.fn(() => ({
+        started: false,
+        reason: 'Heartbeat interval is invalid.',
+        job: {
+          worldId: 'world-1',
+          worldName: 'World 1',
+          interval: 'bad',
+          status: 'stopped',
+          runCount: 0,
+        },
+      })),
+      pauseJob: vi.fn(),
+      resumeJob: vi.fn(),
+      stopJob: vi.fn(),
+      stopAll: vi.fn(),
+      listJobs: vi.fn(() => []),
+    };
+
+    const { handlers } = await createHandlers({
+      getWorld,
+      ensureWorldSubscribed,
+      heartbeatManager,
+    });
+
+    await expect(handlers.runHeartbeatJob({ worldId: 'world-1', chatId: 'chat-1' })).rejects.toThrow(
+      'Heartbeat interval is invalid.'
+    );
   });
 });

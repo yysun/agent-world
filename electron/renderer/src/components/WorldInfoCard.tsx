@@ -11,9 +11,10 @@
  * - Keeps existing sidebar typography and spacing to avoid visual regressions
  *
  * Recent Changes:
+ * - 2026-03-14: Removed the pause heartbeat control and kept start/stop buttons only.
  * - 2026-03-14: Replaced the sidebar `Messages` summary with `Chats`.
  * - 2026-03-14: Replaced the heartbeat status chip with `Heartbeat: on|off` text and shortened the run label to `Runs`.
- * - 2026-03-14: Added heartbeat cron status, run count, and start/pause/stop controls under world metrics.
+ * - 2026-03-14: Added heartbeat cron status, run count, and start/stop controls under world metrics.
  * - 2026-02-14: Moved refresh/edit/delete actions to the header row (outside card) aligned right with World Info label.
  * - 2026-02-14: Extracted from App.jsx to reduce top-level renderer complexity.
  */
@@ -34,7 +35,6 @@ export default function WorldInfoCard({
   onDeleteWorld,
   selectedSessionId,
   onStartHeartbeat,
-  onPauseHeartbeat,
   onStopHeartbeat
 }) {
   if (!loadedWorld) return null;
@@ -133,19 +133,6 @@ export default function WorldInfoCard({
               >
                 <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <path d="M8 5v14l11-7z" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={onPauseHeartbeat}
-                disabled={!heartbeatControls.canPause}
-                className="rounded p-1 text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                title={heartbeatControls.pauseTitle}
-                aria-label={heartbeatControls.pauseTitle}
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                  <path d="M9 5v14" />
-                  <path d="M15 5v14" />
                 </svg>
               </button>
               <button

@@ -12,6 +12,10 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-03-14: Heartbeat start now syncs persisted heartbeat config onto the active
+ *   runtime world and rejects silent no-op starts when the job remains stopped.
+ * - 2026-03-14: Stopped auto-restarting heartbeat jobs after world-settings saves so
+ *   renderer edits require an explicit cron start action.
  * - 2026-03-13: Refreshed subscribed world runtimes after `agent:create` so
  *   Electron IPC-created E2E agents become live responders immediately.
  * - 2026-03-10: Rebound `sendChatMessage` queue dispatch to the post-restore subscribed runtime so user sends stream on the active world emitter after chat activation.
@@ -182,14 +186,26 @@ interface MainIpcHandlerFactoryDependencies {
   GitHubWorldImportError: new (...args: any[]) => GitHubWorldImportErrorLike;
   stageGitHubWorldFromShorthand: (shorthand: string) => Promise<GitHubWorldImportStagedResult>;
   heartbeatManager: {
-    startJob: (world: any, chatId: string) => void;
-    restartJob: (world: any, chatId: string) => void;
+    startJob: (world: any, chatId: string) => { started: boolean; reason: string | null; job: { status: 'running' | 'paused' | 'stopped' } | null };
+    restartJob: (world: any, chatId: string) => { started: boolean; reason: string | null; job: { status: 'running' | 'paused' | 'stopped' } | null };
     pauseJob: (worldId: string) => void;
     resumeJob: (worldId: string) => void;
     stopJob: (worldId: string) => void;
     stopAll: () => void;
-    listJobs: () => Array<{ worldId: string; worldName: string; interval: string; status: 'running' | 'paused' | 'stopped' }>;
+    listJobs: () => Array<{ worldId: string; worldName: string; interval: string; status: 'running' | 'paused' | 'stopped'; runCount: number }>;
   };
+}
+
+function syncRuntimeWorldHeartbeatConfig(runtimeWorld: any, persistedWorld: any) {
+  if (!runtimeWorld || !persistedWorld) {
+    return runtimeWorld;
+  }
+
+  runtimeWorld.name = persistedWorld.name ?? runtimeWorld.name;
+  runtimeWorld.heartbeatEnabled = persistedWorld.heartbeatEnabled === true;
+  runtimeWorld.heartbeatInterval = persistedWorld.heartbeatInterval ?? null;
+  runtimeWorld.heartbeatPrompt = persistedWorld.heartbeatPrompt ?? null;
+  return runtimeWorld;
 }
 
 interface GitHubWorldImportSource {
@@ -625,17 +641,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     }
 
     const refreshWarning = await refreshWorldSubscription(worldId);
-    try {
-      const targetChatId = String(payload?.chatId || '').trim();
-      if (updated.heartbeatEnabled === true && targetChatId) {
-        const runtimeWorld = await ensureWorldSubscribed(worldId);
-        heartbeatManager.restartJob(runtimeWorld as any, targetChatId);
-      } else {
-        heartbeatManager.stopJob(worldId);
-      }
-    } catch {
-      // If subscription cannot be resolved, heartbeat runtime state will be reconciled on next workspace load.
-    }
+    heartbeatManager.stopJob(worldId);
     const serialized = serializeWorldInfo(updated);
     if (refreshWarning) {
       return {
@@ -805,9 +811,22 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!chatId) {
       throw new Error('Chat ID is required.');
     }
+    const persistedWorld = await getWorld(worldId);
+    if (!persistedWorld) {
+      throw new Error(`World not found: ${worldId}`);
+    }
     const runtimeWorld = await ensureWorldSubscribed(worldId);
-    heartbeatManager.restartJob(runtimeWorld as any, chatId);
-    return { ok: true };
+    const syncedRuntimeWorld = syncRuntimeWorldHeartbeatConfig(runtimeWorld, persistedWorld);
+    const startResult = heartbeatManager.restartJob(syncedRuntimeWorld as any, chatId);
+    if (!startResult?.started) {
+      throw new Error(startResult?.reason || 'Failed to start cron.');
+    }
+    return {
+      ok: true,
+      worldId,
+      chatId,
+      status: startResult.job?.status ?? 'running',
+    };
   }
 
   async function pauseHeartbeatJob(payload: any) {

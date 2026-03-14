@@ -7,6 +7,7 @@
  * Key Features:
  * - Requires `chatId` to start or restart a heartbeat job.
  * - Persists explicit chat scope across pause/resume cycles.
+ * - Returns explicit start outcomes so callers can reject silent no-op starts.
  *
  * Implementation Notes:
  * - Uses injected scheduler fakes only; no timers or Electron runtime needed.
@@ -24,7 +25,7 @@ describe('electron heartbeat manager', () => {
       stopHeartbeat: vi.fn(),
     });
 
-    manager.startJob({
+    const result = manager.startJob({
       id: 'world-1',
       name: 'World 1',
       heartbeatEnabled: true,
@@ -33,6 +34,10 @@ describe('electron heartbeat manager', () => {
     }, '');
 
     expect(startHeartbeat).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      started: false,
+      reason: 'Chat ID is required.',
+    }));
     expect(manager.listJobs()).toEqual([
       expect.objectContaining({
         worldId: 'world-1',
@@ -58,10 +63,17 @@ describe('electron heartbeat manager', () => {
       heartbeatPrompt: 'tick',
     };
 
-    manager.startJob(world, 'chat-7');
+    const result = manager.startJob(world, 'chat-7');
     manager.pauseJob('world-1');
     manager.resumeJob('world-1');
 
+    expect(result).toEqual(expect.objectContaining({
+      started: true,
+      reason: null,
+      job: expect.objectContaining({
+        status: 'running',
+      }),
+    }));
     expect(task.start).toHaveBeenCalledTimes(1);
     expect(startHeartbeat).toHaveBeenCalledWith(world, 'chat-7', expect.objectContaining({
       onRun: expect.any(Function),
@@ -106,5 +118,31 @@ describe('electron heartbeat manager', () => {
         runCount: 4,
       }),
     ]);
+  });
+
+  it('returns a failure reason when heartbeat config is not startable', () => {
+    const startHeartbeat = vi.fn(() => ({ task: { stop: vi.fn(), start: vi.fn(), destroy: vi.fn() } }));
+    const manager = createHeartbeatManager({
+      isValidCronExpression: vi.fn(() => false),
+      startHeartbeat,
+      stopHeartbeat: vi.fn(),
+    });
+
+    const result = manager.startJob({
+      id: 'world-1',
+      name: 'World 1',
+      heartbeatEnabled: true,
+      heartbeatInterval: 'invalid',
+      heartbeatPrompt: 'tick',
+    }, 'chat-7');
+
+    expect(result).toEqual(expect.objectContaining({
+      started: false,
+      reason: 'Heartbeat interval is invalid.',
+      job: expect.objectContaining({
+        status: 'stopped',
+      }),
+    }));
+    expect(startHeartbeat).not.toHaveBeenCalled();
   });
 });
