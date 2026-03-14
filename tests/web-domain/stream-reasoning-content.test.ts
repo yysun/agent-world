@@ -23,7 +23,7 @@ vi.mock('../../web/src/api', () => ({
   apiRequest: vi.fn(),
 }));
 
-import { handleStreamChunk, handleStreamStart } from '../../web/src/utils/sse-client';
+import { handleStreamChunk, handleStreamEnd, handleStreamStart } from '../../web/src/utils/sse-client';
 
 function createBaseState() {
   return {
@@ -56,5 +56,43 @@ describe('web assistant reasoning streaming', () => {
         isStreaming: true,
       }),
     ]);
+  });
+
+  it('keeps completed reasoning content and records finalized duration on stream end', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-14T12:00:00.000Z'));
+
+    const startedState = handleStreamStart(createBaseState(), {
+      messageId: 'assistant-stream-2',
+      sender: 'assistant-1',
+    } as any);
+
+    const chunkedState = handleStreamChunk(startedState, {
+      messageId: 'assistant-stream-2',
+      sender: 'assistant-1',
+      content: 'Final answer',
+      reasoningContent: 'Reasoning step',
+      isAccumulated: true,
+    });
+
+    vi.setSystemTime(new Date('2026-03-14T12:00:05.000Z'));
+
+    const finalizedState = handleStreamEnd(chunkedState, {
+      messageId: 'assistant-stream-2',
+      sender: 'assistant-1',
+      content: 'Final answer',
+    } as any);
+
+    expect(finalizedState.messages).toEqual([
+      expect.objectContaining({
+        messageId: 'assistant-stream-2',
+        text: 'Final answer',
+        reasoningContent: 'Reasoning step',
+        reasoningDurationMs: 5000,
+        isStreaming: false,
+      }),
+    ]);
+
+    vi.useRealTimers();
   });
 });

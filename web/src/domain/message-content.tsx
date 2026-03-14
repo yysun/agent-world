@@ -304,6 +304,47 @@ export function getToolToggleLabel(isExpanded: boolean): 'Open' | 'Collapse' {
   return isExpanded ? 'Collapse' : 'Open';
 }
 
+export function formatReasoningDuration(elapsedMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
+export function getReasoningElapsedMs(message: Message, nowMs: number = Date.now()): number {
+  if (!message.isStreaming && typeof (message as any).reasoningDurationMs === 'number') {
+    return Math.max(0, (message as any).reasoningDurationMs);
+  }
+
+  const createdAtValue = message.createdAt instanceof Date
+    ? message.createdAt.getTime()
+    : new Date(message.createdAt).getTime();
+
+  if (!Number.isFinite(createdAtValue)) {
+    return 0;
+  }
+
+  return Math.max(0, nowMs - createdAtValue);
+}
+
+export function getReasoningHeaderLabel(message: Message, nowMs: number = Date.now()): string {
+  if (message.isStreaming) {
+    return `Thinking ... ${formatReasoningDuration(getReasoningElapsedMs(message, nowMs))}`;
+  }
+  return `Thought for ${formatReasoningDuration(getReasoningElapsedMs(message, nowMs))}`;
+}
+
+export function isReasoningExpanded(message: Message): boolean {
+  if (typeof (message as any).isReasoningExpanded === 'boolean') {
+    return Boolean((message as any).isReasoningExpanded);
+  }
+  return Boolean(message.isStreaming);
+}
+
+function getReasoningToggleLabel(expanded: boolean): string {
+  return expanded ? 'Collapse thinking' : 'Expand thinking';
+}
+
 export function getToolPreviewMaxLines(): number {
   return 10;
 }
@@ -348,12 +389,41 @@ function renderReasoningContent(message: Message) {
     return null;
   }
 
+  const expanded = isReasoningExpanded(message);
+  const toggleLabel = getReasoningToggleLabel(expanded);
+
   return (
-    <div className="mt-2 rounded-md border border-border/60 bg-muted/40 px-3 py-2">
-      <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Reasoning</div>
-      <div className="prose prose-invert max-w-none break-words text-sm text-muted-foreground">
-        {safeHTML(renderMarkdown(reasoningText))}
+    <div className="reasoning-block">
+      <div className="reasoning-header">
+        <div className="reasoning-summary-line">{getReasoningHeaderLabel(message)}</div>
+        <button
+          className="tool-output-toggle reasoning-toggle"
+          $onclick={['toggle-reasoning-output', message.id]}
+          title={toggleLabel}
+          aria-label={toggleLabel}
+          aria-expanded={expanded}
+        >
+          <svg
+            className="tool-toggle-icon"
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            {expanded
+              ? <path d="M5 8l5 5 5-5" />
+              : <path d="M8 5l5 5-5 5" />}
+          </svg>
+        </button>
       </div>
+      {expanded && (
+        <div className="reasoning-body prose prose-invert max-w-none break-words text-sm text-muted-foreground">
+          {safeHTML(renderMarkdown(reasoningText))}
+        </div>
+      )}
     </div>
   );
 }

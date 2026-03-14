@@ -984,10 +984,12 @@ async function streamSSERequest(
 export const handleStreamStart = <T extends SSEComponentState>(state: T, data: StreamStartData): T => {
   const { messageId, sender } = data;
   const messages = [...(state.messages || []), {
+    id: messageId,
     sender: sender,
     text: '...',
     isStreaming: true,
     messageId: messageId,
+    createdAt: new Date(),
   } as any];
   const newState = { ...state, messages, needScroll: true };
   return newState;
@@ -1006,7 +1008,7 @@ export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: S
         ...messages[i],
         text: content || '',
         reasoningContent: reasoningContent || '',
-        createdAt: new Date(),
+        createdAt: messages[i].createdAt || new Date(),
         // Preserve tool_calls if present
         ...(tool_calls && { tool_calls })
       };
@@ -1024,11 +1026,13 @@ export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: S
   return {
     ...state,
     messages: [...messages, {
+      id: activeStreamMessageId,
       sender: sender,
       text: content || '',
       reasoningContent: reasoningContent || '',
       isStreaming: true,
       messageId: activeStreamMessageId,
+      createdAt: new Date(),
       // Include tool_calls if present
       ...(tool_calls && { tool_calls })
     }],
@@ -1041,9 +1045,26 @@ export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: S
 export const handleStreamEnd = <T extends SSEComponentState>(state: T, data: StreamEndData): T => {
   const activeStreamMessageId = (state as any).activeStreamMessageId;
   const targetId = activeStreamMessageId ?? data.messageId;
+  const messages = (state.messages || []).map((message) => {
+    if (!(message.isStreaming && message.messageId === targetId)) {
+      return message;
+    }
 
-  state.messages = state.messages.filter(msg => !(msg.isStreaming && msg.messageId === targetId));
-  return { ...state, activeStreamMessageId: undefined, needScroll: false };
+    const reasoningText = String((message as any)?.reasoningContent || '').trim();
+    const startedAt = message.createdAt instanceof Date ? message.createdAt.getTime() : new Date(message.createdAt).getTime();
+    const finalizedDurationMs = reasoningText && Number.isFinite(startedAt)
+      ? Math.max(0, Date.now() - startedAt)
+      : (message as any).reasoningDurationMs;
+
+    return {
+      ...message,
+      isStreaming: false,
+      text: data.content || message.text || '',
+      ...(reasoningText ? { reasoningDurationMs: finalizedDurationMs } : {}),
+    };
+  });
+
+  return { ...state, messages, activeStreamMessageId: undefined, needScroll: false };
 };
 
 // Handle streaming errors

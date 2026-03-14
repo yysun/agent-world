@@ -111,6 +111,7 @@ export interface Message {
   sender: string;
   text: string;
   reasoningContent?: string;
+  reasoningDurationMs?: number;
   createdAt: Date;
   worldName?: string;
   isStreaming?: boolean;
@@ -130,6 +131,7 @@ export interface Message {
   }>;
   tool_call_id?: string;
   userEntered?: boolean;
+  isReasoningExpanded?: boolean;
   fromAgentId?: string;
   ownerAgentId?: string; // Which agent's memory this message came from (for filtering)
   seenByAgents?: string[]; // CALCULATED field - built incrementally from actual message data (NOT persisted)

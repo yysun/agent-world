@@ -24,7 +24,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { getToolToggleLabel, isToolRenderableMessage } from '../../web/src/domain/message-content';
+import {
+  formatReasoningDuration,
+  getReasoningHeaderLabel,
+  getToolToggleLabel,
+  isToolRenderableMessage,
+  isReasoningExpanded,
+} from '../../web/src/domain/message-content';
 import { getMessageSurfaceShadowClass, getNarratedToolCallBorderClass, getToolRowContainerClass } from '../../web/src/components/world-chat';
 import { worldUpdateHandlers } from '../../web/src/pages/World.update';
 import { SenderType } from '../../web/src/utils/sender-type';
@@ -113,6 +119,52 @@ describe('web/tool message ui', () => {
     expect(getToolToggleLabel(true)).toBe('Collapse');
   });
 
+  it('formats streaming and completed reasoning labels for web assistant messages', () => {
+    expect(formatReasoningDuration(65000)).toBe('1m 5s');
+    expect(getReasoningHeaderLabel({
+      id: 'assistant-live',
+      type: 'assistant',
+      role: 'assistant',
+      sender: 'agent-a',
+      text: 'Answer',
+      reasoningContent: 'Reasoning',
+      isStreaming: true,
+      createdAt: new Date('2026-03-14T12:00:00.000Z'),
+    } as any, new Date('2026-03-14T12:01:05.000Z').getTime())).toBe('Thinking ... 1m 5s');
+
+    expect(getReasoningHeaderLabel({
+      id: 'assistant-done',
+      type: 'assistant',
+      role: 'assistant',
+      sender: 'agent-a',
+      text: 'Answer',
+      reasoningContent: 'Reasoning',
+      isStreaming: false,
+      reasoningDurationMs: 65000,
+      createdAt: new Date('2026-03-14T12:00:00.000Z'),
+    } as any)).toBe('Thought for 1m 5s');
+  });
+
+  it('defaults web reasoning expansion to live-open and completed-collapsed', () => {
+    expect(isReasoningExpanded({
+      id: 'live',
+      type: 'assistant',
+      sender: 'agent-a',
+      text: 'Answer',
+      createdAt: new Date(),
+      isStreaming: true,
+    } as any)).toBe(true);
+
+    expect(isReasoningExpanded({
+      id: 'done',
+      type: 'assistant',
+      sender: 'agent-a',
+      text: 'Answer',
+      createdAt: new Date(),
+      isStreaming: false,
+    } as any)).toBe(false);
+  });
+
   it('applies the shared surface shadow only to user and assistant rows', () => {
     expect(getMessageSurfaceShadowClass({ senderType: SenderType.HUMAN, isToolRow: false })).toBe('message-surface-shadow');
     expect(getMessageSurfaceShadowClass({ senderType: SenderType.AGENT, isToolRow: false })).toBe('message-surface-shadow');
@@ -185,6 +237,25 @@ describe('web/tool message ui', () => {
     expect(nextState.messages).toEqual([
       { id: 'tool-1', isToolOutputExpanded: true },
       { id: 'tool-2', isToolOutputExpanded: true },
+    ]);
+    expect(nextState.needScroll).toBe(false);
+  });
+
+  it('toggles reasoning expansion only for the targeted message', () => {
+    const toggleHandler = (worldUpdateHandlers as any)['toggle-reasoning-output'];
+    const state = {
+      messages: [
+        { id: 'assistant-1', isStreaming: false, isReasoningExpanded: false },
+        { id: 'assistant-2', isStreaming: true },
+      ],
+      needScroll: true,
+    } as any;
+
+    const nextState = toggleHandler(state, 'assistant-1');
+
+    expect(nextState.messages).toEqual([
+      { id: 'assistant-1', isStreaming: false, isReasoningExpanded: true },
+      { id: 'assistant-2', isStreaming: true },
     ]);
     expect(nextState.needScroll).toBe(false);
   });

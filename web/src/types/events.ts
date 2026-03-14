@@ -148,6 +148,9 @@ export type WorldEvents =
   /** Toggle log details expansion */
   | { name: 'toggle-log-details'; payload: string | number }
 
+  /** Toggle assistant reasoning expansion */
+  | { name: 'toggle-reasoning-output'; payload: string }
+
   /** Acknowledge scroll completed */
   | { name: 'ack-scroll'; payload: void }
 

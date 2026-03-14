@@ -1678,6 +1678,25 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'toggle-log-details': (state: WorldComponentState, messageId: WorldEventPayload<'toggle-log-details'>): WorldComponentState =>
     MessageDisplayDomain.toggleLogDetails(state, messageId),
 
+  'toggle-reasoning-output': (state: WorldComponentState, messageId: string): WorldComponentState => ({
+    ...state,
+    messages: state.messages.map((message) => {
+      if (message.id !== messageId) {
+        return message;
+      }
+
+      const currentlyExpanded = typeof (message as any).isReasoningExpanded === 'boolean'
+        ? Boolean((message as any).isReasoningExpanded)
+        : Boolean(message.isStreaming);
+
+      return {
+        ...message,
+        isReasoningExpanded: !currentlyExpanded,
+      };
+    }),
+    needScroll: false,
+  }),
+
   // ========================================
   // DASHBOARD
   // ========================================
