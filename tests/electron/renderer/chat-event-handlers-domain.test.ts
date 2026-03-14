@@ -11,6 +11,8 @@
  * - Focuses on orchestration behavior, not UI rendering.
  *
  * Recent Changes:
+ * - 2026-03-13: Added regression coverage for stale out-of-order activity events so a late idle
+ *   cannot clear working-agent state for a newer edited-turn response cycle.
  * - 2026-03-13: Updated SSE chunk delegation coverage for the reasoning-content streaming argument.
  * - 2026-03-12: Added plain-text selected-chat system-event forwarding coverage for status-bar visibility.
  * - 2026-03-10: Added assistant SSE chatId propagation coverage so live streaming rows stay scoped
@@ -36,6 +38,12 @@ import {
   createChatSubscriptionEventHandler,
   createGlobalLogEventHandler
 } from '../../../electron/renderer/src/domain/chat-event-handlers';
+import {
+  createStatusRegistry,
+  getAgentStatus,
+  getRegistry,
+  updateRegistry,
+} from '../../../electron/renderer/src/domain/status-registry';
 
 type TestMessage = {
   messageId?: string;
@@ -156,6 +164,48 @@ describe('createGlobalLogEventHandler', () => {
 });
 
 describe('createChatSubscriptionEventHandler', () => {
+  it('ignores stale idle activity events after a newer response-start', () => {
+    updateRegistry(() => createStatusRegistry());
+    const harness = createMessageStateHarness();
+    const streamingStateRef = makeFullStreamingRef();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef,
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
+    });
+
+    handler({
+      type: 'activity',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      activity: {
+        activityId: 2,
+        eventType: 'response-start',
+        pendingOperations: 1,
+        activeSources: ['agent-1'],
+      }
+    });
+
+    handler({
+      type: 'activity',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      activity: {
+        activityId: 1,
+        eventType: 'idle',
+        pendingOperations: 0,
+      }
+    });
+
+    expect(getAgentStatus(getRegistry(), 'world-1', 'chat-1', 'agent-1')).toBe('working');
+    expect(streamingStateRef.current?.cleanup).not.toHaveBeenCalled();
+  });
+
   it('upserts incoming session message events', () => {
     const harness = createMessageStateHarness();
     const streamingStateRef = {

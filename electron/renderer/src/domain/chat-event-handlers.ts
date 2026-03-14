@@ -13,6 +13,8 @@
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
+ * - 2026-03-13: Ignore stale chat-scoped activity events by `activityId` so a late idle from a
+ *   canceled pre-edit turn cannot clear working-agent state for the newly edited turn.
  * - 2026-03-13: Forwarded SSE `reasoningContent` into renderer streaming state so reasoning-only assistant chunks survive transport.
  * - 2026-03-10: Forwarded selected-chat `chatId` into assistant SSE start/chunk streaming-state
  *   calls so live assistant rows remain refresh-safe for the active chat.
@@ -170,6 +172,7 @@ export function createChatSubscriptionEventHandler({
 }: ChatHandlerOptions) {
   const toolCommandByUseId = new Map<string, string>();
   const toolInputByUseId = new Map<string, Record<string, unknown>>();
+  const latestActivityIdByChat = new Map<string, number>();
 
   const ensureToolStreamMessageChatId = (messageId: string, chatId: string | null) => {
     const normalizedMessageId = String(messageId || '').trim();
@@ -198,6 +201,15 @@ export function createChatSubscriptionEventHandler({
     const streaming = streamingStateRef.current;
     if (!streaming) return;
     streaming.endAllToolStreams();
+  };
+
+  const toActivityId = (value: unknown): number | null => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      return null;
+    }
+
+    return Math.max(0, Math.floor(parsed));
   };
 
   const endResponseStreamByMessage = (incomingMessage: Record<string, unknown>) => {
@@ -520,6 +532,15 @@ export function createChatSubscriptionEventHandler({
       const activityChatId = String(payload.chatId || activityPayload.chatId || '').trim() || null;
       if (!activityChatId) return;
       if (selectedSessionId && activityChatId !== selectedSessionId) return;
+
+      const activityId = toActivityId(payload.activityId ?? activityPayload.activityId);
+      const latestActivityId = latestActivityIdByChat.get(activityChatId) ?? null;
+      if (activityId !== null && latestActivityId !== null && activityId < latestActivityId) {
+        return;
+      }
+      if (activityId !== null && (latestActivityId === null || activityId > latestActivityId)) {
+        latestActivityIdByChat.set(activityChatId, activityId);
+      }
 
       const activityEventType = String(activityPayload.eventType || '').toLowerCase();
       const pendingOps = Number(activityPayload.pendingOperations ?? -1);
