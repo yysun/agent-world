@@ -63,11 +63,47 @@ describe('electron heartbeat manager', () => {
     manager.resumeJob('world-1');
 
     expect(task.start).toHaveBeenCalledTimes(1);
-    expect(startHeartbeat).toHaveBeenCalledWith(world, 'chat-7');
+    expect(startHeartbeat).toHaveBeenCalledWith(world, 'chat-7', expect.objectContaining({
+      onRun: expect.any(Function),
+    }));
     expect(manager.listJobs()).toEqual([
       expect.objectContaining({
         worldId: 'world-1',
         status: 'running',
+      }),
+    ]);
+  });
+
+  it('tracks successful heartbeat runs across restarts', () => {
+    const task = { stop: vi.fn(), start: vi.fn(), destroy: vi.fn() };
+    const startHeartbeat = vi.fn((_world, _chatId, callbacks) => {
+      callbacks?.onRun?.();
+      callbacks?.onRun?.();
+      return { task };
+    });
+    const manager = createHeartbeatManager({
+      isValidCronExpression: vi.fn(() => true),
+      startHeartbeat,
+      stopHeartbeat: vi.fn(),
+    });
+
+    const world = {
+      id: 'world-1',
+      name: 'World 1',
+      heartbeatEnabled: true,
+      heartbeatInterval: '*/5 * * * *',
+      heartbeatPrompt: 'tick',
+    };
+
+    manager.startJob(world, 'chat-7');
+    manager.stopJob('world-1');
+    manager.startJob(world, 'chat-7');
+
+    expect(manager.listJobs()).toEqual([
+      expect.objectContaining({
+        worldId: 'world-1',
+        status: 'running',
+        runCount: 4,
       }),
     ]);
   });

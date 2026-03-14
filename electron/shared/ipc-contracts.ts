@@ -112,6 +112,7 @@ export interface HeartbeatJobStatus {
   worldName: string;
   interval: string;
   status: 'running' | 'paused' | 'stopped';
+  runCount: number;
 }
 
 export interface BranchSessionFromMessagePayload extends WorldChatPayload {

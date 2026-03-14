@@ -13,6 +13,7 @@
  * - Receives all domain state/actions from `App.jsx` orchestration.
  *
  * Recent Changes:
+ * - 2026-03-14: Wired world-card heartbeat status and control props through the left sidebar.
  * - 2026-02-26: Changed import action to open right-panel import form (local directory or GitHub source).
  * - 2026-02-19: Added world export action button alongside create/import controls.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component decomposition.
@@ -35,12 +36,17 @@ export default function LeftSidebarPanel({
   loadingWorld,
   worldLoadError,
   worldInfoStats,
+  heartbeatJob,
+  heartbeatAction,
   refreshingWorldInfo,
   updatingWorld,
   deletingWorld,
   onRefreshWorldInfo,
   onOpenWorldEditPanel,
   onDeleteWorld,
+  onStartHeartbeat,
+  onPauseHeartbeat,
+  onStopHeartbeat,
   onCreateSession,
   sessionSearch,
   setSessionSearch,
@@ -231,12 +237,18 @@ export default function LeftSidebarPanel({
         <WorldInfoCard
           loadedWorld={loadedWorld}
           worldInfoStats={worldInfoStats}
+          heartbeatJob={heartbeatJob}
+          heartbeatAction={heartbeatAction}
           refreshingWorldInfo={refreshingWorldInfo}
           updatingWorld={updatingWorld}
           deletingWorld={deletingWorld}
           onRefreshWorldInfo={onRefreshWorldInfo}
           onOpenWorldEditPanel={onOpenWorldEditPanel}
           onDeleteWorld={onDeleteWorld}
+          selectedSessionId={selectedSessionId}
+          onStartHeartbeat={onStartHeartbeat}
+          onPauseHeartbeat={onPauseHeartbeat}
+          onStopHeartbeat={onStopHeartbeat}
         />
       ) : availableWorlds.length > 0 ? (
         <div className="mb-4 shrink-0 rounded-md border border-dashed border-sidebar-border p-3 text-xs text-sidebar-foreground/70">

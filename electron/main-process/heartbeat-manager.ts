@@ -7,6 +7,7 @@
  * Key Features:
  * - Start/restart/pause/resume/stop lifecycle operations.
  * - World-scoped job registry with deterministic state.
+ * - Tracks runtime heartbeat run counts for renderer status display.
  * - Safe no-op behavior for invalid/missing heartbeat config.
  *
  * Implementation Notes:
@@ -43,6 +44,7 @@ export interface HeartbeatJobView {
   worldName: string;
   interval: string;
   status: HeartbeatJobStatus;
+  runCount: number;
 }
 
 interface HeartbeatJobEntry {
@@ -50,6 +52,7 @@ interface HeartbeatJobEntry {
   worldName: string;
   interval: string;
   status: HeartbeatJobStatus;
+  runCount: number;
   world: WorldLike;
   chatId: string | null;
   handle: HeartbeatHandle | null;
@@ -57,7 +60,7 @@ interface HeartbeatJobEntry {
 
 interface HeartbeatManagerDeps {
   isValidCronExpression: (expr: string) => boolean;
-  startHeartbeat: (world: WorldLike, chatId: string) => HeartbeatHandle | null;
+  startHeartbeat: (world: WorldLike, chatId: string, callbacks?: { onRun?: () => void }) => HeartbeatHandle | null;
   stopHeartbeat: (handle: HeartbeatHandle | null | undefined) => void;
 }
 
@@ -106,46 +109,39 @@ export function createHeartbeatManager(deps: HeartbeatManagerDeps): HeartbeatMan
     const targetChatId = normalizeChatId(chatId);
 
     const existing = jobs.get(worldId);
+    const preservedRunCount = existing?.runCount ?? 0;
     if (existing) {
       stopHandle(existing);
     }
 
-    if (!isStartableWorld(world, deps) || !targetChatId) {
-      jobs.set(worldId, {
-        worldId,
-        worldName: String(world?.name || worldId),
-        interval: toInterval(world),
-        status: 'stopped',
-        world,
-        chatId: targetChatId,
-        handle: null,
-      });
-      return;
-    }
-
-    const handle = deps.startHeartbeat(world, targetChatId);
-    if (!handle) {
-      jobs.set(worldId, {
-        worldId,
-        worldName: String(world?.name || worldId),
-        interval: toInterval(world),
-        status: 'stopped',
-        world,
-        chatId: targetChatId,
-        handle: null,
-      });
-      return;
-    }
-
-    jobs.set(worldId, {
+    const nextEntry: HeartbeatJobEntry = {
       worldId,
       worldName: String(world?.name || worldId),
       interval: toInterval(world),
-      status: 'running',
+      status: 'stopped',
+      runCount: preservedRunCount,
       world,
       chatId: targetChatId,
-      handle,
+      handle: null,
+    };
+
+    jobs.set(worldId, nextEntry);
+
+    if (!isStartableWorld(world, deps) || !targetChatId) {
+      return;
+    }
+
+    const handle = deps.startHeartbeat(world, targetChatId, {
+      onRun: () => {
+        nextEntry.runCount += 1;
+      }
     });
+    if (!handle) {
+      return;
+    }
+
+    nextEntry.status = 'running';
+    nextEntry.handle = handle;
   }
 
   function restartJob(world: WorldLike, chatId: string): void {
@@ -206,6 +202,7 @@ export function createHeartbeatManager(deps: HeartbeatManagerDeps): HeartbeatMan
         worldName: entry.worldName,
         interval: entry.interval,
         status: entry.status,
+        runCount: entry.runCount,
       }))
       .sort((a, b) => a.worldName.localeCompare(b.worldName));
   }

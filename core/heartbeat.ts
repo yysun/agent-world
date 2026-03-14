@@ -30,6 +30,10 @@ export interface HeartbeatHandle {
   task: ScheduledTask;
 }
 
+export interface HeartbeatCallbacks {
+  onRun?: () => void;
+}
+
 const loggerHeartbeat = createCategoryLogger('heartbeat');
 
 // keep node-cron as a direct import so test-time module mocking works
@@ -48,7 +52,7 @@ export function isValidCronExpression(expr: string): boolean {
   }
 }
 
-export function startHeartbeat(world: World, chatId: string): HeartbeatHandle | null {
+export function startHeartbeat(world: World, chatId: string, callbacks: HeartbeatCallbacks = {}): HeartbeatHandle | null {
   const enabled = world?.heartbeatEnabled === true;
   const interval = String(world?.heartbeatInterval || '').trim();
   const prompt = String(world?.heartbeatPrompt || '');
@@ -84,6 +88,7 @@ export function startHeartbeat(world: World, chatId: string): HeartbeatHandle | 
 
     void enqueueAndProcessUserTurn(world.id, targetChatId, prompt, 'world', world)
       .then((queuedMessage) => {
+        callbacks.onRun?.();
         loggerHeartbeat.debug('Heartbeat cron tick enqueued', {
           worldId: world.id,
           chatId: targetChatId,

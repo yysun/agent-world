@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-03-14: Added sidebar heartbeat polling plus start/pause/stop handlers for selected-world cron controls.
  * - 2026-03-13: Added `reasoningEffort` derived from `world.variables` and wired it into the Electron composer dropdown.
  * - 2026-03-12: Added `toolPermission` derived from `world.variables` env key and `onSetToolPermission` wired to composer props for the Electron tool permission dropdown.
  * - 2026-03-10: Reconcile selected-chat refresh results with live optimistic/streaming/system-error rows so history reloads do not wipe authoritative transient state.
@@ -98,7 +99,6 @@ import {
   getEnvValueFromText,
   getReasoningEffortLevel,
   getWorldFormFromWorld,
-  parseOptionalInteger,
 } from './utils/app-helpers';
 import { useChatEventSubscriptions } from './hooks/useChatEventSubscriptions';
 import { deriveHitlPromptDisplayState } from './domain/hitl-scope';
@@ -125,6 +125,8 @@ import {
   type WorldGridLayoutChoiceId,
   type WorldViewMode,
 } from './domain/world-view';
+import { deriveWorldHeartbeatSummary } from './domain/world-heartbeat';
+import { deriveWorldInfoStats } from './domain/world-info-stats';
 import {
   countAgentConversationResponses,
   countConversationDisplayMessages,
@@ -254,6 +256,8 @@ function AppContent({ api }: { api: DesktopApi }) {
   const [worldViewMode, setWorldViewMode] = useState<WorldViewMode>('chat');
   const [worldGridLayoutChoiceId, setWorldGridLayoutChoiceId] = useState<WorldGridLayoutChoiceId>('1+2');
   const [isGridLayoutSubmenuOpen, setIsGridLayoutSubmenuOpen] = useState(false);
+  const [heartbeatJobs, setHeartbeatJobs] = useState<any[]>([]);
+  const [heartbeatAction, setHeartbeatAction] = useState<'start' | 'pause' | 'stop' | null>(null);
 
   // Skill editor state
   const [editorMode, setEditorMode] = useState<'none' | 'skill'>('none');
@@ -522,23 +526,125 @@ function AppContent({ api }: { api: DesktopApi }) {
     [sessions, selectedSessionId]
   );
 
-  const worldInfoStats = useMemo(() => {
-    const totalAgentsParsed = parseOptionalInteger(loadedWorld?.totalAgents, 0);
-    const totalMessagesParsed = parseOptionalInteger(loadedWorld?.totalMessages, 0);
-    const turnLimitParsed = parseOptionalInteger(loadedWorld?.turnLimit, MIN_TURN_LIMIT);
+  const refreshHeartbeatJobs = useCallback(async (options?: { silent?: boolean }) => {
+    try {
+      const nextJobs = await api.listHeartbeatJobs();
+      const normalizedJobs = Array.isArray(nextJobs) ? nextJobs : [];
+      setHeartbeatJobs(normalizedJobs);
+      return normalizedJobs;
+    } catch (error) {
+      if (options?.silent) {
+        rendererLogger.debug('electron.renderer.world-heartbeat', 'Failed to refresh heartbeat jobs', {
+          error: safeMessage(error, 'unknown error')
+        });
+        return [];
+      }
 
-    const fallbackTotalAgents = Array.isArray(loadedWorld?.agents) ? loadedWorld.agents.length : 0;
-    const fallbackTotalMessages = sessions.reduce((sum: number, session: any) => {
-      const next = Number(session?.messageCount);
-      return sum + (Number.isFinite(next) ? Math.max(0, Math.floor(next)) : 0);
-    }, 0);
+      setStatusText(safeMessage(error, 'Failed to load cron status.'), 'error');
+      return [];
+    }
+  }, [api, setStatusText]);
 
-    return {
-      totalAgents: totalAgentsParsed ?? fallbackTotalAgents,
-      totalMessages: sessions.length > 0 ? fallbackTotalMessages : (totalMessagesParsed ?? fallbackTotalMessages),
-      turnLimit: turnLimitParsed ?? DEFAULT_TURN_LIMIT
+  useEffect(() => {
+    if (!loadedWorld?.id) {
+      setHeartbeatJobs([]);
+      setHeartbeatAction(null);
+      return;
+    }
+
+    void refreshHeartbeatJobs({ silent: true });
+    const timer = setInterval(() => {
+      void refreshHeartbeatJobs({ silent: true });
+    }, 3000);
+
+    return () => {
+      clearInterval(timer);
     };
+  }, [loadedWorld?.id, refreshHeartbeatJobs]);
+
+  const worldInfoStats = useMemo(() => {
+    return deriveWorldInfoStats(loadedWorld, sessions, MIN_TURN_LIMIT, DEFAULT_TURN_LIMIT);
   }, [loadedWorld, sessions]);
+
+  const selectedHeartbeatJob = useMemo(() => {
+    const selectedWorldId = String(loadedWorld?.id || '').trim();
+    if (!selectedWorldId) {
+      return null;
+    }
+
+    return heartbeatJobs.find((job: any) => String(job?.worldId || '').trim() === selectedWorldId) || null;
+  }, [heartbeatJobs, loadedWorld?.id]);
+
+  const heartbeatSummary = useMemo(
+    () => deriveWorldHeartbeatSummary(loadedWorld, selectedHeartbeatJob),
+    [loadedWorld, selectedHeartbeatJob]
+  );
+
+  const onStartHeartbeat = useCallback(async () => {
+    const worldId = String(loadedWorld?.id || '').trim();
+    const chatId = String(selectedSessionId || '').trim();
+    if (!worldId) {
+      setStatusText('No world loaded to start cron.', 'error');
+      return;
+    }
+    if (!heartbeatSummary.configured) {
+      setStatusText('Enable heartbeat with a valid cron interval and prompt before starting cron.', 'error');
+      return;
+    }
+    if (!chatId) {
+      setStatusText('Select a chat session before starting cron.', 'error');
+      return;
+    }
+
+    setHeartbeatAction('start');
+    try {
+      await api.runHeartbeat(worldId, chatId);
+      await refreshHeartbeatJobs({ silent: true });
+      setStatusText('Cron started.', 'success');
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to start cron.'), 'error');
+    } finally {
+      setHeartbeatAction((current) => (current === 'start' ? null : current));
+    }
+  }, [api, heartbeatSummary.configured, loadedWorld?.id, refreshHeartbeatJobs, selectedSessionId, setStatusText]);
+
+  const onPauseHeartbeat = useCallback(async () => {
+    const worldId = String(loadedWorld?.id || '').trim();
+    if (!worldId) {
+      setStatusText('No world loaded to pause cron.', 'error');
+      return;
+    }
+
+    setHeartbeatAction('pause');
+    try {
+      await api.pauseHeartbeat(worldId);
+      await refreshHeartbeatJobs({ silent: true });
+      setStatusText('Cron paused.', 'success');
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to pause cron.'), 'error');
+    } finally {
+      setHeartbeatAction((current) => (current === 'pause' ? null : current));
+    }
+  }, [api, loadedWorld?.id, refreshHeartbeatJobs, setStatusText]);
+
+  const onStopHeartbeat = useCallback(async () => {
+    const worldId = String(loadedWorld?.id || '').trim();
+    if (!worldId) {
+      setStatusText('No world loaded to stop cron.', 'error');
+      return;
+    }
+
+    setHeartbeatAction('stop');
+    try {
+      await api.stopHeartbeat(worldId);
+      await refreshHeartbeatJobs({ silent: true });
+      setStatusText('Cron stopped.', 'success');
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to stop cron.'), 'error');
+    } finally {
+      setHeartbeatAction((current) => (current === 'stop' ? null : current));
+    }
+  }, [api, loadedWorld?.id, refreshHeartbeatJobs, setStatusText]);
 
   const rawWorldAgents = useMemo(
     () => (Array.isArray(loadedWorld?.agents) ? loadedWorld.agents : []),
@@ -1421,12 +1527,17 @@ function AppContent({ api }: { api: DesktopApi }) {
     loadingWorld,
     worldLoadError,
     worldInfoStats,
+    heartbeatJob: selectedHeartbeatJob,
+    heartbeatAction,
     refreshingWorldInfo,
     updatingWorld,
     deletingWorld,
     onRefreshWorldInfo,
     onOpenWorldEditPanel,
     onDeleteWorld,
+    onStartHeartbeat,
+    onPauseHeartbeat,
+    onStopHeartbeat,
     onCreateSession,
     sessionSearch,
     setSessionSearch,
