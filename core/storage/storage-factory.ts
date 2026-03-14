@@ -286,10 +286,10 @@ export function createStorageWrappers(storageInstance: StorageAPI | null): Stora
       }
     },
 
-    async updateChatNameIfCurrent(worldId: string, chatId: string, expectedName: string, nextName: string): Promise<boolean> {
+    async updateChatNameIfCurrent(worldId: string, chatId: string, expectedName: string, nextName: string, nextProvenance?: import('../chat-constants.js').TitleProvenance): Promise<boolean> {
       if (!storageInstance) return false;
       if (typeof storageInstance.updateChatNameIfCurrent === 'function') {
-        return storageInstance.updateChatNameIfCurrent(worldId, chatId, expectedName, nextName);
+        return storageInstance.updateChatNameIfCurrent(worldId, chatId, expectedName, nextName, nextProvenance);
       }
 
       // Fallback path for backends without compare-and-set support.
@@ -297,7 +297,7 @@ export function createStorageWrappers(storageInstance: StorageAPI | null): Stora
       if (!current || current.name !== expectedName) {
         return false;
       }
-      const updated = await storageInstance.updateChatData(worldId, chatId, { name: nextName });
+      const updated = await storageInstance.updateChatData(worldId, chatId, { name: nextName, ...(nextProvenance !== undefined ? { titleProvenance: nextProvenance } : {}) });
       return !!updated;
     },
 
@@ -632,16 +632,16 @@ function createFileStorageAdapter(rootPath: string): StorageAPI {
       }
       return null;
     },
-    async updateChatNameIfCurrent(worldId: string, chatId: string, expectedName: string, nextName: string): Promise<boolean> {
+    async updateChatNameIfCurrent(worldId: string, chatId: string, expectedName: string, nextName: string, nextProvenance?: import('../chat-constants.js').TitleProvenance): Promise<boolean> {
       await ensureModulesLoaded();
       if (worldStorage?.updateChatNameIfCurrent) {
-        return worldStorage.updateChatNameIfCurrent(rootPath, worldId, chatId, expectedName, nextName);
+        return worldStorage.updateChatNameIfCurrent(rootPath, worldId, chatId, expectedName, nextName, nextProvenance);
       }
       const current = await this.loadChatData(worldId, chatId);
       if (!current || current.name !== expectedName) {
         return false;
       }
-      const updated = await this.updateChatData(worldId, chatId, { name: nextName });
+      const updated = await this.updateChatData(worldId, chatId, { name: nextName, ...(nextProvenance !== undefined ? { titleProvenance: nextProvenance } : {}) });
       return !!updated;
     },
     async loadAgentWithRetry(worldId: string, agentId: string, options?: any): Promise<Agent | null> {

@@ -20,6 +20,9 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-03-13: Phase 1 — weak fallback no-commit: `pickFallbackTitle` returns '' instead of 'Chat Session' so low-signal LLM results keep the chat in 'New Chat' state.
+ * - 2026-03-13: Phase 2 — bounded context window: `buildTitlePromptMessages` collects up to TITLE_CONTEXT_WINDOW_TURNS*2 recent user+assistant messages for richer prompt context.
+ * - 2026-03-13: Improved title-gen prompt: explicit @mention semantics, no-verbatim-copy rule, noun-phrase Title Case format constraint.
  * - 2026-03-13: Title-generation LLM calls now strip world `reasoning_effort` so background title requests omit provider reasoning params by default.
  * - 2026-03-06: Required explicit chat scope in memory-save/continuation/assistant-response paths; removed `world.currentChatId` fallback from agent event routing.
  * - 2026-03-06: Normalized shell continuation parse/validation/policy failures through explicit canonical shell failure reasons and updated continuation comments to reflect bounded-preview tool persistence.
@@ -110,6 +113,7 @@ const loggerAutoMention = createCategoryLogger('automention');
 const loggerRestoreResumeTools = createCategoryLogger('chat.restore.resume.tools');
 const loggerMessagePublish = createCategoryLogger('message.publish');
 const TITLE_PROMPT_MAX_CHARS_PER_TURN = 240;
+const TITLE_CONTEXT_WINDOW_TURNS = 3;
 
 // Storage wrapper instance - initialized lazily
 let storageWrappers: StorageAPI | null = null;
@@ -237,6 +241,9 @@ type TitlePromptMessage = {
   role: 'user' | 'assistant';
   content: string;
 };
+// Fallback title candidates longer than this are likely full sentences/commands, not titles.
+const FALLBACK_TITLE_MAX_CHARS = 60;
+
 const GENERIC_TITLES = new Set([
   'chat',
   'new chat',
@@ -245,7 +252,9 @@ const GENERIC_TITLES = new Set([
   'title',
   'assistant chat',
   'user chat',
-  'chat title'
+  'chat title',
+  'chat session',
+  'session'
 ]);
 
 function normalizeTitlePromptText(content: string): string {
@@ -284,15 +293,42 @@ function selectTitleSourceUserMessage(messages: AgentMessage[], content: string)
 }
 
 function buildTitlePromptMessages(messages: AgentMessage[], content: string): TitlePromptMessage[] {
-  const sourceMessage = selectTitleSourceUserMessage(messages, content);
-  if (!sourceMessage) {
-    return [];
+  // Collect up to TITLE_CONTEXT_WINDOW_TURNS * 2 most recent eligible messages (user + assistant only).
+  const maxMessages = TITLE_CONTEXT_WINDOW_TURNS * 2;
+  const window: TitlePromptMessage[] = [];
+
+  for (let i = messages.length - 1; i >= 0 && window.length < maxMessages; i -= 1) {
+    const message = messages[i];
+    if (!message) continue;
+    const role = String(message.role || '').toLowerCase();
+    if (role !== 'user' && role !== 'assistant') continue;
+    if (typeof message.content !== 'string') continue;
+    const normalized = normalizeTitlePromptText(message.content);
+    if (!normalized) continue;
+    window.unshift({
+      role: role as 'user' | 'assistant',
+      content: clipTitlePromptText(normalized)
+    });
   }
 
-  return [{
-    role: 'user',
-    content: sourceMessage
-  }];
+  // Apply explicit content override to the last user slot (or append if none found).
+  const overrideText = normalizeTitlePromptText(content || '');
+  if (overrideText) {
+    const clipped = clipTitlePromptText(overrideText);
+    let replaced = false;
+    for (let i = window.length - 1; i >= 0; i -= 1) {
+      if (window[i].role === 'user') {
+        window[i] = { role: 'user', content: clipped };
+        replaced = true;
+        break;
+      }
+    }
+    if (!replaced) {
+      window.push({ role: 'user', content: clipped });
+    }
+  }
+
+  return window;
 }
 
 function sanitizeGeneratedTitle(rawTitle: string): string {
@@ -304,7 +340,9 @@ function sanitizeGeneratedTitle(rawTitle: string): string {
     .replace(/^[-*]\s+/, '')
     .replace(/^\d+[.)]\s+/, '')
     .replace(/^title\s*[:\-]\s*/i, '')
-    .replace(/^["'`]+|["'`]+$/g, '')
+    .replace(/\\"/g, '')        // strip \" sequences before quote removal
+    .replace(/"/g, '')           // strip all remaining double quotes
+    .replace(/^['`]+|['`]+$/g, '') // strip leading/trailing single quotes and backticks
     .replace(/[\r\n\*`_]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -337,19 +375,21 @@ function isLowQualityTitle(title: string): boolean {
 
 function pickFallbackTitle(content: string, promptMessages: TitlePromptMessage[]): string {
   const contentCandidate = sanitizeGeneratedTitle(content);
-  if (!isLowQualityTitle(contentCandidate)) {
+  if (!isLowQualityTitle(contentCandidate) && contentCandidate.length <= FALLBACK_TITLE_MAX_CHARS) {
     return contentCandidate;
   }
 
   for (const message of promptMessages) {
     if (message.role !== 'user') continue;
     const candidate = sanitizeGeneratedTitle(message.content);
-    if (!isLowQualityTitle(candidate)) {
+    if (!isLowQualityTitle(candidate) && candidate.length <= FALLBACK_TITLE_MAX_CHARS) {
       return candidate;
     }
   }
 
-  return 'Chat Session';
+  // No quality title found — return empty string so the caller retains 'New Chat'
+  // and the chat remains eligible for a future auto-title attempt.
+  return '';
 }
 
 function isTitleGenerationCanceledError(error: unknown): boolean {
@@ -2233,21 +2273,20 @@ export async function generateChatTitleFromMessages(
     const tempAgent: any = {
       provider: world.chatLLMProvider || firstAgent?.provider || 'openai',
       model: world.chatLLMModel || firstAgent?.model || 'gpt-4',
-      systemPrompt: 'You are a helpful assistant that turns conversations into concise titles.',
+      systemPrompt: 'You are a concise title generator. Given a conversation snippet, output a short noun-phrase title (3–6 words, Title Case). Rules: output the title only — no explanation, no punctuation at the end; never copy the user message verbatim; if the user message begins with @agentname, that is an agent mention — base the title on the topic or task after it, not on the mention itself.',
       maxTokens: 20,
     };
 
     const userPrompt = {
       role: 'user' as const,
-      content: `Below is a conversation between a user and an assistant. Generate a short, punchy title (3–6 words) that captures its main topic.
-
-${promptMessages.map(msg => `-${msg.role}: ${msg.content}`).join('\n')}
-      `
+      content: `Generate a short title (3–6 words, Title Case) for this conversation.\nRules:\n- Do NOT copy the user message word-for-word.\n- An @name prefix (e.g. "@gemini") is an agent mention — base the title on the topic or task, not the mention.\n- Output the title only.\n\n${promptMessages.map(msg => `-${msg.role}: ${msg.content}`).join('\n')}`
     };
 
     const titleGenerationWorld: World = {
       ...world,
-      variables: removeEnvVariableFromText(world.variables, 'reasoning_effort'),
+      // Force reasoning_effort=none so thinking models (e.g. Gemini 2.5 Flash)
+      // don't exhaust the maxOutputTokens budget on thinking before outputting text.
+      variables: removeEnvVariableFromText(world.variables, 'reasoning_effort') + '\nreasoning_effort=none',
     };
 
     const { response: titleResponse } = await generateAgentResponse(
@@ -2258,8 +2297,8 @@ ${promptMessages.map(msg => `-${msg.role}: ${msg.content}`).join('\n')}
       true,
       targetChatId
     ); // skipTools = true for title generation
-    // Title generation should return plain text when skipTools=true; keep a guard for safety.
-    title = typeof titleResponse === 'string' ? titleResponse : '';
+    // LLMResponse is an object {type, content?} — extract the text content.
+    title = (titleResponse as any)?.type === 'text' ? ((titleResponse as any)?.content ?? '') : '';
     loggerChatTitle.debug('LLM generated title', { rawTitle: title });
 
   } catch (error) {

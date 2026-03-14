@@ -27,7 +27,7 @@ import { createCategoryLogger } from '../logger.js';
 import { createStorageWithWrappers } from '../storage/storage-factory.js';
 import { generateChatTitleFromMessages } from './memory-manager.js';
 import { publishEvent } from './publishers.js';
-import { isDefaultChatTitle, NEW_CHAT_TITLE } from '../chat-constants.js';
+import { isDefaultChatTitle, NEW_CHAT_TITLE, TITLE_PROVENANCE_AUTO } from '../chat-constants.js';
 
 const loggerChatTitle = createCategoryLogger('chattitle');
 
@@ -83,7 +83,7 @@ async function commitChatTitleIfDefault(
   const storage = await getStorageWrappers();
 
   if (typeof storage.updateChatNameIfCurrent === 'function') {
-    return storage.updateChatNameIfCurrent(world.id, chatId, NEW_CHAT_TITLE, nextTitle);
+    return storage.updateChatNameIfCurrent(world.id, chatId, NEW_CHAT_TITLE, nextTitle, TITLE_PROVENANCE_AUTO);
   }
 
   // Legacy fallback when storage backend does not provide compare-and-set helper.
@@ -92,7 +92,7 @@ async function commitChatTitleIfDefault(
     return false;
   }
 
-  const updated = await storage.updateChatData(world.id, chatId, { name: nextTitle });
+  const updated = await storage.updateChatData(world.id, chatId, { name: nextTitle, titleProvenance: TITLE_PROVENANCE_AUTO });
   return !!updated;
 }
 
@@ -148,6 +148,7 @@ async function tryGenerateAndApplyTitle(
     }
 
     currentChat.name = title;
+    currentChat.titleProvenance = TITLE_PROVENANCE_AUTO;
     publishEvent(world, 'system', {
       eventType: 'chat-title-updated',
       chatId: targetChatId,

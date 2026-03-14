@@ -547,13 +547,14 @@ export class MemoryStorage implements StorageAPI {
     if (updates.name !== undefined) chat.name = updates.name;
     if (updates.description !== undefined) chat.description = updates.description;
     if (updates.messageCount !== undefined) chat.messageCount = updates.messageCount;
+    if (updates.titleProvenance !== undefined) chat.titleProvenance = updates.titleProvenance;
     chat.updatedAt = new Date();
 
     await this.saveChatData(worldId, chat);
     return deepClone(chat);
   }
 
-  async updateChatNameIfCurrent(worldId: string, chatId: string, expectedName: string, nextName: string): Promise<boolean> {
+  async updateChatNameIfCurrent(worldId: string, chatId: string, expectedName: string, nextName: string, nextProvenance?: import('../chat-constants.js').TitleProvenance): Promise<boolean> {
     const worldChats = this.chats.get(worldId);
     if (!worldChats) return false;
 
@@ -562,6 +563,7 @@ export class MemoryStorage implements StorageAPI {
     if (chat.name !== expectedName) return false;
 
     chat.name = nextName;
+    if (nextProvenance !== undefined) chat.titleProvenance = nextProvenance;
     chat.updatedAt = new Date();
     worldChats.set(chatId, deepClone(chat));
     return true;

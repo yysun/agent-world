@@ -447,6 +447,7 @@ describe('storage-factory runtime selection', () => {
       'chat-1',
       'Old',
       'New',
+      undefined,
     );
     expect(await storage.worldExists('world-1')).toBe(true);
   });

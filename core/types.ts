@@ -255,6 +255,7 @@ export interface Chat {
   createdAt: Date;
   updatedAt: Date;
   messageCount: number;
+  titleProvenance?: import('./chat-constants.js').TitleProvenance;
 }
 
 /**
@@ -272,6 +273,7 @@ export interface CreateChatParams {
 export interface UpdateChatParams extends Partial<Omit<CreateChatParams, 'captureChat'>> {
   tags?: string[];
   messageCount?: number; // For autosave updates
+  titleProvenance?: import('./chat-constants.js').TitleProvenance;
 }
 
 /**
@@ -416,7 +418,7 @@ export interface StorageAPI {
   deleteChatData(worldId: string, chatId: string): Promise<boolean>;
   listChats(worldId: string): Promise<Chat[]>;
   updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<Chat | null>;
-  updateChatNameIfCurrent?(worldId: string, chatId: string, expectedName: string, nextName: string): Promise<boolean>;
+  updateChatNameIfCurrent?(worldId: string, chatId: string, expectedName: string, nextName: string, nextProvenance?: import('./chat-constants.js').TitleProvenance): Promise<boolean>;
 
   // Integrity operations
   validateIntegrity(worldId: string, agentId?: string): Promise<boolean>;

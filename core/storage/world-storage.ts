@@ -288,6 +288,7 @@ export async function updateChatData(rootPath: string, worldId: string, chatId: 
   // Apply updates to metadata
   if (updates.name !== undefined) chatData.name = updates.name;
   if (updates.description !== undefined) chatData.description = updates.description;
+  if (updates.titleProvenance !== undefined) chatData.titleProvenance = updates.titleProvenance;
 
   // Update timestamps
   chatData.updatedAt = new Date();
@@ -305,13 +306,15 @@ export async function updateChatNameIfCurrent(
   worldId: string,
   chatId: string,
   expectedName: string,
-  nextName: string
+  nextName: string,
+  nextProvenance?: import('../chat-constants.js').TitleProvenance
 ): Promise<boolean> {
   const chatData = await loadChatData(rootPath, worldId, chatId);
   if (!chatData) return false;
   if (chatData.name !== expectedName) return false;
 
   chatData.name = nextName;
+  if (nextProvenance !== undefined) chatData.titleProvenance = nextProvenance;
   chatData.updatedAt = new Date();
   await saveChatData(rootPath, worldId, chatData);
   return true;

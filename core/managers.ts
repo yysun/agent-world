@@ -91,7 +91,7 @@ import { EventEmitter } from 'events';
 import { type StorageAPI } from './storage/storage-factory.js';
 import * as utils from './utils.js';
 import { nanoid } from 'nanoid';
-import { NEW_CHAT_TITLE, isDefaultChatTitle } from './chat-constants.js';
+import { NEW_CHAT_TITLE, isDefaultChatTitle, TITLE_PROVENANCE_MANUAL } from './chat-constants.js';
 import { hasActiveChatMessageProcessing } from './message-processing-control.js';
 import { replayPendingHitlRequests, listPendingHitlPromptEventsFromMessages } from './hitl.js';
 import { clearChatSkillApprovals, reconstructSkillApprovalsFromMessages } from './load-skill-tool.js';
@@ -1088,6 +1088,13 @@ export async function updateChat(worldId: string, chatId: string, updates: Updat
   await ensureInitialization();
 
   const resolvedWorldId = await getResolvedWorldId(worldId);
+
+  // When the caller explicitly sets a name, treat it as a manual title so the
+  // auto-title scheduler will not overwrite it.
+  if (typeof updates.name === 'string' && updates.name.trim().length > 0) {
+    updates = { ...updates, titleProvenance: TITLE_PROVENANCE_MANUAL };
+  }
+
   const chat = await storageWrappers!.updateChatData(resolvedWorldId, chatId, updates);
 
   if (!chat) {

@@ -506,22 +506,25 @@ export async function repairData(ctx: SQLiteStorageContext, worldId: string, age
 export async function saveChatData(ctx: SQLiteStorageContext, worldId: string, chat: Chat): Promise<void> {
   await ensureInitialized(ctx);
   await run(ctx, `
-    INSERT INTO world_chats (id, world_id, name, description, message_count, tags, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    INSERT INTO world_chats (id, world_id, name, description, message_count, tags, title_provenance, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       description = excluded.description,
       message_count = excluded.message_count,
       tags = excluded.tags,
+      title_provenance = excluded.title_provenance,
       updated_at = CURRENT_TIMESTAMP
-  `, chat.id, worldId, chat.name, chat.description, chat.messageCount || 0);
+  `, chat.id, worldId, chat.name, chat.description, chat.messageCount || 0,
+    JSON.stringify(Array.isArray((chat as any).tags) ? (chat as any).tags : []),
+    chat.titleProvenance ?? 'default');
 }
 
 export async function loadChatData(ctx: SQLiteStorageContext, worldId: string, chatId: string): Promise<Chat | null> {
   await ensureInitialized(ctx);
   const result = await get(ctx, `
     SELECT id, world_id as worldId, name, description, message_count as messageCount,
-           tags, created_at as createdAt, updated_at as updatedAt
+           tags, title_provenance as titleProvenance, created_at as createdAt, updated_at as updatedAt
     FROM world_chats
     WHERE id = ? AND world_id = ?
   `, chatId, worldId);
@@ -533,6 +536,7 @@ export async function loadChatData(ctx: SQLiteStorageContext, worldId: string, c
     createdAt: new Date(result.createdAt),
     updatedAt: new Date(result.updatedAt),
     tags: JSON.parse(result.tags || '[]'),
+    titleProvenance: result.titleProvenance ?? 'default',
   };
 }
 
@@ -548,7 +552,7 @@ export async function listChatHistories(ctx: SQLiteStorageContext, worldId: stri
   await ensureInitialized(ctx);
   const results = await all(ctx, `
     SELECT id, name, description, message_count as messageCount,
-           tags, created_at as createdAt, updated_at as updatedAt
+           tags, title_provenance as titleProvenance, created_at as createdAt, updated_at as updatedAt
     FROM world_chats
     WHERE world_id = ?
     ORDER BY updated_at DESC
@@ -558,7 +562,8 @@ export async function listChatHistories(ctx: SQLiteStorageContext, worldId: stri
     ...chat,
     createdAt: new Date(chat.createdAt),
     updatedAt: new Date(chat.updatedAt),
-    tags: JSON.parse(chat.tags || '[]')
+    tags: JSON.parse(chat.tags || '[]'),
+    titleProvenance: chat.titleProvenance ?? 'default',
   }));
 }
 
@@ -584,6 +589,10 @@ export async function updateChatData(ctx: SQLiteStorageContext, worldId: string,
     setClauses.push('message_count = ?');
     params.push(updates.messageCount);
   }
+  if (updates.titleProvenance !== undefined) {
+    setClauses.push('title_provenance = ?');
+    params.push(updates.titleProvenance);
+  }
 
   if (setClauses.length === 0) {
     return await loadChatData(ctx, worldId, chatId);
@@ -606,9 +615,18 @@ export async function updateChatNameIfCurrent(
   worldId: string,
   chatId: string,
   expectedName: string,
-  nextName: string
+  nextName: string,
+  nextProvenance?: import('../chat-constants.js').TitleProvenance
 ): Promise<boolean> {
   await ensureInitialized(ctx);
+  if (nextProvenance !== undefined) {
+    const result = await run(ctx, `
+      UPDATE world_chats
+      SET name = ?, title_provenance = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND world_id = ? AND name = ?
+    `, nextName, nextProvenance, chatId, worldId, expectedName);
+    return ((result as { changes?: number }).changes ?? 0) > 0;
+  }
   const result = await run(ctx, `
     UPDATE world_chats
     SET name = ?, updated_at = CURRENT_TIMESTAMP

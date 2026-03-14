@@ -46,7 +46,7 @@ const mocks = vi.hoisted(() => ({
     { role: 'assistant', content: 'Hi! How can I help you?' }
   ]),
   generateAgentResponse: vi.fn(async () => ({
-    response: 'Generated Chat Title',
+    response: { type: 'text', content: 'Generated Chat Title', assistantMessage: { role: 'assistant', content: 'Generated Chat Title' } },
     messageId: 'title-msg-1'
   }))
 }));
@@ -94,7 +94,7 @@ describe('World activity-based title update', () => {
       { role: 'assistant', content: 'Hi! How can I help you?' }
     ]);
     mocks.generateAgentResponse.mockImplementation(async () => ({
-      response: 'Generated Chat Title',
+      response: { type: 'text', content: 'Generated Chat Title', assistantMessage: { role: 'assistant', content: 'Generated Chat Title' } },
       messageId: 'title-msg-1'
     }));
 
@@ -200,7 +200,7 @@ describe('World activity-based title update', () => {
 
     expect(world.chats.get('chat-1')!.name).toBe('Generated Chat Title');
     expect(world.chats.get('chat-2')!.name).toBe('New Chat');
-    expect(mocks.updateChatNameIfCurrent).toHaveBeenCalledWith('world-1', 'chat-1', 'New Chat', 'Generated Chat Title');
+    expect(mocks.updateChatNameIfCurrent).toHaveBeenCalledWith('world-1', 'chat-1', 'New Chat', 'Generated Chat Title', 'auto');
   });
 
   test('keeps title update scoped to captured chat when currentChatId changes mid-generation', async () => {
@@ -214,7 +214,7 @@ describe('World activity-based title update', () => {
 
     mocks.generateAgentResponse.mockImplementationOnce(async () => {
       await new Promise(r => setTimeout(r, 25));
-      return { response: 'Scoped Chat Title', messageId: 'title-msg-2' };
+      return { response: { type: 'text', content: 'Scoped Chat Title', assistantMessage: { role: 'assistant', content: 'Scoped Chat Title' } }, messageId: 'title-msg-2' };
     });
 
     world.eventEmitter.emit('world', {
@@ -234,7 +234,7 @@ describe('World activity-based title update', () => {
 
     expect(world.chats.get('chat-1')!.name).toBe('Scoped Chat Title');
     expect(world.chats.get('chat-2')!.name).toBe('New Chat');
-    expect(mocks.updateChatNameIfCurrent).toHaveBeenCalledWith('world-1', 'chat-1', 'New Chat', 'Scoped Chat Title');
+    expect(mocks.updateChatNameIfCurrent).toHaveBeenCalledWith('world-1', 'chat-1', 'New Chat', 'Scoped Chat Title', 'auto');
     expect(systemEvents.at(-1)?.content).toMatchObject({
       eventType: 'chat-title-updated',
       chatId: 'chat-1',
@@ -246,7 +246,7 @@ describe('World activity-based title update', () => {
   test('skips title commit when chat is no longer default at commit time', async () => {
     mocks.generateAgentResponse.mockImplementationOnce(async () => {
       await new Promise(r => setTimeout(r, 20));
-      return { response: 'Should Not Commit', messageId: 'title-msg-3' };
+      return { response: { type: 'text', content: 'Should Not Commit', assistantMessage: { role: 'assistant', content: 'Should Not Commit' } }, messageId: 'title-msg-3' };
     });
 
     world.eventEmitter.emit('world', {
@@ -269,7 +269,7 @@ describe('World activity-based title update', () => {
     expect(mocks.updateChatNameIfCurrent).not.toHaveBeenCalled();
   });
 
-  test('builds title prompt from latest user message only', async () => {
+  test('builds title prompt from bounded multi-turn context window', async () => {
     const noisyMessages = [
       { role: 'user', content: 'Very old user message', messageId: 'old-1' },
       ...Array.from({ length: 30 }).map((_, index) => ({
@@ -303,17 +303,17 @@ describe('World activity-based title update', () => {
     const promptContent = promptMessages?.[0]?.content ?? '';
     const scopedChatId = latestGenerateCall?.[5];
 
-    expect(promptContent).not.toContain('-assistant:');
+    expect(promptContent).toContain('-assistant:');
     expect(promptContent).not.toContain('-tool:');
     expect(promptContent).not.toContain('-system:');
-    expect((promptContent.match(/-user:/g) || []).length).toBe(1);
+    expect((promptContent.match(/-user:/g) || []).length).toBe(4);
     expect(promptContent).toContain('-user: Duplicate prompt line');
     expect(promptContent).not.toContain('Very old user message');
-    expect(promptContent).not.toContain('Recent turn 29');
+    expect(promptContent).toContain('-assistant: Recent turn 29');
     expect(scopedChatId).toBe('chat-1');
   });
 
-  test('omits world reasoning override from title-generation LLM calls', async () => {
+  test('forces reasoning_effort=none in title-generation LLM calls to prevent empty responses from thinking models', async () => {
     world.variables = 'reasoning_effort=high\nworking_directory=/tmp/project';
 
     world.eventEmitter.emit('world', {
@@ -332,14 +332,14 @@ describe('World activity-based title update', () => {
     const latestGenerateCall = mocks.generateAgentResponse.mock.calls.at(-1) as any[] | undefined;
     const llmWorld = latestGenerateCall?.[0] as World | undefined;
 
-    expect(llmWorld?.variables).toBe('working_directory=/tmp/project');
+    expect(llmWorld?.variables).toBe('working_directory=/tmp/project\nreasoning_effort=none');
     expect(llmWorld).not.toBe(world);
     expect(world.variables).toBe('reasoning_effort=high\nworking_directory=/tmp/project');
   });
 
   test('uses fallback hierarchy when LLM returns low-quality title', async () => {
     mocks.generateAgentResponse.mockImplementationOnce(async () => ({
-      response: 'Title: Chat',
+      response: { type: 'text', content: 'Title: Chat', assistantMessage: { role: 'assistant', content: 'Title: Chat' } },
       messageId: 'title-msg-4'
     }));
 
@@ -384,7 +384,7 @@ describe('World activity-based title update', () => {
   test('deduplicates repeated idle events while title generation is in flight', async () => {
     mocks.generateAgentResponse.mockImplementationOnce(async () => {
       await new Promise(r => setTimeout(r, 30));
-      return { response: 'Single Title Generation', messageId: 'title-msg-5' };
+      return { response: { type: 'text', content: 'Single Title Generation', assistantMessage: { role: 'assistant', content: 'Single Title Generation' } }, messageId: 'title-msg-5' };
     });
 
     const idleEvent = {
@@ -455,5 +455,153 @@ describe('World activity-based title update', () => {
     expect(standaloneWorld.chats.get('chat-1')!.name).toBe('Generated Chat Title');
 
     await subscription.unsubscribe();
+  });
+
+  // ── Phase 1: weak-fallback no-commit ───────────────────────────────────────
+
+  test('does not commit title when LLM returns empty string and all user messages are also generic', async () => {
+    mocks.getMemory.mockImplementationOnce(async () => [
+      { role: 'user', content: 'new chat', messageId: 'u1' },
+    ]);
+    mocks.generateAgentResponse.mockImplementationOnce(async () => ({
+      response: { type: 'text', content: '', assistantMessage: { role: 'assistant', content: '' } },
+      messageId: 'empty-title-msg'
+    }));
+
+    world.eventEmitter.emit('world', {
+      type: 'idle',
+      pendingOperations: 0,
+      activityId: 1,
+      timestamp: new Date().toISOString(),
+      activeSources: [],
+      queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
+      messageId: 'test-msg-id',
+      chatId: 'chat-1'
+    });
+
+    await new Promise(r => setTimeout(r, 15));
+
+    expect(world.chats.get('chat-1')!.name).toBe('New Chat');
+    expect(mocks.updateChatNameIfCurrent).not.toHaveBeenCalled();
+  });
+
+  test('does not commit verbatim long user message when LLM returns empty string', async () => {
+    const longUserMessage = '@gemini search most recent 10 youtube videos about google stitch';
+    mocks.getMemory.mockImplementationOnce(async () => [
+      { role: 'user', content: longUserMessage, messageId: 'u1' },
+    ]);
+    mocks.generateAgentResponse.mockImplementationOnce(async () => ({
+      response: { type: 'text', content: '', assistantMessage: { role: 'assistant', content: '' } },
+      messageId: 'empty-title-msg-2'
+    }));
+
+    world.eventEmitter.emit('world', {
+      type: 'idle',
+      pendingOperations: 0,
+      activityId: 1,
+      timestamp: new Date().toISOString(),
+      activeSources: [],
+      queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
+      messageId: 'test-msg-id',
+      chatId: 'chat-1'
+    });
+
+    await new Promise(r => setTimeout(r, 15));
+
+    expect(world.chats.get('chat-1')!.name).toBe('New Chat');
+    expect(mocks.updateChatNameIfCurrent).not.toHaveBeenCalled();
+  });
+
+  test('strips embedded double quotes from LLM-generated title', async () => {
+    mocks.generateAgentResponse.mockResolvedValueOnce({
+      response: { type: 'text', content: 'Searching YouTube for "OpenClaw"', assistantMessage: { role: 'assistant', content: 'Searching YouTube for "OpenClaw"' } },
+      messageId: 'title-msg-quote'
+    });
+    world.eventEmitter.emit('world', {
+      type: 'idle',
+      pendingOperations: 0,
+      activityId: 1,
+      timestamp: new Date().toISOString(),
+      activeSources: [],
+      queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
+      messageId: 'test-msg-id',
+      chatId: 'chat-1'
+    });
+    await new Promise(r => setTimeout(r, 15));
+    expect(world.chats.get('chat-1')!.name).toBe('Searching YouTube for OpenClaw');
+  });
+
+  test('does not commit title when LLM returns a generic title and all user messages are also generic', async () => {
+    mocks.getMemory.mockImplementationOnce(async () => [
+      { role: 'user', content: 'chat session', messageId: 'u1' },
+    ]);
+    mocks.generateAgentResponse.mockImplementationOnce(async () => ({
+      response: { type: 'text', content: 'session', assistantMessage: { role: 'assistant', content: 'session' } },
+      messageId: 'generic-title-msg'
+    }));
+
+    world.eventEmitter.emit('world', {
+      type: 'idle',
+      pendingOperations: 0,
+      activityId: 1,
+      timestamp: new Date().toISOString(),
+      activeSources: [],
+      queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
+      messageId: 'test-msg-id',
+      chatId: 'chat-1'
+    });
+
+    await new Promise(r => setTimeout(r, 15));
+
+    expect(world.chats.get('chat-1')!.name).toBe('New Chat');
+    expect(mocks.updateChatNameIfCurrent).not.toHaveBeenCalled();
+  });
+
+  // ── Phase 3d: provenance in runtime cache ──────────────────────────────────
+
+  test('sets titleProvenance = auto in runtime cache after successful title commit', async () => {
+    world.eventEmitter.emit('world', {
+      type: 'idle',
+      pendingOperations: 0,
+      activityId: 1,
+      timestamp: new Date().toISOString(),
+      activeSources: [],
+      queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
+      messageId: 'test-msg-id',
+      chatId: 'chat-1'
+    });
+
+    await new Promise(r => setTimeout(r, 15));
+
+    expect(world.chats.get('chat-1')!.name).toBe('Generated Chat Title');
+    expect((world.chats.get('chat-1') as any).titleProvenance).toBe('auto');
+  });
+
+  test('does not set titleProvenance when commit is skipped due to race', async () => {
+    mocks.generateAgentResponse.mockImplementationOnce(async () => {
+      await new Promise(r => setTimeout(r, 20));
+      return { response: { type: 'text', content: 'Raced Title', assistantMessage: { role: 'assistant', content: 'Raced Title' } }, messageId: 'race-msg' };
+    });
+
+    world.eventEmitter.emit('world', {
+      type: 'idle',
+      pendingOperations: 0,
+      activityId: 1,
+      timestamp: new Date().toISOString(),
+      activeSources: [],
+      queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
+      messageId: 'test-msg-id',
+      chatId: 'chat-1'
+    });
+
+    // Manually rename the chat before the async commit completes
+    world.chats.get('chat-1')!.name = 'Manual Name';
+    mocks.chatNameById.set('chat-1', 'Manual Name');
+
+    await new Promise(r => setTimeout(r, 35));
+
+    // CAS fails, so provenance must not be set to 'auto'
+    expect(world.chats.get('chat-1')!.name).toBe('Manual Name');
+    expect((world.chats.get('chat-1') as any).titleProvenance).not.toBe('auto');
   });
 });

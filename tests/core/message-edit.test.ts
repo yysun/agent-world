@@ -330,7 +330,7 @@ describe('Message Edit Feature', () => {
           { role: 'user', content: 'hi', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date(), agentId: 'agent-1' }
         ]
       });
-      const chat = { id: 'chat-1', name: 'hi', worldId: world.id, messageCount: 1, createdAt: new Date(), updatedAt: new Date() };
+      const chat = { id: 'chat-1', name: 'hi', worldId: world.id, messageCount: 1, createdAt: new Date(), updatedAt: new Date(), titleProvenance: 'auto' as const };
 
       await getMemoryStorage().saveWorld(world);
       await getMemoryStorage().saveAgent(world.id, agent);
@@ -355,6 +355,7 @@ describe('Message Edit Feature', () => {
       expect(result.resubmissionStatus).toBe('success');
       const updatedChat = await getMemoryStorage().loadChatData(world.id, 'chat-1');
       expect(updatedChat?.name).toBe('New Chat');
+      expect(updatedChat?.titleProvenance).toBe('default');
     });
 
     test('should not reset manual title when it does not match latest generated title', async () => {
@@ -445,5 +446,57 @@ describe('Message Edit Feature', () => {
       expect(updatedChat?.name).toBe('Generated title');
       storage.addQueuedMessage = originalAddQueuedMessage;
     });
+
+    test('should restore titleProvenance = auto when rollback succeeds after failed resubmission', async () => {
+      const world = createTestWorld({
+        id: 'test-world-provenance-rollback',
+        name: 'Test World Provenance Rollback',
+        isProcessing: false,
+        currentChatId: 'chat-1'
+      });
+      const agent = createTestAgent({
+        memory: [
+          { role: 'user', content: 'hello', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date(), agentId: 'agent-1' }
+        ]
+      });
+      const chat = {
+        id: 'chat-1',
+        name: 'Auto Generated Title',
+        worldId: world.id,
+        messageCount: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        titleProvenance: 'auto' as const,
+      };
+
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent(world.id, agent);
+      await getMemoryStorage().saveChatData(world.id, chat);
+
+      const runtimeWorld = await getWorld(world.id);
+
+      const storage = getMemoryStorage() as StorageAPI & {
+        addQueuedMessage?: (worldId: string, chatId: string, messageId: string, content: string, sender: string) => Promise<void>;
+      };
+      const originalAddQueuedMessage = storage.addQueuedMessage?.bind(storage);
+      if (!originalAddQueuedMessage) {
+        throw new Error('Expected in-memory storage to expose addQueuedMessage.');
+      }
+
+      storage.addQueuedMessage = vi.fn(async () => {
+        throw new Error('simulated resubmit failure');
+      });
+
+      const result = await editUserMessage(world.id, 'msg-1', 'updated content', 'chat-1', runtimeWorld!);
+
+      expect(result.resubmissionStatus).toBe('failed');
+
+      const updatedChat = await getMemoryStorage().loadChatData(world.id, 'chat-1');
+      // Title and provenance should be rolled back to the original auto state
+      expect(updatedChat?.name).toBe('Auto Generated Title');
+      expect(updatedChat?.titleProvenance).toBe('auto');
+      storage.addQueuedMessage = originalAddQueuedMessage;
+    });
   });
 });
+
