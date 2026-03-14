@@ -3,12 +3,12 @@
  *
  * Purpose:
  * - Display the user message queue with status indicators and control buttons.
- * - Hidden when queue is empty.
+ * - Hidden unless more than one active queue item remains.
  *
  * Key Features:
  * - Lists queued messages in order (queued, sending)
  * - Pause / Resume / Stop / Clear controls
- * - Auto-hides when no active queue items
+ * - Auto-hides when the queue does not have enough items to justify the floating panel
  *
  * Implementation Notes:
  * - Stateless presentation; parent owns queue state and action callbacks.
@@ -38,7 +38,7 @@ export default function MessageQueuePanel({
   onClear: () => void;
   isPaused?: boolean;
 }) {
-  if (queuedMessages.length === 0) return null;
+  if (queuedMessages.length <= 1) return null;
 
   const hasSending = queuedMessages.some((m) => m.status === 'sending');
 
