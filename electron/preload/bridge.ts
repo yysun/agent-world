@@ -94,6 +94,8 @@ export function createDesktopApi(ipcRendererLike: IpcRendererLike = ipcRenderer)
     loadWorld: (worldId) =>
       invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_LOAD, worldId),
     importWorld: (payload) => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_IMPORT, payload),
+    importAgent: (payload) => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.AGENT_IMPORT, payload),
+    importSkill: (payload) => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.SKILL_IMPORT, payload),
     exportWorld: (worldId) =>
       invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_EXPORT, toWorldPayload(worldId)),
     listWorlds: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_LIST),

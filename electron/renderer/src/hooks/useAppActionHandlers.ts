@@ -13,6 +13,7 @@
  * - Uses dependency injection for state setters and collaborators.
  *
  * Recent Changes:
+ * - 2026-03-14: Routed world import mode into the left sidebar and closed the right panel for that flow.
  * - 2026-03-13: Switched reasoning-effort persistence to `default`/`none`, where `default` clears the env override.
  * - 2026-03-13: Added `onSetReasoningEffort` handler that persists `reasoning_effort` env state via updateWorld.
  * - 2026-03-12: Added `onSetToolPermission` handler that persists tool_permission env key via upsertEnvVariable → updateWorld.
@@ -49,6 +50,11 @@ type OpenSettingsPanelArgs = {
   panelOpen?: boolean;
 };
 
+type OpenImportWorldSidebarArgs = {
+  setPanelMode: (mode: string) => void;
+  setPanelOpen: (open: boolean) => void;
+};
+
 async function runBestEffortAsync(task: (() => Promise<void>) | undefined): Promise<void> {
   if (!task) return;
   try {
@@ -75,6 +81,14 @@ export async function openSettingsPanel({
     runBestEffortAsync(loadSystemSettings),
     runBestEffortAsync(refreshSkillRegistry),
   ]);
+}
+
+export function openImportWorldSidebar({
+  setPanelMode,
+  setPanelOpen,
+}: OpenImportWorldSidebarArgs): void {
+  setPanelMode('import-world');
+  setPanelOpen(false);
 }
 
 export function useAppActionHandlers({
@@ -162,8 +176,15 @@ export function useAppActionHandlers({
   }, [setPanelMode, setPanelOpen]);
 
   const onOpenImportWorldPanel = useCallback(() => {
-    setPanelMode('import-world');
-    setPanelOpen(true);
+    openImportWorldSidebar({
+      setPanelMode,
+      setPanelOpen,
+    });
+  }, [setPanelMode, setPanelOpen]);
+
+  const onCloseImportWorldPanel = useCallback(() => {
+    setPanelMode('create-world');
+    setPanelOpen(false);
   }, [setPanelMode, setPanelOpen]);
 
   const onOpenLogsPanel = useCallback(() => {
@@ -421,6 +442,7 @@ export function useAppActionHandlers({
     onSaveSettings,
     onOpenCreateWorldPanel,
     onOpenImportWorldPanel,
+    onCloseImportWorldPanel,
     onOpenLogsPanel,
     onOpenWorldEditPanel,
     onOpenCreateAgentPanel,

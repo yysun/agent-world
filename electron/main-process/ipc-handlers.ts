@@ -185,6 +185,11 @@ interface MainIpcHandlerFactoryDependencies {
   loggerIpcMessages?: LoggerLike;
   GitHubWorldImportError: new (...args: any[]) => GitHubWorldImportErrorLike;
   stageGitHubWorldFromShorthand: (shorthand: string) => Promise<GitHubWorldImportStagedResult>;
+  stageGitHubFolderFromRepo: (
+    repoInput: string,
+    folderPath: string,
+    options?: { folderName?: string }
+  ) => Promise<GitHubFolderImportStagedResult>;
   heartbeatManager: {
     startJob: (world: any, chatId: string) => { started: boolean; reason: string | null; job: { status: 'running' | 'paused' | 'stopped' } | null };
     restartJob: (world: any, chatId: string) => { started: boolean; reason: string | null; job: { status: 'running' | 'paused' | 'stopped' } | null };
@@ -226,6 +231,22 @@ interface GitHubWorldImportStagedResult {
 
 interface GitHubWorldImportErrorLike extends Error {
   details?: Record<string, unknown>;
+}
+
+interface GitHubFolderImportSource {
+  repoInput: string;
+  owner: string;
+  repo: string;
+  branch: string;
+  folderPath: string;
+  commitSha: string | null;
+}
+
+interface GitHubFolderImportStagedResult {
+  stagingRootPath: string;
+  folderPath: string;
+  source: GitHubFolderImportSource;
+  cleanup: () => Promise<void>;
 }
 
 export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDependencies) {
@@ -275,6 +296,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     loggerIpcMessages = NOOP_LOGGER,
     GitHubWorldImportError,
     stageGitHubWorldFromShorthand,
+    stageGitHubFolderFromRepo,
     heartbeatManager
   } = dependencies;
 
@@ -312,6 +334,157 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!fs.existsSync(configPath)) {
       return 'Selected folder does not contain a valid world (missing config.json)';
     }
+    return null;
+  }
+
+  function getAgentFolderValidationError(agentFolderPath: string): string | null {
+    if (!isDirectoryOnDisk(agentFolderPath)) {
+      return 'Selected path is not a folder';
+    }
+    const configPath = path.join(agentFolderPath, 'config.json');
+    if (!fs.existsSync(configPath)) {
+      return 'Selected folder does not contain a valid agent (missing config.json)';
+    }
+    return null;
+  }
+
+  function getSkillFolderValidationError(skillFolderPath: string): string | null {
+    if (!isDirectoryOnDisk(skillFolderPath)) {
+      return 'Selected path is not a folder';
+    }
+    const skillPath = path.join(skillFolderPath, 'SKILL.md');
+    if (!fs.existsSync(skillPath)) {
+      return 'Selected folder does not contain a valid skill (missing SKILL.md)';
+    }
+    return null;
+  }
+
+  function normalizeImportItemName(value: unknown, label: string): string {
+    const normalized = String(value || '').trim().replace(/^\/+|\/+$/g, '');
+    if (!normalized) {
+      throw new Error(`${label} is required.`);
+    }
+    if (normalized === '.' || normalized === '..' || normalized.includes('/') || normalized.includes('\\')) {
+      throw new Error(`${label} must be a single folder name.`);
+    }
+    return normalized;
+  }
+
+  function buildGitHubFolderCandidates(kind: 'world' | 'agent' | 'skill', itemName: string): string[] {
+    if (kind === 'world') {
+      return [`data/worlds/${itemName}`, `worlds/${itemName}`, itemName];
+    }
+    if (kind === 'agent') {
+      return [`agents/${itemName}`, `data/agents/${itemName}`, itemName];
+    }
+    return [`skills/${itemName}`, `.agents/skills/${itemName}`, itemName];
+  }
+
+  function toDateOrUndefined(value: unknown): Date | undefined {
+    if (value instanceof Date) return value;
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const parsed = new Date(trimmed);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+  }
+
+  async function readOptionalTextFile(filePath: string): Promise<string | undefined> {
+    try {
+      return await fs.promises.readFile(filePath, 'utf8');
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err?.code === 'ENOENT') {
+        return undefined;
+      }
+      throw error;
+    }
+  }
+
+  async function readOptionalJsonFile<T>(filePath: string): Promise<T | undefined> {
+    const content = await readOptionalTextFile(filePath);
+    if (content == null) {
+      return undefined;
+    }
+    return JSON.parse(content) as T;
+  }
+
+  async function loadStandaloneAgentFromFolder(agentFolderPath: string): Promise<any> {
+    const configPath = path.join(agentFolderPath, 'config.json');
+    const config = JSON.parse(await fs.promises.readFile(configPath, 'utf8')) as Record<string, unknown>;
+    const memory = await readOptionalJsonFile<any[]>(path.join(agentFolderPath, 'memory.json'));
+    const systemPrompt = await readOptionalTextFile(path.join(agentFolderPath, 'system-prompt.md'));
+    const fallbackId = path.basename(agentFolderPath);
+    const agentId = String(config.id || fallbackId).trim();
+    const agentName = String(config.name || agentId).trim();
+
+    if (!agentId) {
+      throw new Error('Agent config is missing id.');
+    }
+    if (!agentName) {
+      throw new Error('Agent config is missing name.');
+    }
+
+    return {
+      ...config,
+      id: agentId,
+      name: agentName,
+      type: String(config.type || 'assistant').trim() || 'assistant',
+      provider: String(config.provider || '').trim(),
+      model: String(config.model || '').trim(),
+      systemPrompt: systemPrompt ?? (typeof config.systemPrompt === 'string' ? config.systemPrompt : undefined),
+      temperature: typeof config.temperature === 'number' ? config.temperature : undefined,
+      maxTokens: typeof config.maxTokens === 'number' ? config.maxTokens : undefined,
+      autoReply: typeof config.autoReply === 'boolean' ? config.autoReply : undefined,
+      status: typeof config.status === 'string' ? config.status : undefined,
+      createdAt: toDateOrUndefined(config.createdAt),
+      lastActive: toDateOrUndefined(config.lastActive),
+      lastLLMCall: toDateOrUndefined(config.lastLLMCall),
+      llmCallCount: Number.isFinite(Number(config.llmCallCount)) ? Number(config.llmCallCount) : 0,
+      memory: Array.isArray(memory) ? memory : [],
+    };
+  }
+
+  async function stageGitHubImportFolder(
+    kind: 'world' | 'agent' | 'skill',
+    payload?: { source?: unknown; repo?: unknown; itemName?: unknown }
+  ): Promise<GitHubFolderImportStagedResult | GitHubWorldImportStagedResult | null> {
+    const source = String(payload?.source || '').trim();
+    const repo = String(payload?.repo || '').trim();
+    const itemName = String(payload?.itemName || '').trim();
+
+    if (kind === 'world' && source.startsWith('@') && !repo && !itemName) {
+      return stageGitHubWorldFromShorthand(source);
+    }
+
+    if (!repo && !itemName) {
+      return null;
+    }
+
+    const normalizedRepo = repo || source;
+    const normalizedItemName = normalizeImportItemName(itemName, `${kind[0].toUpperCase()}${kind.slice(1)} name`);
+    const candidates = buildGitHubFolderCandidates(kind, normalizedItemName);
+    let lastNotFoundError: GitHubWorldImportErrorLike | null = null;
+
+    for (const folderPath of candidates) {
+      try {
+        return await stageGitHubFolderFromRepo(normalizedRepo, folderPath, { folderName: normalizedItemName });
+      } catch (error) {
+        if (error instanceof GitHubWorldImportError && error.message && (error as GitHubWorldImportErrorLike).details) {
+          const typedError = error as GitHubWorldImportErrorLike;
+          if ((typedError as any).code === 'source-not-found') {
+            lastNotFoundError = typedError;
+            continue;
+          }
+        }
+        throw error;
+      }
+    }
+
+    if (lastNotFoundError) {
+      throw lastNotFoundError;
+    }
+
     return null;
   }
 
@@ -853,11 +1026,15 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     const mainWindow = getMainWindow();
     if (!mainWindow) throw new Error('Main window not initialized');
     const requestedSource = String(payload?.source || '').trim();
-    const selectedWorldFolder = requestedSource
-      || await pickTargetDirectory(mainWindow, 'Import World Folder', 'Import');
+    const requestedRepo = String(payload?.repo || '').trim();
+    const requestedItemName = String(payload?.itemName || '').trim();
+    const selectedWorldFolder = requestedSource || requestedRepo || requestedItemName
+      ? String(requestedSource || '')
+      : await pickTargetDirectory(mainWindow, 'Import World Folder', 'Import');
     let stagedGitHubWorld: GitHubWorldImportStagedResult | null = null;
+    let stagedGitHubFolder: GitHubFolderImportStagedResult | null = null;
 
-    if (!selectedWorldFolder) {
+    if (!selectedWorldFolder && !requestedRepo && !requestedItemName) {
       return {
         success: false,
         error: 'Import canceled',
@@ -869,16 +1046,23 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       await ensureCoreReady();
 
       let resolvedWorldFolder = path.resolve(path.normalize(selectedWorldFolder));
-      let sourceMetadata: {
-        shorthand: string;
-        owner: string;
-        repo: string;
-        branch: string;
-        worldPath: string;
-        commitSha: string | null;
-      } | null = null;
+      let sourceMetadata: Record<string, unknown> | null = null;
 
-      if (selectedWorldFolder.startsWith('@')) {
+      const stagedGitHubImport = await stageGitHubImportFolder('world', payload);
+      if (stagedGitHubImport) {
+        if ('worldFolderPath' in stagedGitHubImport) {
+          stagedGitHubWorld = stagedGitHubImport;
+          resolvedWorldFolder = path.resolve(path.normalize(stagedGitHubImport.worldFolderPath));
+          sourceMetadata = stagedGitHubImport.source as Record<string, unknown>;
+        } else {
+          stagedGitHubFolder = stagedGitHubImport;
+          resolvedWorldFolder = path.resolve(path.normalize(stagedGitHubImport.folderPath));
+          sourceMetadata = {
+            ...stagedGitHubImport.source,
+            itemName: requestedItemName || path.basename(stagedGitHubImport.folderPath),
+          };
+        }
+      } else if (selectedWorldFolder.startsWith('@')) {
         stagedGitHubWorld = await stageGitHubWorldFromShorthand(selectedWorldFolder);
         resolvedWorldFolder = path.resolve(path.normalize(stagedGitHubWorld.worldFolderPath));
         sourceMetadata = stagedGitHubWorld.source;
@@ -1012,9 +1196,9 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
         const owner = String(details.owner || '');
         const repo = String(details.repo || '');
         const branch = String(details.branch || '');
-        const worldPath = String(details.worldPath || '');
-        const resolvedSource = owner && repo && branch && worldPath
-          ? `${owner}/${repo}@${branch}:${worldPath}`
+        const folderPath = String(details.worldPath || details.folderPath || '');
+        const resolvedSource = owner && repo && branch && folderPath
+          ? `${owner}/${repo}@${branch}:${folderPath}`
           : undefined;
         return {
           success: false,
@@ -1032,6 +1216,9 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     } finally {
       if (stagedGitHubWorld) {
         await stagedGitHubWorld.cleanup();
+      }
+      if (stagedGitHubFolder) {
+        await stagedGitHubFolder.cleanup();
       }
     }
   }
@@ -1147,6 +1334,261 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
         eventCount
       }
     };
+  }
+
+  async function importAgent(payload?: any) {
+    const mainWindow = getMainWindow();
+    if (!mainWindow) throw new Error('Main window not initialized');
+
+    const worldId = String(payload?.worldId || '').trim();
+    if (!worldId) {
+      throw new Error('World ID is required.');
+    }
+
+    const requestedSource = String(payload?.source || '').trim();
+    const requestedRepo = String(payload?.repo || '').trim();
+    const requestedItemName = String(payload?.itemName || '').trim();
+    const selectedAgentFolder = requestedSource || requestedRepo || requestedItemName
+      ? String(requestedSource || '')
+      : await pickTargetDirectory(mainWindow, 'Import Agent Folder', 'Import');
+    let stagedGitHubFolder: GitHubFolderImportStagedResult | null = null;
+
+    if (!selectedAgentFolder && !requestedRepo && !requestedItemName) {
+      return {
+        success: false,
+        error: 'Import canceled',
+        message: 'Agent import was canceled'
+      };
+    }
+
+    try {
+      await ensureCoreReady();
+
+      const targetWorld = await getWorld(worldId);
+      if (!targetWorld) {
+        return {
+          success: false,
+          error: 'World not found',
+          message: `Could not find destination world '${worldId}'`,
+        };
+      }
+
+      let resolvedAgentFolder = path.resolve(path.normalize(selectedAgentFolder || ''));
+      let sourceMetadata: Record<string, unknown> | null = null;
+
+      const stagedGitHubImport = await stageGitHubImportFolder('agent', payload);
+      if (stagedGitHubImport) {
+        if ('folderPath' in stagedGitHubImport) {
+          stagedGitHubFolder = stagedGitHubImport;
+          resolvedAgentFolder = path.resolve(path.normalize(stagedGitHubImport.folderPath));
+          sourceMetadata = {
+            ...stagedGitHubImport.source,
+            itemName: requestedItemName || path.basename(stagedGitHubImport.folderPath),
+          };
+        } else {
+          throw new Error('Agent GitHub import requires an explicit repo and agent name.');
+        }
+      }
+
+      const validationError = getAgentFolderValidationError(resolvedAgentFolder);
+      if (validationError) {
+        return {
+          success: false,
+          error: 'Invalid agent folder',
+          message: validationError,
+        };
+      }
+
+      const importedAgent = await loadStandaloneAgentFromFolder(resolvedAgentFolder);
+      if (!importedAgent.provider || !importedAgent.model) {
+        return {
+          success: false,
+          error: 'Invalid agent config',
+          message: 'Imported agent config must include provider and model.',
+        };
+      }
+
+      const targetStorage = await createStorageFromEnv() as StorageLike;
+      const existingAgents = await targetStorage.listAgents(worldId);
+      const idConflict = existingAgents.find((agent) => String(agent?.id || '') === String(importedAgent.id || ''));
+      const nameConflict = existingAgents.find((agent) => String(agent?.name || '').trim().toLowerCase() === String(importedAgent.name || '').trim().toLowerCase());
+
+      if (idConflict && nameConflict && String(idConflict.id) !== String(nameConflict.id)) {
+        return {
+          success: false,
+          error: 'Multiple conflicts detected',
+          message: `Cannot import because ID conflict ('${idConflict.id}') and name conflict ('${nameConflict.name}') refer to different agents. Resolve conflicts manually and retry.`,
+        };
+      }
+
+      const conflictAgent = idConflict || nameConflict;
+      if (conflictAgent) {
+        const conflictType = idConflict && nameConflict ? 'id and name' : (idConflict ? 'id' : 'name');
+        const shouldOverwrite = await promptForOverwrite(
+          mainWindow,
+          'Overwrite Existing Agent?',
+          `An agent with the same ${conflictType} already exists in this world.`,
+          `Existing agent: ${conflictAgent.name} (${conflictAgent.id})\nIncoming agent: ${importedAgent.name} (${importedAgent.id})`
+        );
+        if (!shouldOverwrite) {
+          return {
+            success: false,
+            error: 'Import canceled',
+            message: 'Import canceled. Existing agent was not modified.',
+          };
+        }
+
+        await deleteAgent(worldId, String(conflictAgent.id));
+      }
+
+      await targetStorage.saveAgent(worldId, importedAgent);
+      const refreshWarning = await refreshWorldSubscription(worldId);
+      const refreshedWorld = await getWorld(worldId);
+
+      return {
+        success: true,
+        world: refreshedWorld ? serializeWorldInfo(refreshedWorld) : null,
+        agent: serializeAgentSummary(importedAgent),
+        source: sourceMetadata || undefined,
+        ...(refreshWarning ? { refreshWarning } : {}),
+      };
+    } catch (error) {
+      if (error instanceof GitHubWorldImportError) {
+        return {
+          success: false,
+          error: error.message,
+          message: `Failed to import agent: ${error.message}`,
+        };
+      }
+      const err = error as Error;
+      return {
+        success: false,
+        error: err.message || 'Unknown error',
+        message: `Failed to import agent: ${err.message || 'Unknown error occurred'}`,
+      };
+    } finally {
+      if (stagedGitHubFolder) {
+        await stagedGitHubFolder.cleanup();
+      }
+    }
+  }
+
+  async function importSkill(payload?: any) {
+    const mainWindow = getMainWindow();
+    if (!mainWindow) throw new Error('Main window not initialized');
+
+    const requestedSource = String(payload?.source || '').trim();
+    const requestedRepo = String(payload?.repo || '').trim();
+    const requestedItemName = String(payload?.itemName || '').trim();
+    const selectedSkillFolder = requestedSource || requestedRepo || requestedItemName
+      ? String(requestedSource || '')
+      : await pickTargetDirectory(mainWindow, 'Import Skill Folder', 'Import');
+    let stagedGitHubFolder: GitHubFolderImportStagedResult | null = null;
+
+    if (!selectedSkillFolder && !requestedRepo && !requestedItemName) {
+      return {
+        success: false,
+        error: 'Import canceled',
+        message: 'Skill import was canceled'
+      };
+    }
+
+    try {
+      await ensureCoreReady();
+
+      const workspacePath = String(getWorkspaceState()?.workspacePath || '').trim();
+      if (!workspacePath) {
+        return {
+          success: false,
+          error: 'Workspace unavailable',
+          message: 'Workspace path is not available for skill import.',
+        };
+      }
+
+      let resolvedSkillFolder = path.resolve(path.normalize(selectedSkillFolder || ''));
+      let sourceMetadata: Record<string, unknown> | null = null;
+
+      const stagedGitHubImport = await stageGitHubImportFolder('skill', payload);
+      if (stagedGitHubImport) {
+        if ('folderPath' in stagedGitHubImport) {
+          stagedGitHubFolder = stagedGitHubImport;
+          resolvedSkillFolder = path.resolve(path.normalize(stagedGitHubImport.folderPath));
+          sourceMetadata = {
+            ...stagedGitHubImport.source,
+            itemName: requestedItemName || path.basename(stagedGitHubImport.folderPath),
+          };
+        } else {
+          throw new Error('Skill GitHub import requires an explicit repo and skill name.');
+        }
+      }
+
+      const validationError = getSkillFolderValidationError(resolvedSkillFolder);
+      if (validationError) {
+        return {
+          success: false,
+          error: 'Invalid skill folder',
+          message: validationError,
+        };
+      }
+
+      const targetSkillName = requestedItemName
+        ? normalizeImportItemName(requestedItemName, 'Skill name')
+        : normalizeImportItemName(path.basename(resolvedSkillFolder), 'Skill name');
+      const targetSkillsRoot = path.join(workspacePath, 'skills');
+      const targetSkillPath = path.join(targetSkillsRoot, targetSkillName);
+
+      if (fs.existsSync(targetSkillPath)) {
+        const shouldOverwrite = await promptForOverwrite(
+          mainWindow,
+          'Overwrite Existing Skill?',
+          `A skill folder named '${targetSkillName}' already exists in this workspace.`,
+          targetSkillPath
+        );
+        if (!shouldOverwrite) {
+          return {
+            success: false,
+            error: 'Import canceled',
+            message: 'Import canceled. Existing skill was not modified.',
+          };
+        }
+
+        await fs.promises.rm(targetSkillPath, { recursive: true, force: true });
+      }
+
+      await fs.promises.mkdir(targetSkillsRoot, { recursive: true });
+      await fs.promises.cp(resolvedSkillFolder, targetSkillPath, { recursive: true, force: true });
+
+      const projectSkillRoots = [
+        path.join(workspacePath, '.agents', 'skills'),
+        targetSkillsRoot,
+      ];
+      await syncSkills({ projectSkillRoots });
+
+      return {
+        success: true,
+        skillId: targetSkillName,
+        path: targetSkillPath,
+        source: sourceMetadata || undefined,
+      };
+    } catch (error) {
+      if (error instanceof GitHubWorldImportError) {
+        return {
+          success: false,
+          error: error.message,
+          message: `Failed to import skill: ${error.message}`,
+        };
+      }
+      const err = error as Error;
+      return {
+        success: false,
+        error: err.message || 'Unknown error',
+        message: `Failed to import skill: ${err.message || 'Unknown error occurred'}`,
+      };
+    } finally {
+      if (stagedGitHubFolder) {
+        await stagedGitHubFolder.cleanup();
+      }
+    }
   }
 
   async function listWorldSessions(worldId: unknown) {
@@ -1571,6 +2013,8 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     deleteWorldAgent,
     deleteWorkspaceWorld,
     importWorld,
+    importAgent,
+    importSkill,
     exportWorld,
     listWorldSessions,
     createWorldSession,

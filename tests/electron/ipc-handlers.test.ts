@@ -21,7 +21,17 @@
  * - 2026-02-28: Added to validate optional `targetWorld` parameter acceptance.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
+
+const fsMockState = vi.hoisted(() => ({
+  readFile: vi.fn(async () => '# SKILL content'),
+  writeFile: vi.fn(async () => undefined),
+  mkdir: vi.fn(async () => undefined),
+  cp: vi.fn(async () => undefined),
+  rm: vi.fn(async () => undefined),
+  existsSync: vi.fn(() => false),
+  statSync: vi.fn(() => ({ isDirectory: () => false })),
+}));
 
 vi.mock('electron', () => ({
   dialog: {
@@ -31,14 +41,34 @@ vi.mock('electron', () => ({
 
 vi.mock('node:fs', () => ({
   promises: {
-    readFile: vi.fn(async () => '# SKILL content'),
-    writeFile: vi.fn(async () => undefined),
+    readFile: fsMockState.readFile,
+    writeFile: fsMockState.writeFile,
+    mkdir: fsMockState.mkdir,
+    cp: fsMockState.cp,
+    rm: fsMockState.rm,
   },
-  existsSync: vi.fn(() => false),
+  existsSync: fsMockState.existsSync,
+  statSync: fsMockState.statSync,
   readFileSync: vi.fn(() => '{}'),
 }));
 
+vi.mock('node:path', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:path')>();
+  return actual;
+});
+
 import { createMainIpcHandlers } from '../../electron/main-process/ipc-handlers';
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  fsMockState.readFile.mockReset().mockResolvedValue('# SKILL content' as any);
+  fsMockState.writeFile.mockReset().mockResolvedValue(undefined as any);
+  fsMockState.mkdir.mockReset().mockResolvedValue(undefined as any);
+  fsMockState.cp.mockReset().mockResolvedValue(undefined as any);
+  fsMockState.rm.mockReset().mockResolvedValue(undefined as any);
+  fsMockState.existsSync.mockReset().mockReturnValue(false);
+  fsMockState.statSync.mockReset().mockReturnValue({ isDirectory: () => false } as any);
+});
 
 describe('createMainIpcHandlers', () => {
   it('constructs handlers when editUserMessage accepts a fifth arg', () => {
@@ -87,7 +117,9 @@ describe('createMainIpcHandlers', () => {
       loggerIpcSession: { debug: () => { }, info: () => { }, warn: () => { }, error: () => { } },
       loggerIpcMessages: { debug: () => { }, info: () => { }, warn: () => { }, error: () => { } },
       GitHubWorldImportError: Error,
-      stageGitHubWorldFromShorthand: async () => ({ stagingRootPath: '', worldFolderPath: '', source: { shorthand: '', owner: '', repo: '', branch: '', worldPath: '', commitSha: null }, cleanup: async () => { } })
+      stageGitHubWorldFromShorthand: async () => ({ stagingRootPath: '', worldFolderPath: '', source: { shorthand: '', owner: '', repo: '', branch: '', worldPath: '', commitSha: null }, cleanup: async () => { } }),
+      stageGitHubFolderFromRepo: async () => ({ stagingRootPath: '', folderPath: '', source: { repoInput: '', owner: '', repo: '', branch: '', folderPath: '', commitSha: null }, cleanup: async () => { } }),
+      heartbeatManager: { startJob: () => ({ started: true, reason: null, job: { status: 'running' } }), restartJob: () => ({ started: true, reason: null, job: { status: 'running' } }), pauseJob: () => { }, resumeJob: () => { }, stopJob: () => { }, stopAll: () => { }, listJobs: () => [] },
     };
 
     const handlers = createMainIpcHandlers(deps);
@@ -143,6 +175,8 @@ describe('createMainIpcHandlers — readSkillContent / saveSkillContent', () => 
       loggerIpcMessages: { debug: () => { }, info: () => { }, warn: () => { }, error: () => { } },
       GitHubWorldImportError: Error,
       stageGitHubWorldFromShorthand: async () => ({ stagingRootPath: '', worldFolderPath: '', source: { shorthand: '', owner: '', repo: '', branch: '', worldPath: '', commitSha: null }, cleanup: async () => { } }),
+      stageGitHubFolderFromRepo: async () => ({ stagingRootPath: '', folderPath: '', source: { repoInput: '', owner: '', repo: '', branch: '', folderPath: '', commitSha: null }, cleanup: async () => { } }),
+      heartbeatManager: { startJob: () => ({ started: true, reason: null, job: { status: 'running' } }), restartJob: () => ({ started: true, reason: null, job: { status: 'running' } }), pauseJob: () => { }, resumeJob: () => { }, stopJob: () => { }, stopAll: () => { }, listJobs: () => [] },
     };
   }
 
@@ -169,5 +203,58 @@ describe('createMainIpcHandlers — readSkillContent / saveSkillContent', () => 
     const handlers = createMainIpcHandlers(makeDeps(() => '/skills/my-skill/SKILL.md'));
     await (handlers as any).saveSkillContent({ skillId: 'my-skill', content: '# Updated' });
     expect(fsMock.writeFile).toHaveBeenCalledWith('/skills/my-skill/SKILL.md', '# Updated', 'utf8');
+  });
+
+  it('importAgent saves a standalone local agent into the selected world', async () => {
+    const saveAgent = vi.fn(async () => undefined);
+    fsMockState.existsSync.mockImplementation((targetPath: string) => (
+      targetPath === '/imports/agent-kit'
+      || targetPath === '/imports/agent-kit/config.json'
+    ));
+    fsMockState.statSync.mockImplementation(() => ({ isDirectory: () => true }));
+    fsMockState.readFile.mockImplementation(async (targetPath: string) => {
+      if (targetPath === '/imports/agent-kit/config.json') {
+        return JSON.stringify({ id: 'agent-kit', name: 'Agent Kit', type: 'assistant', provider: 'openai', model: 'gpt-4o-mini', llmCallCount: 0 });
+      }
+      const error = new Error(`Missing file: ${targetPath}`) as NodeJS.ErrnoException;
+      error.code = 'ENOENT';
+      throw error;
+    });
+
+    const handlers = createMainIpcHandlers({
+      ...makeDeps(() => undefined),
+      getWorkspaceState: () => ({ workspacePath: '/workspace', storagePath: '/workspace', coreInitialized: true }),
+      getMainWindow: () => ({ isDestroyed: () => false }),
+      getWorld: vi.fn(async () => ({ id: 'world-1', name: 'World 1', agents: new Map() })),
+      createStorageFromEnv: async () => ({ listAgents: async () => [], saveAgent }),
+      refreshWorldSubscription: async () => null,
+    } as any);
+
+    const result = await (handlers as any).importAgent({ worldId: 'world-1', source: '/imports/agent-kit' });
+    expect(result.success).toBe(true);
+    expect(saveAgent).toHaveBeenCalledWith('world-1', expect.objectContaining({ id: 'agent-kit', name: 'Agent Kit' }));
+  });
+
+  it('importSkill copies a local skill folder into the workspace skills directory', async () => {
+    const syncSkills = vi.fn(async () => undefined);
+    fsMockState.existsSync.mockImplementation((targetPath: string) => (
+      targetPath === '/imports/writing-skill'
+      || targetPath === '/imports/writing-skill/SKILL.md'
+    ));
+    fsMockState.statSync.mockImplementation(() => ({ isDirectory: () => true }));
+    fsMockState.cp.mockResolvedValue(undefined as any);
+    fsMockState.mkdir.mockResolvedValue(undefined as any);
+
+    const handlers = createMainIpcHandlers({
+      ...makeDeps(() => undefined),
+      getWorkspaceState: () => ({ workspacePath: '/workspace', storagePath: '/workspace', coreInitialized: true }),
+      getMainWindow: () => ({ isDestroyed: () => false }),
+      syncSkills,
+    } as any);
+
+    const result = await (handlers as any).importSkill({ source: '/imports/writing-skill' });
+    expect(result.success).toBe(true);
+    expect(fsMockState.cp).toHaveBeenCalledWith('/imports/writing-skill', '/workspace/skills/writing-skill', { recursive: true, force: true });
+    expect(syncSkills).toHaveBeenCalledWith({ projectSkillRoots: ['/workspace/.agents/skills', '/workspace/skills'] });
   });
 });

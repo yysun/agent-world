@@ -50,6 +50,31 @@ function normalizeImportSource(source: string): string {
   return `@${alias}/${normalizedWorldName}`;
 }
 
+function normalizeGitHubWorldName(name: string): string {
+  return String(name || '').trim().replace(/\s+/g, '-').toLowerCase();
+}
+
+function buildImportPayload(
+  input: string | { repo?: string; itemName?: string } | undefined,
+  options: { normalizeItemName?: (value: string) => string } = {}
+) {
+  if (typeof input === 'string') {
+    const normalizedSource = normalizeImportSource(input);
+    return normalizedSource ? { source: normalizedSource } : undefined;
+  }
+
+  const repo = String(input?.repo || '').trim();
+  const rawItemName = String(input?.itemName || '').trim();
+  const itemName = options.normalizeItemName ? options.normalizeItemName(rawItemName) : rawItemName;
+  if (!repo && !itemName) {
+    return undefined;
+  }
+  return {
+    ...(repo ? { repo } : {}),
+    ...(itemName ? { itemName } : {}),
+  };
+}
+
 export function useWorldManagement({
   api,
   setStatusText,
@@ -310,9 +335,8 @@ export function useWorldManagement({
     }
   }, [api, loadedWorld, onSelectWorld, setMessages, setPanelMode, setPanelOpen, setSelectedAgentId, setSelectedSessionId, setSessions, setStatusText]);
 
-  const onImportWorld = useCallback(async (source?: string) => {
-    const normalizedSource = normalizeImportSource(String(source || '').trim());
-    const importPayload = normalizedSource ? { source: normalizedSource } : undefined;
+  const onImportWorld = useCallback(async (input?: string | { repo?: string; itemName?: string }) => {
+    const importPayload = buildImportPayload(input, { normalizeItemName: normalizeGitHubWorldName });
 
     try {
       const result = await api.importWorld(importPayload);
@@ -333,7 +357,11 @@ export function useWorldManagement({
         );
         setWorldLoadError(null);
 
-        const importedSource = String(result?.source?.shorthand || normalizedSource).trim();
+        const importedSource = String(
+          result?.source?.shorthand
+          || result?.source?.repoInput
+          || (importPayload?.repo && importPayload?.itemName ? `${importPayload.repo}:${importPayload.itemName}` : '')
+        ).trim();
         const successMessage = importedSource
           ? `World imported: ${result.world.name} (${importedSource})`
           : `World imported: ${result.world.name}`;
@@ -349,6 +377,68 @@ export function useWorldManagement({
       return false;
     }
   }, [api, setSelectedAgentId, setSelectedSessionId, setSessions, setStatusText]);
+
+  const onImportAgent = useCallback(async (input?: string | { repo?: string; itemName?: string }) => {
+    const worldId = String(loadedWorld?.id || '').trim();
+    if (!worldId) {
+      setStatusText('Load a world before importing an agent.', 'error');
+      return false;
+    }
+
+    const importPayload = buildImportPayload(input);
+
+    try {
+      const result = await api.importAgent({ worldId, ...(importPayload || {}) });
+      if (result?.success) {
+        if (result.world) {
+          setLoadedWorld(result.world);
+        }
+        const importedSource = String(
+          result?.source?.repoInput
+          || (importPayload?.repo && importPayload?.itemName ? `${importPayload.repo}:${importPayload.itemName}` : '')
+        ).trim();
+        const agentName = String(result?.agent?.name || result?.agent?.id || 'Agent').trim();
+        const warning = getRefreshWarning(result);
+        const successMessage = importedSource
+          ? `Agent imported: ${agentName} (${importedSource})`
+          : `Agent imported: ${agentName}`;
+        setStatusText(warning ? `${successMessage}. ${warning}` : successMessage, warning ? 'error' : 'success');
+        return true;
+      }
+
+      setStatusText(result?.message || result?.error || 'Failed to import agent', 'error');
+      return false;
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to import agent.'), 'error');
+      return false;
+    }
+  }, [api, loadedWorld?.id, setStatusText]);
+
+  const onImportSkill = useCallback(async (input?: string | { repo?: string; itemName?: string }) => {
+    const importPayload = buildImportPayload(input);
+
+    try {
+      const result = await api.importSkill(importPayload);
+      if (result?.success) {
+        const importedSource = String(
+          result?.source?.repoInput
+          || (importPayload?.repo && importPayload?.itemName ? `${importPayload.repo}:${importPayload.itemName}` : '')
+        ).trim();
+        const skillName = String(result?.skillId || importPayload?.itemName || 'Skill').trim();
+        const successMessage = importedSource
+          ? `Skill imported: ${skillName} (${importedSource})`
+          : `Skill imported: ${skillName}`;
+        setStatusText(successMessage, 'success');
+        return true;
+      }
+
+      setStatusText(result?.message || result?.error || 'Failed to import skill', 'error');
+      return false;
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to import skill.'), 'error');
+      return false;
+    }
+  }, [api, setStatusText]);
 
   const onExportWorld = useCallback(async () => {
     const worldId = String(loadedWorld?.id || '').trim();
@@ -399,6 +489,8 @@ export function useWorldManagement({
     onUpdateWorld,
     onDeleteWorld,
     onImportWorld,
+    onImportAgent,
+    onImportSkill,
     onExportWorld,
   };
 }

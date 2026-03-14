@@ -40,7 +40,9 @@ vi.mock('node:path', async (importOriginal) => {
 import {
   ensureSafeRelativePath,
   GitHubWorldImportError,
+  resolveGitHubRepoSource,
   resolveGitHubWorldShorthand,
+  stageGitHubFolderFromRepo,
   stageGitHubWorldFromShorthand,
 } from '../../core/storage/github-world-import.js';
 
@@ -249,6 +251,57 @@ describe('stageGitHubWorldFromShorthand', () => {
   });
 });
 
+describe('stageGitHubFolderFromRepo', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    fsPromisesMocks.mkdtemp.mockResolvedValue('/tmp/agent-world-github-import-staging');
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('stages a named folder from an explicit repo and branch', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ sha: 'def456' }))
+      .mockResolvedValueOnce(jsonResponse([
+        {
+          type: 'file',
+          path: 'skills/research/SKILL.md',
+          download_url: 'https://download/skill',
+        },
+      ]))
+      .mockResolvedValueOnce(bytesResponse('# Research skill'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const staged = await stageGitHubFolderFromRepo('octo/tools#dev', 'skills/research', {
+      folderName: 'research',
+      tempPrefix: 'aw-stage-',
+    });
+
+    expect(staged.folderPath).toBe('/tmp/agent-world-github-import-staging/research');
+    expect(staged.source).toEqual({
+      repoInput: 'octo/tools#dev',
+      owner: 'octo',
+      repo: 'tools',
+      branch: 'dev',
+      folderPath: 'skills/research',
+      commitSha: 'def456',
+    });
+    expect(fsPromisesMocks.writeFile).toHaveBeenCalledWith(
+      '/tmp/agent-world-github-import-staging/research/SKILL.md',
+      expect.any(Uint8Array),
+    );
+  });
+
+  it('rejects empty folder paths', async () => {
+    await expect(stageGitHubFolderFromRepo('octo/tools', '')).rejects.toMatchObject({
+      name: 'GitHubWorldImportError',
+      code: 'invalid-shorthand',
+    });
+  });
+});
+
 describe('resolveGitHubWorldShorthand', () => {
   it('resolves supported alias and world name', () => {
     const resolved = resolveGitHubWorldShorthand('@awesome-agent-world/infinite-etude');
@@ -287,6 +340,34 @@ describe('resolveGitHubWorldShorthand', () => {
       const typedError = error as GitHubWorldImportError;
       expect(typedError.code).toBe('unsupported-alias');
     }
+  });
+});
+
+describe('resolveGitHubRepoSource', () => {
+  it('accepts explicit owner repo syntax', () => {
+    expect(resolveGitHubRepoSource('octo/tools#dev')).toEqual({
+      repoInput: 'octo/tools#dev',
+      owner: 'octo',
+      repo: 'tools',
+      branch: 'dev',
+    });
+  });
+
+  it('accepts github urls', () => {
+    expect(resolveGitHubRepoSource('https://github.com/octo/tools')).toEqual({
+      repoInput: 'https://github.com/octo/tools',
+      owner: 'octo',
+      repo: 'tools',
+      branch: 'main',
+    });
+  });
+
+  it('rejects alias-only repo inputs', () => {
+    expect(() => resolveGitHubRepoSource('@awesome-agent-world')).toThrowError(GitHubWorldImportError);
+  });
+
+  it('rejects unsupported aliases', () => {
+    expect(() => resolveGitHubRepoSource('@not-allowed')).toThrowError(GitHubWorldImportError);
   });
 });
 

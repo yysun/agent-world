@@ -13,6 +13,7 @@
  * - Receives all mutation handlers and state via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-03-14: Removed the world-import form because import now renders in the left sidebar.
  * - 2026-02-28: Skill scope and per-skill switches now persist immediately (autosave) instead of waiting for footer Save.
  * - 2026-02-27: Hid per-skill rows for global/project sections when their parent section toggle is off.
  * - 2026-02-27: Added `Show tool messages` settings toggle above skill options to control tool-card visibility in the main transcript area.
@@ -24,7 +25,7 @@
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component extraction.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import AgentFormFields from './AgentFormFields';
 import SettingsSwitch from './SettingsSwitch';
 import SettingsSkillSwitch from './SettingsSkillSwitch';
@@ -131,23 +132,12 @@ export default function RightPanelContent({
   onCreateWorld,
   creatingWorld,
   setCreatingWorld,
-  onImportWorld,
   panelLogs,
   onClearPanelLogs,
   onEditSkill,
 }) {
-  const [importSourceType, setImportSourceType] = useState('local');
-  const [githubImportSource, setGithubImportSource] = useState('@awesome-agent-world/');
-  const [importingWorld, setImportingWorld] = useState(false);
   const logsContainerRef = useRef<HTMLDivElement | null>(null);
   const shouldStickLogsToBottomRef = useRef(true);
-
-  useEffect(() => {
-    if (panelMode !== 'import-world') return;
-    setImportSourceType('local');
-    setGithubImportSource('@awesome-agent-world/');
-    setImportingWorld(false);
-  }, [panelMode]);
 
   useEffect(() => {
     if (panelMode !== 'logs') return;
@@ -171,36 +161,6 @@ export default function RightPanelContent({
     const container = logsContainerRef.current;
     if (!container) return;
     shouldStickLogsToBottomRef.current = isNearBottom(container);
-  };
-
-  const onImportFromLocal = async () => {
-    if (importingWorld) return;
-
-    setImportingWorld(true);
-    try {
-      const success = await onImportWorld();
-      if (success) {
-        closePanel();
-      }
-    } finally {
-      setImportingWorld(false);
-    }
-  };
-
-  const onImportFromGithub = async () => {
-    if (importingWorld) return;
-    const source = String(githubImportSource || '').trim();
-    if (!source) return;
-
-    setImportingWorld(true);
-    try {
-      const success = await onImportWorld(source);
-      if (success) {
-        closePanel();
-      }
-    } finally {
-      setImportingWorld(false);
-    }
   };
 
   return (
@@ -420,7 +380,7 @@ export default function RightPanelContent({
                                 onClick={() => onEditSkill(entry)}
                                 className="mr-1 flex-none rounded p-0.5 text-sidebar-foreground/30 opacity-0 transition-opacity hover:text-sidebar-foreground/80 group-hover:opacity-100"
                               >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
                               </button>
                             ) : null}
                             <div className="flex-1 min-w-0">
@@ -457,7 +417,7 @@ export default function RightPanelContent({
                                 onClick={() => onEditSkill(entry)}
                                 className="mr-1 flex-none rounded p-0.5 text-sidebar-foreground/30 opacity-0 transition-opacity hover:text-sidebar-foreground/80 group-hover:opacity-100"
                               >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
                               </button>
                             ) : null}
                             <div className="flex-1 min-w-0">
@@ -497,74 +457,6 @@ export default function RightPanelContent({
             >
               {savingSystemSettings ? 'Saving...' : (settingsNeedRestart ? 'Save & Restart' : 'Save')}
             </button>
-          </div>
-        </div>
-      ) : panelMode === 'import-world' ? (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
-            <p className="text-xs text-sidebar-foreground/70">
-              Choose import source type, then import into the current workspace.
-            </p>
-
-            <div className="space-y-2 rounded-md border border-sidebar-border bg-sidebar-accent p-3">
-              <label className="flex cursor-pointer items-center gap-2 text-xs text-sidebar-foreground">
-                <input
-                  type="radio"
-                  name="import-source-type"
-                  value="local"
-                  checked={importSourceType === 'local'}
-                  onChange={() => setImportSourceType('local')}
-                  disabled={importingWorld}
-                  className="accent-primary"
-                />
-                <span>From local directory</span>
-              </label>
-              <label className="flex cursor-pointer items-center gap-2 text-xs text-sidebar-foreground">
-                <input
-                  type="radio"
-                  name="import-source-type"
-                  value="github"
-                  checked={importSourceType === 'github'}
-                  onChange={() => setImportSourceType('github')}
-                  disabled={importingWorld}
-                  className="accent-primary"
-                />
-                <span>From GitHub shorthand</span>
-              </label>
-            </div>
-
-            {importSourceType === 'github' ? (
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-sidebar-foreground/90">GitHub Source</label>
-                <input
-                  value={githubImportSource}
-                  onChange={(event) => setGithubImportSource(event.target.value)}
-                  placeholder="@awesome-agent-world/infinite-etude"
-                  className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                  disabled={importingWorld}
-                />
-                <span className="text-[10px] text-sidebar-foreground/60">
-                  Example: @awesome-agent-world/infinite-etude
-                </span>
-                <button
-                  type="button"
-                  onClick={onImportFromGithub}
-                  disabled={importingWorld || !String(githubImportSource || '').trim()}
-                  className="mt-2 w-fit rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {importingWorld ? 'Importing...' : 'Import from GitHub'}
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={onImportFromLocal}
-                disabled={importingWorld}
-                className="w-fit rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {importingWorld ? 'Importing...' : 'Open local world folder'}
-              </button>
-            )}
           </div>
         </div>
       ) : panelMode === 'edit-world' && loadedWorld ? (

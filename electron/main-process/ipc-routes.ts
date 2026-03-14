@@ -44,6 +44,8 @@ export interface MainIpcHandlers {
   loadWorldsFromWorkspace: () => Promise<unknown> | unknown;
   loadSpecificWorld: (worldId: unknown) => Promise<unknown> | unknown;
   importWorld: (payload?: unknown) => Promise<unknown> | unknown;
+  importAgent: (payload?: unknown) => Promise<unknown> | unknown;
+  importSkill: (payload?: unknown) => Promise<unknown> | unknown;
   exportWorld: (payload: unknown) => Promise<unknown> | unknown;
   listWorkspaceWorlds: () => Promise<unknown> | unknown;
   listSkillRegistry: (payload?: unknown) => Promise<unknown> | unknown;
@@ -99,6 +101,14 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
     {
       channel: DESKTOP_INVOKE_CHANNELS.WORLD_IMPORT,
       handler: async (_event, payload) => handlers.importWorld(payload as WorldImportPayload)
+    },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.AGENT_IMPORT,
+      handler: async (_event, payload) => handlers.importAgent(payload)
+    },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.SKILL_IMPORT,
+      handler: async (_event, payload) => handlers.importSkill(payload)
     },
     {
       channel: DESKTOP_INVOKE_CHANNELS.WORLD_EXPORT,

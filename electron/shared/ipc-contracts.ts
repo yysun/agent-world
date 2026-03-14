@@ -38,6 +38,8 @@ export const DESKTOP_INVOKE_CHANNELS = {
   WORLD_LOAD_FROM_FOLDER: 'world:loadFromFolder',
   WORLD_LOAD: 'world:load',
   WORLD_IMPORT: 'world:import',
+  AGENT_IMPORT: 'agent:import',
+  SKILL_IMPORT: 'skill:import',
   WORLD_EXPORT: 'world:export',
   WORLD_LIST: 'world:list',
   SKILL_LIST: 'skill:list',
@@ -97,6 +99,20 @@ export interface WorldExportPayload extends WorldIdPayload {
 
 export interface WorldImportPayload {
   source?: string;
+  repo?: string;
+  itemName?: string;
+}
+
+export interface AgentImportPayload extends WorldIdPayload {
+  source?: string;
+  repo?: string;
+  itemName?: string;
+}
+
+export interface SkillImportPayload {
+  source?: string;
+  repo?: string;
+  itemName?: string;
 }
 
 export interface WorldChatPayload extends WorldIdPayload {
@@ -218,6 +234,8 @@ export interface DesktopApi {
   loadWorldFromFolder: () => Promise<unknown>;
   loadWorld: (worldId: string) => Promise<unknown>;
   importWorld: (payload?: WorldImportPayload) => Promise<unknown>;
+  importAgent: (payload: AgentImportPayload) => Promise<unknown>;
+  importSkill: (payload?: SkillImportPayload) => Promise<unknown>;
   exportWorld: (worldId: string) => Promise<unknown>;
   listWorlds: () => Promise<unknown>;
   listSkills: (filters?: SkillListFilterPayload) => Promise<SkillRegistrySummary[]>;

@@ -12,6 +12,7 @@
  * - Data-only transformations from provided inputs.
  *
  * Recent Changes:
+ * - 2026-03-14: Moved world import props from the right panel into left-sidebar wiring.
  * - 2026-03-13: Added `reasoningEffort` and `onSetReasoningEffort` to composer props for world-level reasoning control.
  * - 2026-03-12: Added `toolPermission` and `onSetToolPermission` to composer props for world-level tool permission dropdown.
  * - 2026-03-04: Added grid submenu open-state wiring for grid icon submenu toggle/dismiss behavior.
@@ -143,7 +144,6 @@ export function createMainContentRightPanelContentProps<T extends PropBag>(input
     onCreateWorld: input.onCreateWorld,
     creatingWorld: input.creatingWorld,
     setCreatingWorld: input.setCreatingWorld,
-    onImportWorld: input.onImportWorld,
     panelLogs: input.panelLogs,
     onClearPanelLogs: input.onClearPanelLogs,
     onEditSkill: input.onEditSkill,
@@ -158,8 +158,13 @@ export function createLeftSidebarProps<T extends PropBag>(input: T) {
     noDragRegionStyle: input.NO_DRAG_REGION_STYLE,
     availableWorlds: input.availableWorlds,
     loadedWorld: input.loadedWorld,
+    panelMode: input.panelMode,
     onOpenCreateWorldPanel: input.onOpenCreateWorldPanel,
+    onOpenImportWorldPanel: input.onOpenImportWorldPanel,
+    onCloseImportWorldPanel: input.onCloseImportWorldPanel,
     onImportWorld: input.onImportWorld,
+    onImportAgent: input.onImportAgent,
+    onImportSkill: input.onImportSkill,
     onExportWorld: input.onExportWorld,
     onSelectWorld: input.onSelectWorld,
     loadingWorld: input.loadingWorld,

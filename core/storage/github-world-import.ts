@@ -6,7 +6,8 @@
  * - Safely fetch and stage remote world folders into a temporary local directory.
  *
  * Key Features:
- * - Supports `@awesome-agent-world/<world-name>` shorthand mapping.
+ * - Supports legacy `@awesome-agent-world/<world-name>` world shorthand mapping.
+ * - Requires explicit `owner/repo` input for generic GitHub repo imports.
  * - Enforces strict alias allowlist and world-path derivation.
  * - Applies safety checks for unsupported entry types and unsafe paths.
  * - Enforces bounded file-count and byte limits during staging.
@@ -78,6 +79,13 @@ export interface ResolvedGitHubWorldSource {
   worldPath: string;
 }
 
+export interface ResolvedGitHubRepoSource {
+  repoInput: string;
+  owner: string;
+  repo: string;
+  branch: string;
+}
+
 interface GitHubContentsEntry {
   type: string;
   path: string;
@@ -101,6 +109,20 @@ export interface StagedGitHubWorldResult {
     repo: string;
     branch: string;
     worldPath: string;
+    commitSha: string | null;
+  };
+  cleanup: () => Promise<void>;
+}
+
+export interface StagedGitHubFolderResult {
+  stagingRootPath: string;
+  folderPath: string;
+  source: {
+    repoInput: string;
+    owner: string;
+    repo: string;
+    branch: string;
+    folderPath: string;
     commitSha: string | null;
   };
   cleanup: () => Promise<void>;
@@ -315,10 +337,47 @@ export function resolveGitHubWorldShorthand(source: string): ResolvedGitHubWorld
   };
 }
 
-export async function stageGitHubWorldFromShorthand(
-  shorthand: string,
-  options: StageRemoteWorldOptions = {}
-): Promise<StagedGitHubWorldResult> {
+export function resolveGitHubRepoSource(repoInput: string): ResolvedGitHubRepoSource {
+  const trimmed = String(repoInput || '').trim();
+  if (!trimmed) {
+    throw new GitHubWorldImportError('invalid-shorthand', 'GitHub repo is required.', {
+      repoInput: trimmed,
+    });
+  }
+
+  const withoutScheme = trimmed.replace(/^https?:\/\/github\.com\//i, '');
+  const [repoPart, branchPart] = withoutScheme.split('#', 2);
+  const normalizedRepoPart = String(repoPart || '').trim().replace(/^\/+|\/+$/g, '');
+  const requestedBranch = String(branchPart || '').trim();
+
+  if (!normalizedRepoPart) {
+    throw new GitHubWorldImportError('invalid-shorthand', 'GitHub repo is required.', {
+      repoInput: trimmed,
+    });
+  }
+
+  const directMatch = normalizedRepoPart.match(/^([^/\s]+)\/([^/\s]+)$/);
+  if (directMatch) {
+    return {
+      repoInput: trimmed,
+      owner: String(directMatch[1] || '').trim(),
+      repo: String(directMatch[2] || '').trim(),
+      branch: requestedBranch || DEFAULT_BRANCH,
+    };
+  }
+
+  throw new GitHubWorldImportError(
+    'unsupported-alias',
+    `Unsupported GitHub repo '${trimmed}'. Use explicit 'owner/repo' syntax.`,
+    { repoInput: trimmed }
+  );
+}
+
+export async function stageGitHubFolderFromRepo(
+  repoInput: string,
+  folderPath: string,
+  options: StageRemoteWorldOptions & { folderName?: string } = {}
+): Promise<StagedGitHubFolderResult> {
   const maxFileCount = Number.isFinite(options.maxFileCount) ? Math.max(1, Number(options.maxFileCount)) : DEFAULT_MAX_FILE_COUNT;
   const maxTotalBytes = Number.isFinite(options.maxTotalBytes) ? Math.max(1, Number(options.maxTotalBytes)) : DEFAULT_MAX_TOTAL_BYTES;
   const requestTimeoutMs = Number.isFinite(options.requestTimeoutMs)
@@ -326,10 +385,29 @@ export async function stageGitHubWorldFromShorthand(
     : DEFAULT_REQUEST_TIMEOUT_MS;
   const tempPrefix = String(options.tempPrefix || 'agent-world-github-import-');
 
-  const resolved = resolveGitHubWorldShorthand(shorthand);
+  const resolvedRepo = resolveGitHubRepoSource(repoInput);
+  const normalizedFolderPath = String(folderPath || '').trim().replace(/^\/+|\/+$/g, '');
+  if (!normalizedFolderPath) {
+    throw new GitHubWorldImportError('invalid-shorthand', 'GitHub folder path is required.', {
+      repoInput,
+      folderPath,
+    });
+  }
+
+  ensureSafeRelativePath(normalizedFolderPath);
+
+  const requestedFolderName = String(options.folderName || path.basename(normalizedFolderPath)).trim();
+  const folderName = requestedFolderName || path.basename(normalizedFolderPath);
+  if (!folderName) {
+    throw new GitHubWorldImportError('invalid-shorthand', 'GitHub folder name is required.', {
+      repoInput,
+      folderPath: normalizedFolderPath,
+    });
+  }
+
   const stagingRootPath = await mkdtemp(path.join(os.tmpdir(), tempPrefix));
-  const worldFolderPath = path.join(stagingRootPath, resolved.worldName);
-  const worldFolderRealPath = path.resolve(worldFolderPath);
+  const stagedFolderPath = path.join(stagingRootPath, folderName);
+  const stagedFolderRealPath = path.resolve(stagedFolderPath);
 
   const cleanup = async () => {
     await rm(stagingRootPath, { recursive: true, force: true });
@@ -337,55 +415,55 @@ export async function stageGitHubWorldFromShorthand(
 
   let totalBytes = 0;
   try {
-    const commitSha = await fetchCommitSha(resolved.owner, resolved.repo, resolved.branch, requestTimeoutMs);
+    const commitSha = await fetchCommitSha(resolvedRepo.owner, resolvedRepo.repo, resolvedRepo.branch, requestTimeoutMs);
     const files: GitHubContentsEntry[] = [];
     await listGithubFilesRecursively(
-      resolved.owner,
-      resolved.repo,
-      resolved.branch,
-      resolved.worldPath,
+      resolvedRepo.owner,
+      resolvedRepo.repo,
+      resolvedRepo.branch,
+      normalizedFolderPath,
       requestTimeoutMs,
       files
     );
 
     if (files.length === 0) {
-      throw new GitHubWorldImportError('source-not-found', `No files were found in GitHub world path '${resolved.worldPath}'.`, {
-        owner: resolved.owner,
-        repo: resolved.repo,
-        branch: resolved.branch,
-        worldPath: resolved.worldPath
+      throw new GitHubWorldImportError('source-not-found', `No files were found in GitHub path '${normalizedFolderPath}'.`, {
+        owner: resolvedRepo.owner,
+        repo: resolvedRepo.repo,
+        branch: resolvedRepo.branch,
+        folderPath: normalizedFolderPath,
       });
     }
 
     if (files.length > maxFileCount) {
-      throw new GitHubWorldImportError('limits-exceeded', `GitHub world source exceeds file-count limit (${files.length}/${maxFileCount}).`, {
+      throw new GitHubWorldImportError('limits-exceeded', `GitHub source exceeds file-count limit (${files.length}/${maxFileCount}).`, {
         fileCount: files.length,
-        maxFileCount
+        maxFileCount,
       });
     }
 
     for (const fileEntry of files) {
       if (!fileEntry.download_url) {
         throw new GitHubWorldImportError('fetch-failed', 'GitHub file entry does not include a download URL.', {
-          path: fileEntry.path
+          path: fileEntry.path,
         });
       }
 
-      const relativePath = ensureSafeRelativePath(normalizeRelativePath(resolved.worldPath, fileEntry.path));
-      const targetPath = path.resolve(worldFolderPath, relativePath);
-      const allowedPrefix = `${worldFolderRealPath}${path.sep}`;
-      if (targetPath !== worldFolderRealPath && !targetPath.startsWith(allowedPrefix)) {
-        throw new GitHubWorldImportError('unsafe-path', 'Fetched content attempted to escape staging world folder.', {
-          relativePath
+      const relativePath = ensureSafeRelativePath(normalizeRelativePath(normalizedFolderPath, fileEntry.path));
+      const targetPath = path.resolve(stagedFolderPath, relativePath);
+      const allowedPrefix = `${stagedFolderRealPath}${path.sep}`;
+      if (targetPath !== stagedFolderRealPath && !targetPath.startsWith(allowedPrefix)) {
+        throw new GitHubWorldImportError('unsafe-path', 'Fetched content attempted to escape the staging folder.', {
+          relativePath,
         });
       }
 
       const fileBytes = await downloadFileBytes(fileEntry.download_url, requestTimeoutMs);
       totalBytes += fileBytes.byteLength;
       if (totalBytes > maxTotalBytes) {
-        throw new GitHubWorldImportError('limits-exceeded', `GitHub world source exceeds byte limit (${totalBytes}/${maxTotalBytes}).`, {
+        throw new GitHubWorldImportError('limits-exceeded', `GitHub source exceeds byte limit (${totalBytes}/${maxTotalBytes}).`, {
           totalBytes,
-          maxTotalBytes
+          maxTotalBytes,
         });
       }
 
@@ -395,19 +473,55 @@ export async function stageGitHubWorldFromShorthand(
 
     return {
       stagingRootPath,
-      worldFolderPath,
+      folderPath: stagedFolderPath,
+      source: {
+        repoInput: resolvedRepo.repoInput,
+        owner: resolvedRepo.owner,
+        repo: resolvedRepo.repo,
+        branch: resolvedRepo.branch,
+        folderPath: normalizedFolderPath,
+        commitSha,
+      },
+      cleanup,
+    };
+  } catch (error) {
+    await cleanup();
+    if (error instanceof GitHubWorldImportError) {
+      throw error;
+    }
+    const err = error as Error;
+    throw new GitHubWorldImportError('fetch-failed', err.message || 'Failed to stage GitHub source.');
+  }
+}
+
+export async function stageGitHubWorldFromShorthand(
+  shorthand: string,
+  options: StageRemoteWorldOptions = {}
+): Promise<StagedGitHubWorldResult> {
+  const resolved = resolveGitHubWorldShorthand(shorthand);
+  try {
+    const staged = await stageGitHubFolderFromRepo(
+      `${resolved.owner}/${resolved.repo}#${resolved.branch}`,
+      resolved.worldPath,
+      {
+        ...options,
+        folderName: resolved.worldName,
+      }
+    );
+    return {
+      stagingRootPath: staged.stagingRootPath,
+      worldFolderPath: staged.folderPath,
       source: {
         shorthand: resolved.shorthand,
         owner: resolved.owner,
         repo: resolved.repo,
         branch: resolved.branch,
         worldPath: resolved.worldPath,
-        commitSha
+        commitSha: staged.source.commitSha,
       },
-      cleanup
+      cleanup: staged.cleanup,
     };
   } catch (error) {
-    await cleanup();
     if (error instanceof GitHubWorldImportError) {
       throw error;
     }

@@ -173,7 +173,7 @@ const {
   addLogStreamCallback,
 } = await importCoreModule(__dirname);
 const { createStorage, createStorageFromEnv } = await importCoreStorageFactoryModule(__dirname);
-const { GitHubWorldImportError, stageGitHubWorldFromShorthand } = await importCoreGitHubWorldImportModule(__dirname);
+const { GitHubWorldImportError, stageGitHubWorldFromShorthand, stageGitHubFolderFromRepo } = await importCoreGitHubWorldImportModule(__dirname);
 const realtimeEventsRuntimeModule = await import('./main-process/realtime-events.js');
 const createRealtimeEventsRuntime = resolveRealtimeEventsRuntimeFactory(realtimeEventsRuntimeModule) as
   ((dependencies: unknown) => RealtimeEventsRuntime) | null;
@@ -286,6 +286,7 @@ const ipcHandlers = createMainIpcHandlers({
   createStorageFromEnv,
   GitHubWorldImportError,
   stageGitHubWorldFromShorthand,
+  stageGitHubFolderFromRepo,
   heartbeatManager,
   loggerIpc: mainIpcLogger,
   loggerIpcSession: mainIpcSessionLogger,
@@ -300,6 +301,8 @@ function registerIpcHandlers() {
     loadWorldsFromWorkspace: ipcHandlers.loadWorldsFromWorkspace,
     loadSpecificWorld: (worldId) => ipcHandlers.loadSpecificWorld(String(worldId ?? '')),
     importWorld: ipcHandlers.importWorld,
+    importAgent: ipcHandlers.importAgent,
+    importSkill: ipcHandlers.importSkill,
     exportWorld: ipcHandlers.exportWorld,
     listWorkspaceWorlds: ipcHandlers.listWorkspaceWorlds,
     listSkillRegistry: ipcHandlers.listSkillRegistry,
