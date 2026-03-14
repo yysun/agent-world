@@ -96,6 +96,30 @@ describe('subscribeAgentToMessages mainAgent routing', () => {
     unsubscribe();
   });
 
+  it('prepends @mainAgent for world message when configured', async () => {
+    const { subscribeAgentToMessages } = await import('../../../core/events/subscribers.js');
+    const world = createWorldWithAgents('alice-agent');
+    const agent = world.agents.get('alice-agent')!;
+    const unsubscribe = subscribeAgentToMessages(world, agent);
+
+    world.eventEmitter.emit('message', {
+      content: 'Scheduled sync',
+      sender: 'world',
+      timestamp: new Date(),
+      messageId: 'msg-world-1',
+      chatId: 'chat-1'
+    });
+
+    await vi.waitFor(() => {
+      expect(shouldAgentRespondMock).toHaveBeenCalledTimes(1);
+    });
+
+    const routedEvent = shouldAgentRespondMock.mock.calls[0][2];
+    expect(routedEvent.content).toBe('@alice-agent Scheduled sync');
+
+    unsubscribe();
+  });
+
   it('keeps content unchanged when mainAgent is not configured', async () => {
     const { subscribeAgentToMessages } = await import('../../../core/events/subscribers.js');
     const world = createWorldWithAgents(null);

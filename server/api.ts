@@ -132,7 +132,7 @@ const loggerExport = createCategoryLogger('api.export');
 
 function isUserSender(sender: string): boolean {
   const normalized = String(sender || '').trim().toLowerCase();
-  return normalized === 'human' || normalized.startsWith('user');
+  return normalized === 'human' || normalized === 'world' || normalized.startsWith('user');
 }
 
 async function hasPendingCurrentChatQueueMessage(world: World): Promise<boolean> {

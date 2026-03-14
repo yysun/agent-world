@@ -1217,18 +1217,12 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
     return false;
   }
 
-  // Always respond to world messages
-  if (messageEvent.sender === 'world') {
-    loggerResponse.debug('Responding to world message', { agentId: agent.id });
-    return true;
-  }
-
   const anyMentions = extractMentions(messageEvent.content);
   const mentions = extractParagraphBeginningMentions(messageEvent.content);
   loggerResponse.debug('Extracted mentions', { mentions, anyMentions });
 
-  // For HUMAN messages
-  if (senderType === SenderType.HUMAN) {
+  // Treat world messages like human ingress: public messages broadcast, leading mentions target.
+  if (senderType === SenderType.HUMAN || senderType === SenderType.WORLD) {
     if (mentions.length === 0) {
       if (anyMentions.length > 0) {
         loggerResponse.debug('Mentions exist but not at paragraph beginning', { agentId: agent.id });
@@ -1239,7 +1233,12 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
     }
     const normalizedAgentId = agent.id.toLowerCase().replace(/\s+/g, '-');
     const shouldRespond = mentions.includes(normalizedAgentId);
-    loggerResponse.debug('HUMAN message mention check', { agentId: agent.id, normalizedAgentId, shouldRespond });
+    loggerResponse.debug('Human-like message mention check', {
+      agentId: agent.id,
+      normalizedAgentId,
+      senderType,
+      shouldRespond,
+    });
     return shouldRespond;
   }
 

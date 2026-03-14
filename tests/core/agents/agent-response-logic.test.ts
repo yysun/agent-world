@@ -266,6 +266,18 @@ describe('shouldAgentRespond', () => {
       expect(result).toBe(true);
     });
 
+    test('should NOT respond to mid-paragraph world mentions', async () => {
+      const messageEvent: WorldMessageEvent = {
+        content: 'Queue update for @test-agent to review.',
+        sender: 'world',
+        timestamp: new Date(),
+        messageId: 'msg-10-world-mid',
+      };
+
+      const result = await shouldAgentRespond(mockWorld, mockAgent, messageEvent);
+      expect(result).toBe(false);
+    });
+
     test('should NOT respond to system messages', async () => {
       const messageEvent: WorldMessageEvent = {
         content: 'System error message',
@@ -468,6 +480,18 @@ describe('shouldAgentRespond', () => {
 
       const result = await shouldAgentRespond(mockWorld, mockAgent, messageEvent);
       expect(result).toBe(true); // Treated as world message
+    });
+
+    test('should NOT respond to world leading mention for another agent', async () => {
+      const messageEvent: WorldMessageEvent = {
+        content: '@other-agent, hello',
+        sender: 'world',
+        timestamp: new Date(),
+        messageId: 'msg-21-world-other',
+      };
+
+      const result = await shouldAgentRespond(mockWorld, mockAgent, messageEvent);
+      expect(result).toBe(false);
     });
 
     test('should NOT respond to system sender', async () => {

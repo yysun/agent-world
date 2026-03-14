@@ -117,7 +117,8 @@ export function setupEventPersistence(world: World): () => void {
     const messageDirection = calculateMessageDirection(world, event);
     const isMemoryOnly = calculateIsMemoryOnly(world, event);
     const isCrossAgentMessage = calculateIsCrossAgentMessage(world, event);
-    const isHumanMessage = event.sender === 'human' || event.sender === 'user';
+    const normalizedSender = String(event.sender || '').trim().toLowerCase();
+    const isHumanMessage = normalizedSender === 'human' || normalizedSender === 'world' || normalizedSender === 'user';
 
     // Calculate thread metadata (requires loading messages for accurate depth calculation)
     // For now, use simplified version - can enhance later with full message history

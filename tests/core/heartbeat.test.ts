@@ -14,14 +14,25 @@
  * - Uses mocked node-cron schedule callback for deterministic tick execution.
  *
  * Recent Changes:
+ * - 2026-03-14: Heartbeat ticks now emit env-controlled `heartbeat` logger events instead of direct console logs.
  * - 2026-03-06: Heartbeat start now requires explicit `chatId`; scheduler no longer reads `world.currentChatId`.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const scheduleMock = vi.fn();
 const validateMock = vi.fn();
-const publishMessageMock = vi.fn();
+const enqueueAndProcessUserTurnMock = vi.fn();
+const heartbeatLogger = {
+  trace: vi.fn(),
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  child: vi.fn(),
+  level: 'debug',
+};
+const createCategoryLoggerMock = vi.fn(() => heartbeatLogger);
 
 vi.mock('node-cron', () => ({
   default: {
@@ -30,11 +41,28 @@ vi.mock('node-cron', () => ({
   }
 }));
 
-vi.mock('../../core/events/publishers.js', () => ({
-  publishMessage: publishMessageMock,
+vi.mock('../../core/queue-manager.js', () => ({
+  enqueueAndProcessUserTurn: enqueueAndProcessUserTurnMock,
+}));
+
+vi.mock('../../core/logger.js', () => ({
+  createCategoryLogger: createCategoryLoggerMock,
 }));
 
 describe('core heartbeat', () => {
+  afterEach(() => {
+    enqueueAndProcessUserTurnMock.mockReset();
+    scheduleMock.mockReset();
+    validateMock.mockReset();
+    createCategoryLoggerMock.mockClear();
+    heartbeatLogger.trace.mockReset();
+    heartbeatLogger.debug.mockReset();
+    heartbeatLogger.info.mockReset();
+    heartbeatLogger.warn.mockReset();
+    heartbeatLogger.error.mockReset();
+    heartbeatLogger.child.mockReset();
+  });
+
   it('validates strict 5-field cron expressions', async () => {
     validateMock.mockReturnValue(true);
     const { isValidCronExpression } = await import('../../core/heartbeat.js');
@@ -60,8 +88,9 @@ describe('core heartbeat', () => {
     expect(scheduleMock).not.toHaveBeenCalled();
   });
 
-  it('publishes world heartbeat message on tick when chat is active', async () => {
+  it('enqueues world heartbeat message on tick and writes heartbeat logger diagnostics', async () => {
     validateMock.mockReturnValue(true);
+    enqueueAndProcessUserTurnMock.mockResolvedValue({ messageId: 'hb-msg-1', status: 'queued' });
 
     let tickHandler: (() => void) | null = null;
     const task = {
@@ -90,8 +119,25 @@ describe('core heartbeat', () => {
     expect(typeof tickHandler).toBe('function');
 
     tickHandler?.();
+    await Promise.resolve();
 
-    expect(publishMessageMock).toHaveBeenCalledWith(world, 'heartbeat prompt', 'world', 'chat-1');
+    expect(enqueueAndProcessUserTurnMock).toHaveBeenCalledWith(
+      'world-1',
+      'chat-1',
+      'heartbeat prompt',
+      'world',
+      world,
+    );
+    expect(heartbeatLogger.debug).toHaveBeenCalledWith('Heartbeat cron tick', expect.objectContaining({
+      worldId: 'world-1',
+      chatId: 'chat-1',
+    }));
+    expect(heartbeatLogger.debug).toHaveBeenCalledWith('Heartbeat cron tick enqueued', expect.objectContaining({
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      messageId: 'hb-msg-1',
+      status: 'queued',
+    }));
 
     stopHeartbeat(handle);
     expect(task.stop).toHaveBeenCalledTimes(1);
@@ -121,8 +167,43 @@ describe('core heartbeat', () => {
 
     startHeartbeat(world, 'chat-1');
     tickHandler?.();
+    expect(enqueueAndProcessUserTurnMock).not.toHaveBeenCalled();
+    expect(heartbeatLogger.debug).toHaveBeenCalledWith('Heartbeat tick skipped: chat busy or queued', expect.objectContaining({
+      worldId: 'world-1',
+      chatId: 'chat-1',
+    }));
+  });
 
-    expect(publishMessageMock).not.toHaveBeenCalled();
+  it('logs enqueue failures through the heartbeat logger', async () => {
+    validateMock.mockReturnValue(true);
+    enqueueAndProcessUserTurnMock.mockRejectedValue(new Error('queue down'));
+
+    let tickHandler: (() => void) | null = null;
+    scheduleMock.mockImplementation((_expr: string, callback: () => void) => {
+      tickHandler = callback;
+      return { stop: vi.fn(), destroy: vi.fn(), start: vi.fn() };
+    });
+
+    const { startHeartbeat } = await import('../../core/heartbeat.js');
+
+    const world: any = {
+      id: 'world-1',
+      isProcessing: false,
+      heartbeatEnabled: true,
+      heartbeatInterval: '*/5 * * * *',
+      heartbeatPrompt: 'heartbeat prompt',
+    };
+
+    startHeartbeat(world, 'chat-1');
+    tickHandler?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(heartbeatLogger.error).toHaveBeenCalledWith('Heartbeat cron tick failed to enqueue', expect.objectContaining({
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      error: 'queue down',
+    }));
   });
 
   it('does not start heartbeat when explicit chatId is missing', async () => {

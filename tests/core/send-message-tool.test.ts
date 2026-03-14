@@ -196,6 +196,41 @@ describe('core/send-message-tool', () => {
     expect(payload.chatId).toBe('trusted-chat');
   });
 
+  it('routes world sender messages through the queue-backed dispatch path', async () => {
+    mockedEnqueueAndProcessUserTurn.mockResolvedValueOnce({ messageId: 'queued-world-1', status: 'queued' } as any);
+
+    const tool = buildWrappedSendMessageTool();
+    const result = await tool.execute(
+      {
+        messages: [
+          { content: '@planner sync status', sender: 'world' },
+        ],
+      },
+      undefined,
+      undefined,
+      {
+        world: { id: 'world-1', currentChatId: 'chat-1' } as any,
+        chatId: 'chat-1',
+      },
+    );
+
+    expect(mockedEnqueueAndProcessUserTurn).toHaveBeenCalledWith(
+      'world-1',
+      'chat-1',
+      '@planner sync status',
+      'world',
+      expect.any(Object),
+      { source: 'direct' },
+    );
+    expect(mockedDispatchImmediateChatMessage).not.toHaveBeenCalled();
+
+    const payload = JSON.parse(String(result));
+    expect(payload.results[0]).toMatchObject({
+      dispatchMode: 'queued',
+      messageId: 'queued-world-1',
+    });
+  });
+
   it('returns validation error for empty messages array', async () => {
     const tool = buildWrappedSendMessageTool();
     const result = await tool.execute(

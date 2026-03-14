@@ -22,6 +22,8 @@
  * - All other dependencies (events/index.js, storage-init.ts, etc.) are static.
  *
  * Recent Changes:
+ * - 2026-03-14: Allowed `world` sender messages onto the queue so scheduled/system-originated
+ *   world prompts use the same ordered ingress and mention preflight rules as human turns.
  * - 2026-03-12: Registered queue advance listeners in the detachable listener map so sequential queued
  *   turns in the same chat can reattach completion cleanup after the previous turn finishes.
  * - 2026-03-10: Treat unresolved persisted HITL prompts as explicit recovery boundaries during stale `sending` recovery so restore does not replay turns that are already waiting for approval.
@@ -760,7 +762,7 @@ export function clearQueuePauseForChat(worldId: string, chatId: string): void {
 
 function isUserQueueSender(sender: string): boolean {
   const normalized = String(sender || '').trim().toLowerCase();
-  return normalized === 'human' || normalized.startsWith('user');
+  return normalized === 'human' || normalized === 'world' || normalized.startsWith('user');
 }
 
 async function resolveRuntimeWorldForChat(

@@ -49,7 +49,8 @@ export function validateEventForPersistence(event: StoredEvent): void {
  * Create default metadata values for required fields
  */
 export function createDefaultMessageMetadata(sender: string): MessageEventMetadata {
-  const isHuman = sender === 'human' || sender === 'user';
+  const normalizedSender = String(sender || '').trim().toLowerCase();
+  const isHuman = normalizedSender === 'human' || normalizedSender === 'world' || normalizedSender === 'user';
 
   return {
     sender,

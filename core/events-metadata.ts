@@ -24,6 +24,11 @@
 import type { World, WorldMessageEvent, AgentMessage } from './types.js';
 import { extractParagraphBeginningMentions } from './utils.js';
 
+function isHumanLikeMessageSender(sender: string | undefined): boolean {
+  const normalized = String(sender || '').trim().toLowerCase();
+  return normalized === 'human' || normalized === 'world' || normalized === 'user';
+}
+
 function resolveRecipientAgentId(world: World, message: WorldMessageEvent): string | null {
   const mentions = extractParagraphBeginningMentions(message.content || '');
   if (mentions.length === 0) {
@@ -53,7 +58,7 @@ export function calculateOwnerAgentIds(
   world: World,
   message: WorldMessageEvent
 ): string[] {
-  const isHuman = message.sender === 'human' || message.sender === 'user';
+  const isHuman = isHumanLikeMessageSender(message.sender);
 
   // Human messages go to all agents
   if (isHuman) {
@@ -93,7 +98,7 @@ export function calculateMessageDirection(
   world: World,
   message: WorldMessageEvent
 ): 'outgoing' | 'incoming' | 'broadcast' {
-  const isHuman = message.sender === 'human' || message.sender === 'user';
+  const isHuman = isHumanLikeMessageSender(message.sender);
 
   if (isHuman) {
     return 'broadcast'; // Human messages are always broadcast
@@ -118,7 +123,7 @@ export function calculateIsMemoryOnly(
   world: World,
   message: WorldMessageEvent
 ): boolean {
-  const isHuman = message.sender === 'human' || message.sender === 'user';
+  const isHuman = isHumanLikeMessageSender(message.sender);
   if (isHuman) return false; // Human messages always trigger responses
 
   const recipientId = calculateRecipientAgentId(world, message);
@@ -132,7 +137,7 @@ export function calculateIsCrossAgentMessage(
   world: World,
   message: WorldMessageEvent
 ): boolean {
-  const isHuman = message.sender === 'human' || message.sender === 'user';
+  const isHuman = isHumanLikeMessageSender(message.sender);
   if (isHuman) return false;
 
   const recipientId = calculateRecipientAgentId(world, message);

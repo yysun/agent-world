@@ -91,6 +91,25 @@ describe('Enhanced Event Persistence', () => {
     expect(messageEvent.meta.messageDirection).toBe('broadcast');
   });
 
+  it('should persist world message mentions as broadcast metadata for all agents', async () => {
+    publishMessage(world, '@Agent2 please check this', 'world', 'chat-1');
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    const events = await world.eventStorage.getEventsByWorldAndChat(world.id, 'chat-1');
+    const messageEvent = events.find(e => e.type === 'message' && e.payload.sender === 'world');
+
+    expect(messageEvent).toBeDefined();
+    expect(messageEvent.meta.ownerAgentIds).toHaveLength(2);
+    expect(messageEvent.meta.ownerAgentIds).toContain('agent1');
+    expect(messageEvent.meta.ownerAgentIds).toContain('agent2');
+    expect(messageEvent.meta.recipientAgentId).toBe('agent2');
+    expect(messageEvent.meta.isMemoryOnly).toBe(false);
+    expect(messageEvent.meta.isCrossAgentMessage).toBe(false);
+    expect(messageEvent.meta.isHumanMessage).toBe(true);
+    expect(messageEvent.meta.messageDirection).toBe('broadcast');
+  });
+
   it('should persist agent message with @mention and correct recipient', async () => {
     const messageEvent: WorldMessageEvent = {
       content: '@Agent2 please check this',

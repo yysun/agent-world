@@ -7,7 +7,7 @@
  * Key features covered:
  * - pauseChatQueue / resumeChatQueue state transitions
  * - addToQueue happy path with cache update
- * - `enqueueAndProcessUserTurn` is queue-only for user senders
+ * - `enqueueAndProcessUserTurn` accepts human-like queued senders (`human`/`user`/`world`)
  * - `dispatchImmediateChatMessage` bypasses queue for non-user senders
  *
  * Implementation Notes:
@@ -292,6 +292,19 @@ describe('queue-manager', () => {
 
       expect(result).not.toBeNull();
       expect(result?.messageId).toBe('pre-id-1');
+      expect(result?.status).toBe('queued');
+    });
+
+    it('enqueues for world sender', async () => {
+      const worldId = 'world-q';
+      const chatId = 'chat-human';
+
+      const result = await enqueueAndProcessUserTurn(worldId, chatId, '@agent-a heartbeat', 'world', null, {
+        preassignedMessageId: 'pre-id-world-1',
+      });
+
+      expect(result).not.toBeNull();
+      expect(result?.messageId).toBe('pre-id-world-1');
       expect(result?.status).toBe('queued');
     });
 

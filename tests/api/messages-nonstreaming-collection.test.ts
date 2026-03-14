@@ -272,4 +272,38 @@ describe('api non-streaming message collection', () => {
     expect(contentPayload.data.messageId).toBe('msg-a2');
     expect(contentPayload.data.chatId).toBe('chat-a');
   });
+
+  it('queues world sender messages through the same non-streaming ingress path', async () => {
+    enqueueAndProcessUserTurn.mockImplementation((_worldId: string, _chatId: string, _message: string, _sender: string, world: any) => {
+      world.eventEmitter.emit('world', { type: 'response-start', chatId: 'chat-a', activityId: 3 });
+      world.eventEmitter.emit('message', {
+        sender: 'agent',
+        content: 'world queued reply',
+        messageId: 'msg-world-a',
+        chatId: 'chat-a',
+      });
+      world.eventEmitter.emit('world', { type: 'idle', chatId: 'chat-a', activityId: 3 });
+    });
+
+    const { default: router } = await import('../../server/api.js');
+    const [validateWorld, routeHandler] = getRouteHandlers(router, 'post', '/worlds/:worldName/messages');
+
+    const req: any = {
+      params: { worldName: 'world-1' },
+      body: {
+        message: '@agent sync now',
+        sender: 'world',
+        stream: false,
+        chatId: 'chat-a',
+      },
+    };
+    const res = createMockResponse();
+
+    await runMiddleware(validateWorld, req, res);
+    await routeHandler(req, res);
+
+    expect(enqueueAndProcessUserTurn).toHaveBeenCalledWith('world-1', 'chat-a', '@agent sync now', 'world', expect.any(Object));
+    expect(dispatchImmediateChatMessage).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(200);
+  });
 });

@@ -18,6 +18,7 @@
  * - Runtime routing requires explicit `context.chatId`; it does not fall back to `world.currentChatId`.
  *
  * Recent Changes:
+ * - 2026-03-14: Routed `world` sender messages through the same queue-backed ingress as human/user turns.
  * - 2026-03-10: Split sender routing so queue-backed dispatch is user-only and non-user senders use immediate dispatch.
  * - 2026-03-04: Removed `world.currentChatId` fallback from trusted runtime routing; `context.chatId` is now required.
  * - 2026-03-04: Initial implementation of built-in `send_message` tool with trusted context injection.
@@ -72,7 +73,7 @@ function normalizeSender(sender: unknown): { ok: true; value: string } | { ok: f
 
 function isUserSender(sender: string): boolean {
   const normalized = String(sender || '').trim().toLowerCase();
-  return normalized === 'human' || normalized.startsWith('user');
+  return normalized === 'human' || normalized === 'world' || normalized.startsWith('user');
 }
 
 function normalizeMessageEntry(entry: unknown, index: number):

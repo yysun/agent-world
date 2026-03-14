@@ -152,5 +152,15 @@ describe('Event Validation', () => {
       expect(metadata.llmTokensInput).toBeNull();
       expect(metadata.llmTokensOutput).toBeNull();
     });
+
+    it('should create valid defaults for world sender as human-like ingress', () => {
+      const metadata = createDefaultMessageMetadata('world');
+
+      expect(metadata.sender).toBe('world');
+      expect(metadata.isHumanMessage).toBe(true);
+      expect(metadata.ownerAgentIds).toEqual([]);
+      expect(metadata.messageDirection).toBe('broadcast');
+      expect(metadata.toolCallCount).toBe(0);
+    });
   });
 });

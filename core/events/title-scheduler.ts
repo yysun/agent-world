@@ -47,7 +47,7 @@ function getTitleGenerationKey(worldId: string, chatId: string): string {
 
 export function isHumanSender(sender?: string): boolean {
   const normalized = String(sender ?? '').trim().toLowerCase();
-  return normalized === 'human' || normalized.startsWith('user');
+  return normalized === 'human' || normalized === 'world' || normalized.startsWith('user');
 }
 
 export async function runIdleTitleUpdate(world: World, event: any): Promise<void> {
