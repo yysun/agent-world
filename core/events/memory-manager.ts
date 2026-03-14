@@ -20,6 +20,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-03-13: Title-generation LLM calls now strip world `reasoning_effort` so background title requests omit provider reasoning params by default.
  * - 2026-03-06: Required explicit chat scope in memory-save/continuation/assistant-response paths; removed `world.currentChatId` fallback from agent event routing.
  * - 2026-03-06: Normalized shell continuation parse/validation/policy failures through explicit canonical shell failure reasons and updated continuation comments to reflect bounded-preview tool persistence.
  * - 2026-03-06: Collapsed shell continuation result-mode selection to one bounded-preview mode and normalized persisted shell tool failures through the canonical shell-result formatter.
@@ -310,6 +311,19 @@ function sanitizeGeneratedTitle(rawTitle: string): string {
 
   title = title.replace(/[.!?]+$/g, '').trim();
   return title;
+}
+
+function removeEnvVariableFromText(variablesText: unknown, key: string): string {
+  const targetKey = String(key || '').trim();
+  if (!targetKey) {
+    return String(variablesText || '');
+  }
+
+  return String(variablesText || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith(`${targetKey}=`))
+    .join('\n');
 }
 
 function isLowQualityTitle(title: string): boolean {
@@ -2231,8 +2245,13 @@ ${promptMessages.map(msg => `-${msg.role}: ${msg.content}`).join('\n')}
       `
     };
 
+    const titleGenerationWorld: World = {
+      ...world,
+      variables: removeEnvVariableFromText(world.variables, 'reasoning_effort'),
+    };
+
     const { response: titleResponse } = await generateAgentResponse(
-      world,
+      titleGenerationWorld,
       tempAgent,
       [userPrompt],
       undefined,

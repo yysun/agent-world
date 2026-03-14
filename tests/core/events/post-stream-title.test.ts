@@ -15,6 +15,7 @@
  * - Exercises subscriber behavior through emitted `world` events.
  *
  * Recent Changes:
+ * - 2026-03-13: Asserted title-generation LLM calls strip world `reasoning_effort` overrides before request dispatch.
  * - 2026-03-10: Added standalone runtime coverage so `startWorld(...)` still binds idle-based
  *   title generation when event persistence is unavailable.
  * - 2026-03-10: Removed the human-message debounce expectation; title generation now requires
@@ -310,6 +311,30 @@ describe('World activity-based title update', () => {
     expect(promptContent).not.toContain('Very old user message');
     expect(promptContent).not.toContain('Recent turn 29');
     expect(scopedChatId).toBe('chat-1');
+  });
+
+  test('omits world reasoning override from title-generation LLM calls', async () => {
+    world.variables = 'reasoning_effort=high\nworking_directory=/tmp/project';
+
+    world.eventEmitter.emit('world', {
+      type: 'idle',
+      pendingOperations: 0,
+      activityId: 1,
+      timestamp: new Date().toISOString(),
+      activeSources: [],
+      queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
+      messageId: 'test-msg-id',
+      chatId: 'chat-1'
+    });
+
+    await new Promise(r => setTimeout(r, 10));
+
+    const latestGenerateCall = mocks.generateAgentResponse.mock.calls.at(-1) as any[] | undefined;
+    const llmWorld = latestGenerateCall?.[0] as World | undefined;
+
+    expect(llmWorld?.variables).toBe('working_directory=/tmp/project');
+    expect(llmWorld).not.toBe(world);
+    expect(world.variables).toBe('reasoning_effort=high\nworking_directory=/tmp/project');
   });
 
   test('uses fallback hierarchy when LLM returns low-quality title', async () => {
