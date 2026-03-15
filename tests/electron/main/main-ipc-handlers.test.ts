@@ -1143,6 +1143,68 @@ describe('createMainIpcHandlers chat-flow scenario matrix', () => {
 });
 
 describe('createMainIpcHandlers.updateWorkspaceWorld heartbeat mapping', () => {
+  it('returns a hydrated world snapshot so agents survive renderer world-save refreshes', async () => {
+    const updateWorld = vi.fn(async () => ({
+      id: 'world-1',
+      name: 'World 1',
+      description: 'Updated description',
+      turnLimit: 5,
+    }));
+    const getWorld = vi.fn(async () => ({
+      id: 'world-1',
+      name: 'World 1',
+      description: 'Updated description',
+      turnLimit: 5,
+      agents: new Map([
+        ['e2e-google', {
+          id: 'e2e-google',
+          name: 'E2E Google',
+          type: 'assistant',
+          provider: 'google',
+          model: 'gemini-2.5-flash',
+          autoReply: true,
+          memory: [],
+        }]
+      ]),
+    }));
+    const refreshWorldSubscription = vi.fn(async () => null);
+    const heartbeatManager = {
+      startJob: vi.fn(),
+      restartJob: vi.fn(),
+      pauseJob: vi.fn(),
+      resumeJob: vi.fn(),
+      stopJob: vi.fn(),
+      stopAll: vi.fn(),
+      listJobs: vi.fn(() => []),
+    };
+
+    const { handlers } = await createHandlers({
+      updateWorld,
+      getWorld,
+      refreshWorldSubscription,
+      heartbeatManager,
+    });
+
+    const result = await handlers.updateWorkspaceWorld({
+      worldId: 'world-1',
+      description: 'Updated description',
+    });
+
+    expect(refreshWorldSubscription).toHaveBeenCalledWith('world-1');
+    expect(getWorld).toHaveBeenCalledWith('world-1');
+    expect(result).toMatchObject({
+      id: 'world-1',
+      name: 'World 1',
+      description: 'Updated description',
+      agents: [
+        expect.objectContaining({
+          id: 'e2e-google',
+          name: 'E2E Google',
+        })
+      ]
+    });
+  });
+
   it('maps heartbeat fields but does not auto-start heartbeat job when saving world settings', async () => {
     const updateWorld = vi.fn(async () => ({
       id: 'world-1',

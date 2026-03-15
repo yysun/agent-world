@@ -835,7 +835,8 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
 
     const refreshWarning = await refreshWorldSubscription(worldId);
     heartbeatManager.stopJob(worldId);
-    const serialized = serializeWorldInfo(updated);
+    const hydratedWorld = await getWorld(worldId);
+    const serialized = serializeWorldInfo(hydratedWorld || updated);
     if (refreshWarning) {
       return {
         ...serialized,
