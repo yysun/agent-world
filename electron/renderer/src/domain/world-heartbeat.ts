@@ -13,6 +13,7 @@
  * - Renderer treats heartbeat as a world-level cron surface scoped to the selected chat.
  *
  * Recent Changes:
+ * - 2026-03-15: Added next-run countdown derivation for running heartbeat jobs.
  * - 2026-03-14: Aligned start/stop button availability with the runtime running state.
  * - 2026-03-14: Added sidebar heartbeat summary/control derivation for the Electron world panel.
  */
@@ -29,6 +30,7 @@ type HeartbeatJobLike = {
   status?: unknown;
   interval?: unknown;
   runCount?: unknown;
+  nextRunAt?: unknown;
 };
 
 type HeartbeatControlInput = {
@@ -58,18 +60,77 @@ function normalizeStatus(value: unknown): 'running' | 'paused' | 'stopped' {
   return 'stopped';
 }
 
-export function deriveWorldHeartbeatSummary(world: WorldHeartbeatLike | null | undefined, job: HeartbeatJobLike | null | undefined) {
+function normalizeDate(value: unknown): Date | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  const normalized = normalizeText(value);
+  if (!normalized) {
+    return null;
+  }
+
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatCountdownDuration(remainingMs: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
+  if (totalSeconds < 1) {
+    return '<1s';
+  }
+
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (days > 0) {
+    return `${days}d ${hours}h`;
+  }
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+
+  return `${seconds}s`;
+}
+
+function deriveNextRunCountdownLabel(
+  status: WorldHeartbeatDisplayStatus,
+  nextRunAt: Date | null,
+  now: Date,
+): string | null {
+  if (status !== 'running' || !nextRunAt) {
+    return null;
+  }
+
+  return `Next: ${formatCountdownDuration(nextRunAt.getTime() - now.getTime())}`;
+}
+
+export function deriveWorldHeartbeatSummary(
+  world: WorldHeartbeatLike | null | undefined,
+  job: HeartbeatJobLike | null | undefined,
+  now: Date = new Date(),
+) {
   const interval = normalizeText(job?.interval) || normalizeText(world?.heartbeatInterval);
   const prompt = normalizeText(world?.heartbeatPrompt);
   const configured = world?.heartbeatEnabled === true && Boolean(interval) && Boolean(prompt);
   const runtimeStatus = normalizeStatus(job?.status);
   const status: WorldHeartbeatDisplayStatus = configured ? runtimeStatus : 'disabled';
   const heartbeatEnabled = status === 'running';
+  const nextRunAt = normalizeDate(job?.nextRunAt);
 
   return {
     configured,
     interval,
     runCount: normalizeRunCount(job?.runCount),
+    nextRunAt: nextRunAt?.toISOString() ?? null,
+    nextRunCountdownLabel: deriveNextRunCountdownLabel(status, nextRunAt, now),
     status,
     heartbeatEnabled,
     heartbeatLabel: heartbeatEnabled ? 'on' : 'off',

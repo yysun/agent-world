@@ -15,6 +15,7 @@
  * - This module does not persist world config changes.
  *
  * Recent Changes:
+ * - 2026-03-15: Exposed the next scheduled heartbeat run so the renderer can show a countdown.
  * - 2026-03-14: Start/restart now return an explicit outcome so IPC callers can reject
  *   silent cron no-op starts instead of reporting success while status stays stopped.
  * - 2026-03-06: Heartbeat jobs now require explicit chat scope; jobs no longer infer session routing from world state.
@@ -25,6 +26,7 @@ type ScheduledTaskLike = {
   stop: () => void;
   start?: () => void;
   destroy?: () => void;
+  getNextRun?: () => Date | null;
 };
 
 type HeartbeatHandle = {
@@ -47,6 +49,7 @@ export interface HeartbeatJobView {
   interval: string;
   status: HeartbeatJobStatus;
   runCount: number;
+  nextRunAt: string | null;
 }
 
 export interface HeartbeatJobStartResult {
@@ -103,6 +106,27 @@ function normalizeChatId(chatId: string | null | undefined): string | null {
   return normalized || null;
 }
 
+function toNextRunAt(entry: HeartbeatJobEntry): string | null {
+  if (entry.status !== 'running') {
+    return null;
+  }
+
+  const getNextRun = entry.handle?.task?.getNextRun;
+  if (typeof getNextRun !== 'function') {
+    return null;
+  }
+
+  try {
+    const nextRun = getNextRun.call(entry.handle?.task);
+    if (!(nextRun instanceof Date) || Number.isNaN(nextRun.getTime())) {
+      return null;
+    }
+    return nextRun.toISOString();
+  } catch {
+    return null;
+  }
+}
+
 function toJobView(entry: HeartbeatJobEntry | null | undefined): HeartbeatJobView | null {
   if (!entry) {
     return null;
@@ -114,6 +138,7 @@ function toJobView(entry: HeartbeatJobEntry | null | undefined): HeartbeatJobVie
     interval: entry.interval,
     status: entry.status,
     runCount: entry.runCount,
+    nextRunAt: toNextRunAt(entry),
   };
 }
 

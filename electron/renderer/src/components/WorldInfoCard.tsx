@@ -11,6 +11,7 @@
  * - Keeps existing sidebar typography and spacing to avoid visual regressions
  *
  * Recent Changes:
+ * - 2026-03-15: Replaced the running heartbeat `Runs` label with a next-run countdown sourced from cron job status.
  * - 2026-03-14: Removed the pause heartbeat control and kept start/stop buttons only.
  * - 2026-03-14: Replaced the sidebar `Messages` summary with `Chats`.
  * - 2026-03-14: Replaced the heartbeat status chip with `Heartbeat: on|off` text and shortened the run label to `Runs`.
@@ -46,6 +47,7 @@ export default function WorldInfoCard({
     selectedChatId: selectedSessionId,
     isActionPending: Boolean(heartbeatAction),
   });
+  const heartbeatStatusLabel = heartbeatSummary.nextRunCountdownLabel || `Runs: ${heartbeatSummary.runCount}`;
 
   return (
     <div className="mb-4 shrink-0 space-y-2 text-xs">
@@ -118,9 +120,7 @@ export default function WorldInfoCard({
             <div className="flex min-w-0 items-center gap-2">
               <span className="shrink-0">Heartbeat: {heartbeatSummary.heartbeatLabel}</span>
               <span className="shrink-0 text-sidebar-foreground/50">|</span>
-              <span className="truncate">
-                Runs: {heartbeatSummary.runCount}
-              </span>
+              <span className="truncate">{heartbeatStatusLabel}</span>
             </div>
             <div className="flex items-center gap-1">
               <button

@@ -11,6 +11,9 @@
  *
  * Implementation Notes:
  * - Uses injected scheduler fakes only; no timers or Electron runtime needed.
+ *
+ * Summary of Recent Changes:
+ * - 2026-03-15: Added next-run heartbeat job metadata coverage for renderer countdowns.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -116,6 +119,37 @@ describe('electron heartbeat manager', () => {
         worldId: 'world-1',
         status: 'running',
         runCount: 4,
+      }),
+    ]);
+  });
+
+  it('includes the next scheduled run while a job is running', () => {
+    const nextRunAt = new Date('2026-03-15T12:05:00.000Z');
+    const task = {
+      stop: vi.fn(),
+      start: vi.fn(),
+      destroy: vi.fn(),
+      getNextRun: vi.fn(() => nextRunAt),
+    };
+    const manager = createHeartbeatManager({
+      isValidCronExpression: vi.fn(() => true),
+      startHeartbeat: vi.fn(() => ({ task })),
+      stopHeartbeat: vi.fn(),
+    });
+
+    manager.startJob({
+      id: 'world-1',
+      name: 'World 1',
+      heartbeatEnabled: true,
+      heartbeatInterval: '*/5 * * * *',
+      heartbeatPrompt: 'tick',
+    }, 'chat-7');
+
+    expect(manager.listJobs()).toEqual([
+      expect.objectContaining({
+        worldId: 'world-1',
+        status: 'running',
+        nextRunAt: '2026-03-15T12:05:00.000Z',
       }),
     ]);
   });

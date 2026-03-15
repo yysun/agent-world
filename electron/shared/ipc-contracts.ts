@@ -15,6 +15,7 @@
  * - Runtime validation remains in main-process handlers for behavior parity.
  *
  * Recent Changes:
+ * - 2026-03-15: Added `nextRunAt` to heartbeat job status so the renderer can show a live next-run countdown.
  * - 2026-03-08: Added `skill:readContent` and `skill:saveContent` invoke contracts for skill SKILL.md read/write flows.
  * - 2026-02-26: Added `logging:getConfig` invoke contract and typed renderer logging config payload for env-controlled categorized renderer logs.
  * - 2026-02-25: Extended `world:import` contract with optional source payload for path/shorthand imports.
@@ -129,6 +130,7 @@ export interface HeartbeatJobStatus {
   interval: string;
   status: 'running' | 'paused' | 'stopped';
   runCount: number;
+  nextRunAt: string | null;
 }
 
 export interface BranchSessionFromMessagePayload extends WorldChatPayload {
