@@ -1544,6 +1544,7 @@ function AppContent({ api }: { api: DesktopApi }) {
     visibleWorldAgents,
     hiddenWorldAgentCount,
     activeHeaderAgentIds: [],
+    selectedAgentId,
     onOpenEditAgentPanel,
     onOpenCreateAgentPanel,
     worldViewMode,

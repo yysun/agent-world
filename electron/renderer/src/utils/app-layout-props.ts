@@ -12,6 +12,7 @@
  * - Data-only transformations from provided inputs.
  *
  * Recent Changes:
+ * - 2026-03-15: Added `editingAgentId` wiring so the Electron header can highlight the agent currently being edited.
  * - 2026-03-14: Moved world import props from the right panel into left-sidebar wiring.
  * - 2026-03-13: Added `reasoningEffort` and `onSetReasoningEffort` to composer props for world-level reasoning control.
  * - 2026-03-12: Added `toolPermission` and `onSetToolPermission` to composer props for world-level tool permission dropdown.
@@ -201,6 +202,7 @@ export function createMainHeaderProps<T extends PropBag>(input: T) {
     visibleWorldAgents: input.visibleWorldAgents,
     hiddenWorldAgentCount: input.hiddenWorldAgentCount,
     activeHeaderAgentIds: input.activeHeaderAgentIds,
+    editingAgentId: input.panelMode === 'edit-agent' ? input.selectedAgentId : null,
     onOpenEditAgentPanel: input.onOpenEditAgentPanel,
     onOpenCreateAgentPanel: input.onOpenCreateAgentPanel,
     worldViewMode: input.worldViewMode,

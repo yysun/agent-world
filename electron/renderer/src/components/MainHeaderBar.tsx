@@ -14,6 +14,7 @@
  * - Preserves existing drag/no-drag region behavior for Electron title area.
  *
  * Recent Changes:
+ * - 2026-03-15: Added a distinct editing highlight for the header agent currently open in the edit panel.
  * - 2026-03-06: Clicking the session title in the header now copies the chat/session ID to the clipboard.
  * - 2026-03-04: Grid submenu now dismisses on option select and is left-aligned to the Grid icon button.
  * - 2026-03-04: Replaced grid layout dropdown with a submenu anchored under the Grid icon.
@@ -42,6 +43,59 @@ function isMainWorldAgent(agent: { id?: unknown; name?: unknown }, selectedWorld
   return normalizedMainAgent === normalizedAgentId || normalizedMainAgent === normalizedAgentName;
 }
 
+function isEditingWorldAgent(agent: { id?: unknown }, editingAgentId: unknown): boolean {
+  const normalizedEditingAgentId = normalizeMainAgentValue(editingAgentId);
+  if (!normalizedEditingAgentId) return false;
+  return normalizeMainAgentValue(agent?.id) === normalizedEditingAgentId;
+}
+
+export function getAgentBadgeClassName({
+  isEditingAgent,
+  isMainAgent,
+  isActiveStreamingAgent,
+}: {
+  isEditingAgent: boolean;
+  isMainAgent: boolean;
+  isActiveStreamingAgent: boolean;
+}): string {
+  const toneClassName = isEditingAgent
+    ? 'bg-sky-200 text-sky-900 ring-2 ring-sky-400 hover:bg-sky-300'
+    : isMainAgent
+      ? 'bg-amber-200 text-amber-900 ring-2 ring-amber-400 hover:bg-amber-300'
+      : 'bg-secondary text-secondary-foreground hover:bg-secondary/80';
+  return `relative flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold transition-colors ${toneClassName} ${isActiveStreamingAgent ? 'header-agent-active' : ''}`.trim();
+}
+
+export function getAgentBadgeTitle({
+  agentName,
+  messageCount,
+  isMainAgent,
+  isEditingAgent,
+  isActiveStreamingAgent,
+}: {
+  agentName: string;
+  messageCount: number;
+  isMainAgent: boolean;
+  isEditingAgent: boolean;
+  isActiveStreamingAgent: boolean;
+}): string {
+  return `${agentName} • ${messageCount} message${messageCount === 1 ? '' : 's'}${isMainAgent ? ' • Main agent' : ''}${isEditingAgent ? ' • Editing' : ''}${isActiveStreamingAgent ? ' • Responding' : ''}`;
+}
+
+export function getAgentBadgeAriaLabel({
+  agentName,
+  isMainAgent,
+  isEditingAgent,
+  isActiveStreamingAgent,
+}: {
+  agentName: string;
+  isMainAgent: boolean;
+  isEditingAgent: boolean;
+  isActiveStreamingAgent: boolean;
+}): string {
+  return `Edit agent ${agentName}${isMainAgent ? ' (main agent)' : ''}${isEditingAgent ? ' (editing)' : ''}${isActiveStreamingAgent ? ' (responding)' : ''}`;
+}
+
 export default function MainHeaderBar({
   leftSidebarCollapsed,
   setLeftSidebarCollapsed,
@@ -50,6 +104,7 @@ export default function MainHeaderBar({
   visibleWorldAgents,
   hiddenWorldAgentCount,
   activeHeaderAgentIds,
+  editingAgentId,
   onOpenEditAgentPanel,
   onOpenCreateAgentPanel,
   onOpenSettingsPanel,
@@ -135,18 +190,27 @@ export default function MainHeaderBar({
           <div className="inline-flex items-center gap-2 rounded-md bg-card/70 px-2 py-1">
             {visibleWorldAgents.map((agent, index) => {
               const isMainAgent = isMainWorldAgent(agent, selectedWorld);
+              const isEditingAgent = isEditingWorldAgent(agent, editingAgentId);
               const isActiveStreamingAgent = activeHeaderAgentIdSet.has(normalizeMainAgentValue(agent?.id));
               return (
                 <button
                   key={`${agent.id}-${index}`}
                   type="button"
                   onClick={() => onOpenEditAgentPanel(agent.id)}
-                  className={`relative flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold transition-colors ${isMainAgent
-                    ? 'bg-amber-200 text-amber-900 ring-2 ring-amber-400 hover:bg-amber-300'
-                    : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
-                    } ${isActiveStreamingAgent ? 'header-agent-active' : ''}`}
-                  title={`${agent.name} • ${agent.messageCount} message${agent.messageCount === 1 ? '' : 's'}${isMainAgent ? ' • Main agent' : ''}${isActiveStreamingAgent ? ' • Responding' : ''}`}
-                  aria-label={`Edit agent ${agent.name}${isMainAgent ? ' (main agent)' : ''}${isActiveStreamingAgent ? ' (responding)' : ''}`}
+                  className={getAgentBadgeClassName({ isEditingAgent, isMainAgent, isActiveStreamingAgent })}
+                  title={getAgentBadgeTitle({
+                    agentName: agent.name,
+                    messageCount: agent.messageCount,
+                    isMainAgent,
+                    isEditingAgent,
+                    isActiveStreamingAgent,
+                  })}
+                  aria-label={getAgentBadgeAriaLabel({
+                    agentName: agent.name,
+                    isMainAgent,
+                    isEditingAgent,
+                    isActiveStreamingAgent,
+                  })}
                 >
                   {agent.initials}
                   {isMainAgent ? (
