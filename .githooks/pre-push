@@ -1,0 +1,18 @@
+#!/bin/sh
+#
+# Purpose:
+# - Block pushes when repository checks or tests fail.
+#
+# Key features:
+# - Runs `npm run check && npm run test` before each push.
+# - Loads NVM when available so hook execution matches local development shells.
+#
+# Notes on implementation:
+# - The push hook is intentionally stricter than pre-commit and requires both type checks and unit tests.
+#
+# Recent changes:
+# - 2026-03-15: Added a pre-push gate for `npm run check && npm run test`.
+
+set -eu
+
+npm run build && npm run test
