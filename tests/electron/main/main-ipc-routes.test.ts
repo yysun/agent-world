@@ -11,6 +11,8 @@
  * - Tests route build + registration helpers together.
  *
  * Recent Changes:
+ * - 2026-03-15: Added canonical channel and payload coverage for `agent:import`
+ *   and `skill:import` route wiring.
  * - 2026-03-08: Updated canonical channel list and last-route assertion for skill:readContent and skill:saveContent.
  * - 2026-02-26: Added channel/order/payload assertions for `logging:getConfig` route wiring.
  * - 2026-02-26: Added payload assertion for `world:import` route wiring with optional `source` input.
@@ -36,6 +38,8 @@ function createHandlerMocks() {
     loadWorldsFromWorkspace: vi.fn(async () => ([])),
     loadSpecificWorld: vi.fn(async () => ({})),
     importWorld: vi.fn(async () => ({})),
+    importAgent: vi.fn(async () => ({})),
+    importSkill: vi.fn(async () => ({})),
     exportWorld: vi.fn(async () => ({})),
     listWorkspaceWorlds: vi.fn(async () => ([])),
     listSkillRegistry: vi.fn(async () => ([])),
@@ -94,6 +98,8 @@ describe('buildMainIpcRoutes', () => {
       'world:loadFromFolder',
       'world:load',
       'world:import',
+      'agent:import',
+      'skill:import',
       'world:export',
       'world:list',
       'skill:list',
@@ -149,6 +155,8 @@ describe('buildMainIpcRoutes', () => {
     await routes.find((route) => route.channel === 'workspace:open')?.handler({}, { directoryPath: '/tmp/workspace' });
     await routes.find((route) => route.channel === 'dialog:pickDirectory')?.handler({});
     await routes.find((route) => route.channel === 'world:import')?.handler({}, { source: '@awesome-agent-world/infinite-etude' });
+    await routes.find((route) => route.channel === 'agent:import')?.handler({}, { repo: 'yysun/agent-worlds', itemName: 'guide-agent' });
+    await routes.find((route) => route.channel === 'skill:import')?.handler({}, { repo: 'yysun/agent-skills', itemName: 'reviewer' });
     await routes.find((route) => route.channel === 'world:export')?.handler({}, { worldId: 'w-9' });
     await routes.find((route) => route.channel === 'skill:list')?.handler({});
     await routes.find((route) => route.channel === 'heartbeat:list')?.handler({});
@@ -178,6 +186,8 @@ describe('buildMainIpcRoutes', () => {
     expect(handlers.openWorkspaceDialog).toHaveBeenCalledWith({ directoryPath: '/tmp/workspace' });
     expect(handlers.pickDirectoryDialog).toHaveBeenCalledTimes(1);
     expect(handlers.importWorld).toHaveBeenCalledWith({ source: '@awesome-agent-world/infinite-etude' });
+    expect(handlers.importAgent).toHaveBeenCalledWith({ repo: 'yysun/agent-worlds', itemName: 'guide-agent' });
+    expect(handlers.importSkill).toHaveBeenCalledWith({ repo: 'yysun/agent-skills', itemName: 'reviewer' });
     expect(handlers.exportWorld).toHaveBeenCalledWith({ worldId: 'w-9' });
     expect(handlers.listSkillRegistry).toHaveBeenCalledTimes(1);
     expect(handlers.listHeartbeatJobs).toHaveBeenCalledTimes(1);

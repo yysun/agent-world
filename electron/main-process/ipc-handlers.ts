@@ -24,6 +24,7 @@
  * - 2026-03-06: Heartbeat job starts now require explicit `chatId`; workspace load no longer auto-starts heartbeat jobs from persisted world state.
  * - 2026-03-06: Removed runtime queue-resume fallback to persisted `currentChatId`; Electron now resumes chat queues only for explicitly selected sessions.
  * - 2026-03-04: Extended `sendChatMessage` IPC response with queue metadata (`queueStatus`, `queueRetryCount`) for queue-failure visibility.
+ * - 2026-03-15: Normalized `world:import` folder selection to a guaranteed string and removed unsafe GitHub source metadata casts so TypeScript checks stay aligned with agent/skill imports.
  * - 2026-03-10: Suppressed restore-time auto-resume during edit/delete message mutations so failed user-last turns cannot replay before storage mutation.
  * - 2026-02-28: `message:edit` now resolves and passes the active subscribed world into core edit resubmission so edited turns publish on the same realtime emitter the renderer listens to.
  * - 2026-02-26: Added env-derived renderer logging config endpoint and replaced session/message console traces with categorized injected logger calls.
@@ -213,6 +214,21 @@ function syncRuntimeWorldHeartbeatConfig(runtimeWorld: any, persistedWorld: any)
   return runtimeWorld;
 }
 
+function sanitizeWorldForExport(world: any): any {
+  if (!world || typeof world !== 'object') {
+    return world;
+  }
+
+  const {
+    variables,
+    currentChatId,
+    env,
+    ...exportableWorld
+  } = world;
+
+  return exportableWorld;
+}
+
 interface GitHubWorldImportSource {
   shorthand: string;
   owner: string;
@@ -247,6 +263,10 @@ interface GitHubFolderImportStagedResult {
   folderPath: string;
   source: GitHubFolderImportSource;
   cleanup: () => Promise<void>;
+}
+
+export function toImportSourceMetadata(source: GitHubWorldImportSource | GitHubFolderImportSource): Record<string, unknown> {
+  return { ...source };
 }
 
 export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDependencies) {
@@ -1030,7 +1050,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     const requestedItemName = String(payload?.itemName || '').trim();
     const selectedWorldFolder = requestedSource || requestedRepo || requestedItemName
       ? String(requestedSource || '')
-      : await pickTargetDirectory(mainWindow, 'Import World Folder', 'Import');
+      : (await pickTargetDirectory(mainWindow, 'Import World Folder', 'Import')) || '';
     let stagedGitHubWorld: GitHubWorldImportStagedResult | null = null;
     let stagedGitHubFolder: GitHubFolderImportStagedResult | null = null;
 
@@ -1053,19 +1073,19 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
         if ('worldFolderPath' in stagedGitHubImport) {
           stagedGitHubWorld = stagedGitHubImport;
           resolvedWorldFolder = path.resolve(path.normalize(stagedGitHubImport.worldFolderPath));
-          sourceMetadata = stagedGitHubImport.source as Record<string, unknown>;
+          sourceMetadata = toImportSourceMetadata(stagedGitHubImport.source);
         } else {
           stagedGitHubFolder = stagedGitHubImport;
           resolvedWorldFolder = path.resolve(path.normalize(stagedGitHubImport.folderPath));
           sourceMetadata = {
-            ...stagedGitHubImport.source,
+            ...toImportSourceMetadata(stagedGitHubImport.source),
             itemName: requestedItemName || path.basename(stagedGitHubImport.folderPath),
           };
         }
       } else if (selectedWorldFolder.startsWith('@')) {
         stagedGitHubWorld = await stageGitHubWorldFromShorthand(selectedWorldFolder);
         resolvedWorldFolder = path.resolve(path.normalize(stagedGitHubWorld.worldFolderPath));
-        sourceMetadata = stagedGitHubWorld.source;
+        sourceMetadata = toImportSourceMetadata(stagedGitHubWorld.source);
       }
 
       const validationError = getWorldFolderValidationError(resolvedWorldFolder);
@@ -1287,7 +1307,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       rootPath: normalizedTargetPath
     }) as StorageLike;
 
-    await targetStorage.saveWorld(world);
+    await targetStorage.saveWorld(sanitizeWorldForExport(world));
 
     const worldAgents = world?.agents && typeof world.agents.values === 'function'
       ? Array.from(world.agents.values())

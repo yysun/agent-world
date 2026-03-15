@@ -17,6 +17,9 @@
  *   runtime state instead of auto-starting or auto-restarting cron jobs.
  * - 2026-03-13: Added coverage that `agent:create` refreshes the subscribed
  *   world runtime so Electron-created agents become live responders.
+ * - 2026-03-15: Added regression coverage for exported worlds omitting env-backed config.
+ * - 2026-03-15: Added regression coverage for `toImportSourceMetadata` so
+ *   GitHub import source objects stay serializable without unsafe casts.
  * - 2026-03-10: Added a chat-flow scenario matrix covering new/current/switched chat
  *   send and edit lifecycles, including replay-safe pending HITL prompt recovery.
  * - 2026-03-10: Added coverage that edit/delete restore chat state in mutation mode without triggering auto-resume.
@@ -30,6 +33,7 @@
  * - 2026-02-13: Added regression coverage for delete-message flow to refresh subscribed world runtime after storage deletion.
  */
 
+import * as nodeFs from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('electron', () => ({
@@ -37,6 +41,11 @@ vi.mock('electron', () => ({
     showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] }))
   }
 }), { virtual: true });
+
+vi.mock('path', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('path')>();
+  return actual;
+});
 
 function createDependencies(overrides: Record<string, unknown> = {}) {
   return {
@@ -123,6 +132,86 @@ async function createHandlers(overrides: Record<string, unknown> = {}) {
     dependencies
   };
 }
+
+describe('createMainIpcHandlers.importWorld', () => {
+  it('copies GitHub world source objects into plain metadata records', async () => {
+    const { toImportSourceMetadata } = await import('../../../electron/main-process/ipc-handlers');
+
+    const source = {
+      shorthand: '@yysun/agent-worlds/infinite-etude',
+      owner: 'yysun',
+      repo: 'agent-worlds',
+      branch: 'main',
+      worldPath: 'worlds/infinite-etude',
+      commitSha: 'abc123',
+    };
+
+    const metadata = toImportSourceMetadata(source);
+
+    expect(metadata).toEqual(source);
+    expect(metadata).not.toBe(source);
+  });
+});
+
+describe('createMainIpcHandlers.exportWorld', () => {
+  it('omits world env data and current chat id from exported world config', async () => {
+    const saveWorld = vi.fn(async () => undefined);
+    const createStorage = vi.fn(async () => ({
+      saveWorld,
+      saveAgent: vi.fn(async () => undefined),
+      saveChatData: vi.fn(async () => undefined),
+    }));
+    const getWorld = vi.fn(async () => ({
+      id: 'world-1',
+      name: 'World 1',
+      description: 'Export me',
+      turnLimit: 5,
+      currentChatId: 'chat-9',
+      variables: 'OPENAI_API_KEY=secret\nworking_directory=/tmp/project',
+      env: { OPENAI_API_KEY: 'secret' },
+      agents: new Map(),
+      chats: new Map(),
+    }));
+    const existsSyncSpy = vi.spyOn(nodeFs, 'existsSync').mockReturnValue(false);
+    const mkdirSyncSpy = vi.spyOn(nodeFs, 'mkdirSync').mockImplementation(() => undefined as any);
+
+    try {
+      const { handlers } = await createHandlers({
+        getMainWindow: vi.fn(() => ({ isDestroyed: () => false })),
+        getWorld,
+        createStorage,
+        listChats: vi.fn(async () => []),
+      });
+
+      const result = await handlers.exportWorld({
+        worldId: 'world-1',
+        targetPath: '/exports',
+      });
+
+      expect(result).toMatchObject({ success: true });
+      expect(createStorage).toHaveBeenCalledWith({
+        type: 'file',
+        rootPath: '/exports',
+      });
+
+      const exportedWorld = saveWorld.mock.calls[0]?.[0];
+      expect(exportedWorld).toMatchObject({
+        id: 'world-1',
+        name: 'World 1',
+        description: 'Export me',
+        turnLimit: 5,
+      });
+      expect(exportedWorld).not.toHaveProperty('variables');
+      expect(exportedWorld).not.toHaveProperty('env');
+      expect(exportedWorld).not.toHaveProperty('currentChatId');
+      expect(mkdirSyncSpy).toHaveBeenCalledWith('/exports', { recursive: true });
+      expect(existsSyncSpy).toHaveBeenCalled();
+    } finally {
+      existsSyncSpy.mockRestore();
+      mkdirSyncSpy.mockRestore();
+    }
+  });
+});
 
 type FlowLifecycle = 'new-chat' | 'current-chat' | 'switch-chat';
 
