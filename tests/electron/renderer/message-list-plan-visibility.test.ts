@@ -6,6 +6,7 @@
  *   not merged away into tool result cards.
  *
  * Recent changes:
+ * - 2026-03-15: Added regression coverage for live shell stdout rows using `toolUseId-stdout` so streaming tool output merges into the existing tool request row.
  * - 2026-03-13: Added coverage for reserving avatar spacing on tool transcript rows.
  * - 2026-03-13: Added coverage for suppressing avatar chrome on tool transcript rows.
  * - 2026-03-04: Added view-mode coverage ensuring message chrome only appears in `Chat View`.
@@ -231,5 +232,42 @@ describe('MessageListPanel narrated tool-call visibility', () => {
     expect(merged[0]?.messageId).toBe('assistant-call-1');
     expect(Array.isArray(merged[0]?.combinedToolResults)).toBe(true);
     expect(merged[0]?.combinedToolResults).toHaveLength(1);
+  });
+
+  it('merges live shell stdout rows into the placeholder tool request during streaming', () => {
+    const assistantCallingTool = {
+      messageId: 'assistant-call-stream-1',
+      role: 'assistant',
+      sender: 'runner',
+      content: 'Calling tool: shell_cmd',
+      tool_calls: [
+        {
+          id: 'tool-live-1',
+          type: 'function',
+          function: {
+            name: 'shell_cmd',
+            arguments: '{"command":"npm test"}',
+          },
+        },
+      ],
+    };
+
+    const liveStdoutRow = {
+      messageId: 'tool-live-1-stdout',
+      role: 'tool',
+      sender: 'runner',
+      toolName: 'shell_cmd',
+      command: 'npm test',
+      content: 'running tests\n',
+      isToolStreaming: true,
+    };
+
+    const merged = buildCombinedRenderableMessages([assistantCallingTool, liveStdoutRow]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.messageId).toBe('assistant-call-stream-1');
+    expect(Array.isArray(merged[0]?.combinedToolResults)).toBe(true);
+    expect(merged[0]?.combinedToolResults).toHaveLength(1);
+    expect(merged[0]?.combinedToolResults?.[0]?.messageId).toBe('tool-live-1-stdout');
   });
 });

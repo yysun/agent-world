@@ -13,6 +13,7 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-03-15: Merged live shell stdout rows keyed as `toolUseId-stdout` into their calling-tool request cards so streaming tool output no longer renders as a duplicate transcript row.
  * - 2026-03-13: Keep completed assistant reasoning in a separate collapsed panel so reasoning stays available after stream completion without expanding the whole card by default.
  * - 2026-03-13: Removed chat-era left offsets from non-chat message cards so hidden avatars do not leave unused gutter space in Electron world views.
  * - 2026-03-13: Preserved narrated assistant tool-call status metadata before `showToolMessages=false` filtering so hidden tool rows do not remove success/failure border state from assistant cards.
@@ -181,6 +182,38 @@ function collectToolCallIds(message) {
     .filter(Boolean);
 }
 
+function normalizeToolResultLookupKey(value) {
+  const normalizedValue = String(value || '').trim();
+  if (!normalizedValue) {
+    return '';
+  }
+
+  if (normalizedValue.endsWith('-stdout')) {
+    return normalizedValue.slice(0, -'-stdout'.length);
+  }
+
+  return normalizedValue;
+}
+
+function collectToolResultLookupKeys(message) {
+  const lookupKeys = new Set<string>();
+  const toolCallId = String(message?.tool_call_id || message?.toolCallId || '').trim();
+  const messageId = String(message?.messageId || '').trim();
+
+  for (const candidateKey of [toolCallId, messageId]) {
+    if (!candidateKey) {
+      continue;
+    }
+    lookupKeys.add(candidateKey);
+    const normalizedKey = normalizeToolResultLookupKey(candidateKey);
+    if (normalizedKey) {
+      lookupKeys.add(normalizedKey);
+    }
+  }
+
+  return Array.from(lookupKeys);
+}
+
 function isToolRequestMessage(message) {
   if (isNarratedAssistantToolCallMessage(message)) {
     return false;
@@ -342,6 +375,7 @@ export function buildCombinedRenderableMessages(messages) {
     if (requestedCallIds.length === 0) {
       return [];
     }
+    const requestedCallIdSet = new Set(requestedCallIds);
 
     const requestMessageId = String(message?.messageId || '').trim();
     const linkedResults: Array<any> = [];
@@ -353,9 +387,9 @@ export function buildCombinedRenderableMessages(messages) {
         continue;
       }
 
-      const completionKey = String(candidate?.tool_call_id || candidate?.messageId || '').trim();
       const replyToMessageId = String(candidate?.replyToMessageId || '').trim();
-      const isLinkedByCallId = completionKey && requestedCallIds.includes(completionKey);
+      const candidateLookupKeys = collectToolResultLookupKeys(candidate);
+      const isLinkedByCallId = candidateLookupKeys.some((lookupKey) => requestedCallIdSet.has(lookupKey));
       const isLinkedByReply = requestMessageId && replyToMessageId === requestMessageId;
       if (!isLinkedByCallId && !isLinkedByReply) {
         continue;
@@ -380,13 +414,15 @@ export function buildCombinedRenderableMessages(messages) {
     if (role !== 'tool') {
       continue;
     }
-    const completionKey = String(message?.tool_call_id || message?.messageId || '').trim();
-    if (!completionKey) {
+    const completionKeys = collectToolResultLookupKeys(message);
+    if (completionKeys.length === 0) {
       continue;
     }
-    const existing = toolResultsByKey.get(completionKey) || [];
-    existing.push(message);
-    toolResultsByKey.set(completionKey, existing);
+    for (const completionKey of completionKeys) {
+      const existing = toolResultsByKey.get(completionKey) || [];
+      existing.push(message);
+      toolResultsByKey.set(completionKey, existing);
+    }
   }
 
   const consumedToolResultIds = new Set<string>();
