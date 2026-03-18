@@ -15,6 +15,7 @@
  * - Avoids network/process side effects while preserving runtime code paths.
  *
  * Recent changes:
+ * - 2026-03-17: Added remote MCP header validation, transport propagation, and registry-isolation coverage.
  * - 2026-03-05: Added deterministic MCP tool-discovery timeout coverage for hanging `listTools()` calls.
  * - 2026-03-05: Added MCP execution reconnect-retry coverage for chat-scoped retry status emissions and retry-exhaustion error mapping.
  */
@@ -285,28 +286,110 @@ describe('mcp-server-registry behavior', () => {
 
     const parsedLegacy = parseServersFromConfig({
       mcpServers: {
-        remote: { type: 'http', url: 'https://example.com/mcp' },
+        remote: {
+          type: 'http',
+          url: 'https://example.com/mcp',
+          headers: { Authorization: 'Bearer token' },
+        },
       },
     });
     expect(parsedLegacy[0]).toMatchObject({
       name: 'remote',
       transport: 'streamable-http',
       url: 'https://example.com/mcp',
+      headers: { Authorization: 'Bearer token' },
     });
 
     expect(
       validateMCPConfig({
         servers: {
           local: { command: 'node', args: ['server.js'] },
-          remote: { transport: 'sse', url: 'https://example.com/sse' },
+          remote: {
+            transport: 'sse',
+            url: 'https://example.com/sse',
+            headers: { 'X-Goog-Api-Key': 'secret-key' },
+          },
         },
       })
     ).toBe(true);
     expect(validateMCPConfig({ servers: { bad: { transport: 'invalid', command: 'x' } } })).toBe(
       false
     );
+    expect(
+      validateMCPConfig({
+        servers: {
+          badHeaders: { transport: 'streamable-http', url: 'https://example.com/mcp', headers: [] },
+        },
+      })
+    ).toBe(false);
+    expect(
+      validateMCPConfig({
+        servers: {
+          badHeaderValue: {
+            transport: 'streamable-http',
+            url: 'https://example.com/mcp',
+            headers: { Authorization: 123 },
+          },
+        },
+      })
+    ).toBe(false);
+    expect(
+      validateMCPConfig({
+        servers: {
+          emptyHeaderName: {
+            transport: 'streamable-http',
+            url: 'https://example.com/mcp',
+            headers: { '   ': 'value' },
+          },
+        },
+      })
+    ).toBe(false);
     expect(parseMCPConfig('{"servers":{"a":{"command":"node"}}}')).not.toBeNull();
+    expect(
+      parseMCPConfig(
+        '{"mcpServers":{"stitch":{"url":"https://stitch.googleapis.com/mcp","headers":{"X-Goog-Api-Key":"key"}}}}'
+      )
+    ).toEqual({
+      mcpServers: {
+        stitch: {
+          url: 'https://stitch.googleapis.com/mcp',
+          headers: { 'X-Goog-Api-Key': 'key' },
+        },
+      },
+    });
     expect(parseMCPConfig('{bad-json')).toBeNull();
+  });
+
+  it('passes configured headers into remote transport connections and isolates same-url servers by header set', async () => {
+    const firstId = await registerMCPServer(
+      {
+        name: 'stitch',
+        transport: 'streamable-http',
+        url: 'https://stitch.googleapis.com/mcp',
+        headers: { 'X-Goog-Api-Key': 'key-a' },
+      },
+      'world-a'
+    );
+
+    const secondId = await registerMCPServer(
+      {
+        name: 'stitch',
+        transport: 'streamable-http',
+        url: 'https://stitch.googleapis.com/mcp',
+        headers: { 'X-Goog-Api-Key': 'key-b' },
+      },
+      'world-b'
+    );
+
+    expect(firstId).not.toBe(secondId);
+    expect(listMCPServers()).toHaveLength(2);
+    expect(mockClientConnect).toHaveBeenCalledTimes(2);
+
+    const firstTransport = mockClientConnect.mock.calls[0]?.[0];
+    const secondTransport = mockClientConnect.mock.calls[1]?.[0];
+
+    expect(firstTransport?.options?.requestInit?.headers).toEqual({ 'X-Goog-Api-Key': 'key-a' });
+    expect(secondTransport?.options?.requestInit?.headers).toEqual({ 'X-Goog-Api-Key': 'key-b' });
   });
 
   it('times out hanging MCP tool discovery with deterministic error', async () => {
@@ -561,7 +644,7 @@ describe('mcp-server-registry behavior', () => {
       const pending = aiTools.demo_lookup.execute({ query: 'hello' });
       const observedError = pending.then(
         () => null,
-        (error) => error as Error & { code?: string; category?: string },
+        (error: unknown) => error as Error & { code?: string; category?: string },
       );
       await vi.advanceTimersByTimeAsync(1000);
       const retryExhaustedError = await observedError;

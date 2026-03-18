@@ -12,6 +12,9 @@
  *
  * Notes:
  * - Uses mocked fs and mocked agent-storage helpers only (no real filesystem/database access).
+ *
+ * Recent changes:
+ * - 2026-03-17: Added MCP header-bearing config round-trip coverage.
  */
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -260,6 +263,43 @@ describe('world-storage behavior', () => {
     fsState.files.delete('/data/world-1/mcp.json');
     const fallback = await worldStorage.loadWorld('/data', 'world-1');
     expect(fallback?.mcpConfig).toBeNull();
+  });
+
+  it('preserves header-bearing remote MCP config across save and load', async () => {
+    const mcpConfig = JSON.stringify({
+      mcpServers: {
+        stitch: {
+          url: 'https://stitch.googleapis.com/mcp',
+          headers: {
+            'X-Goog-Api-Key': 'test-api-key',
+            Authorization: 'Bearer token-value',
+          },
+        },
+      },
+    });
+
+    await worldStorage.saveWorld('/data', {
+      id: 'world-headers',
+      name: 'World Headers',
+      mcpConfig,
+      createdAt: new Date('2026-03-17T00:00:00.000Z'),
+      lastUpdated: new Date('2026-03-17T00:00:00.000Z'),
+    } as any);
+
+    expect(JSON.parse(fsState.files.get('/data/world-headers/mcp.json')!)).toEqual({
+      mcpServers: {
+        stitch: {
+          url: 'https://stitch.googleapis.com/mcp',
+          headers: {
+            'X-Goog-Api-Key': 'test-api-key',
+            Authorization: 'Bearer token-value',
+          },
+        },
+      },
+    });
+
+    const loaded = await worldStorage.loadWorld('/data', 'world-headers');
+    expect(loaded?.mcpConfig).toBe(mcpConfig);
   });
 
   it('supports worldExists, listWorlds sorting, and deleteWorld cascade removal', async () => {

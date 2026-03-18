@@ -12,6 +12,7 @@
  * - LOG_MCP=debug - Enable all MCP logs
  *
  * Recent Changes:
+ * - 2026-03-17: Tightened remote MCP header validation so world config JSON accepts only string-to-string HTTP header maps.
  * - 2026-03-06: Removed `world.currentChatId` fallback from retry-status routing; MCP retry status emits only when `context.chatId` is explicit.
  * 
  * What you'll see:
@@ -426,6 +427,20 @@ function isMCPErrorResponse(response: any): Error | null {
   }
 
   return null;
+}
+
+function isValidHeaderMap(headers: unknown): headers is Record<string, string> {
+  if (headers === undefined) {
+    return true;
+  }
+
+  if (!headers || typeof headers !== 'object' || Array.isArray(headers)) {
+    return false;
+  }
+
+  return Object.entries(headers).every(([headerName, headerValue]) => {
+    return headerName.trim().length > 0 && typeof headerValue === 'string';
+  });
 }
 
 function isConnectionLevelError(error: unknown): boolean {
@@ -1613,15 +1628,16 @@ export function validateMCPConfig(config: any): config is MCPConfig {
     if (!config?.servers && !config?.mcpServers) return false;
 
     const serverDefs = config.servers || config.mcpServers;
-    if (typeof serverDefs !== 'object') return false;
+    if (!serverDefs || typeof serverDefs !== 'object' || Array.isArray(serverDefs)) return false;
 
     for (const [serverName, server] of Object.entries(serverDefs)) {
       if (!serverName || !server || typeof server !== 'object') return false;
 
       const serverConfig = server as any;
+      const hasUrl = typeof serverConfig.url === 'string' && serverConfig.url.length > 0;
       const transport = serverConfig.transport ||
         (serverConfig.type === 'http' ? 'streamable-http' : serverConfig.type) ||
-        'stdio';
+        (hasUrl ? 'streamable-http' : 'stdio');
 
       if (!['stdio', 'sse', 'streamable-http', 'http'].includes(transport)) return false;
 
@@ -1630,6 +1646,8 @@ export function validateMCPConfig(config: any): config is MCPConfig {
       } else {
         if (!serverConfig.url || typeof serverConfig.url !== 'string') return false;
       }
+
+      if (!isValidHeaderMap(serverConfig.headers)) return false;
     }
 
     return true;
