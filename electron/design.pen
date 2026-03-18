@@ -1,0 +1,1773 @@
+{
+  "version": "2.8",
+  "children": [
+    {
+      "type": "frame",
+      "id": "adVl6",
+      "x": 40,
+      "y": 40,
+      "name": "Electron Renderer Components",
+      "width": 1760,
+      "height": 1980,
+      "fill": "$muted",
+      "cornerRadius": 24,
+      "layout": "none",
+      "children": [
+        {
+          "type": "frame",
+          "id": "1xmz6",
+          "x": 40,
+          "y": 40,
+          "name": "introBlock",
+          "width": 620,
+          "layout": "vertical",
+          "gap": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "WRscP",
+              "name": "introTitle",
+              "fill": "$foreground",
+              "content": "Electron Renderer Components",
+              "fontFamily": "Inter",
+              "fontSize": 28,
+              "fontWeight": "700"
+            },
+            {
+              "type": "text",
+              "id": "S70dN",
+              "name": "introSubtitle",
+              "fill": "$mutedForeground",
+              "textGrowth": "fixed-width",
+              "width": 620,
+              "content": "Reusable UI primitives and shell panels imported from electron/renderer/src/components.",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "zdxJv",
+          "x": 40,
+          "y": 120,
+          "name": "Status And Controls Section",
+          "opacity": 0.78,
+          "width": 940,
+          "height": 240,
+          "fill": "$background",
+          "cornerRadius": 20,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "layout": "none"
+        },
+        {
+          "type": "frame",
+          "id": "MNAiT",
+          "x": 40,
+          "y": 380,
+          "name": "Conversation Surfaces Section",
+          "opacity": 0.78,
+          "width": 720,
+          "height": 260,
+          "fill": "$background",
+          "cornerRadius": 20,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "layout": "none"
+        },
+        {
+          "type": "frame",
+          "id": "ZPbbX",
+          "x": 780,
+          "y": 380,
+          "name": "Panels And Input Section",
+          "opacity": 0.78,
+          "width": 900,
+          "height": 260,
+          "fill": "$background",
+          "cornerRadius": 20,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "layout": "none"
+        },
+        {
+          "type": "frame",
+          "id": "U2X8h",
+          "x": 40,
+          "y": 660,
+          "name": "Workspace Shells Section",
+          "opacity": 0.78,
+          "width": 1640,
+          "height": 720,
+          "fill": "$background",
+          "cornerRadius": 20,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "layout": "none"
+        },
+        {
+          "type": "frame",
+          "id": "VBTnJ",
+          "x": 40,
+          "y": 160,
+          "name": "ActivityPulse",
+          "reusable": true,
+          "fill": "$card",
+          "cornerRadius": "$radiusLg",
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "gap": 8,
+          "padding": [
+            10,
+            12
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "ellipse",
+              "id": "wm7tk",
+              "name": "activityDot",
+              "fill": "$success",
+              "width": 10,
+              "height": 10
+            },
+            {
+              "type": "text",
+              "id": "ssO5D",
+              "name": "activityLabel",
+              "fill": "$foreground",
+              "content": "Agent active",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "600"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "lpFih",
+          "x": 300,
+          "y": 160,
+          "name": "ThinkingIndicator",
+          "reusable": true,
+          "fill": "$card",
+          "cornerRadius": "$radiusLg",
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "gap": 8,
+          "padding": [
+            10,
+            14
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "yBk6R",
+              "name": "thinkingLabel",
+              "fill": "$mutedForeground",
+              "content": "Thinking",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "600"
+            },
+            {
+              "type": "ellipse",
+              "id": "nk6N7",
+              "name": "thinkingDot1",
+              "fill": "$ring",
+              "width": 6,
+              "height": 6
+            },
+            {
+              "type": "ellipse",
+              "id": "pS4tV",
+              "name": "thinkingDot2",
+              "fill": "$ring",
+              "width": 6,
+              "height": 6
+            },
+            {
+              "type": "ellipse",
+              "id": "2FITI",
+              "name": "thinkingDot3",
+              "fill": "$ring",
+              "width": 6,
+              "height": 6
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "eZw6s",
+          "x": 560,
+          "y": 152,
+          "name": "SettingsSwitch",
+          "reusable": true,
+          "fill": "$card",
+          "cornerRadius": "$radiusLg",
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "gap": 12,
+          "padding": [
+            8,
+            12
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "C6ERh",
+              "name": "settingsLabel",
+              "fill": "$foreground",
+              "content": "Show tool rows",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "P9QTy",
+              "name": "settingsTrack",
+              "width": 42,
+              "height": 24,
+              "fill": "$primary",
+              "cornerRadius": 999,
+              "layout": "none",
+              "children": [
+                {
+                  "type": "ellipse",
+                  "id": "Wvah9",
+                  "x": 22,
+                  "y": 4,
+                  "name": "settingsThumb",
+                  "fill": "$primaryForeground",
+                  "width": 16,
+                  "height": 16
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "bWOj0",
+          "x": 870,
+          "y": 152,
+          "name": "AgentBadge",
+          "reusable": true,
+          "width": 74,
+          "height": 44,
+          "layout": "none",
+          "children": [
+            {
+              "type": "ellipse",
+              "id": "JzR3t",
+              "x": 0,
+              "y": 0,
+              "name": "agentBadgeCircle",
+              "fill": "$primary",
+              "width": 44,
+              "height": 44
+            },
+            {
+              "type": "text",
+              "id": "q5lNk",
+              "x": 12,
+              "y": 13,
+              "name": "agentBadgeText",
+              "fill": "$primaryForeground",
+              "content": "A1",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "700"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "7uxUK",
+          "x": 40,
+          "y": 280,
+          "name": "AgentQueueDisplay",
+          "reusable": true,
+          "fill": "$card",
+          "cornerRadius": "$radiusLg",
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "gap": 10,
+          "padding": [
+            12,
+            14
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "id": "Kgk6W",
+              "type": "ref",
+              "ref": "bWOj0",
+              "name": "queueDisplayPrimary",
+              "x": 14,
+              "y": 12
+            },
+            {
+              "id": "i6aNi",
+              "type": "ref",
+              "ref": "bWOj0",
+              "name": "queueDisplaySecondary",
+              "x": 98,
+              "y": 12,
+              "descendants": {
+                "JzR3t": {
+                  "fill": "$muted"
+                },
+                "q5lNk": {
+                  "content": "A2",
+                  "fill": "$foreground"
+                }
+              }
+            },
+            {
+              "type": "text",
+              "id": "mQ6cJ",
+              "name": "queueDisplayLabel",
+              "fill": "$mutedForeground",
+              "content": "Queue x 3",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "600"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "7Kqzu",
+          "x": 360,
+          "y": 276,
+          "name": "QueueMessageItem",
+          "reusable": true,
+          "width": 440,
+          "fill": "$card",
+          "cornerRadius": "$radiusLg",
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "gap": 12,
+          "padding": 14,
+          "children": [
+            {
+              "id": "8iVCJ",
+              "type": "ref",
+              "ref": "bWOj0",
+              "name": "queueItemBadge",
+              "x": 14,
+              "y": 14,
+              "descendants": {
+                "JzR3t": {
+                  "fill": "$muted"
+                },
+                "q5lNk": {
+                  "content": "U",
+                  "fill": "$foreground"
+                }
+              }
+            },
+            {
+              "type": "frame",
+              "id": "V34So",
+              "name": "queueItemTextColumn",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 6,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "45Vt2",
+                  "name": "queueItemTitle",
+                  "fill": "$foreground",
+                  "textGrowth": "fixed-width",
+                  "width": 340,
+                  "content": "Refine the world prompt and reopen logs panel.",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "XVv6f",
+                  "name": "queueItemMeta",
+                  "fill": "$mutedForeground",
+                  "content": "queued • reasoned route",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "bWExB",
+          "x": 840,
+          "y": 276,
+          "name": "WorkingStatusBar",
+          "reusable": true,
+          "fill": "$card",
+          "cornerRadius": "$radiusLg",
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "gap": 14,
+          "padding": [
+            10,
+            14
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "id": "uYfHL",
+              "type": "ref",
+              "ref": "VBTnJ",
+              "name": "workingStatusPulse",
+              "width": "fit_content",
+              "x": 14,
+              "y": 10,
+              "descendants": {
+                "ssO5D": {
+                  "content": "claude-3.7-sonnet working"
+                }
+              }
+            },
+            {
+              "type": "frame",
+              "id": "lh6eS",
+              "name": "workingStatusTimer",
+              "fill": "$muted",
+              "cornerRadius": 999,
+              "padding": [
+                6,
+                10
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "vt77t",
+                  "name": "workingStatusTimerLabel",
+                  "fill": "$foreground",
+                  "content": "00:18",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "700"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "vVPLX",
+              "name": "workingStatusNote",
+              "fill": "$mutedForeground",
+              "content": "2 agents processed",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "hjcS7",
+          "x": 40,
+          "y": 420,
+          "name": "MessageCard",
+          "reusable": true,
+          "width": 700,
+          "fill": "$card",
+          "cornerRadius": 18,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "layout": "vertical",
+          "gap": 10,
+          "padding": 16,
+          "children": [
+            {
+              "type": "frame",
+              "id": "NHtpR",
+              "name": "messageCardHeader",
+              "width": "fill_container",
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "yEjNw",
+                  "name": "messageCardSender",
+                  "fill": "$foreground",
+                  "content": "assistant • Research Agent",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "y9ZKK",
+                  "name": "messageCardMeta",
+                  "fill": "$mutedForeground",
+                  "content": "tool activity",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "ScHRK",
+              "name": "messageCardBody",
+              "fill": "$foreground",
+              "textGrowth": "fixed-width",
+              "width": 668,
+              "content": "Found three relevant patterns in the current world config and staged a draft update for review.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "id": "EqhPR",
+              "type": "ref",
+              "ref": "lpFih",
+              "name": "messageCardStatus",
+              "x": 16,
+              "y": 75
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "BlMB6",
+          "x": 780,
+          "y": 420,
+          "name": "WorldInfoCard",
+          "reusable": true,
+          "width": 300,
+          "fill": "$card",
+          "cornerRadius": 18,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "layout": "vertical",
+          "gap": 12,
+          "padding": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "q5VRS",
+              "name": "worldInfoTitle",
+              "fill": "$foreground",
+              "content": "Research World",
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "700"
+            },
+            {
+              "type": "text",
+              "id": "RRI73",
+              "name": "worldInfoSummary",
+              "fill": "$mutedForeground",
+              "textGrowth": "fixed-width",
+              "width": 268,
+              "content": "heartbeat active • reasoning medium • tool permission ask",
+              "lineHeight": 1.4,
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "ebQxQ",
+              "name": "worldInfoStatsRow",
+              "width": "fill_container",
+              "gap": 10,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "zGaFx",
+                  "name": "worldInfoStatA",
+                  "width": "fill_container",
+                  "fill": "$muted",
+                  "cornerRadius": 14,
+                  "layout": "vertical",
+                  "gap": 4,
+                  "padding": 12,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "U7Q8b",
+                      "name": "worldInfoStatAValue",
+                      "fill": "$foreground",
+                      "content": "4",
+                      "fontFamily": "Inter",
+                      "fontSize": 20,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "1DZAr",
+                      "name": "worldInfoStatALabel",
+                      "fill": "$mutedForeground",
+                      "content": "agents",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Iw57u",
+                  "name": "worldInfoStatB",
+                  "width": "fill_container",
+                  "fill": "$muted",
+                  "cornerRadius": 14,
+                  "layout": "vertical",
+                  "gap": 4,
+                  "padding": 12,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "d7xQQ",
+                      "name": "worldInfoStatBValue",
+                      "fill": "$foreground",
+                      "content": "12",
+                      "fontFamily": "Inter",
+                      "fontSize": 20,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "7gO2N",
+                      "name": "worldInfoStatBLabel",
+                      "fill": "$mutedForeground",
+                      "content": "sessions",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "vAkZ6",
+              "name": "worldInfoActions",
+              "width": "fill_container",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "8Ezpg",
+                  "name": "worldInfoActionEdit",
+                  "width": "fill_container",
+                  "fill": "$primary",
+                  "cornerRadius": 12,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "justifyContent": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "dR4hw",
+                      "name": "worldInfoActionEditLabel",
+                      "fill": "$primaryForeground",
+                      "content": "Edit world",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "700"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "K5kdQ",
+                  "name": "worldInfoActionExport",
+                  "width": "fill_container",
+                  "fill": "$muted",
+                  "cornerRadius": 12,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "justifyContent": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "GHE7H",
+                      "name": "worldInfoActionExportLabel",
+                      "fill": "$foreground",
+                      "content": "Export",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "pJQ6u",
+          "x": 1120,
+          "y": 420,
+          "name": "ComposerBar",
+          "reusable": true,
+          "width": 560,
+          "fill": "$card",
+          "cornerRadius": 18,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "layout": "vertical",
+          "gap": 12,
+          "padding": 14,
+          "children": [
+            {
+              "type": "frame",
+              "id": "kI1S4",
+              "name": "composerInput",
+              "width": "fill_container",
+              "height": 84,
+              "fill": "$muted",
+              "cornerRadius": 14,
+              "layout": "vertical",
+              "padding": 14,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "DqSYv",
+                  "name": "composerHint",
+                  "fill": "$mutedForeground",
+                  "textGrowth": "fixed-width",
+                  "width": 500,
+                  "content": "Message the active world. Use @agent, /tool, or continue an approval flow.",
+                  "lineHeight": 1.45,
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "GD96u",
+              "name": "composerToolbar",
+              "width": "fill_container",
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "kwaC9",
+                  "name": "composerProjectPill",
+                  "fill": "$muted",
+                  "cornerRadius": 999,
+                  "padding": [
+                    8,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "OiZT0",
+                      "name": "composerProjectLabel",
+                      "fill": "$foreground",
+                      "content": "Project • agent-world",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "D2wyp",
+                  "name": "composerReasoningPill",
+                  "fill": "$muted",
+                  "cornerRadius": 999,
+                  "padding": [
+                    8,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Wf1Uc",
+                      "name": "composerReasoningLabel",
+                      "fill": "$foreground",
+                      "content": "Reasoning • medium",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "dLFsD",
+                  "name": "composerSendButton",
+                  "fill": "$primary",
+                  "cornerRadius": 999,
+                  "padding": [
+                    8,
+                    14
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "92i9s",
+                      "name": "composerSendLabel",
+                      "fill": "$primaryForeground",
+                      "content": "Send",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "700"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "38XII",
+          "x": 40,
+          "y": 700,
+          "name": "MainHeaderBar",
+          "reusable": true,
+          "width": 1640,
+          "fill": "$card",
+          "cornerRadius": 18,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "padding": [
+            14,
+            16
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "9dLKO",
+              "name": "headerTitle",
+              "fill": "$foreground",
+              "content": "Agent World • Research Workspace",
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "700"
+            },
+            {
+              "type": "frame",
+              "id": "1rTmQ",
+              "name": "headerAgents",
+              "gap": 10,
+              "alignItems": "center",
+              "children": [
+                {
+                  "id": "jYwMR",
+                  "type": "ref",
+                  "ref": "bWOj0",
+                  "name": "headerBadgeMain",
+                  "x": 0,
+                  "y": 0
+                },
+                {
+                  "id": "sGJlf",
+                  "type": "ref",
+                  "ref": "bWOj0",
+                  "name": "headerBadgeSecondary",
+                  "x": 84,
+                  "y": 0,
+                  "descendants": {
+                    "JzR3t": {
+                      "fill": "$muted"
+                    },
+                    "q5lNk": {
+                      "content": "A2",
+                      "fill": "$foreground"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Gto2W",
+              "name": "headerLogsButton",
+              "fill": "$muted",
+              "cornerRadius": 999,
+              "padding": [
+                8,
+                12
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "JwDb1",
+                  "name": "headerLogsLabel",
+                  "fill": "$foreground",
+                  "content": "Logs panel",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "600"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "m3tAZ",
+          "x": 40,
+          "y": 820,
+          "name": "LeftSidebarPanel",
+          "reusable": true,
+          "width": 300,
+          "fill": "$sidebar",
+          "cornerRadius": 20,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$sidebarBorder"
+          },
+          "layout": "vertical",
+          "gap": 14,
+          "padding": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "jhQcT",
+              "name": "sidebarBrand",
+              "fill": "$foreground",
+              "content": "Worlds",
+              "fontFamily": "Inter",
+              "fontSize": 20,
+              "fontWeight": "700"
+            },
+            {
+              "id": "0PzoJ",
+              "type": "ref",
+              "ref": "BlMB6",
+              "width": "fill_container",
+              "name": "sidebarInfo",
+              "x": 16,
+              "y": 54,
+              "descendants": {
+                "ebQxQ": {
+                  "width": "fill_container"
+                },
+                "zGaFx": {
+                  "width": "fill_container"
+                },
+                "Iw57u": {
+                  "width": "fill_container",
+                  "x": 123
+                },
+                "vAkZ6": {
+                  "width": "fill_container"
+                },
+                "8Ezpg": {
+                  "width": "fill_container"
+                },
+                "dR4hw": {
+                  "x": 25
+                },
+                "K5kdQ": {
+                  "width": "fill_container",
+                  "x": 122
+                },
+                "GHE7H": {
+                  "x": 36
+                }
+              }
+            },
+            {
+              "type": "frame",
+              "id": "zyzaK",
+              "name": "sidebarSessionA",
+              "width": "fill_container",
+              "fill": "$sidebarSelected",
+              "cornerRadius": 14,
+              "padding": [
+                12,
+                14
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "xE7hA",
+                  "name": "sidebarSessionALabel",
+                  "fill": "$foreground",
+                  "content": "Research thread",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "aGX5U",
+              "name": "sidebarSessionB",
+              "width": "fill_container",
+              "fill": "$card",
+              "cornerRadius": 14,
+              "padding": [
+                12,
+                14
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "2w73B",
+                  "name": "sidebarSessionBLabel",
+                  "fill": "$mutedForeground",
+                  "content": "Prompt editing",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "SRXzU",
+          "x": 380,
+          "y": 820,
+          "name": "MessageListPanel",
+          "reusable": true,
+          "width": 760,
+          "height": 520,
+          "fill": "$background",
+          "cornerRadius": 20,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "layout": "vertical",
+          "gap": 12,
+          "padding": 16,
+          "children": [
+            {
+              "id": "NXgSK",
+              "type": "ref",
+              "ref": "hjcS7",
+              "width": "fill_container",
+              "name": "messageListCardA",
+              "x": 16,
+              "y": 16,
+              "descendants": {
+                "NHtpR": {
+                  "width": "fill_container"
+                },
+                "y9ZKK": {
+                  "x": 630
+                }
+              }
+            },
+            {
+              "id": "j1yvG",
+              "type": "ref",
+              "ref": "hjcS7",
+              "width": "fill_container",
+              "name": "messageListCardB",
+              "height": "fit_content",
+              "x": 16,
+              "y": 155,
+              "descendants": {
+                "NHtpR": {
+                  "width": "fill_container"
+                },
+                "yEjNw": {
+                  "content": "user • Emily"
+                },
+                "y9ZKK": {
+                  "content": "draft queued",
+                  "x": 623
+                },
+                "ScHRK": {
+                  "content": "Can you compare the Electron and web composer affordances?"
+                },
+                "EqhPR": {
+                  "enabled": false
+                }
+              }
+            },
+            {
+              "id": "lDTSY",
+              "type": "ref",
+              "ref": "bWExB",
+              "name": "messageListStatus",
+              "x": 16,
+              "y": 248
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Yxjwl",
+          "x": 1180,
+          "y": 700,
+          "name": "MessageQueuePanel",
+          "reusable": true,
+          "width": 500,
+          "fill": "$card",
+          "cornerRadius": 18,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "layout": "vertical",
+          "gap": 10,
+          "padding": 12,
+          "children": [
+            {
+              "id": "1Ezyg",
+              "type": "ref",
+              "ref": "7Kqzu",
+              "width": "fill_container",
+              "name": "messageQueuePanelItem",
+              "x": 12,
+              "y": 12,
+              "descendants": {
+                "V34So": {
+                  "width": "fill_container"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "vMI0I",
+          "x": 1180,
+          "y": 820,
+          "name": "RightPanelShell",
+          "reusable": true,
+          "width": 320,
+          "height": 360,
+          "fill": "$card",
+          "cornerRadius": 20,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border"
+          },
+          "layout": "vertical",
+          "gap": 12,
+          "padding": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "johez",
+              "name": "rightPanelShellTitle",
+              "fill": "$foreground",
+              "content": "RightPanelShell",
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "700"
+            },
+            {
+              "id": "l0RV3",
+              "type": "ref",
+              "ref": "eZw6s",
+              "name": "rightPanelShellSwitch",
+              "x": 16,
+              "y": 50
+            },
+            {
+              "type": "frame",
+              "id": "QOisY",
+              "name": "rightPanelShellLogCard",
+              "width": "fill_container",
+              "fill": "$muted",
+              "cornerRadius": 16,
+              "layout": "vertical",
+              "gap": 8,
+              "padding": 14,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "35bYq",
+                  "name": "rightPanelShellLogTitle",
+                  "fill": "$foreground",
+                  "content": "Scoped logs",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "bAVbH",
+                  "name": "rightPanelShellLogText",
+                  "fill": "$mutedForeground",
+                  "textGrowth": "fixed-width",
+                  "width": 256,
+                  "content": "main: refreshWorldSubscription complete\nrenderer: chat scope rebound\nworld: heartbeat active",
+                  "lineHeight": 1.45,
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "vopmy",
+          "x": 64,
+          "y": 140,
+          "name": "statusSectionTitle",
+          "fill": "$foreground",
+          "content": "Status And Controls",
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "700"
+        },
+        {
+          "type": "text",
+          "id": "4h4s7",
+          "x": 64,
+          "y": 166,
+          "name": "statusSectionSubtitle",
+          "fill": "$mutedForeground",
+          "textGrowth": "fixed-width",
+          "width": 880,
+          "content": "ActivityPulse, ThinkingIndicator, SettingsSwitch, AgentBadge, AgentQueueDisplay, QueueMessageItem, and WorkingStatusBar.",
+          "lineHeight": 1.45,
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "rYuIx",
+          "x": 64,
+          "y": 400,
+          "name": "conversationSectionTitle",
+          "fill": "$foreground",
+          "content": "Conversation Surfaces",
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "700"
+        },
+        {
+          "type": "text",
+          "id": "WpePZ",
+          "x": 64,
+          "y": 426,
+          "name": "conversationSectionSubtitle",
+          "fill": "$mutedForeground",
+          "textGrowth": "fixed-width",
+          "width": 660,
+          "content": "Transcript card anatomy with message body, metadata, and inline status indicators.",
+          "lineHeight": 1.45,
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "CkOko",
+          "x": 804,
+          "y": 400,
+          "name": "panelSectionTitle",
+          "fill": "$foreground",
+          "content": "Panels And Input",
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "700"
+        },
+        {
+          "type": "text",
+          "id": "7IR7d",
+          "x": 804,
+          "y": 426,
+          "name": "panelSectionSubtitle",
+          "fill": "$mutedForeground",
+          "textGrowth": "fixed-width",
+          "width": 850,
+          "content": "WorldInfoCard and ComposerBar patterns for sidebar summaries, configuration controls, and chat entry.",
+          "lineHeight": 1.45,
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "p7d8T",
+          "x": 64,
+          "y": 680,
+          "name": "shellSectionTitle",
+          "fill": "$foreground",
+          "content": "Workspace Shells",
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "700"
+        },
+        {
+          "type": "text",
+          "id": "BQjuB",
+          "x": 64,
+          "y": 706,
+          "name": "shellSectionSubtitle",
+          "fill": "$mutedForeground",
+          "textGrowth": "fixed-width",
+          "width": 1560,
+          "content": "MainHeaderBar, LeftSidebarPanel, MessageListPanel, MessageQueuePanel, and RightPanelShell arranged as higher-order layout building blocks.",
+          "lineHeight": 1.45,
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "d4Cpo",
+      "x": 1840,
+      "y": 40,
+      "name": "Electron Desktop Workspace Preview",
+      "theme": {
+        "mode": "light"
+      },
+      "width": 1440,
+      "height": 980,
+      "fill": "$muted",
+      "cornerRadius": 28,
+      "layout": "vertical",
+      "gap": 16,
+      "padding": 20,
+      "children": [
+        {
+          "id": "GH2fU",
+          "type": "ref",
+          "ref": "38XII",
+          "width": "fill_container",
+          "name": "desktopHeader",
+          "x": 20,
+          "y": 20,
+          "descendants": {
+            "1rTmQ": {
+              "x": 734
+            },
+            "Gto2W": {
+              "x": 1296
+            }
+          }
+        },
+        {
+          "type": "frame",
+          "id": "SUfRI",
+          "name": "desktopBody",
+          "width": "fill_container",
+          "height": "fill_container",
+          "gap": 16,
+          "children": [
+            {
+              "id": "pG1m6",
+              "type": "ref",
+              "ref": "m3tAZ",
+              "height": "fill_container",
+              "name": "desktopSidebar",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "type": "frame",
+              "id": "PJjiI",
+              "name": "desktopMain",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical",
+              "gap": 16,
+              "children": [
+                {
+                  "id": "eFmUB",
+                  "type": "ref",
+                  "ref": "SRXzU",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "name": "desktopMessages",
+                  "x": 0,
+                  "y": 0,
+                  "descendants": {
+                    "NXgSK": {
+                      "width": "fill_container"
+                    },
+                    "NXgSK/NHtpR": {
+                      "width": "fill_container"
+                    },
+                    "NXgSK/y9ZKK": {
+                      "x": 618
+                    },
+                    "j1yvG": {
+                      "width": "fill_container"
+                    },
+                    "j1yvG/NHtpR": {
+                      "width": "fill_container"
+                    },
+                    "j1yvG/y9ZKK": {
+                      "x": 611
+                    }
+                  }
+                },
+                {
+                  "id": "DK3hQ",
+                  "type": "ref",
+                  "ref": "pJQ6u",
+                  "width": "fill_container",
+                  "name": "desktopComposer",
+                  "x": 0,
+                  "y": 697,
+                  "descendants": {
+                    "kI1S4": {
+                      "width": "fill_container"
+                    },
+                    "GD96u": {
+                      "width": "fill_container"
+                    },
+                    "D2wyp": {
+                      "x": 333
+                    },
+                    "dLFsD": {
+                      "x": 661
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "yWpY7",
+              "type": "ref",
+              "ref": "vMI0I",
+              "height": "fill_container",
+              "name": "desktopRightPanelRef"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "themes": {
+    "mode": [
+      "light",
+      "dark"
+    ]
+  },
+  "variables": {
+    "background": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#FFFFFF",
+          "theme": {
+            "mode": "light"
+          }
+        },
+        {
+          "value": "#171717",
+          "theme": {
+            "mode": "dark"
+          }
+        }
+      ]
+    },
+    "border": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#E5E5E5",
+          "theme": {
+            "mode": "light"
+          }
+        },
+        {
+          "value": "#404040",
+          "theme": {
+            "mode": "dark"
+          }
+        }
+      ]
+    },
+    "card": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#FFFFFF",
+          "theme": {
+            "mode": "light"
+          }
+        },
+        {
+          "value": "#262626",
+          "theme": {
+            "mode": "dark"
+          }
+        }
+      ]
+    },
+    "destructive": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#DC2626",
+          "theme": {
+            "mode": "light"
+          }
+        },
+        {
+          "value": "#F87171",
+          "theme": {
+            "mode": "dark"
+          }
+        }
+      ]
+    },
+    "foreground": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#171717",
+          "theme": {
+            "mode": "light"
+          }
+        },
+        {
+          "value": "#FAFAFA",
+          "theme": {
+            "mode": "dark"
+          }
+        }
+      ]
+    },
+    "muted": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#F5F5F5",
+          "theme": {
+            "mode": "light"
+          }
+        },
+        {
+          "value": "#404040",
+          "theme": {
+            "mode": "dark"
+          }
+        }
+      ]
+    },
+    "mutedForeground": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#737373",
+          "theme": {
+            "mode": "light"
+          }
+        },
+        {
+          "value": "#A3A3A3",
+          "theme": {
+            "mode": "dark"
+          }
+        }
+      ]
+    },
+    "primary": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#171717",
+          "theme": {
+            "mode": "light"
+          }
+        },
+        {
+          "value": "#FAFAFA",
+          "theme": {
+            "mode": "dark"
+          }
+        }
+      ]
+    },
+    "primaryForeground": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#FAFAFA",
+          "theme": {
+            "mode": "light"
+          }
+        },
+        {
+          "value": "#171717",
+          "theme": {
+            "mode": "dark"
+          }
+        }
+      ]
+    },
+    "radiusLg": {
+      "type": "number",
+      "value": 14
+    },
+    "radiusMd": {
+      "type": "number",
+      "value": 10
+    },
+    "radiusSm": {
+      "type": "number",
+      "value": 8
+    },
+    "ring": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#A3A3A3",
+          "theme": {
+            "mode": "light"
+          }
+        },
+        {
+          "value": "#737373",
+          "theme": {
+            "mode": "dark"
+          }
+        }
+      ]
+    },
+    "sidebar": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#F5F5F5",
+          "theme": {
+            "mode": "light"
+          }
+        },
+        {
+          "value": "#262626",
+          "theme": {
+            "mode": "dark"
+          }
+        }
+      ]
+    },
+    "sidebarBorder": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#E5E5E5",
+          "theme": {
+            "mode": "light"
+          }
+        },
+        {
+          "value": "#404040",
+          "theme": {
+            "mode": "dark"
+          }
+        }
+      ]
+    },
+    "sidebarSelected": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#EAEAEA",
+          "theme": {
+            "mode": "light"
+          }
+        },
+        {
+          "value": "#313131",
+          "theme": {
+            "mode": "dark"
+          }
+        }
+      ]
+    },
+    "space1": {
+      "type": "number",
+      "value": 4
+    },
+    "space2": {
+      "type": "number",
+      "value": 8
+    },
+    "space3": {
+      "type": "number",
+      "value": 12
+    },
+    "space4": {
+      "type": "number",
+      "value": 16
+    },
+    "space5": {
+      "type": "number",
+      "value": 20
+    },
+    "success": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#10B981",
+          "theme": {
+            "mode": "light"
+          }
+        },
+        {
+          "value": "#34D399",
+          "theme": {
+            "mode": "dark"
+          }
+        }
+      ]
+    }
+  }
+}

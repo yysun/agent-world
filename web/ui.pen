@@ -1,0 +1,1752 @@
+{
+  "version": "2.8",
+  "children": [
+    {
+      "type": "frame",
+      "id": "2bWfX",
+      "x": 120,
+      "y": 3800,
+      "name": "Web Pattern Primitives",
+      "width": 1440,
+      "height": 1720,
+      "fill": "$bg-secondary",
+      "layout": "vertical",
+      "gap": 22,
+      "padding": 28,
+      "children": [
+        {
+          "type": "frame",
+          "id": "8b0KU",
+          "name": "componentsHero",
+          "width": "fill_container",
+          "fill": "$bg-primary",
+          "cornerRadius": 24,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border-primary"
+          },
+          "layout": "vertical",
+          "gap": 10,
+          "padding": 28,
+          "children": [
+            {
+              "type": "text",
+              "id": "QLjxX",
+              "fill": "$text-primary",
+              "content": "Web Pattern Primitives",
+              "fontFamily": "Short Stack",
+              "fontSize": 30,
+              "fontWeight": "700"
+            },
+            {
+              "type": "text",
+              "id": "vNtDA",
+              "fill": "$text-secondary",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Browser-faithful primitives derived from the rendered stack: playful Doodle home chrome, fieldset framing, and the selectively cleaned world composer.",
+              "lineHeight": 1.5,
+              "fontFamily": "Short Stack",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "a0sLl",
+          "name": "buttonSection",
+          "width": "fill_container",
+          "fill": "$bg-primary",
+          "cornerRadius": 20,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border-primary"
+          },
+          "layout": "vertical",
+          "gap": 18,
+          "padding": 24,
+          "children": [
+            {
+              "type": "text",
+              "id": "KwPp2",
+              "fill": "$text-primary",
+              "content": "Carousel Card",
+              "fontFamily": "Short Stack",
+              "fontSize": 24,
+              "fontWeight": "700"
+            },
+            {
+              "type": "frame",
+              "id": "pnWAn",
+              "name": "carouselShowcase",
+              "width": "fill_container",
+              "gap": 18,
+              "alignItems": "center",
+              "children": [
+                {
+                  "id": "zBzEv",
+                  "type": "ref",
+                  "ref": "46KmY",
+                  "x": 0,
+                  "y": 0
+                },
+                {
+                  "id": "yi6IR",
+                  "type": "ref",
+                  "ref": "Ham4o",
+                  "name": "arrowInstance",
+                  "x": 358,
+                  "y": 56
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "V7abq",
+              "fill": "$text-secondary",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "The home pattern is not a neutral card. It is a doodle-style button surface with handwritten type, heavy emphasis on the centered card, and simple slate accents.",
+              "lineHeight": 1.55,
+              "fontFamily": "Short Stack",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "xVp8y",
+              "fill": "$text-secondary",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Arrow buttons are circular doodle buttons with oversized handwritten glyphs. They are decorative, but still part of the same home-screen chrome as the carousel cards.",
+              "lineHeight": 1.55,
+              "fontFamily": "Short Stack",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "YJQmP",
+          "name": "fieldSection",
+          "width": "fill_container",
+          "fill": "$bg-primary",
+          "cornerRadius": 20,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border-primary"
+          },
+          "layout": "vertical",
+          "gap": 18,
+          "padding": 24,
+          "children": [
+            {
+              "type": "text",
+              "id": "U5FMT",
+              "fill": "$text-primary",
+              "content": "World Composer Shell",
+              "fontFamily": "Short Stack",
+              "fontSize": 24,
+              "fontWeight": "700"
+            },
+            {
+              "id": "ysJik",
+              "type": "ref",
+              "ref": "oxLg1",
+              "width": "fill_container",
+              "x": 24,
+              "y": 72,
+              "descendants": {
+                "AB8ic": {
+                  "width": "fill_container"
+                },
+                "F0MtF": {
+                  "x": 1262
+                }
+              }
+            },
+            {
+              "type": "text",
+              "id": "3XLzz",
+              "fill": "$text-secondary",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "This shell intentionally breaks from Doodle border-image chrome. The textarea reads clean and modern, while project/select controls are still coerced back into Short Stack within the doodle page context.",
+              "lineHeight": 1.55,
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "id": "sQe2h",
+              "type": "ref",
+              "ref": "4l3T7",
+              "width": "fill_container",
+              "x": 24,
+              "y": 258,
+              "descendants": {
+                "otxhP": {
+                  "width": "fill_container"
+                },
+                "xzggZ": {
+                  "x": 1038
+                }
+              }
+            },
+            {
+              "type": "text",
+              "id": "kPsDt",
+              "fill": "$text-secondary",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Search keeps the doodle handwriting and framed input treatment. Tool-permission selects also keep the doodle tone, even when composer controls elsewhere are partially cleaned up.",
+              "lineHeight": 1.55,
+              "fontFamily": "Short Stack",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "3Gmsd",
+          "name": "surfaceSection",
+          "width": "fill_container",
+          "fill": "$bg-primary",
+          "cornerRadius": 20,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border-primary"
+          },
+          "layout": "vertical",
+          "gap": 18,
+          "padding": 24,
+          "children": [
+            {
+              "type": "text",
+              "id": "IpO53",
+              "fill": "$text-primary",
+              "content": "Doodle Fieldset",
+              "fontFamily": "Short Stack",
+              "fontSize": 24,
+              "fontWeight": "700"
+            },
+            {
+              "id": "OkpBc",
+              "type": "ref",
+              "ref": "9UFHJ",
+              "width": "fill_container",
+              "height": "fit_content",
+              "x": 24,
+              "y": 72,
+              "descendants": {
+                "eU3YO": {
+                  "width": "fill_container"
+                },
+                "KfK8I": {
+                  "width": "fill_container",
+                  "y": 97
+                },
+                "Dzrhp": {
+                  "width": "fill_container"
+                },
+                "Vj0Ag": {
+                  "width": "fill_container"
+                }
+              }
+            },
+            {
+              "type": "text",
+              "id": "rSSW0",
+              "fill": "$text-secondary",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Fieldsets remain the page-level organizing device around chat and sidebar content. Message surfaces and tool rows live inside that larger doodle frame.",
+              "lineHeight": 1.55,
+              "fontFamily": "Short Stack",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "id": "JhOcf",
+              "type": "ref",
+              "ref": "hsj59",
+              "width": "fill_container",
+              "x": 24,
+              "y": 328,
+              "descendants": {
+                "xjsGw": {
+                  "width": "fill_container"
+                },
+                "z4vuE": {
+                  "width": "fill_container"
+                },
+                "woGVZ": {
+                  "width": "fill_container"
+                },
+                "MGJL0": {
+                  "x": 1244
+                }
+              }
+            },
+            {
+              "type": "text",
+              "id": "ktrO7",
+              "fill": "$text-secondary",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Status rows flatten tool activity into a concise fieldset-contained pattern: user message first, then a running/openable tool line with a live-state dot and lightweight action text.",
+              "lineHeight": 1.55,
+              "fontFamily": "Short Stack",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "AIRnj",
+      "x": 1680,
+      "y": 3800,
+      "name": "Rendered Web Style",
+      "width": 1440,
+      "height": 2140,
+      "fill": "$bg-secondary",
+      "layout": "vertical",
+      "gap": 22,
+      "padding": 28,
+      "children": [
+        {
+          "type": "frame",
+          "id": "81EsE",
+          "name": "renderedHero",
+          "width": "fill_container",
+          "fill": "$bg-primary",
+          "cornerRadius": 24,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border-primary"
+          },
+          "layout": "vertical",
+          "gap": 10,
+          "padding": 28,
+          "children": [
+            {
+              "type": "text",
+              "id": "tu69j",
+              "fill": "$text-primary",
+              "content": "Rendered Web Style",
+              "fontFamily": "Short Stack",
+              "fontSize": 32,
+              "fontWeight": "700"
+            },
+            {
+              "type": "text",
+              "id": "OZtKU",
+              "fill": "$text-secondary",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "This screen tracks the actual browser result. Tailwind provides structure and spacing, doodle.css adds the handwritten body scale and control chrome, and styles.css selectively cleans the composer and dashboard controls.",
+              "lineHeight": 1.5,
+              "fontFamily": "Short Stack",
+              "fontSize": 17,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "mXQGt",
+          "name": "stackSection",
+          "width": "fill_container",
+          "fill": "$bg-primary",
+          "cornerRadius": 20,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border-primary"
+          },
+          "layout": "vertical",
+          "gap": 16,
+          "padding": 24,
+          "children": [
+            {
+              "type": "text",
+              "id": "BAggX",
+              "fill": "$text-primary",
+              "content": "Runtime Style Layers",
+              "fontFamily": "Short Stack",
+              "fontSize": 22,
+              "fontWeight": "700"
+            },
+            {
+              "type": "frame",
+              "id": "kTtHf",
+              "name": "stackRow",
+              "width": "fill_container",
+              "gap": 14,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "o8204",
+                  "name": "tailwindLayer",
+                  "width": "fill_container",
+                  "fill": "$bg-secondary",
+                  "cornerRadius": 16,
+                  "layout": "vertical",
+                  "gap": 8,
+                  "padding": 16,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "txn86",
+                      "fill": "$text-primary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "1. Tailwind\nLayout, spacing, breakpoints, rounded shells, and utility-scale tokens.",
+                      "lineHeight": 1.45,
+                      "fontFamily": "Short Stack",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "RbXKR",
+                  "name": "doodleLayer",
+                  "width": "fill_container",
+                  "fill": "$bg-accent",
+                  "cornerRadius": 16,
+                  "layout": "vertical",
+                  "gap": 8,
+                  "padding": 16,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "eqMIA",
+                      "fill": "$text-primary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "2. doodle.css\nShort Stack body type, 2em page scale, hand-drawn button/select chrome, and fieldset framing.",
+                      "lineHeight": 1.45,
+                      "fontFamily": "Short Stack",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "H0cKy",
+                  "name": "overrideLayer",
+                  "width": "fill_container",
+                  "fill": "$color-white",
+                  "cornerRadius": 16,
+                  "stroke": {
+                    "thickness": 1,
+                    "fill": "$border-secondary"
+                  },
+                  "layout": "vertical",
+                  "gap": 8,
+                  "padding": 16,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "j3L0x",
+                      "fill": "$text-primary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "3. styles.css overrides\nThe world composer escapes doodle borders: white card, neutral icons, readable selects, tighter control sizing.",
+                      "lineHeight": 1.45,
+                      "fontFamily": "Short Stack",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "H7GZ9",
+          "name": "homeSection",
+          "width": "fill_container",
+          "fill": "$bg-primary",
+          "cornerRadius": 20,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border-primary"
+          },
+          "layout": "vertical",
+          "gap": 18,
+          "padding": 24,
+          "children": [
+            {
+              "type": "text",
+              "id": "4bNSz",
+              "fill": "$text-primary",
+              "content": "Home Screen Cues",
+              "fontFamily": "Short Stack",
+              "fontSize": 22,
+              "fontWeight": "700"
+            },
+            {
+              "type": "frame",
+              "id": "74zhP",
+              "name": "homeRow",
+              "width": "fill_container",
+              "gap": 16,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "PyfCG",
+                  "name": "centerWorld",
+                  "width": "fill_container",
+                  "height": 180,
+                  "fill": "$accent-primary",
+                  "cornerRadius": 18,
+                  "stroke": {
+                    "thickness": 2,
+                    "fill": "$accent-secondary"
+                  },
+                  "layout": "vertical",
+                  "gap": 10,
+                  "padding": 18,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "9O20d",
+                      "fill": "$color-white",
+                      "content": "CENTER WORLD",
+                      "fontFamily": "Short Stack",
+                      "fontSize": 26,
+                      "fontWeight": "700"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "5Z8l8",
+                  "name": "sideWorld",
+                  "width": "fill_container",
+                  "height": 152,
+                  "fill": "$bg-secondary",
+                  "cornerRadius": 18,
+                  "stroke": {
+                    "thickness": 2,
+                    "fill": "$border-secondary"
+                  },
+                  "layout": "vertical",
+                  "gap": 10,
+                  "padding": 18,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "OW5w3",
+                      "fill": "$text-secondary",
+                      "content": "SIDE WORLD",
+                      "fontFamily": "Short Stack",
+                      "fontSize": 22,
+                      "fontWeight": "700"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "8fo1B",
+              "name": "homeSearch",
+              "width": "fill_container",
+              "height": 64,
+              "fill": "$color-white",
+              "cornerRadius": 16,
+              "stroke": {
+                "thickness": 2,
+                "fill": "$border-primary"
+              },
+              "padding": [
+                0,
+                18
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "JoxmL",
+                  "fill": "$text-tertiary",
+                  "content": "Search worlds...",
+                  "fontFamily": "Short Stack",
+                  "fontSize": 18,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "5yybL",
+              "fill": "$text-secondary",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "The home page is intentionally oversized and playful: handwritten type, carousel cards, doodle-framed controls, and simple slate accents instead of dense product chrome.",
+              "lineHeight": 1.55,
+              "fontFamily": "Short Stack",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "xBoIe",
+          "name": "worldSection",
+          "width": "fill_container",
+          "fill": "$bg-primary",
+          "cornerRadius": 20,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border-primary"
+          },
+          "layout": "vertical",
+          "gap": 18,
+          "padding": 24,
+          "children": [
+            {
+              "type": "text",
+              "id": "e72XX",
+              "fill": "$text-primary",
+              "content": "World Screen Cues",
+              "fontFamily": "Short Stack",
+              "fontSize": 22,
+              "fontWeight": "700"
+            },
+            {
+              "type": "frame",
+              "id": "2uPgk",
+              "name": "fieldsetShell",
+              "width": "fill_container",
+              "fill": "$bg-secondary",
+              "cornerRadius": 20,
+              "stroke": {
+                "thickness": 3,
+                "fill": "$border-primary"
+              },
+              "layout": "vertical",
+              "gap": 12,
+              "padding": 20,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "0phur",
+                  "fill": "$text-primary",
+                  "content": "Conversation fieldset",
+                  "fontFamily": "Short Stack",
+                  "fontSize": 24,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "cZ6WG",
+                  "fill": "$text-secondary",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "World chat and side panels still read like doodle fieldsets: big handwritten legends, framed edges, and generous spacing around the content area.",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Short Stack",
+                  "fontSize": 15,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "eeoXi",
+                  "name": "messageRow",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "N0hD0",
+                      "name": "userSurface",
+                      "width": "fill_container",
+                      "fill": "$color-white",
+                      "cornerRadius": 16,
+                      "stroke": {
+                        "thickness": 1,
+                        "fill": "$border-secondary"
+                      },
+                      "layout": "vertical",
+                      "gap": 8,
+                      "padding": 16,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "gqsKw",
+                          "fill": "$text-primary",
+                          "content": "User message surface",
+                          "fontFamily": "Short Stack",
+                          "fontSize": 16,
+                          "fontWeight": "700"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "UcRsX",
+                      "name": "toolSurface",
+                      "width": "fill_container",
+                      "fill": "$bg-primary",
+                      "cornerRadius": 16,
+                      "stroke": {
+                        "thickness": 1,
+                        "fill": "$border-primary"
+                      },
+                      "layout": "vertical",
+                      "gap": 8,
+                      "padding": 16,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "k0SZS",
+                          "fill": "$text-secondary",
+                          "content": "Tool or status row",
+                          "fontFamily": "Short Stack",
+                          "fontSize": 16,
+                          "fontWeight": "700"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "1qUsE",
+              "name": "composerReference",
+              "width": "fill_container",
+              "fill": "$color-white",
+              "cornerRadius": 18,
+              "stroke": {
+                "thickness": 1,
+                "fill": "$border-secondary"
+              },
+              "layout": "vertical",
+              "gap": 12,
+              "padding": 18,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "W138H",
+                  "fill": "$text-secondary",
+                  "content": "Composer override shell",
+                  "fontFamily": "Inter",
+                  "fontSize": 16,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "0UMcv",
+                  "fill": "$text-secondary",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Inside the doodle page chrome, the composer deliberately becomes cleaner: white card shell, neutral icon buttons, readable selects, and tighter control sizing. The textarea uses Inter while select/button controls are forced back to Short Stack in doodle context.",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Inter",
+                  "fontSize": 15,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "kgHyh",
+                  "name": "toolbarRow",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "rGY5T",
+                      "name": "toolbarLeft",
+                      "gap": 10,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "u0qJ0",
+                          "name": "attachButton",
+                          "width": 34,
+                          "height": 34,
+                          "fill": "$bg-accent",
+                          "cornerRadius": 10,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "3zRyy",
+                              "fill": "$text-secondary",
+                              "content": "+",
+                              "fontFamily": "Inter",
+                              "fontSize": 18,
+                              "fontWeight": "700"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "WgN1G",
+                          "name": "projectPill",
+                          "height": 34,
+                          "fill": "$bg-primary",
+                          "cornerRadius": 10,
+                          "padding": [
+                            0,
+                            12
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "XoDw9",
+                              "fill": "$text-secondary",
+                              "content": "Project",
+                              "fontFamily": "Short Stack",
+                              "fontSize": 14,
+                              "fontWeight": "700"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "DBJjM",
+                      "name": "sendButton",
+                      "width": 38,
+                      "height": 38,
+                      "fill": "$text-tertiary",
+                      "cornerRadius": 999,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "zI9by",
+                          "fill": "$color-white",
+                          "content": "Send",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "700"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "KeHrj",
+              "fill": "$text-secondary",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Use this page as the browser-faithful reference. The earlier token page is still useful for semantic variables, but this screen reflects the final rendered mix of Tailwind layout, doodle chrome, and hand-picked overrides.",
+              "lineHeight": 1.55,
+              "fontFamily": "Short Stack",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "yKyRB",
+      "x": 3240,
+      "y": 3800,
+      "name": "Web Component Kit",
+      "width": 1380,
+      "height": 1500,
+      "fill": "$bg-secondary",
+      "layout": "vertical",
+      "gap": 20,
+      "padding": 28,
+      "children": [
+        {
+          "type": "frame",
+          "id": "r5LWa",
+          "name": "kitHero",
+          "width": "fill_container",
+          "fill": "$bg-primary",
+          "cornerRadius": 24,
+          "stroke": {
+            "thickness": 1,
+            "fill": "$border-primary"
+          },
+          "layout": "vertical",
+          "gap": 10,
+          "padding": 28,
+          "children": [
+            {
+              "type": "text",
+              "id": "JZMkb",
+              "fill": "$text-primary",
+              "content": "Web Component Kit",
+              "fontFamily": "Short Stack",
+              "fontSize": 30,
+              "fontWeight": "700"
+            },
+            {
+              "type": "text",
+              "id": "au2Vr",
+              "fill": "$text-secondary",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Reusable masters for the actual web app patterns. These are the source components referenced by the primitives page and follow the rendered browser style rather than a generic token library aesthetic.",
+              "lineHeight": 1.5,
+              "fontFamily": "Short Stack",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "FkRGw",
+          "name": "kitStack",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 20,
+          "children": [
+            {
+              "type": "frame",
+              "id": "46KmY",
+              "name": "Carousel Card / Web",
+              "reusable": true,
+              "width": 340,
+              "height": 188,
+              "fill": "$accent-primary",
+              "cornerRadius": 18,
+              "stroke": {
+                "thickness": 2,
+                "fill": "$accent-secondary"
+              },
+              "layout": "vertical",
+              "gap": 10,
+              "padding": 18,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "SQOCT",
+                  "fill": "$color-white",
+                  "content": "Selected World",
+                  "fontFamily": "Short Stack",
+                  "fontSize": 28,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "J6BVM",
+                  "fill": "#ffffffd1",
+                  "content": "Home carousel master",
+                  "fontFamily": "Short Stack",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "9UFHJ",
+              "name": "Doodle Fieldset / Web",
+              "reusable": true,
+              "width": 620,
+              "fill": "$bg-secondary",
+              "cornerRadius": 20,
+              "stroke": {
+                "thickness": 3,
+                "fill": "$border-primary"
+              },
+              "layout": "vertical",
+              "gap": 12,
+              "padding": 20,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "2NTj9",
+                  "fill": "$text-primary",
+                  "content": "Conversation fieldset",
+                  "fontFamily": "Short Stack",
+                  "fontSize": 24,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "eU3YO",
+                  "fill": "$text-secondary",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Handwritten legend, framed shell, and roomy internal spacing for chat or sidebar content.",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Short Stack",
+                  "fontSize": 15,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "KfK8I",
+                  "name": "fieldsetRow",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "Dzrhp",
+                      "name": "fieldsetMessage",
+                      "width": "fill_container",
+                      "fill": "$color-white",
+                      "cornerRadius": 16,
+                      "stroke": {
+                        "thickness": 1,
+                        "fill": "$border-secondary"
+                      },
+                      "layout": "vertical",
+                      "gap": 8,
+                      "padding": 16,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "LyJtJ",
+                          "fill": "$text-primary",
+                          "content": "Message surface",
+                          "fontFamily": "Short Stack",
+                          "fontSize": 16,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "Vj0Ag",
+                          "fill": "$text-secondary",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Tool rows and replies sit inside the doodle frame, not outside it.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "Short Stack",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "oxLg1",
+              "name": "World Composer Shell / Web",
+              "reusable": true,
+              "width": 820,
+              "fill": "$color-white",
+              "cornerRadius": 18,
+              "stroke": {
+                "thickness": 1,
+                "fill": "$border-secondary"
+              },
+              "layout": "vertical",
+              "gap": 12,
+              "padding": 18,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "nWlkC",
+                  "fill": "$text-tertiary",
+                  "content": "Ask Agent World anything...",
+                  "fontFamily": "Inter",
+                  "fontSize": 15,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "AB8ic",
+                  "name": "composerToolbar",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "CxdYY",
+                      "name": "composerLeft",
+                      "gap": 10,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "XsYWC",
+                          "name": "composerAttach",
+                          "width": 34,
+                          "height": 34,
+                          "fill": "$bg-accent",
+                          "cornerRadius": 10,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "6Bn5f",
+                              "fill": "$text-secondary",
+                              "content": "+",
+                              "fontFamily": "Inter",
+                              "fontSize": 18,
+                              "fontWeight": "700"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "tpycj",
+                          "name": "composerProject",
+                          "height": 34,
+                          "fill": "$bg-primary",
+                          "cornerRadius": 10,
+                          "padding": [
+                            0,
+                            12
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "gf8ne",
+                              "fill": "$text-secondary",
+                              "content": "Project",
+                              "fontFamily": "Short Stack",
+                              "fontSize": 14,
+                              "fontWeight": "700"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "F0MtF",
+                      "name": "composerSend",
+                      "width": 38,
+                      "height": 38,
+                      "fill": "$text-tertiary",
+                      "cornerRadius": 999,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "gEmSS",
+                          "fill": "$color-white",
+                          "content": "Send",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "700"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Ham4o",
+              "name": "Carousel Arrow Button / Web",
+              "reusable": true,
+              "width": 76,
+              "height": 76,
+              "fill": "$bg-primary",
+              "cornerRadius": 999,
+              "stroke": {
+                "thickness": 2,
+                "fill": "$border-primary"
+              },
+              "layout": "vertical",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "mr8Yl",
+                  "fill": "$text-primary",
+                  "content": "<",
+                  "fontFamily": "Short Stack",
+                  "fontSize": 26,
+                  "fontWeight": "700"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "4l3T7",
+              "name": "Search Input + Doodle Select / Web",
+              "reusable": true,
+              "width": 980,
+              "fill": "$bg-primary",
+              "cornerRadius": 18,
+              "stroke": {
+                "thickness": 1,
+                "fill": "$border-primary"
+              },
+              "gap": 14,
+              "padding": 18,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "otxhP",
+                  "name": "searchField",
+                  "width": "fill_container",
+                  "height": 64,
+                  "fill": "$color-white",
+                  "cornerRadius": 16,
+                  "stroke": {
+                    "thickness": 2,
+                    "fill": "$border-primary"
+                  },
+                  "padding": [
+                    0,
+                    18
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "e79QR",
+                      "fill": "$text-tertiary",
+                      "content": "Search worlds...",
+                      "fontFamily": "Short Stack",
+                      "fontSize": 18,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "xzggZ",
+                  "name": "selectShell",
+                  "width": 280,
+                  "height": 64,
+                  "fill": "$bg-secondary",
+                  "cornerRadius": 16,
+                  "stroke": {
+                    "thickness": 2,
+                    "fill": "$border-secondary"
+                  },
+                  "padding": [
+                    0,
+                    18
+                  ],
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "uYrzP",
+                      "fill": "$text-secondary",
+                      "content": "Read",
+                      "fontFamily": "Short Stack",
+                      "fontSize": 18,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "yuMIa",
+                      "fill": "$text-tertiary",
+                      "content": "v",
+                      "fontFamily": "Short Stack",
+                      "fontSize": 18,
+                      "fontWeight": "700"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "hsj59",
+              "name": "Message + Tool Status Row / Web",
+              "reusable": true,
+              "width": 1120,
+              "fill": "$bg-secondary",
+              "cornerRadius": 20,
+              "stroke": {
+                "thickness": 3,
+                "fill": "$border-primary"
+              },
+              "layout": "vertical",
+              "gap": 14,
+              "padding": 18,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "ad8Ho",
+                  "fill": "$text-primary",
+                  "content": "Conversation fieldset",
+                  "fontFamily": "Short Stack",
+                  "fontSize": 22,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "frame",
+                  "id": "xjsGw",
+                  "name": "statusBody",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "z4vuE",
+                      "name": "messageBubble",
+                      "width": "fill_container",
+                      "fill": "$color-white",
+                      "cornerRadius": 16,
+                      "stroke": {
+                        "thickness": 1,
+                        "fill": "$border-secondary"
+                      },
+                      "layout": "vertical",
+                      "gap": 8,
+                      "padding": 16,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "p9g5k",
+                          "fill": "$text-primary",
+                          "content": "User: show me the active tools",
+                          "fontFamily": "Short Stack",
+                          "fontSize": 16,
+                          "fontWeight": "700"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "woGVZ",
+                      "name": "toolRow",
+                      "width": "fill_container",
+                      "fill": "$bg-primary",
+                      "cornerRadius": 16,
+                      "stroke": {
+                        "thickness": 1,
+                        "fill": "$border-primary"
+                      },
+                      "padding": [
+                        14,
+                        16
+                      ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "sAeed",
+                          "name": "toolMeta",
+                          "gap": 10,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "RnDel",
+                              "name": "statusDot",
+                              "width": 12,
+                              "height": 12,
+                              "fill": "#22C55E",
+                              "cornerRadius": 999
+                            },
+                            {
+                              "type": "text",
+                              "id": "OV6yH",
+                              "fill": "$text-secondary",
+                              "content": "Tool Output  •  Running",
+                              "fontFamily": "Short Stack",
+                              "fontSize": 15,
+                              "fontWeight": "700"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "MGJL0",
+                          "fill": "$text-tertiary",
+                          "content": "Open",
+                          "fontFamily": "Short Stack",
+                          "fontSize": 14,
+                          "fontWeight": "700"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variables": {
+    "accent-primary": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#475569"
+        },
+        {
+          "value": "#475569"
+        }
+      ]
+    },
+    "accent-secondary": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#334155"
+        },
+        {
+          "value": "#334155"
+        }
+      ]
+    },
+    "bg-accent": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#f1f5f9"
+        },
+        {
+          "value": "#f1f5f9"
+        }
+      ]
+    },
+    "bg-primary": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#ffffff"
+        },
+        {
+          "value": "#ffffff"
+        }
+      ]
+    },
+    "bg-secondary": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#f8f9fa"
+        },
+        {
+          "value": "#f8f9fa"
+        }
+      ]
+    },
+    "bg-tertiary": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#f7fafc"
+        },
+        {
+          "value": "#f7fafc"
+        }
+      ]
+    },
+    "border-accent": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#475569"
+        },
+        {
+          "value": "#475569"
+        }
+      ]
+    },
+    "border-primary": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#e2e8f0"
+        },
+        {
+          "value": "#e2e8f0"
+        }
+      ]
+    },
+    "border-secondary": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#cbd5e0"
+        },
+        {
+          "value": "#cbd5e0"
+        }
+      ]
+    },
+    "shadow-lg": {
+      "type": "string",
+      "value": [
+        {
+          "value": "0 4px 12px rgba(0, 0, 0, 0.1)"
+        },
+        {
+          "value": "0 4px 12px rgba(0, 0, 0, .1)"
+        }
+      ]
+    },
+    "shadow-md": {
+      "type": "string",
+      "value": [
+        {
+          "value": "0 2px 8px rgba(0, 0, 0, 0.05)"
+        },
+        {
+          "value": "0 2px 8px rgba(0, 0, 0, .05)"
+        }
+      ]
+    },
+    "shadow-sm": {
+      "type": "string",
+      "value": [
+        {
+          "value": "0 1px 2px rgba(0, 0, 0, 0.05)"
+        },
+        {
+          "value": "0 1px 2px rgba(0, 0, 0, .05)"
+        }
+      ]
+    },
+    "shadow-xl": {
+      "type": "string",
+      "value": [
+        {
+          "value": "0 4px 20px rgba(71, 85, 105, 0.2)"
+        },
+        {
+          "value": "0 4px 20px rgba(71, 85, 105, .2)"
+        }
+      ]
+    },
+    "text-primary": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#2d3748"
+        },
+        {
+          "value": "#2d3748"
+        }
+      ]
+    },
+    "text-quaternary": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#a0aec0"
+        },
+        {
+          "value": "#a0aec0"
+        }
+      ]
+    },
+    "text-secondary": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#4a5568"
+        },
+        {
+          "value": "#4a5568"
+        }
+      ]
+    },
+    "text-tertiary": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#718096"
+        },
+        {
+          "value": "#718096"
+        }
+      ]
+    },
+    "color-black": {
+      "type": "color",
+      "value": "#000"
+    },
+    "color-gray-400": {
+      "type": "string",
+      "value": "oklch(70.7% .022 261.325)"
+    },
+    "color-gray-500": {
+      "type": "string",
+      "value": "oklch(55.1% .027 264.364)"
+    },
+    "color-gray-600": {
+      "type": "string",
+      "value": "oklch(44.6% .03 256.802)"
+    },
+    "color-gray-700": {
+      "type": "string",
+      "value": "oklch(37.3% .034 259.733)"
+    },
+    "color-text-primary": {
+      "type": "color",
+      "value": "#2d3748"
+    },
+    "color-text-secondary": {
+      "type": "color",
+      "value": "#4a5568"
+    },
+    "color-white": {
+      "type": "color",
+      "value": "#fff"
+    },
+    "container-2xl": {
+      "type": "string",
+      "value": "42rem"
+    },
+    "container-7xl": {
+      "type": "string",
+      "value": "80rem"
+    },
+    "container-md": {
+      "type": "string",
+      "value": "28rem"
+    },
+    "default-transition-duration": {
+      "type": "string",
+      "value": ".15s"
+    },
+    "default-transition-timing-function": {
+      "type": "string",
+      "value": "cubic-bezier(.4,0,.2,1)"
+    },
+    "font-weight-bold": {
+      "type": "number",
+      "value": 700
+    },
+    "font-weight-medium": {
+      "type": "number",
+      "value": 500
+    },
+    "radius-lg": {
+      "type": "string",
+      "value": ".5rem"
+    },
+    "radius-xl": {
+      "type": "string",
+      "value": ".75rem"
+    },
+    "spacing": {
+      "type": "string",
+      "value": ".25rem"
+    },
+    "text-2xl": {
+      "type": "string",
+      "value": "1.5rem"
+    },
+    "text-2xl--line-height": {
+      "type": "string",
+      "value": "calc(2/1.5)"
+    },
+    "text-3xl": {
+      "type": "string",
+      "value": "1.875rem"
+    },
+    "text-3xl--line-height": {
+      "type": "string",
+      "value": "1.2"
+    },
+    "text-4xl": {
+      "type": "string",
+      "value": "2.25rem"
+    },
+    "text-4xl--line-height": {
+      "type": "string",
+      "value": "calc(2.5/2.25)"
+    },
+    "text-5xl": {
+      "type": "string",
+      "value": "3rem"
+    },
+    "text-5xl--line-height": {
+      "type": "string",
+      "value": "1"
+    },
+    "text-6xl": {
+      "type": "string",
+      "value": "3.75rem"
+    },
+    "text-6xl--line-height": {
+      "type": "string",
+      "value": "1"
+    },
+    "text-base": {
+      "type": "string",
+      "value": "1rem"
+    },
+    "text-base--line-height": {
+      "type": "string",
+      "value": "1.5"
+    },
+    "text-lg": {
+      "type": "string",
+      "value": "1.125rem"
+    },
+    "text-lg--line-height": {
+      "type": "string",
+      "value": "calc(1.75/1.125)"
+    },
+    "text-sm": {
+      "type": "string",
+      "value": ".875rem"
+    },
+    "text-sm--line-height": {
+      "type": "string",
+      "value": "calc(1.25/.875)"
+    },
+    "text-xl": {
+      "type": "string",
+      "value": "1.25rem"
+    },
+    "text-xl--line-height": {
+      "type": "string",
+      "value": "calc(1.75/1.25)"
+    },
+    "text-xs": {
+      "type": "string",
+      "value": ".75rem"
+    },
+    "text-xs--line-height": {
+      "type": "string",
+      "value": "calc(1/.75)"
+    }
+  }
+}
