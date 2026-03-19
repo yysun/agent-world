@@ -1,3 +1,46 @@
+v0.15.0
+
+**Highlights**
+- World-level built-in tool permission controls with `Read`, `Ask`, and `Auto` modes across web and Electron
+- World-scoped reasoning-effort controls with separate reasoning-token streaming and rendering
+- Queue-backed world messages plus expanded heartbeat controls, diagnostics, and next-run visibility
+- In-app marketplace/import improvements for discovering and importing worlds, agents, and skills
+- Electron and web transcript UX refinements, including compact tool rows and external link opening from desktop chat
+
+**Tool Permissions & Safety**
+- Added world-level `tool_permission` controls stored in world variables, with `Read`, `Ask`, and `Auto` modes exposed in both the web and Electron composers
+- `write_file`, `shell_cmd`, `create_agent`, and skill script execution now respect those permission levels, while `web_fetch` remains available with its existing private-network safeguards
+- Added fetch-target permission helpers, public-URL validation coverage, and stronger approval visibility/error handling across clients
+- Added MCP HTTP header validation and regression coverage for persisted config handling
+
+**Reasoning, Titles & Message Flow**
+- Added world-scoped `reasoning_effort` controls for supported providers, including transport-safe reasoning token streaming through core, SSE, Electron, and web
+- Rendered reasoning content separately from assistant answer text, with collapsed-state support and duration formatting in message views
+- Hardened chat title generation by stripping world reasoning-effort overrides from title requests and tracking title provenance
+- Fixed stale chat-scoped activity handling so working-agent state stays accurate during message edits and streaming refreshes
+
+**World Queueing & Heartbeat**
+- World-originated and heartbeat-generated prompts now use the same queue-backed ingress path and mention-targeting rules as human messages
+- Heartbeat management gained explicit start/stop behavior, run tracking, sidebar controls, next-run countdown display, and structured logger diagnostics
+- Heartbeat prompts can now expand runtime datetime placeholders, and saving heartbeat settings no longer silently restarts jobs
+- Tightened queue visibility so the desktop queue panel only appears when it adds value
+
+**Imports, Marketplace & World Management**
+- Added an in-app marketplace flow for discovering and importing worlds, agents, and skills from curated GitHub sources
+- Refactored import actions into the Electron left sidebar and hardened world import/export metadata handling and sanitization
+- Improved live world updates with hydrated world snapshots, better agent visibility refresh behavior, and stronger import/export traceability
+- Added Pencil design assets to support ongoing desktop UI work
+
+**Web, Electron & Transcript UX**
+- Implemented compact tool-message rows in the web app with better linked request/result handling, status borders, and cross-client parity improvements
+- Improved working indicators, responsive chat/history sizing, and client-side system-event display in the web app and CLI
+- Added editing-agent highlight behavior in the Electron header and improved transcript/message rendering consistency across Electron and web
+- Electron markdown links now open in the external browser, with aligned sanitizer, preload, renderer, and main-process validation rules
+
+**Developer Experience & Reliability**
+- Added repository hooks including post-checkout install support and pre-push validation checks, plus `.nvmrc` for Node version alignment
+- Expanded E2E and regression coverage for tool permissions, shell streaming, heartbeat behavior, import flows, and Electron session/world visibility handling
+
 v0.14.0
 
 **Highlights**

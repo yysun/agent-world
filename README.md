@@ -37,25 +37,31 @@ Paste that prompt. Agents come alive instantly.
 - ✅ Built-in Rules for Messages - Turn limits to prevent loops
 - ✅ Concurrent Chat Sessions - Isolated `chatId` routing enables parallel conversations
 - ✅ Progressive Agent Skills - Skills are discovered and loaded on demand via `load_skill`
+- ✅ World-Level Tool Permissions - `Read`, `Ask`, and `Auto` modes control write and execution capabilities
 - ✅ Cross-Client HITL Approval - Option-based approvals in CLI, Web, and Electron
+- ✅ Reasoning Controls - World-scoped reasoning effort with separate reasoning-token rendering
+- ✅ Heartbeats & Queueing - Queue-backed world prompts and cron scheduling with explicit controls
+- ✅ Marketplace & Imports - Bring in worlds, agents, and skills from local folders or curated GitHub sources
 - ✅ Runtime Controls - Session-scoped send/stop flows and tool lifecycle visibility
 - ✅ Safer Tool Execution - Trusted-CWD and argument-scope guards for `shell_cmd`
 - ✅ Multiple AI Providers - Use different models for different agents
 - ✅ Web + CLI + Electron - Modern interfaces with real-time streaming and status feedback
 
-## Latest Highlights (since v0.11.1)
+## Latest Highlights (v0.15.0)
 
-- Web app now includes a Settings page, chat-history search, and branch-from-message workflow
-- Built-in `create_agent` tool now supports approval-first creation and inherits world chat defaults
-- File exploration is easier with built-in `read_file`, `list_files` (including recursive mode), and `grep`
-- Electron now supports folder-based world import/export with validation and conflict handling
-- Chat UX is smoother with clearer inline working status, better streaming feedback, and UI refinements
-- Real-time refresh behavior is improved across web and desktop when agents/world data changes
+- World-level tool permissions add `Read`, `Ask`, and `Auto` control modes in both the web and Electron composers
+- Supported providers can use world-scoped `reasoning_effort`, with reasoning tokens streamed and rendered separately from final answers
+- World and heartbeat prompts now enter the same queue-backed message flow as human turns, with explicit heartbeat controls and next-run visibility
+- Electron now includes marketplace-style import flows for discovering and importing worlds, agents, and skills
+- Web and Electron transcripts have tighter parity with compact tool rows, improved status rendering, and cleaner working indicators
+- Clicking markdown links in Electron messages now opens the external browser instead of attempting in-app navigation
 
 ## Release Notes
 
+- **v0.15.0** - Tool permission modes, reasoning-token support, queue-backed world/heartbeat flow, marketplace imports, and transcript/UI refinements
+- **v0.14.0** - User message queue, `write_file`/`web_fetch`/`send_message`, shell risk gating, E2E harnesses, skill editor, and heartbeat scheduling
+- **v0.13.0** - Better HITL prompts, improved streaming/main-agent UX, and smoother message rendering
 - **v0.12.0** - Web settings/search/branching, built-in `create_agent`, new file tools, Electron folder import/export, and chat/status UX improvements
-- **v0.11.0** - Electron desktop workflow, concurrent chat sessions, main-agent routing, progressive skills + HITL, and runtime safety hardening
 - Full history: [CHANGELOG.md](CHANGELOG.md)
 
 ## What You Can Build
@@ -102,25 +108,24 @@ Each Agent World has a collection of agents that can communicate through a share
 
 ### Message Rules
 
-| Message Type | Example | Who Responds |
+| Message Shape | Example | Who Responds |
 |--------------|---------|--------------|
-| **Human message** | `Hello everyone!` | All active agents |
-| **Direct mention** | `@alice Can you help?` | Only @alice |
-| **Paragraph mention** | `Please review this:\n@alice` | Only @alice |
-| **Mid-text mention** | `I think @alice should help` | Nobody (event is persisted; no agent-memory save) |
+| **Public human or world message** | `Hello everyone!` | All active agents |
+| **Paragraph-start mention** | `@alice Can you help?` | Only mentioned agents |
+| **Paragraph-start mention after text** | `Please review this:\n@alice` | Only mentioned agents |
+| **Mid-text mention only** | `I think @alice should help` | Nobody (event is persisted; no agent-memory save) |
 | **Stop World** | `<world>pass</world>` | No agents |
 
 ### Agent Behavior
 
 **Agents always respond to:**
-- Human messages (unless mentioned agents exist)
+- Public human or world messages when there is no paragraph-start mention
 - Direct @mentions at paragraph start
-- World messages
 
 **Agents never respond to:**
 - Their own messages
 - Other agents (unless @mentioned at paragraph start)
-- Mid-text mentions (not at paragraph start)
+- Mid-text mentions (not at paragraph start), including world prompts
 
 **When messages are saved to agent memory:**
 - Incoming messages are saved only for agents that will respond
@@ -169,7 +174,13 @@ npm run electron:dev
 
 ## Project Structure
 
-See [Project Structure Documentation](project.md)
+- `core/` - shared runtime, storage, tools, provider integrations, and event flow
+- `server/` - REST API and SSE transport
+- `web/` - browser app
+- `electron/` - desktop app (main, preload, renderer)
+- `cli/` - terminal interface
+
+For broader architecture and usage docs, start with [Docs Home](docs/docs-home.md).
 
 ## Development Scripts
 
@@ -356,6 +367,17 @@ export AGENT_WORLD_DATA_PATH=./data/worlds
 ## Built-in Tools
 
 Agent World includes built-in tools that are automatically available to all agents:
+
+- `read_file`, `list_files`, `grep` - inspect project files and source trees
+- `write_file` - update files inside trusted workspace scope
+- `web_fetch` - fetch web pages and convert them to Markdown for agent use
+- `send_message` - dispatch trusted chat-context messages to other agents
+- `create_agent` - create new agents during a conversation
+- `shell_cmd` - run shell commands with trusted-scope validation and lifecycle controls
+- `load_skill` - progressively load `SKILL.md` instructions and related scripts
+- `human_intervention_request` - ask the user for structured options and approvals
+
+World owners can set built-in tool access to `Read`, `Ask`, or `Auto` so write/execute actions are blocked, approval-gated, or automatic depending on the world.
 
 ### shell_cmd
 Execute shell commands with full output capture and execution history. Perfect for file operations, system information, and automation tasks.
