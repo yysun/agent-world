@@ -45,6 +45,7 @@ import { invokeDesktopChannel } from './invoke.js';
 import {
   toAgentPayload,
   toBranchSessionPayload,
+  toExternalLinkPayload,
   toHeartbeatJobPayload,
   toHitlResponsePayload,
   toMessageEditPayload,
@@ -89,6 +90,11 @@ export function createDesktopApi(ipcRendererLike: IpcRendererLike = ipcRenderer)
       directoryPath ? { directoryPath } : undefined
     ),
     pickDirectory: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_DIRECTORY),
+    openExternalLink: (url) => invokeDesktopChannel(
+      ipcRendererLike,
+      DESKTOP_INVOKE_CHANNELS.LINK_OPEN_EXTERNAL,
+      toExternalLinkPayload(url)
+    ),
     loadWorldFromFolder: () =>
       invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_LOAD_FROM_FOLDER),
     loadWorld: (worldId) =>

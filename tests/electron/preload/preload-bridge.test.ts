@@ -64,6 +64,7 @@ describe('electron preload bridge', () => {
     expect(api).toMatchObject({
       getWorkspace: expect.any(Function),
       pickDirectory: expect.any(Function),
+      openExternalLink: expect.any(Function),
       loadWorldFromFolder: expect.any(Function),
       listWorlds: expect.any(Function),
       exportWorld: expect.any(Function),
@@ -96,6 +97,7 @@ describe('electron preload bridge', () => {
     api.sendMessage(sendPayload);
     api.pickDirectory();
     api.openWorkspace('/tmp/workspace');
+    api.openExternalLink('https://example.com/docs');
     api.importWorld({ source: '@awesome-agent-world/infinite-etude' });
     api.exportWorld('world-1');
     api.listHeartbeatJobs();
@@ -114,45 +116,46 @@ describe('electron preload bridge', () => {
     expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'chat:sendMessage', sendPayload);
     expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'dialog:pickDirectory');
     expect(mocks.invoke).toHaveBeenNthCalledWith(3, 'workspace:open', { directoryPath: '/tmp/workspace' });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(4, 'world:import', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(4, 'link:openExternal', { url: 'https://example.com/docs' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(5, 'world:import', {
       source: '@awesome-agent-world/infinite-etude'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(5, 'world:export', { worldId: 'world-1' });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(6, 'heartbeat:list');
-    expect(mocks.invoke).toHaveBeenNthCalledWith(7, 'heartbeat:run', { worldId: 'world-1' });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(8, 'heartbeat:pause', { worldId: 'world-1' });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(9, 'heartbeat:stop', { worldId: 'world-1' });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(10, 'skill:list');
-    expect(mocks.invoke).toHaveBeenNthCalledWith(11, 'session:branchFromMessage', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(6, 'world:export', { worldId: 'world-1' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(7, 'heartbeat:list');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(8, 'heartbeat:run', { worldId: 'world-1' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(9, 'heartbeat:pause', { worldId: 'world-1' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(10, 'heartbeat:stop', { worldId: 'world-1' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(11, 'skill:list');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(12, 'session:branchFromMessage', {
       worldId: 'world-1',
       chatId: 'chat-1',
       messageId: 'msg-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(12, 'message:edit', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(13, 'message:edit', {
       worldId: 'world-1',
       messageId: 'msg-1',
       newContent: 'Updated',
       chatId: 'chat-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(13, 'hitl:respond', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(14, 'hitl:respond', {
       worldId: 'world-1',
       requestId: 'req-1',
       optionId: 'yes_once',
       chatId: 'chat-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(14, 'chat:stopMessage', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(15, 'chat:stopMessage', {
       worldId: 'world-1',
       chatId: 'chat-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(15, 'chat:subscribeEvents', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(16, 'chat:subscribeEvents', {
       worldId: 'world-1',
       chatId: 'chat-1',
       subscriptionId: 'sub-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(16, 'chat:unsubscribeEvents', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(17, 'chat:unsubscribeEvents', {
       subscriptionId: 'sub-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(17, 'logging:getConfig');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(18, 'logging:getConfig');
   });
 
   it('wires chat event listener callback and cleanup correctly', () => {

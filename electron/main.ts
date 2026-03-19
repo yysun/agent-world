@@ -74,7 +74,7 @@
  * - 2026-02-09: Added automatic world loading from folders with error handling
  * - 2026-02-08: Added real-time chat event streaming with multi-subscription support
  */
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -189,6 +189,21 @@ const mainIpcMessagesLogger = createCategoryLogger('electron.main.ipc.messages')
 const mainRealtimeLogger = createCategoryLogger('electron.main.realtime');
 const mainWorkspaceLogger = createCategoryLogger('electron.main.workspace');
 
+function shouldOpenInExternalBrowser(rawUrl: string): boolean {
+  try {
+    const parsedUrl = new URL(String(rawUrl || '').trim());
+    return parsedUrl.protocol === 'http:'
+      || parsedUrl.protocol === 'https:'
+      || parsedUrl.protocol === 'mailto:'
+      || parsedUrl.protocol === 'tel:'
+      || parsedUrl.protocol === 'sms:'
+      || parsedUrl.protocol === 'xmpp:'
+      || parsedUrl.protocol === 'callto:';
+  } catch {
+    return false;
+  }
+}
+
 let mainWindow: BrowserWindow | null = null;
 
 let ensureCoreReady: () => Promise<void> = async () => {
@@ -282,6 +297,7 @@ const ipcHandlers = createMainIpcHandlers({
   stopChatQueue,
   clearChatQueue,
   retryQueueMessage,
+  openExternalUrl: (url) => shell.openExternal(url),
   createStorage,
   createStorageFromEnv,
   GitHubWorldImportError,
@@ -298,6 +314,7 @@ function registerIpcHandlers() {
     getWorkspaceState,
     openWorkspaceDialog: ipcHandlers.openWorkspaceDialog,
     pickDirectoryDialog: ipcHandlers.pickDirectoryDialog,
+    openExternalLink: ipcHandlers.openExternalLink,
     loadWorldsFromWorkspace: ipcHandlers.loadWorldsFromWorkspace,
     loadSpecificWorld: (worldId) => ipcHandlers.loadSpecificWorld(String(worldId ?? '')),
     importWorld: ipcHandlers.importWorld,
@@ -395,6 +412,21 @@ function createMainWindow() {
   // Keep the global window reference in sync with Electron lifecycle.
   mainWindow.on('closed', () => {
     mainWindow = null;
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (shouldOpenInExternalBrowser(url)) {
+      void ipcHandlers.openExternalLink({ url });
+    }
+    return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!shouldOpenInExternalBrowser(url)) {
+      return;
+    }
+    event.preventDefault();
+    void ipcHandlers.openExternalLink({ url });
   });
 
   loadRenderer(mainWindow).catch((error) => {

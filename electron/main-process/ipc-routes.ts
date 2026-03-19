@@ -28,6 +28,7 @@ import {
   type BranchSessionFromMessagePayload,
   type ChatSubscribePayload,
   type ChatUnsubscribePayload,
+  type ExternalLinkPayload,
   type HitlResponsePayload,
   type MessageEditPayload,
   type MessageDeletePayload,
@@ -41,6 +42,7 @@ export interface MainIpcHandlers {
   getWorkspaceState: () => Promise<unknown> | unknown;
   openWorkspaceDialog: (payload?: unknown) => Promise<unknown> | unknown;
   pickDirectoryDialog: () => Promise<unknown> | unknown;
+  openExternalLink: (payload: unknown) => Promise<unknown> | unknown;
   loadWorldsFromWorkspace: () => Promise<unknown> | unknown;
   loadSpecificWorld: (worldId: unknown) => Promise<unknown> | unknown;
   importWorld: (payload?: unknown) => Promise<unknown> | unknown;
@@ -96,6 +98,10 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
     { channel: DESKTOP_INVOKE_CHANNELS.WORKSPACE_GET, handler: async () => handlers.getWorkspaceState() },
     { channel: DESKTOP_INVOKE_CHANNELS.WORKSPACE_OPEN, handler: async (_event, payload) => handlers.openWorkspaceDialog(payload) },
     { channel: DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_DIRECTORY, handler: async () => handlers.pickDirectoryDialog() },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.LINK_OPEN_EXTERNAL,
+      handler: async (_event, payload) => handlers.openExternalLink(payload as ExternalLinkPayload)
+    },
     { channel: DESKTOP_INVOKE_CHANNELS.WORLD_LOAD_FROM_FOLDER, handler: async () => handlers.loadWorldsFromWorkspace() },
     { channel: DESKTOP_INVOKE_CHANNELS.WORLD_LOAD, handler: async (_event, worldId) => handlers.loadSpecificWorld(worldId) },
     {

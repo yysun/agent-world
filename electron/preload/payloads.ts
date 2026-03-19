@@ -24,6 +24,7 @@
 import type {
   AgentPayload,
   BranchSessionFromMessagePayload,
+  ExternalLinkPayload,
   HeartbeatJobPayload,
   HitlResponsePayload,
   MessageEditPayload,
@@ -45,6 +46,10 @@ export function toWorldPayload(worldId: unknown): WorldIdPayload {
 
 export function toWorldLastSelectedPayload(worldId: unknown): WorldLastSelectedPayload {
   return { worldId: toId(worldId) };
+}
+
+export function toExternalLinkPayload(url: unknown): ExternalLinkPayload {
+  return { url: String(url ?? '') };
 }
 
 export function toWorldChatPayload(worldId: unknown, chatId: unknown): WorldChatPayload {

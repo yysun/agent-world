@@ -44,6 +44,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { readDesktopApi } from '../domain/desktop-api';
 import { renderMarkdown } from '../utils/markdown';
 import { formatLogMessage } from '../utils/formatting';
 import { isToolRelatedMessage } from '../utils/message-utils';
@@ -52,6 +53,78 @@ import {
   parseToolExecutionEnvelopeContent,
   stringifyToolEnvelopeResult,
 } from '../utils/tool-execution-envelope';
+
+const MESSAGE_EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:', 'sms:', 'xmpp:', 'callto:']);
+
+function getElementFromEventTarget(target) {
+  if (!target || typeof target !== 'object') {
+    return null;
+  }
+
+  if (typeof target.closest === 'function') {
+    return target;
+  }
+
+  if (target.nodeType === 3 && target.parentElement && typeof target.parentElement.closest === 'function') {
+    return target.parentElement;
+  }
+
+  if (target.parentElement && typeof target.parentElement.closest === 'function') {
+    return target.parentElement;
+  }
+
+  return null;
+}
+
+function normalizeExternalMessageLink(rawHref) {
+  const href = String(rawHref || '').trim();
+  if (!href) {
+    return null;
+  }
+
+  try {
+    const url = new URL(href);
+    if (!MESSAGE_EXTERNAL_PROTOCOLS.has(url.protocol)) {
+      return null;
+    }
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+export function getExternalMessageLinkFromTarget(target) {
+  const element = getElementFromEventTarget(target);
+  if (!element) {
+    return null;
+  }
+
+  const anchor = element.closest('a');
+  if (!anchor) {
+    return null;
+  }
+
+  const href = (typeof anchor.href === 'string' ? anchor.href : '')
+    || (typeof anchor.getAttribute === 'function' ? anchor.getAttribute('href') : '')
+    || (typeof anchor.textContent === 'string' ? anchor.textContent.trim() : '');
+  return normalizeExternalMessageLink(href);
+}
+
+export function handleMessageExternalLinkClick(event, openExternalLink) {
+  if (event?.defaultPrevented) {
+    return false;
+  }
+
+  const href = getExternalMessageLinkFromTarget(event?.target || null);
+  if (!href || typeof openExternalLink !== 'function') {
+    return false;
+  }
+
+  event.preventDefault?.();
+  event.stopPropagation?.();
+  void openExternalLink(href);
+  return true;
+}
 
 function isStreamingPlaceholderContent(content) {
   const normalized = String(content || '').trim();
@@ -502,9 +575,16 @@ export default function MessageContent({
 
   const inlineErrorText = String(message?.errorMessage || '').trim();
   const shouldShowInlineError = message?.hasError === true && inlineErrorText.length > 0;
+  const handleContainerClick = (event) => {
+    const desktopApi = readDesktopApi();
+    const openExternalLink = desktopApi && typeof desktopApi.openExternalLink === 'function'
+      ? desktopApi.openExternalLink.bind(desktopApi)
+      : undefined;
+    handleMessageExternalLinkClick(event, openExternalLink);
+  };
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2" onClick={handleContainerClick}>
       {shouldShowStreamingDots ? (
         <div className="agent-streaming-dots text-xs" role="status" aria-live="polite" aria-label="Waiting for response">
           <span className="agent-streaming-dots-label">{streamingDotsLabel}</span>

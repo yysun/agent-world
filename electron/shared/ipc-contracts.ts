@@ -36,6 +36,7 @@ export const DESKTOP_INVOKE_CHANNELS = {
   WORKSPACE_GET: 'workspace:get',
   WORKSPACE_OPEN: 'workspace:open',
   DIALOG_PICK_DIRECTORY: 'dialog:pickDirectory',
+  LINK_OPEN_EXTERNAL: 'link:openExternal',
   WORLD_LOAD_FROM_FOLDER: 'world:loadFromFolder',
   WORLD_LOAD: 'world:load',
   WORLD_IMPORT: 'world:import',
@@ -92,6 +93,10 @@ export type DesktopInvokeChannel =
 
 export interface WorldIdPayload {
   worldId: string;
+}
+
+export interface ExternalLinkPayload {
+  url: string;
 }
 
 export interface WorldExportPayload extends WorldIdPayload {
@@ -233,6 +238,7 @@ export interface DesktopApi {
   getWorkspace: () => Promise<unknown>;
   openWorkspace: (directoryPath?: string) => Promise<unknown>;
   pickDirectory: () => Promise<unknown>;
+  openExternalLink: (url: string) => Promise<unknown>;
   loadWorldFromFolder: () => Promise<unknown>;
   loadWorld: (worldId: string) => Promise<unknown>;
   importWorld: (payload?: WorldImportPayload) => Promise<unknown>;

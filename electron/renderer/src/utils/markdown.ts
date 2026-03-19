@@ -70,7 +70,7 @@ const ALLOWED_ATTRIBUTES: Record<string, string[]> = {
 const ALLOWED_ATTR = Array.from(new Set(Object.values(ALLOWED_ATTRIBUTES).flat()));
 
 // Keep protocol filtering strict while allowing common base64 image data URIs used in markdown.
-const ALLOWED_URI_REGEXP = /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$)|data:image\/(?:bmp|gif|jpe?g|png|tiff?|webp|svg\+xml);base64,[a-z0-9+/=\s]+)$/i;
+const ALLOWED_URI_REGEXP = /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|xmpp):[^\s]+|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$)|data:image\/(?:bmp|gif|jpe?g|png|tiff?|webp|svg\+xml);base64,[a-z0-9+/=\s]+)$/i;
 
 function sanitizeMarkdownHtml(rawHtml: string): string {
   const sanitizeOptions = createMarkdownSanitizeOptions();

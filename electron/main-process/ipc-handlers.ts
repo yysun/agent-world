@@ -92,6 +92,7 @@ const NOOP_LOGGER: LoggerLike = {
 
 const VALID_LOG_LEVELS: LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error'];
 const VALID_LOG_LEVEL_SET = new Set<LogLevel>(VALID_LOG_LEVELS);
+const ALLOWED_EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:', 'sms:', 'xmpp:', 'callto:']);
 
 function normalizeCategoryKey(raw: string): string {
   if (!raw) return '';
@@ -127,6 +128,36 @@ function getRendererLoggingConfigFromEnv(): {
 
   const nodeEnv = String(process.env.NODE_ENV || 'development').trim() || 'development';
   return { globalLevel, categoryLevels, nodeEnv };
+}
+
+function normalizeExternalUrl(rawUrl: unknown): string {
+  const urlText = String(rawUrl ?? '').trim();
+  if (!urlText) {
+    throw new Error('External URL is required.');
+  }
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(urlText);
+  } catch {
+    throw new Error('External URL must be absolute.');
+  }
+
+  if (!ALLOWED_EXTERNAL_PROTOCOLS.has(parsedUrl.protocol)) {
+    throw new Error(`Unsupported external URL protocol: ${parsedUrl.protocol}`);
+  }
+
+  return parsedUrl.toString();
+}
+
+async function defaultOpenExternalUrl(url: string) {
+  const electronModule = await import('electron');
+  const openExternal = electronModule.shell?.openExternal
+    ?? electronModule.default?.shell?.openExternal;
+  if (typeof openExternal !== 'function') {
+    throw new Error('Electron shell.openExternal is unavailable.');
+  }
+  await openExternal(url);
 }
 
 interface MainIpcHandlerFactoryDependencies {
@@ -179,6 +210,7 @@ interface MainIpcHandlerFactoryDependencies {
   stopChatQueue: (worldId: string, chatId: string) => Promise<any>;
   clearChatQueue: (worldId: string, chatId: string) => Promise<any>;
   retryQueueMessage: (worldId: string, messageId: string, chatId: string) => Promise<any>;
+  openExternalUrl?: (url: string) => Promise<void> | void;
   createStorage: (config: any) => Promise<any>;
   createStorageFromEnv: () => Promise<any>;
   loggerIpc?: LoggerLike;
@@ -309,6 +341,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     stopChatQueue,
     clearChatQueue,
     retryQueueMessage,
+    openExternalUrl = defaultOpenExternalUrl,
     createStorage,
     createStorageFromEnv,
     loggerIpc = NOOP_LOGGER,
@@ -1906,6 +1939,12 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     return config;
   }
 
+  async function openExternalLink(payload: unknown) {
+    const url = normalizeExternalUrl((payload as { url?: unknown } | undefined)?.url);
+    await openExternalUrl(url);
+    return { opened: true, url };
+  }
+
   async function openFileDialog() {
     const mainWindow = getMainWindow();
     if (!mainWindow) throw new Error('Main window not initialized');
@@ -2021,6 +2060,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     pickDirectoryDialog,
     openWorkspaceDialog,
     openFileDialog,
+    openExternalLink,
     listWorkspaceWorlds,
     listSkillRegistry,
     createWorkspaceWorld,

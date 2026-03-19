@@ -49,13 +49,23 @@ vi.mock('react/jsx-dev-runtime', () => ({
   jsxDEV: jsxFactory,
 }), { virtual: true });
 
+const desktopApiMock = {
+  openExternalLink: vi.fn(async () => ({ opened: true })),
+};
+
+vi.mock('../../../electron/renderer/src/domain/desktop-api', () => ({
+  readDesktopApi: () => desktopApiMock,
+}));
+
 import {
   default as MessageContent,
   formatReasoningDuration,
+  getExternalMessageLinkFromTarget,
   getReasoningElapsedMs,
   getReasoningHeaderLabel,
   getInitialReasoningCollapsedState,
   getToolBodyContent,
+  handleMessageExternalLinkClick,
   getToolStatusLabel
 } from '../../../electron/renderer/src/components/MessageContent';
 
@@ -99,6 +109,107 @@ function collectRenderedText(root: any): string {
 }
 
 describe('message content tool status label', () => {
+  it('extracts only safe absolute external message links from clicked anchors', () => {
+    const target = {
+      closest: vi.fn(() => ({
+        getAttribute: vi.fn(() => 'https://example.com/docs')
+      }))
+    };
+
+    expect(getExternalMessageLinkFromTarget(target as any)).toBe('https://example.com/docs');
+    expect(getExternalMessageLinkFromTarget({
+      closest: vi.fn(() => ({
+        getAttribute: vi.fn(() => '/docs')
+      }))
+    } as any)).toBeNull();
+    expect(getExternalMessageLinkFromTarget({
+      closest: vi.fn(() => ({
+        getAttribute: vi.fn(() => 'javascript:alert(1)')
+      }))
+    } as any)).toBeNull();
+    expect(getExternalMessageLinkFromTarget({
+      closest: vi.fn(() => ({
+        href: 'sms:+15551234567',
+        getAttribute: vi.fn(() => 'sms:+15551234567')
+      }))
+    } as any)).toBe('sms:+15551234567');
+    expect(getExternalMessageLinkFromTarget({
+      nodeType: 3,
+      parentElement: {
+        closest: vi.fn(() => ({
+          getAttribute: vi.fn(() => 'https://example.com/from-text-node')
+        }))
+      }
+    } as any)).toBe('https://example.com/from-text-node');
+    expect(getExternalMessageLinkFromTarget({
+      closest: vi.fn(() => ({
+        getAttribute: vi.fn(() => null),
+        href: '',
+        textContent: 'https://www.youtube.com/watch?v=Gaf_jCnA6mc'
+      }))
+    } as any)).toBe('https://www.youtube.com/watch?v=Gaf_jCnA6mc');
+    expect(getExternalMessageLinkFromTarget({
+      closest: vi.fn(() => ({
+        href: 'https://docs.example.com/extensions/apps/build',
+        getAttribute: vi.fn(() => '/extensions/apps/build'),
+        textContent: 'Build an MCP App'
+      }))
+    } as any)).toBe('https://docs.example.com/extensions/apps/build');
+  });
+
+  it('prevents default and opens safe markdown links externally', async () => {
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    const openExternalLink = vi.fn(async () => ({ opened: true }));
+
+    const handled = handleMessageExternalLinkClick({
+      target: {
+        closest: () => ({
+          getAttribute: () => 'https://example.com/docs'
+        })
+      },
+      preventDefault,
+      stopPropagation,
+      defaultPrevented: false,
+    } as any, openExternalLink);
+
+    expect(handled).toBe(true);
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(stopPropagation).toHaveBeenCalledTimes(1);
+    expect(openExternalLink).toHaveBeenCalledWith('https://example.com/docs');
+  });
+
+  it('wires markdown container clicks to the desktop bridge opener', () => {
+    desktopApiMock.openExternalLink.mockClear();
+
+    const tree = MessageContent({
+      message: {
+        role: 'assistant',
+        content: '[Docs](https://example.com/docs)',
+      },
+      collapsed: false,
+      reasoningCollapsed: true,
+      onToggleReasoningCollapsed: vi.fn(),
+      isToolCallPending: false,
+      showToolHeader: true,
+      streamingDotsLabel: 'model',
+      streamingInputPreview: '',
+    });
+
+    tree.props.onClick({
+      target: {
+        closest: () => ({
+          getAttribute: () => 'https://example.com/docs'
+        })
+      },
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+      defaultPrevented: false,
+    });
+
+    expect(desktopApiMock.openExternalLink).toHaveBeenCalledWith('https://example.com/docs');
+  });
+
   it('formats label as tool-name-status when direct tool name exists', () => {
     const label = getToolStatusLabel({
       role: 'tool',

@@ -36,9 +36,25 @@
 import * as nodeFs from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
+const { showOpenDialogMock, openExternalMock } = vi.hoisted(() => ({
+  showOpenDialogMock: vi.fn(async () => ({ canceled: true, filePaths: [] })),
+  openExternalMock: vi.fn(async () => undefined),
+}));
+
 vi.mock('electron', () => ({
   dialog: {
-    showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] }))
+    showOpenDialog: showOpenDialogMock,
+  },
+  shell: {
+    openExternal: openExternalMock
+  },
+  default: {
+    dialog: {
+      showOpenDialog: showOpenDialogMock,
+    },
+    shell: {
+      openExternal: openExternalMock,
+    }
   }
 }), { virtual: true });
 
@@ -90,6 +106,7 @@ function createDependencies(overrides: Record<string, unknown> = {}) {
     updateWorld: vi.fn(async () => ({})),
     editUserMessage: vi.fn(async () => ({ success: true, resubmissionStatus: 'success' })),
     removeMessagesFrom: vi.fn(async () => ({ success: true, messagesRemovedTotal: 3 })),
+    openExternalUrl: openExternalMock,
     resumeChatQueue: vi.fn(async () => ({})),
     heartbeatManager: {
       startJob: vi.fn(() => ({
@@ -150,6 +167,35 @@ describe('createMainIpcHandlers.importWorld', () => {
 
     expect(metadata).toEqual(source);
     expect(metadata).not.toBe(source);
+  });
+});
+
+describe('createMainIpcHandlers.openExternalLink', () => {
+  it('opens validated external links via Electron shell', async () => {
+    openExternalMock.mockClear();
+    const { handlers } = await createHandlers();
+
+    const result = await handlers.openExternalLink({ url: 'https://example.com/docs?q=1' });
+
+    expect(openExternalMock).toHaveBeenCalledWith('https://example.com/docs?q=1');
+    expect(result).toEqual({ opened: true, url: 'https://example.com/docs?q=1' });
+  });
+
+  it('accepts allowed non-http protocols that the sanitizer preserves', async () => {
+    openExternalMock.mockClear();
+    const { handlers } = await createHandlers();
+
+    const result = await handlers.openExternalLink({ url: 'sms:+15551234567' });
+
+    expect(openExternalMock).toHaveBeenCalledWith('sms:+15551234567');
+    expect(result).toEqual({ opened: true, url: 'sms:+15551234567' });
+  });
+
+  it('rejects unsupported or relative link targets', async () => {
+    const { handlers } = await createHandlers();
+
+    await expect(handlers.openExternalLink({ url: '/docs' })).rejects.toThrow('External URL must be absolute.');
+    await expect(handlers.openExternalLink({ url: 'javascript:alert(1)' })).rejects.toThrow('Unsupported external URL protocol: javascript:');
   });
 });
 

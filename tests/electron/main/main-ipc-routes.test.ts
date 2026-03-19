@@ -35,6 +35,7 @@ function createHandlerMocks() {
     getWorkspaceState: vi.fn(async () => ({})),
     openWorkspaceDialog: vi.fn(async () => ({})),
     pickDirectoryDialog: vi.fn(async () => ({ canceled: true, directoryPath: null })),
+    openExternalLink: vi.fn(async () => ({ opened: true })),
     loadWorldsFromWorkspace: vi.fn(async () => ([])),
     loadSpecificWorld: vi.fn(async () => ({})),
     importWorld: vi.fn(async () => ({})),
@@ -95,6 +96,7 @@ describe('buildMainIpcRoutes', () => {
       'workspace:get',
       'workspace:open',
       'dialog:pickDirectory',
+      'link:openExternal',
       'world:loadFromFolder',
       'world:load',
       'world:import',
@@ -154,6 +156,7 @@ describe('buildMainIpcRoutes', () => {
     await routes.find((route) => route.channel === 'world:saveLastSelected')?.handler({}, 'world-99');
     await routes.find((route) => route.channel === 'workspace:open')?.handler({}, { directoryPath: '/tmp/workspace' });
     await routes.find((route) => route.channel === 'dialog:pickDirectory')?.handler({});
+    await routes.find((route) => route.channel === 'link:openExternal')?.handler({}, { url: 'https://example.com/docs' });
     await routes.find((route) => route.channel === 'world:import')?.handler({}, { source: '@awesome-agent-world/infinite-etude' });
     await routes.find((route) => route.channel === 'agent:import')?.handler({}, { repo: 'yysun/agent-worlds', itemName: 'guide-agent' });
     await routes.find((route) => route.channel === 'skill:import')?.handler({}, { repo: 'yysun/agent-skills', itemName: 'reviewer' });
@@ -185,6 +188,7 @@ describe('buildMainIpcRoutes', () => {
     expect(handlers.writeWorldPreference).toHaveBeenCalledWith('world-99');
     expect(handlers.openWorkspaceDialog).toHaveBeenCalledWith({ directoryPath: '/tmp/workspace' });
     expect(handlers.pickDirectoryDialog).toHaveBeenCalledTimes(1);
+    expect(handlers.openExternalLink).toHaveBeenCalledWith({ url: 'https://example.com/docs' });
     expect(handlers.importWorld).toHaveBeenCalledWith({ source: '@awesome-agent-world/infinite-etude' });
     expect(handlers.importAgent).toHaveBeenCalledWith({ repo: 'yysun/agent-worlds', itemName: 'guide-agent' });
     expect(handlers.importSkill).toHaveBeenCalledWith({ repo: 'yysun/agent-skills', itemName: 'reviewer' });

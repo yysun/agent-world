@@ -235,6 +235,7 @@ body {
 }
 
 @keyframes header-agent-shake {
+
   0%,
   100% {
     transform: translateY(0) scale(1);
@@ -258,6 +259,7 @@ body {
 }
 
 @keyframes header-agent-float {
+
   0%,
   100% {
     box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-ring) 0%, transparent);
@@ -273,6 +275,7 @@ body {
 }
 
 @keyframes agent-streaming-card-glow {
+
   0%,
   100% {
     box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-ring) 14%, transparent);
@@ -304,6 +307,7 @@ body {
 }
 
 @keyframes agent-tool-card-glow {
+
   0%,
   100% {
     box-shadow: inset 0 0 0 1px color-mix(in oklab, #f59e0b 26%, transparent);
@@ -372,12 +376,10 @@ body {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(
-    105deg,
-    transparent 10%,
-    color-mix(in oklab, var(--color-ring) 16%, transparent) 45%,
-    transparent 72%
-  );
+  background: linear-gradient(105deg,
+      transparent 10%,
+      color-mix(in oklab, var(--color-ring) 16%, transparent) 45%,
+      transparent 72%);
   animation: agent-streaming-card-sweep 2.4s linear infinite;
 }
 
@@ -392,12 +394,10 @@ body {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(
-    100deg,
-    transparent 10%,
-    color-mix(in oklab, #f59e0b 24%, transparent) 45%,
-    transparent 72%
-  );
+  background: linear-gradient(100deg,
+      transparent 10%,
+      color-mix(in oklab, #f59e0b 24%, transparent) 45%,
+      transparent 72%);
   animation: agent-tool-card-sweep 2.05s linear infinite;
 }
 
@@ -411,12 +411,10 @@ body {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(
-    110deg,
-    transparent 20%,
-    color-mix(in oklab, var(--color-ring) 14%, transparent) 52%,
-    transparent 85%
-  );
+  background: linear-gradient(110deg,
+      transparent 20%,
+      color-mix(in oklab, var(--color-ring) 14%, transparent) 52%,
+      transparent 85%);
   animation: agent-streaming-indicator-sweep 1.9s linear infinite;
 }
 
@@ -430,12 +428,10 @@ body {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(
-    112deg,
-    transparent 20%,
-    color-mix(in oklab, #f59e0b 22%, transparent) 52%,
-    transparent 85%
-  );
+  background: linear-gradient(112deg,
+      transparent 20%,
+      color-mix(in oklab, #f59e0b 22%, transparent) 52%,
+      transparent 85%);
   animation: agent-streaming-indicator-sweep 1.35s linear infinite;
 }
 
@@ -496,6 +492,7 @@ body {
 
 .prose a {
   color: var(--prose-links);
+  cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
 }
