@@ -34,6 +34,7 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-03-19: Agent-skills prompt assembly now refreshes skill roots from the active world's `variables` so project-scope skills track `working_directory`.
  * - 2026-03-06: Suppressed empty Agent Skills injections and grouped runtime prompt sections behind a structural separator.
  * - 2026-03-01: Added explicit `grep` prompt guidance to require `includePattern` (no leading dot) and reduce tool-parameter validation failures.
  * - 2026-03-01: Added global pre-tool planning guidance so all tool-enabled agents narrate next steps before calling tools.
@@ -62,7 +63,7 @@
 import { nanoid } from 'nanoid';
 import { homedir } from 'os';
 import { filterClientSideMessages } from './message-prep.js';
-import { getSkillSourceScope, getSkillsForSystemPrompt, waitForInitialSkillSync } from './skill-registry.js';
+import { getSkillSourceScope, getSkillsForSystemPrompt, syncSkills, waitForInitialSkillSync } from './skill-registry.js';
 import { parseSkillIdListFromEnv } from './skill-settings.js';
 import { createCategoryLogger } from './logger.js';
 
@@ -282,8 +283,9 @@ function escapeXmlText(value: string): string {
     .replace(/>/g, '&gt;');
 }
 
-async function buildAgentSkillsPromptSection(): Promise<string> {
+async function buildAgentSkillsPromptSection(worldVariablesText = ''): Promise<string> {
   await waitForInitialSkillSync();
+  await syncSkills({ worldVariablesText });
 
   const includeGlobalSkills = String(process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS ?? 'true').toLowerCase() !== 'false';
   const includeProjectSkills = String(process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS ?? 'true').toLowerCase() !== 'false';
@@ -291,6 +293,7 @@ async function buildAgentSkillsPromptSection(): Promise<string> {
   const availableSkills = getSkillsForSystemPrompt({
     includeGlobal: includeGlobalSkills,
     includeProject: includeProjectSkills,
+    worldVariablesText,
   });
 
   const disabledGlobalSkillIds = parseSkillIdListFromEnv(process.env.AGENT_WORLD_DISABLED_GLOBAL_SKILLS);
@@ -587,7 +590,7 @@ export async function prepareMessagesForLLM(
   // IDEMPOTENCE: Always add a system message first.
   // System messages are NEVER saved to storage.
   const interpolatedPrompt = interpolateTemplateVariables(freshSystemPrompt || '', worldEnvMap);
-  const agentSkillsPromptSection = await buildAgentSkillsPromptSection();
+  const agentSkillsPromptSection = await buildAgentSkillsPromptSection(worldVariablesText);
   const mentionFormatRule = buildAgentMentionFormatRule();
   const injectedSections = [agentSkillsPromptSection, mentionFormatRule].filter((section) => section.length > 0);
   const injectedPrompt = injectedSections.join('\n\n');

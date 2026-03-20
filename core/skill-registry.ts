@@ -19,9 +19,10 @@
  * - Project roots are scanned after user roots, so later collisions always override earlier ones
  *
  * Recent Changes:
+ * - 2026-03-19: Switched project-skill root resolution to explicit world `variables` context with `~/` fallback and removed dependency on `AGENT_WORLD_WORKSPACE_PATH`/`AGENT_WORLD_DATA_PATH`.
  * - 2026-02-28: Added symlink-aware skill discovery so SKILL.md files inside symlinked directories are indexed.
  * - 2026-02-27: Made collision precedence explicit in candidate resolution so project-scope definitions always win over global-scope definitions even if discovery order changes.
- * - 2026-02-16: Default project-skill roots now resolve from active workspace env (`AGENT_WORLD_PROJECT_PATH`/`AGENT_WORLD_WORKSPACE_PATH`) before falling back to process cwd.
+ * - 2026-02-16: Default project-skill roots now resolve from active world/workspace context before falling back to a default root.
  * - 2026-02-16: Added source-scope filtering helper so callers can include/exclude global or project skills when building system prompts.
  * - 2026-02-14: Added `getSkillSourcePath` API and source-path tracking map for on-demand `SKILL.md` loading.
  * - 2026-02-14: Added `~/.codex/skills` to default user skill roots for Codex-managed skills discovery.
@@ -51,6 +52,7 @@ export type SkillSourceScope = 'global' | 'project';
 export interface SyncSkillsOptions {
   userSkillRoots?: string[];
   projectSkillRoots?: string[];
+  worldVariablesText?: string;
 }
 
 export interface SyncSkillsResult {
@@ -66,6 +68,7 @@ export interface SkillScopeFilterOptions {
   includeProject?: boolean;
   userSkillRoots?: string[];
   projectSkillRoots?: string[];
+  worldVariablesText?: string;
 }
 
 interface DiscoveredSkill {
@@ -94,16 +97,48 @@ function buildDefaultUserSkillRoots(): string[] {
   ];
 }
 
-function buildDefaultProjectSkillRoots(): string[] {
-  const envWorkspace = [
-    process.env.AGENT_WORLD_PROJECT_PATH,
-    process.env.AGENT_WORLD_WORKSPACE_PATH,
-    process.env.AGENT_WORLD_DATA_PATH,
-  ]
-    .map((value) => (typeof value === 'string' ? value.trim() : ''))
-    .find((value) => value.length > 0);
-  const projectRoot = envWorkspace || process.cwd();
+function getWorkingDirectoryFromWorldVariables(variablesText: string | undefined): string {
+  const lines = String(variablesText || '').split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) {
+      continue;
+    }
+
+    const separatorIndex = trimmed.indexOf('=');
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    if (key !== 'working_directory') {
+      continue;
+    }
+
+    const value = trimmed.slice(separatorIndex + 1).trim();
+    if (value.length > 0) {
+      return value;
+    }
+  }
+
+  return '';
+}
+
+function buildDefaultProjectSkillRoots(worldVariablesText?: string): string[] {
+  const projectRoot = getWorkingDirectoryFromWorldVariables(worldVariablesText) || homedir();
   return [path.join(projectRoot, '.agents', 'skills'), path.join(projectRoot, 'skills')];
+}
+
+function resolveSkillRoots(options: {
+  userSkillRoots?: string[];
+  projectSkillRoots?: string[];
+  worldVariablesText?: string;
+}): { userRoots: string[]; projectRoots: string[] } {
+  const userRoots = normalizeRoots(options.userSkillRoots ?? buildDefaultUserSkillRoots());
+  const projectRoots = normalizeRoots(
+    options.projectSkillRoots ?? buildDefaultProjectSkillRoots(options.worldVariablesText),
+  ).filter((rootPath) => !userRoots.includes(rootPath));
+  return { userRoots, projectRoots };
 }
 
 function normalizeRoots(roots: string[]): string[] {
@@ -351,8 +386,7 @@ function createSkillRegistrySingleton() {
   const registryScopes = new Map<string, SkillSourceScope>();
 
   async function syncSkills(options: SyncSkillsOptions = {}): Promise<SyncSkillsResult> {
-    const userRoots = normalizeRoots(options.userSkillRoots ?? buildDefaultUserSkillRoots());
-    const projectRoots = normalizeRoots(options.projectSkillRoots ?? buildDefaultProjectSkillRoots());
+    const { userRoots, projectRoots } = resolveSkillRoots(options);
     const roots = [
       ...userRoots.map((rootPath) => ({ rootPath, sourceScope: 'global' as const })),
       ...projectRoots.map((rootPath) => ({ rootPath, sourceScope: 'project' as const })),
@@ -469,8 +503,7 @@ function createSkillRegistrySingleton() {
       return [];
     }
 
-    const userRoots = normalizeRoots(options.userSkillRoots ?? buildDefaultUserSkillRoots());
-    const projectRoots = normalizeRoots(options.projectSkillRoots ?? buildDefaultProjectSkillRoots());
+    const { userRoots, projectRoots } = resolveSkillRoots(options);
 
     return [...registry.values()]
       .filter((skill) => {

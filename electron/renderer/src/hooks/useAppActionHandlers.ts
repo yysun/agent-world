@@ -13,6 +13,9 @@
  * - Uses dependency injection for state setters and collaborators.
  *
  * Recent Changes:
+ * - 2026-03-19: Project-folder selection now uses the folder-picker `defaultPath` instead of changing `openWorkspace()` semantics.
+ * - 2026-03-19: Project-folder selection now opens the picker at the current world `working_directory` when available.
+ * - 2026-03-19: Project-folder selection now refreshes the skill registry after persisting world `working_directory`.
  * - 2026-03-14: Routed world import mode into the left sidebar and closed the right panel for that flow.
  * - 2026-03-13: Switched reasoning-effort persistence to `default`/`none`, where `default` clears the env override.
  * - 2026-03-13: Added `onSetReasoningEffort` handler that persists `reasoning_effort` env state via updateWorld.
@@ -37,6 +40,7 @@ import {
 import { computeCanStopCurrentSession } from '../domain/chat-stop-state';
 import { safeMessage } from '../domain/desktop-api';
 import { getChatStatus, getRegistry } from '../domain/status-registry';
+import { getEnvValueFromText } from '../utils/app-helpers';
 import { removeEnvVariable, upsertEnvVariable } from '../utils/data-transform';
 import { getRefreshWarning } from '../utils/formatting';
 import { validateAgentForm } from '../utils/validation';
@@ -338,9 +342,13 @@ export function useAppActionHandlers({
     }
 
     try {
-      const result = await api.openWorkspace();
-      if (!result.canceled && result.workspacePath) {
-        const selectedPath = String(result.workspacePath).trim();
+      const currentProjectPath = getEnvValueFromText(loadedWorld.variables || '', 'working_directory');
+      const result = typeof api.pickDirectory === 'function'
+        ? await api.pickDirectory(currentProjectPath || undefined)
+        : await api.openWorkspace();
+      const selectedProjectPath = result?.directoryPath ?? result?.workspacePath;
+      if (!result.canceled && selectedProjectPath) {
+        const selectedPath = String(selectedProjectPath).trim();
         const nextVariables = upsertEnvVariable(loadedWorld.variables || '', 'working_directory', selectedPath);
         const updated = await api.updateWorld(loadedWorld.id, { variables: nextVariables });
         const warning = getRefreshWarning(updated);
@@ -349,6 +357,7 @@ export function useAppActionHandlers({
 
         setLoadedWorld(updatedWorld);
         setSelectedProjectPath(selectedPath);
+        await runBestEffortAsync(refreshSkillRegistry);
         setStatusText(
           warning ? `Project selected: ${selectedPath}. ${warning}` : `Project selected: ${selectedPath}`,
           warning ? 'error' : 'info'
@@ -357,7 +366,7 @@ export function useAppActionHandlers({
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to select project folder.'), 'error');
     }
-  }, [api, loadedWorld, setLoadedWorld, setSelectedProjectPath, setStatusText]);
+  }, [api, loadedWorld, refreshSkillRegistry, setLoadedWorld, setSelectedProjectPath, setStatusText]);
 
   const onSetToolPermission = useCallback(async (toolPermission: string) => {
     if (!loadedWorld?.id) return;

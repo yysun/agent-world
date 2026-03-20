@@ -12,6 +12,7 @@
  * - Keeps all assertions in-memory with no file-system dependencies.
  *
  * Recent Changes:
+ * - 2026-03-19: Added regression coverage for `pickDirectory(defaultPath)` payload forwarding while preserving `openWorkspace(directoryPath)` wiring.
  * - 2026-02-26: Added coverage for `getLoggingConfig()` IPC bridge wiring.
  * - 2026-02-26: Added coverage for `importWorld({ source })` payload forwarding to `world:import`.
  * - 2026-02-19: Added coverage for `exportWorld` bridge wiring and `world:export` invoke payload contract.
@@ -95,7 +96,7 @@ describe('electron preload bridge', () => {
 
     const sendPayload = { worldId: 'world-1', chatId: 'chat-1', content: 'Hello' };
     api.sendMessage(sendPayload);
-    api.pickDirectory();
+    api.pickDirectory('/tmp/current-project');
     api.openWorkspace('/tmp/workspace');
     api.openExternalLink('https://example.com/docs');
     api.importWorld({ source: '@awesome-agent-world/infinite-etude' });
@@ -104,7 +105,7 @@ describe('electron preload bridge', () => {
     api.runHeartbeat('world-1');
     api.pauseHeartbeat('world-1');
     api.stopHeartbeat('world-1');
-    api.listSkills();
+    api.listSkills({ worldId: 'world-1' });
     api.branchSessionFromMessage('world-1', 'chat-1', 'msg-1');
     api.editMessage('world-1', 'msg-1', 'Updated', 'chat-1');
     api.respondHitlOption('world-1', 'req-1', 'yes_once', 'chat-1');
@@ -114,7 +115,7 @@ describe('electron preload bridge', () => {
     api.getLoggingConfig();
 
     expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'chat:sendMessage', sendPayload);
-    expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'dialog:pickDirectory');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'dialog:pickDirectory', { defaultPath: '/tmp/current-project' });
     expect(mocks.invoke).toHaveBeenNthCalledWith(3, 'workspace:open', { directoryPath: '/tmp/workspace' });
     expect(mocks.invoke).toHaveBeenNthCalledWith(4, 'link:openExternal', { url: 'https://example.com/docs' });
     expect(mocks.invoke).toHaveBeenNthCalledWith(5, 'world:import', {
@@ -125,7 +126,7 @@ describe('electron preload bridge', () => {
     expect(mocks.invoke).toHaveBeenNthCalledWith(8, 'heartbeat:run', { worldId: 'world-1' });
     expect(mocks.invoke).toHaveBeenNthCalledWith(9, 'heartbeat:pause', { worldId: 'world-1' });
     expect(mocks.invoke).toHaveBeenNthCalledWith(10, 'heartbeat:stop', { worldId: 'world-1' });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(11, 'skill:list');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(11, 'skill:list', { worldId: 'world-1' });
     expect(mocks.invoke).toHaveBeenNthCalledWith(12, 'session:branchFromMessage', {
       worldId: 'world-1',
       chatId: 'chat-1',

@@ -14,6 +14,8 @@
  * - Payload normalization helpers preserve existing invoke payload formats.
  *
  * Recent Changes:
+ * - 2026-03-19: Added optional `defaultPath` support to `pickDirectory()` and restored `openWorkspace(directoryPath)` to direct-path payload forwarding only.
+ * - 2026-03-19: Updated `listSkills()` bridge payload support to use world-scoped filters instead of renderer project-path injection.
  * - 2026-03-06: Fixed `runHeartbeat()` payload normalization to omit `chatId` when not provided.
  * - 2026-02-26: Added `getLoggingConfig()` bridge method for renderer-safe env-controlled logging category/level configuration.
  * - 2026-02-25: Updated `importWorld()` bridge method to accept optional source payload.
@@ -89,7 +91,11 @@ export function createDesktopApi(ipcRendererLike: IpcRendererLike = ipcRenderer)
       DESKTOP_INVOKE_CHANNELS.WORKSPACE_OPEN,
       directoryPath ? { directoryPath } : undefined
     ),
-    pickDirectory: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_DIRECTORY),
+    pickDirectory: (defaultPath) => invokeDesktopChannel(
+      ipcRendererLike,
+      DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_DIRECTORY,
+      defaultPath ? { defaultPath } : undefined
+    ),
     openExternalLink: (url) => invokeDesktopChannel(
       ipcRendererLike,
       DESKTOP_INVOKE_CHANNELS.LINK_OPEN_EXTERNAL,

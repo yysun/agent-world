@@ -11,6 +11,7 @@
  * - Tests route build + registration helpers together.
  *
  * Recent Changes:
+ * - 2026-03-19: Added payload-routing coverage for `dialog:pickDirectory(defaultPath)` without changing `workspace:open(directoryPath)` routing.
  * - 2026-03-15: Added canonical channel and payload coverage for `agent:import`
  *   and `skill:import` route wiring.
  * - 2026-03-08: Updated canonical channel list and last-route assertion for skill:readContent and skill:saveContent.
@@ -155,7 +156,7 @@ describe('buildMainIpcRoutes', () => {
 
     await routes.find((route) => route.channel === 'world:saveLastSelected')?.handler({}, 'world-99');
     await routes.find((route) => route.channel === 'workspace:open')?.handler({}, { directoryPath: '/tmp/workspace' });
-    await routes.find((route) => route.channel === 'dialog:pickDirectory')?.handler({});
+    await routes.find((route) => route.channel === 'dialog:pickDirectory')?.handler({}, { defaultPath: '/tmp/current-project' });
     await routes.find((route) => route.channel === 'link:openExternal')?.handler({}, { url: 'https://example.com/docs' });
     await routes.find((route) => route.channel === 'world:import')?.handler({}, { source: '@awesome-agent-world/infinite-etude' });
     await routes.find((route) => route.channel === 'agent:import')?.handler({}, { repo: 'yysun/agent-worlds', itemName: 'guide-agent' });
@@ -187,7 +188,7 @@ describe('buildMainIpcRoutes', () => {
 
     expect(handlers.writeWorldPreference).toHaveBeenCalledWith('world-99');
     expect(handlers.openWorkspaceDialog).toHaveBeenCalledWith({ directoryPath: '/tmp/workspace' });
-    expect(handlers.pickDirectoryDialog).toHaveBeenCalledTimes(1);
+    expect(handlers.pickDirectoryDialog).toHaveBeenCalledWith({ defaultPath: '/tmp/current-project' });
     expect(handlers.openExternalLink).toHaveBeenCalledWith({ url: 'https://example.com/docs' });
     expect(handlers.importWorld).toHaveBeenCalledWith({ source: '@awesome-agent-world/infinite-etude' });
     expect(handlers.importAgent).toHaveBeenCalledWith({ repo: 'yysun/agent-worlds', itemName: 'guide-agent' });

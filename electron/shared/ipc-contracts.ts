@@ -15,6 +15,8 @@
  * - Runtime validation remains in main-process handlers for behavior parity.
  *
  * Recent Changes:
+ * - 2026-03-19: Added optional `defaultPath` payload support to `dialog:pickDirectory` while preserving `workspace:open(directoryPath)` direct-path semantics.
+ * - 2026-03-19: Changed `skill:list` filtering from renderer-provided `projectPath` to world-scoped `worldId`.
  * - 2026-03-15: Added `nextRunAt` to heartbeat job status so the renderer can show a live next-run countdown.
  * - 2026-03-08: Added `skill:readContent` and `skill:saveContent` invoke contracts for skill SKILL.md read/write flows.
  * - 2026-02-26: Added `logging:getConfig` invoke contract and typed renderer logging config payload for env-controlled categorized renderer logs.
@@ -214,7 +216,7 @@ export interface SkillRegistrySummary {
 export interface SkillListFilterPayload {
   includeGlobalSkills?: boolean;
   includeProjectSkills?: boolean;
-  projectPath?: string;
+  worldId?: string;
 }
 
 export interface SkillContentPayload {
@@ -224,6 +226,10 @@ export interface SkillContentPayload {
 export interface SkillSavePayload {
   skillId: string;
   content: string;
+}
+
+export interface PickDirectoryPayload {
+  defaultPath?: string;
 }
 
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
@@ -237,7 +243,7 @@ export interface RendererLoggingConfig {
 export interface DesktopApi {
   getWorkspace: () => Promise<unknown>;
   openWorkspace: (directoryPath?: string) => Promise<unknown>;
-  pickDirectory: () => Promise<unknown>;
+  pickDirectory: (defaultPath?: string) => Promise<unknown>;
   openExternalLink: (url: string) => Promise<unknown>;
   loadWorldFromFolder: () => Promise<unknown>;
   loadWorld: (worldId: string) => Promise<unknown>;

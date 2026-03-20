@@ -10,6 +10,7 @@
  * - Keeps channel naming and payload routing in one module.
  *
  * Recent Changes:
+ * - 2026-03-19: Routed optional `dialog:pickDirectory` payloads through to the main handler so callers can seed the folder picker without changing `workspace:open`.
  * - 2026-02-26: Added `logging:getConfig` route wiring for renderer-safe env-derived logging configuration.
  * - 2026-02-25: Updated `world:import` route to pass optional source payload through to main handler.
  * - 2026-02-19: Added `world:export` route wiring for desktop world save/export flows.
@@ -41,7 +42,7 @@ import {
 export interface MainIpcHandlers {
   getWorkspaceState: () => Promise<unknown> | unknown;
   openWorkspaceDialog: (payload?: unknown) => Promise<unknown> | unknown;
-  pickDirectoryDialog: () => Promise<unknown> | unknown;
+  pickDirectoryDialog: (payload?: unknown) => Promise<unknown> | unknown;
   openExternalLink: (payload: unknown) => Promise<unknown> | unknown;
   loadWorldsFromWorkspace: () => Promise<unknown> | unknown;
   loadSpecificWorld: (worldId: unknown) => Promise<unknown> | unknown;
@@ -97,7 +98,7 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
   return [
     { channel: DESKTOP_INVOKE_CHANNELS.WORKSPACE_GET, handler: async () => handlers.getWorkspaceState() },
     { channel: DESKTOP_INVOKE_CHANNELS.WORKSPACE_OPEN, handler: async (_event, payload) => handlers.openWorkspaceDialog(payload) },
-    { channel: DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_DIRECTORY, handler: async () => handlers.pickDirectoryDialog() },
+    { channel: DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_DIRECTORY, handler: async (_event, payload) => handlers.pickDirectoryDialog(payload) },
     {
       channel: DESKTOP_INVOKE_CHANNELS.LINK_OPEN_EXTERNAL,
       handler: async (_event, payload) => handlers.openExternalLink(payload as ExternalLinkPayload)

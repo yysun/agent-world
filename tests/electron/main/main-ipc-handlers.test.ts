@@ -11,6 +11,7 @@
  * - Mocks the Electron `dialog` module virtually to avoid runtime Electron dependency.
  *
  * Recent Changes:
+ * - 2026-03-19: Added regression coverage for preserving `openWorkspace(directoryPath)` direct-path behavior and for `pickDirectory(defaultPath)` dialog seeding.
  * - 2026-03-14: Added regression coverage for explicit heartbeat starts so the
  *   IPC layer syncs persisted config onto the runtime world and rejects silent no-op starts.
  * - 2026-03-14: Added regression coverage that saving world settings stops heartbeat
@@ -196,6 +197,23 @@ describe('createMainIpcHandlers.openExternalLink', () => {
 
     await expect(handlers.openExternalLink({ url: '/docs' })).rejects.toThrow('External URL must be absolute.');
     await expect(handlers.openExternalLink({ url: 'javascript:alert(1)' })).rejects.toThrow('Unsupported external URL protocol: javascript:');
+  });
+});
+
+describe('createMainIpcHandlers.workspace dialogs', () => {
+  it('returns a provided workspace path without reopening the folder picker', async () => {
+    showOpenDialogMock.mockClear();
+    const { handlers } = await createHandlers();
+
+    const result = await handlers.openWorkspaceDialog({ directoryPath: '/tmp/workspace' });
+
+    expect(showOpenDialogMock).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      workspacePath: '/tmp/workspace',
+      storagePath: '/workspace',
+      coreInitialized: true,
+      canceled: false
+    });
   });
 });
 
@@ -619,7 +637,7 @@ describe('createMainIpcHandlers.respondHitlOption', () => {
 });
 
 describe('createMainIpcHandlers.listSkillRegistry', () => {
-  it('syncs and filters skills using projectPath-scoped roots when provided', async () => {
+  it('syncs and filters skills using world variables from the requested world', async () => {
     const syncSkills = vi.fn(async () => ({ added: 0, updated: 0, removed: 0, unchanged: 0, total: 1 }));
     const getSkillsForSystemPrompt = vi.fn(() => ([
       {
@@ -630,33 +648,31 @@ describe('createMainIpcHandlers.listSkillRegistry', () => {
       }
     ]));
     const getSkillSourceScope = vi.fn(() => 'project');
+    const getWorld = vi.fn(async () => ({
+      id: 'world-1',
+      variables: 'working_directory=/Users/esun/Documents/Projects/test-agent-world',
+    }));
 
     const { handlers } = await createHandlers({
       syncSkills,
       getSkillsForSystemPrompt,
-      getSkillSourceScope
+      getSkillSourceScope,
+      getWorld,
     });
 
-    const projectPath = '/Users/esun/Documents/Projects/test-agent-world';
     const result = await handlers.listSkillRegistry({
       includeGlobalSkills: true,
       includeProjectSkills: true,
-      projectPath,
+      worldId: 'world-1',
     });
 
     expect(syncSkills).toHaveBeenCalledWith({
-      projectSkillRoots: [
-        '/Users/esun/Documents/Projects/test-agent-world/.agents/skills',
-        '/Users/esun/Documents/Projects/test-agent-world/skills',
-      ]
+      worldVariablesText: 'working_directory=/Users/esun/Documents/Projects/test-agent-world',
     });
     expect(getSkillsForSystemPrompt).toHaveBeenCalledWith({
       includeGlobal: true,
       includeProject: true,
-      projectSkillRoots: [
-        '/Users/esun/Documents/Projects/test-agent-world/.agents/skills',
-        '/Users/esun/Documents/Projects/test-agent-world/skills',
-      ]
+      worldVariablesText: 'working_directory=/Users/esun/Documents/Projects/test-agent-world',
     });
     expect(result).toEqual([
       {
@@ -667,6 +683,7 @@ describe('createMainIpcHandlers.listSkillRegistry', () => {
         sourceScope: 'project'
       }
     ]);
+    expect(getWorld).toHaveBeenCalledWith('world-1');
   });
 });
 

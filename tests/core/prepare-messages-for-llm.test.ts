@@ -16,6 +16,7 @@
  * - Focuses on prompt formatting only (no tool execution).
  *
  * Recent changes:
+ * - 2026-03-19: Added coverage that skill-registry prompt assembly refreshes against the active world's `variables`.
  * - 2026-03-01: Added coverage for the `available_skills` post-load acknowledgment requirement text.
  * - 2026-02-20: Shortened mention-format prompt assertions to compact handoff-focused wording.
  * - 2026-02-20: Added explicit assertion that normal user-facing replies should not include @mentions unless addressing another agent.
@@ -31,12 +32,19 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { createAgent, updateWorld } from '../../core/managers.js';
 import { LLMProvider } from '../../core/types.js';
 import { prepareMessagesForLLM } from '../../core/utils.js';
-import { getSkillSourceScope, getSkillsForSystemPrompt, waitForInitialSkillSync } from '../../core/skill-registry.js';
+import { getSkillSourceScope, getSkillsForSystemPrompt, syncSkills, waitForInitialSkillSync } from '../../core/skill-registry.js';
 import { setupTestWorld } from '../helpers/world-test-setup.js';
 
 vi.mock('../../core/skill-registry.js', () => ({
   getSkillSourceScope: vi.fn((skillId: string) => (skillId === 'apprun-skills' ? 'project' : 'global')),
   getSkillsForSystemPrompt: vi.fn(() => []),
+  syncSkills: vi.fn(async () => ({
+    added: 0,
+    updated: 0,
+    removed: 0,
+    unchanged: 0,
+    total: 0,
+  })),
   waitForInitialSkillSync: vi.fn(async () => ({
     added: 0,
     updated: 0,
@@ -48,6 +56,7 @@ vi.mock('../../core/skill-registry.js', () => ({
 
 const mockedGetSkillsForSystemPrompt = vi.mocked(getSkillsForSystemPrompt);
 const mockedGetSkillSourceScope = vi.mocked(getSkillSourceScope);
+const mockedSyncSkills = vi.mocked(syncSkills);
 const mockedWaitForInitialSkillSync = vi.mocked(waitForInitialSkillSync);
 
 describe('prepareMessagesForLLM', () => {
@@ -81,6 +90,13 @@ describe('prepareMessagesForLLM', () => {
     mockedGetSkillSourceScope.mockImplementation((skillId: string) =>
       skillId === 'apprun-skills' ? 'project' : 'global'
     );
+    mockedSyncSkills.mockResolvedValue({
+      added: 0,
+      updated: 0,
+      removed: 0,
+      unchanged: 0,
+      total: 2,
+    });
 
     delete process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS;
     delete process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS;
@@ -102,6 +118,9 @@ describe('prepareMessagesForLLM', () => {
     });
 
     const messages = await prepareMessagesForLLM(worldId(), agent, null);
+    expect(mockedSyncSkills).toHaveBeenCalledWith({
+      worldVariablesText: 'project_name=agent-world\nworking_directory=/tmp/agent-world'
+    });
     expect(messages[0]?.role).toBe('system');
     expect(messages[0]?.content).toContain('You are helping agent-world.');
     expect(messages[0]?.content).toContain('You are helping agent-world.\n\n---\n## Agent Skills');
@@ -204,9 +223,13 @@ describe('prepareMessagesForLLM', () => {
     });
 
     await prepareMessagesForLLM(worldId(), agent, null);
-    expect(mockedGetSkillsForSystemPrompt).toHaveBeenCalledWith({
+    expect(mockedSyncSkills).toHaveBeenCalledWith(expect.objectContaining({
+      worldVariablesText: expect.any(String),
+    }));
+    expect(mockedGetSkillsForSystemPrompt).toHaveBeenCalledWith(expect.objectContaining({
       includeGlobal: false,
       includeProject: false,
-    });
+      worldVariablesText: expect.any(String),
+    }));
   });
 });

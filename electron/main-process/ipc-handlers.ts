@@ -12,6 +12,8 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-03-19: Restored `openWorkspaceDialog(directoryPath)` immediate-path behavior and added optional `defaultPath` support to `pickDirectoryDialog`.
+ * - 2026-03-19: Switched `listSkillRegistry` to world-scoped `world.variables` resolution so project-scope skills no longer depend on `AGENT_WORLD_WORKSPACE_PATH` or `AGENT_WORLD_DATA_PATH`.
  * - 2026-03-14: Heartbeat start now syncs persisted heartbeat config onto the active
  *   runtime world and rejects silent no-op starts when the job remains stopped.
  * - 2026-03-14: Stopped auto-restarting heartbeat jobs after world-settings saves so
@@ -54,7 +56,6 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { dialog } from 'electron';
 import {
   normalizeSessionMessages,
   serializeAgentSummary,
@@ -160,6 +161,43 @@ async function defaultOpenExternalUrl(url: string) {
   await openExternal(url);
 }
 
+async function getElectronDialogCompat() {
+  const electronModule = await import('electron');
+  const electronDialog = electronModule.dialog
+    ?? electronModule.default?.dialog;
+  if (!electronDialog) {
+    throw new Error('Electron dialog is unavailable.');
+  }
+
+  return electronDialog;
+}
+
+async function showOpenDialogCompat(
+  mainWindow: BrowserWindowLike,
+  options: Record<string, unknown>
+) {
+  const electronDialog = await getElectronDialogCompat();
+  const showOpenDialog = electronDialog.showOpenDialog;
+  if (typeof showOpenDialog !== 'function') {
+    throw new Error('Electron dialog.showOpenDialog is unavailable.');
+  }
+
+  return await showOpenDialog(mainWindow as any, options as any);
+}
+
+async function showMessageBoxCompat(
+  mainWindow: BrowserWindowLike,
+  options: Record<string, unknown>
+) {
+  const electronDialog = await getElectronDialogCompat();
+  const showMessageBox = electronDialog.showMessageBox;
+  if (typeof showMessageBox !== 'function') {
+    throw new Error('Electron dialog.showMessageBox is unavailable.');
+  }
+
+  return await showMessageBox(mainWindow as any, options as any);
+}
+
 interface MainIpcHandlerFactoryDependencies {
   ensureCoreReady: () => Promise<void> | void;
   getWorkspaceState: () => WorkspaceStateLike;
@@ -184,10 +222,12 @@ interface MainIpcHandlerFactoryDependencies {
     includeProject?: boolean;
     userSkillRoots?: string[];
     projectSkillRoots?: string[];
+    worldVariablesText?: string;
   }) => any[];
   syncSkills: (options?: {
     userSkillRoots?: string[];
     projectSkillRoots?: string[];
+    worldVariablesText?: string;
   }) => Promise<any> | any;
   newChat: (worldId: string) => Promise<any>;
   branchChatFromMessage: (worldId: string, sourceChatId: string, messageId: string) => Promise<any>;
@@ -547,7 +587,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     message: string,
     detail?: string
   ): Promise<boolean> {
-    const confirmation = await dialog.showMessageBox(mainWindow as any, {
+    const confirmation = await showMessageBoxCompat(mainWindow, {
       type: 'warning',
       title,
       message,
@@ -561,7 +601,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
   }
 
   async function pickTargetDirectory(mainWindow: BrowserWindowLike, title: string, buttonLabel: string): Promise<string | null> {
-    const result = await dialog.showOpenDialog(mainWindow as any, {
+    const result = await showOpenDialogCompat(mainWindow, {
       title,
       properties: ['openDirectory', 'createDirectory'],
       buttonLabel
@@ -654,12 +694,26 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     }
   }
 
-  async function pickDirectoryDialog() {
+  function normalizeOptionalPath(rawPath: unknown): string {
+    return rawPath == null ? '' : String(rawPath).trim();
+  }
+
+  function getPickDirectoryDefaultPath(payload?: unknown): string {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return '';
+    }
+
+    return normalizeOptionalPath((payload as { defaultPath?: unknown }).defaultPath);
+  }
+
+  async function pickDirectoryDialog(payload?: unknown) {
+    const defaultPath = getPickDirectoryDefaultPath(payload);
     const mainWindow = getMainWindow();
     if (!mainWindow) throw new Error('Main window not initialized');
-    const result = await dialog.showOpenDialog(mainWindow as any, {
+    const result = await showOpenDialogCompat(mainWindow, {
       title: 'Open Folder',
-      properties: ['openDirectory', 'createDirectory']
+      properties: ['openDirectory', 'createDirectory'],
+      ...(defaultPath ? { defaultPath } : {}),
     });
 
     if (result.canceled || result.filePaths.length === 0) {
@@ -677,13 +731,20 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     };
   }
 
-  async function openWorkspaceDialog(payload?: any) {
-    const providedDirectoryPath = payload?.directoryPath == null
-      ? ''
-      : String(payload.directoryPath || '').trim();
-    const picked = providedDirectoryPath
-      ? { canceled: false, directoryPath: providedDirectoryPath }
-      : await pickDirectoryDialog();
+  async function openWorkspaceDialog(payload?: unknown) {
+    const providedDirectoryPath = payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? normalizeOptionalPath((payload as { directoryPath?: unknown }).directoryPath)
+      : '';
+
+    if (providedDirectoryPath) {
+      return {
+        ...getWorkspaceState(),
+        canceled: false,
+        workspacePath: providedDirectoryPath
+      };
+    }
+
+    const picked = await pickDirectoryDialog();
 
     if (picked.canceled || !picked.directoryPath) {
       return { ...getWorkspaceState(), canceled: true };
@@ -706,7 +767,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
   async function listSkillRegistry(payload?: unknown) {
     await ensureCoreReady();
     const normalizedPayload = payload && typeof payload === 'object' && !Array.isArray(payload)
-      ? payload as { includeGlobalSkills?: unknown; includeProjectSkills?: unknown; projectPath?: unknown }
+      ? payload as { includeGlobalSkills?: unknown; includeProjectSkills?: unknown; worldId?: unknown }
       : null;
 
     const includeGlobalSkills = typeof normalizedPayload?.includeGlobalSkills === 'boolean'
@@ -716,19 +777,25 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       ? normalizedPayload.includeProjectSkills
       : String(process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS ?? 'true').toLowerCase() !== 'false';
 
-    const projectPath = typeof normalizedPayload?.projectPath === 'string'
-      ? normalizedPayload.projectPath.trim()
+    const requestedWorldId = typeof normalizedPayload?.worldId === 'string'
+      ? normalizedPayload.worldId.trim()
       : '';
-    const projectSkillRoots = projectPath.length > 0
-      ? [path.join(projectPath, '.agents', 'skills'), path.join(projectPath, 'skills')]
-      : undefined;
+    let worldVariablesText = '';
+    if (requestedWorldId.length > 0) {
+      try {
+        const scopedWorld = await getWorld(requestedWorldId);
+        worldVariablesText = typeof scopedWorld?.variables === 'string' ? scopedWorld.variables : '';
+      } catch {
+        worldVariablesText = '';
+      }
+    }
 
-    await syncSkills({ projectSkillRoots });
+    await syncSkills({ worldVariablesText });
 
     const scopedSkills = getSkillsForSystemPrompt({
       includeGlobal: includeGlobalSkills,
       includeProject: includeProjectSkills,
-      projectSkillRoots,
+      worldVariablesText,
     });
     const skills = Array.isArray(scopedSkills) ? scopedSkills : [];
     return skills
@@ -1948,7 +2015,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
   async function openFileDialog() {
     const mainWindow = getMainWindow();
     if (!mainWindow) throw new Error('Main window not initialized');
-    const result = await dialog.showOpenDialog(mainWindow as any, {
+    const result = await showOpenDialogCompat(mainWindow, {
       title: 'Select File',
       properties: ['openFile', 'createDirectory']
     });

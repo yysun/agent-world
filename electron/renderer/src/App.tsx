@@ -801,8 +801,6 @@ function AppContent({ api }: { api: DesktopApi }) {
     refreshSkillRegistry,
   } = useSkillRegistry({
     api,
-    selectedProjectPath,
-    workspacePath: workspace.workspacePath,
     loadedWorldId: loadedWorld?.id,
   });
 

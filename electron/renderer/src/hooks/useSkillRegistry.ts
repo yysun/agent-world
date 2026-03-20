@@ -4,7 +4,7 @@
  * - Load and refresh renderer-visible skill registry entries for current workspace/world context.
  *
  * Key Features:
- * - Fetches skill summaries from desktop API with scoped project path support.
+ * - Fetches skill summaries from desktop API with active-world scoping.
  * - Exposes loading/error state for UI feedback.
  * - Normalizes/filters raw API payload shape into stable entry objects.
  *
@@ -13,6 +13,7 @@
  * - Sorting is deterministic by `skillId` for stable rendering.
  *
  * Recent Changes:
+ * - 2026-03-19: Switched desktop skill-registry refresh to world-scoped `skill:list` requests so project-scope skills follow loaded world `variables`.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 3 custom hook migration.
  */
 
@@ -36,7 +37,7 @@ function normalizeSkillSummaryEntries(rawEntries) {
   return normalized;
 }
 
-export function useSkillRegistry({ api, selectedProjectPath, workspacePath, loadedWorldId }) {
+export function useSkillRegistry({ api, loadedWorldId }) {
   const [skillRegistryEntries, setSkillRegistryEntries] = useState([]);
   const [loadingSkillRegistry, setLoadingSkillRegistry] = useState(false);
   const [skillRegistryError, setSkillRegistryError] = useState('');
@@ -51,11 +52,10 @@ export function useSkillRegistry({ api, selectedProjectPath, workspacePath, load
     setLoadingSkillRegistry(true);
     setSkillRegistryError('');
     try {
-      const scopedProjectPath = String(selectedProjectPath || workspacePath || '').trim();
       const rawEntries = await api.listSkills({
         includeGlobalSkills: true,
         includeProjectSkills: true,
-        projectPath: scopedProjectPath || undefined,
+        worldId: loadedWorldId || undefined,
       });
       setSkillRegistryEntries(normalizeSkillSummaryEntries(rawEntries));
     } catch (error) {
@@ -64,11 +64,11 @@ export function useSkillRegistry({ api, selectedProjectPath, workspacePath, load
     } finally {
       setLoadingSkillRegistry(false);
     }
-  }, [api, selectedProjectPath, workspacePath]);
+  }, [api, loadedWorldId]);
 
   useEffect(() => {
     refreshSkillRegistry();
-  }, [refreshSkillRegistry, workspacePath, loadedWorldId]);
+  }, [refreshSkillRegistry, loadedWorldId]);
 
   return {
     skillRegistryEntries,

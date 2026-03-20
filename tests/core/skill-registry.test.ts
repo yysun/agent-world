@@ -12,9 +12,9 @@
  * - Exercises syncSkills through exported singleton helpers
  *
  * Recent Changes:
+ * - 2026-03-19: Added coverage for `worldVariablesText` project-root resolution and `~/` fallback without workspace/data env vars.
  * - 2026-02-28: Added regression coverage for discovering SKILL.md files under symlinked skill directories.
  * - 2026-02-27: Added regression coverage ensuring project-scope collisions override global scope even when file content hashes are identical.
- * - 2026-02-16: Added coverage ensuring default project-skill roots follow `AGENT_WORLD_PROJECT_PATH` when set.
  * - 2026-02-16: Added coverage for `getSkillsForSystemPrompt` source-scope filtering (global vs project).
  * - 2026-02-14: Added source-path lookup coverage for `load_skill` runtime resolution.
  * - 2026-02-14: Added default-root coverage for `~/.codex/skills` and precedence regression for project overrides even with older mtimes.
@@ -25,6 +25,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fsModule from 'fs';
+import { homedir } from 'os';
 import {
   clearSkillsForTests,
   getSkill,
@@ -383,8 +384,25 @@ describe('core/skill-registry', () => {
     expect(accessCalls.some((value) => value.includes('.codex/skills'))).toBe(true);
   });
 
-  it('uses AGENT_WORLD_PROJECT_PATH for default project roots when available', async () => {
-    process.env.AGENT_WORLD_PROJECT_PATH = '/workspace/test-agent-world';
+  it('uses working_directory from worldVariablesText for default project roots', async () => {
+    setupFsScenario({}, {});
+
+    await syncSkills({
+      userSkillRoots: [],
+      worldVariablesText: 'working_directory=/workspace/test-agent-world',
+    });
+
+    const accessCalls = vi
+      .mocked((fs as any).access)
+      .mock
+      .calls
+      .map((call: any[]) => String(call[0]));
+
+    expect(accessCalls.some((value) => value.endsWith('/workspace/test-agent-world/.agents/skills'))).toBe(true);
+    expect(accessCalls.some((value) => value.endsWith('/workspace/test-agent-world/skills'))).toBe(true);
+  });
+
+  it('falls back to the user home directory when worldVariablesText has no working_directory', async () => {
     setupFsScenario({}, {});
 
     await syncSkills({ userSkillRoots: [] });
@@ -395,8 +413,7 @@ describe('core/skill-registry', () => {
       .calls
       .map((call: any[]) => String(call[0]));
 
-    expect(accessCalls.some((value) => value.endsWith('/workspace/test-agent-world/.agents/skills'))).toBe(true);
-    expect(accessCalls.some((value) => value.endsWith('/workspace/test-agent-world/skills'))).toBe(true);
+    expect(accessCalls.some((value) => value.endsWith(`${homedir()}/skills`))).toBe(true);
   });
 
   it('updates when file is newer and full SKILL.md content hash changes', async () => {
