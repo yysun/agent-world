@@ -13,6 +13,9 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-03-21: Restored web-parity collapse defaults for merged Electron tool rows and keyed tool collapse state by tool-call id when assistant request rows have no message id.
+ * - 2026-03-21: Restored collapse-toggle controls for completed merged Electron tool request rows so request/result transcript rows match the web tool affordance.
+ * - 2026-03-21: Re-consumed placeholder-linked tool result rows after structured preview work so merged Electron tool cards do not duplicate standalone tool transcript entries.
  * - 2026-03-15: Merged live shell stdout rows keyed as `toolUseId-stdout` into their calling-tool request cards so streaming tool output no longer renders as a duplicate transcript row.
  * - 2026-03-13: Keep completed assistant reasoning in a separate collapsed panel so reasoning stays available after stream completion without expanding the whole card by default.
  * - 2026-03-13: Removed chat-era left offsets from non-chat message cards so hidden avatars do not leave unused gutter space in Electron world views.
@@ -353,6 +356,40 @@ export function getInitialMessageCollapsedState(message: any, isCollapsible: boo
   return false;
 }
 
+export function getMessageCollapseKey(message: any): string | null {
+  const messageId = String(message?.messageId || '').trim();
+  if (messageId) {
+    return messageId;
+  }
+
+  const toolCallId = String(message?.tool_call_id || message?.toolCallId || '').trim();
+  if (toolCallId) {
+    return toolCallId;
+  }
+
+  const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+  const firstToolCallId = String(toolCalls[0]?.id || '').trim();
+  if (firstToolCallId) {
+    return firstToolCallId;
+  }
+
+  return null;
+}
+
+export function getMessageCollapseToggleLabel(isCollapsed: boolean): 'Open' | 'Collapse' {
+  return isCollapsed ? 'Open' : 'Collapse';
+}
+
+function hasMergedToolTranscriptContent(message: any): boolean {
+  const combinedToolResults = Array.isArray(message?.combinedToolResults) ? message.combinedToolResults : [];
+  if (combinedToolResults.length > 0) {
+    return true;
+  }
+
+  const combinedToolStreams = Array.isArray(message?.combinedToolStreams) ? message.combinedToolStreams : [];
+  return combinedToolStreams.length > 0;
+}
+
 function getToolSummaryDotClassName(statusTone: string): string {
   if (statusTone === 'failed') {
     return 'bg-red-400';
@@ -425,7 +462,7 @@ export function buildCombinedRenderableMessages(messages) {
     }
   }
 
-  const consumedToolResultIds = new Set<string>();
+  const consumedToolRowIds = new Set<string>();
 
   return messages
     .map((message) => {
@@ -458,7 +495,7 @@ export function buildCombinedRenderableMessages(messages) {
         for (const match of matches) {
           const matchMessageId = String(match?.messageId || '').trim();
           if (matchMessageId) {
-            consumedToolResultIds.add(matchMessageId);
+            consumedToolRowIds.add(matchMessageId);
             combinedMessageIds.add(matchMessageId);
           }
           combinedToolResults.push(match);
@@ -482,7 +519,7 @@ export function buildCombinedRenderableMessages(messages) {
           }
 
           if (candidateMessageId) {
-            consumedToolResultIds.add(candidateMessageId);
+            consumedToolRowIds.add(candidateMessageId);
             combinedMessageIds.add(candidateMessageId);
           }
           combinedToolResults.push(candidate);
@@ -503,11 +540,13 @@ export function buildCombinedRenderableMessages(messages) {
       if (role !== 'tool') {
         return true;
       }
+
       const messageId = String(message?.messageId || '').trim();
       if (!messageId) {
         return true;
       }
-      return !consumedToolResultIds.has(messageId);
+
+      return !consumedToolRowIds.has(messageId);
     });
 }
 
@@ -668,7 +707,7 @@ export default function MessageListPanel({
       worldAgentsById,
       worldAgentsByName
     );
-    const messageKey = message.messageId;
+    const messageKey = getMessageCollapseKey(message);
     const messageAvatar = resolveMessageAvatar(message, worldAgentsById, worldAgentsByName);
     const isHuman = isHumanMessage(message);
     const isPendingOptimisticUserMessage = isHuman && message?.optimisticUserPending === true;
@@ -698,7 +737,8 @@ export default function MessageListPanel({
       && isTrueAgentResponseMessage(message)
       && Boolean(message.messageId);
     const isAssistantMessage = messageRole === 'assistant' && !isToolMessage;
-    const isCollapsible = isToolMessage || (isAssistantMessage && Boolean(messageKey));
+    const isCollapsible = (isToolMessage && (!isToolRequestMessage(message) || hasMergedToolTranscriptContent(message)))
+      || (isAssistantMessage && Boolean(messageKey));
     const isCollapsed = isMessageCollapsed(message, messageKey, isCollapsible);
     const reasoningCollapsed = isReasoningCollapsed(message, messageKey);
     const normalizedEditedText = editingText.trim();
@@ -747,8 +787,8 @@ export default function MessageListPanel({
                   type="button"
                   onClick={() => toggleMessageCollapsed(messageKey, isCollapsed)}
                   className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
-                  title={isCollapsed ? 'Expand' : 'Collapse'}
-                  aria-label={isCollapsed ? 'Expand' : 'Collapse'}
+                  title={getMessageCollapseToggleLabel(isCollapsed)}
+                  aria-label={getMessageCollapseToggleLabel(isCollapsed)}
                 >
                   {isCollapsed ? (
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3" aria-hidden="true">

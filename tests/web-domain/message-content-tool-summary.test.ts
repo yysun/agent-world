@@ -79,6 +79,17 @@ describe('getToolOneLineSummary', () => {
     expect(getToolOneLineSummary(message)).toBe('tool: run_in_terminal - failed');
   });
 
+  it('returns failed summary for plain-text tool execution errors', () => {
+    const message = createMessage({
+      type: 'tool',
+      role: 'tool',
+      toolName: 'search',
+      text: 'Error executing tool: Tool not found: search',
+    });
+
+    expect(getToolOneLineSummary(message)).toBe('tool: search - failed');
+  });
+
   it('returns grouped tool name for multi-tool assistant rows', () => {
     const message = createMessage({
       role: 'assistant',

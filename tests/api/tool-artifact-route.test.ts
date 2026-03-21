@@ -23,11 +23,13 @@ const getSkills = vi.fn();
 const getSkillSourcePath = vi.fn();
 const statMock = vi.fn();
 const realpathMock = vi.fn();
+const readFileMock = vi.fn();
 
 vi.mock('fs', () => ({
   promises: {
     stat: statMock,
     realpath: realpathMock,
+    readFile: readFileMock,
   },
 }));
 
@@ -97,8 +99,11 @@ type MockResponse = {
   statusCode: number;
   body: any;
   headersSent: boolean;
+  contentType: string | null;
   status: (code: number) => MockResponse;
+  type: (value: string) => MockResponse;
   json: (data: any) => MockResponse;
+  send: (data: any) => MockResponse;
   sendFile: (filePath: string) => MockResponse;
 };
 
@@ -107,11 +112,21 @@ function createMockResponse(): MockResponse {
     statusCode: 200,
     body: null,
     headersSent: false,
+    contentType: null,
     status(code: number) {
       this.statusCode = code;
       return this;
     },
+    type(value: string) {
+      this.contentType = value;
+      return this;
+    },
     json(data: any) {
+      this.body = data;
+      this.headersSent = true;
+      return this;
+    },
+    send(data: any) {
       this.body = data;
       this.headersSent = true;
       return this;
@@ -148,6 +163,7 @@ describe('API tool artifact route', () => {
     getSkillSourcePath.mockImplementation((skillId: string) =>
       skillId === 'music-to-svg' ? '/Users/esun/.agents/skills/music-to-svg/SKILL.md' : undefined,
     );
+    readFileMock.mockReset();
   });
 
   it('serves files from symlinked registered skill roots using realpath authorization', async () => {
@@ -216,6 +232,91 @@ describe('API tool artifact route', () => {
     expect(res.body).toMatchObject({
       error: 'Tool artifact not found',
       code: 'TOOL_ARTIFACT_NOT_FOUND',
+    });
+  });
+
+  it('rewrites relative HTML bundle assets through the guarded artifact route for inline preview mode', async () => {
+    statMock.mockImplementation(async (targetPath: string) => {
+      const normalizedPath = String(targetPath).replace(/\/+/g, '/');
+      if (normalizedPath === '/tmp/world-work/out/index.html') {
+        return { isFile: () => true };
+      }
+      throw new Error('ENOENT');
+    });
+    realpathMock.mockImplementation(async (targetPath: string) => {
+      const normalizedPath = String(targetPath).replace(/\/+/g, '/');
+      if (normalizedPath === '/tmp/world-work') {
+        return '/tmp/world-work';
+      }
+      if (normalizedPath === '/Users/esun/.agents/skills/music-to-svg/SKILL.md') {
+        return '/Users/esun/dev/music-to-svg/SKILL.md';
+      }
+      if (normalizedPath === '/tmp/world-work/out/index.html') {
+        return '/tmp/world-work/out/index.html';
+      }
+      throw new Error('ENOENT');
+    });
+    readFileMock.mockResolvedValue('<html><head><script src="./app.js"></script><link rel="stylesheet" href="./styles.css"></head><body><img src="images/cover.png" /></body></html>');
+
+    const { default: router } = await import('../../server/api.js');
+    const handler = getRouteHandler(router, 'get', '/tool-artifact');
+    const req: any = {
+      query: {
+        path: '/tmp/world-work/out/index.html',
+        worldId: 'world-1',
+        preview: 'inline-html',
+      },
+    };
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.contentType).toBe('html');
+    expect(String(res.body)).toContain('/api/tool-artifact?path=%2Ftmp%2Fworld-work%2Fout%2Fapp.js&worldId=world-1');
+    expect(String(res.body)).toContain('/api/tool-artifact?path=%2Ftmp%2Fworld-work%2Fout%2Fstyles.css&worldId=world-1');
+    expect(String(res.body)).toContain('/api/tool-artifact?path=%2Ftmp%2Fworld-work%2Fout%2Fimages%2Fcover.png&worldId=world-1');
+  });
+
+  it('rejects inline HTML preview mode for non-HTML artifacts', async () => {
+    statMock.mockImplementation(async (targetPath: string) => {
+      const normalizedPath = String(targetPath).replace(/\/+/g, '/');
+      if (normalizedPath === '/tmp/world-work/out/report.pdf') {
+        return { isFile: () => true };
+      }
+      throw new Error('ENOENT');
+    });
+    realpathMock.mockImplementation(async (targetPath: string) => {
+      const normalizedPath = String(targetPath).replace(/\/+/g, '/');
+      if (normalizedPath === '/tmp/world-work') {
+        return '/tmp/world-work';
+      }
+      if (normalizedPath === '/Users/esun/.agents/skills/music-to-svg/SKILL.md') {
+        return '/Users/esun/dev/music-to-svg/SKILL.md';
+      }
+      if (normalizedPath === '/tmp/world-work/out/report.pdf') {
+        return '/tmp/world-work/out/report.pdf';
+      }
+      throw new Error('ENOENT');
+    });
+
+    const { default: router } = await import('../../server/api.js');
+    const handler = getRouteHandler(router, 'get', '/tool-artifact');
+    const req: any = {
+      query: {
+        path: '/tmp/world-work/out/report.pdf',
+        worldId: 'world-1',
+        preview: 'inline-html',
+      },
+    };
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toMatchObject({
+      error: 'Inline HTML preview requires an HTML artifact',
+      code: 'INVALID_TOOL_ARTIFACT_PREVIEW',
     });
   });
 });

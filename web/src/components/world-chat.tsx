@@ -12,9 +12,10 @@
  * - Message body rendering is delegated to domain helpers to keep this file focused on view composition.
  *
  * Summary of Recent Changes:
+ * - 2026-03-21: Restored narrated assistant tool-call border styling to the shared tool status parser so enveloped failed results still render the failed border state.
  * - 2026-03-13: Simplified composer dropdown labels to plain capitalized text and renamed the default reasoning option to `Not set`.
  * - 2026-03-13: Added world-scoped reasoning-effort dropdown to the composer toolbar.
- * - 2026-03-13: Added narrated assistant tool-call success/failure border variants so planning cards stay assistant-shaped while reflecting final tool outcomes.
+ * - 2026-03-21: Removed narrated assistant tool-call outcome tinting so assistant rows stay assistant-only after tool/result transcript separation.
  * - 2026-03-13: Stopped applying shared card shadow chrome to tool transcript rows so web tool activity reads as a flat status line.
  * - 2026-03-11: Simplified the chat legend to title-only so world chats no longer show queue/activity widgets in the legend row.
  * - 2026-03-11: Added responsive legend-title truncation so long chat names do not overwhelm the world layout.
@@ -185,7 +186,34 @@ export function getToolRowContainerClass(isToolRow: boolean): string {
   return isToolRow ? 'message-row-tool message-row-reserved-indent' : '';
 }
 
+function isNarratedAssistantToolCallMessage(message: Message): boolean {
+  const role = String(message?.role || '').trim().toLowerCase();
+  if (role !== 'assistant') {
+    return false;
+  }
+
+  const anyMessage = message as any;
+  const toolCalls = Array.isArray(anyMessage.tool_calls) ? anyMessage.tool_calls : [];
+  const narratedToolCallResults = Array.isArray(anyMessage.narratedToolCallResults)
+    ? anyMessage.narratedToolCallResults
+    : [];
+  if (toolCalls.length === 0 && narratedToolCallResults.length === 0) {
+    return false;
+  }
+
+  const text = String(message?.text || '').trim();
+  if (!text) {
+    return false;
+  }
+
+  return !/^calling tool\s*:/i.test(text);
+}
+
 export function getNarratedToolCallBorderClass(message: Message): string {
+  if (!isNarratedAssistantToolCallMessage(message)) {
+    return '';
+  }
+
   const narratedToolCallResults = Array.isArray((message as any)?.narratedToolCallResults)
     ? (message as any).narratedToolCallResults as Message[]
     : [];
@@ -193,8 +221,7 @@ export function getNarratedToolCallBorderClass(message: Message): string {
     return '';
   }
 
-  const hasFailedToolResult = narratedToolCallResults.some((result) => getToolSummaryStatus(result) === 'failed');
-  return hasFailedToolResult
+  return narratedToolCallResults.some((result) => getToolSummaryStatus(result) === 'failed')
     ? 'agent-message-narrated-tool-failed'
     : 'agent-message-narrated-tool-done';
 }

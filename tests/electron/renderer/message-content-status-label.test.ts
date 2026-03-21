@@ -14,6 +14,9 @@
  * - Uses deterministic in-memory message fixtures.
  *
  * Summary of Recent Changes:
+ * - 2026-03-21: Added regression coverage for guarded inline HTML preview URLs so Electron iframe previews use the asset-rewriting route for HTML bundles.
+ * - 2026-03-21: Added regression coverage for plain-text tool execution failures so Electron failed-status dots remain red.
+ * - 2026-03-21: Added regression coverage for structured envelope preview rendering on standalone and combined Electron tool transcript surfaces.
  * - 2026-03-06: Added regression coverage for canonical shell validation/policy failure reasons in renderer tool status labels.
  * - 2026-03-01: Added regression coverage to preserve meaningful planning text in merged tool request/result body content.
  * - 2026-02-28: Added regression coverage for tool-body rendering with linked assistant request metadata (`Args` + `Result`).
@@ -66,7 +69,8 @@ import {
   getInitialReasoningCollapsedState,
   getToolBodyContent,
   handleMessageExternalLinkClick,
-  getToolStatusLabel
+  getToolStatusLabel,
+  getToolStatusTone
 } from '../../../electron/renderer/src/components/MessageContent';
 
 function findNode(root: any, predicate: (node: any) => boolean): any {
@@ -249,6 +253,14 @@ describe('message content tool status label', () => {
     expect(label).toBe('tool: shell_cmd - failed');
   });
 
+  it('treats plain-text tool execution errors as failed status tone', () => {
+    expect(getToolStatusTone({
+      role: 'tool',
+      toolName: 'search',
+      content: 'Error executing tool: Tool not found: search',
+    })).toBe('failed');
+  });
+
   it('renders Args and Result when tool row is linked to assistant tool request metadata', () => {
     const content = getToolBodyContent({
       role: 'tool',
@@ -351,6 +363,225 @@ describe('message content tool status label', () => {
     expect(content).toContain('Result:');
     expect(content).toContain('preview only');
     expect(content).not.toContain('tool_execution_envelope');
+  });
+
+  it('renders structured artifact previews for standalone enveloped tool rows', () => {
+    const envelope = JSON.stringify({
+      __type: 'tool_execution_envelope',
+      version: 1,
+      tool: 'load_skill',
+      tool_call_id: 'call_preview_1',
+      status: 'completed',
+      preview: {
+        kind: 'artifact',
+        renderer: 'file',
+        title: 'out/report.pdf',
+        artifact: {
+          path: '/tmp/report.pdf',
+          url: '/api/tool-artifact?path=%2Ftmp%2Freport.pdf',
+          display_name: 'report.pdf',
+          media_type: 'application/pdf',
+        },
+      },
+      result: 'Generated report.pdf',
+    });
+
+    const tree = MessageContent({
+      message: {
+        role: 'tool',
+        type: 'tool',
+        tool_call_id: 'call_preview_1',
+        content: envelope,
+        isToolOutputExpanded: true,
+      },
+      collapsed: false,
+      reasoningCollapsed: true,
+      onToggleReasoningCollapsed: vi.fn(),
+      isToolCallPending: false,
+      showToolHeader: true,
+      streamingDotsLabel: 'model',
+      streamingInputPreview: '',
+    });
+
+    const iframe = findNode(tree, (node) => node?.type === 'iframe' && String(node?.props?.src || '').includes('/api/tool-artifact'));
+
+    expect(iframe).toBeTruthy();
+    expect(collectRenderedText(tree)).toContain('report.pdf');
+    expect(collectRenderedText(tree)).toContain('Inline preview');
+    expect(collectRenderedText(tree)).not.toContain('tool_execution_envelope');
+  });
+
+  it('renders structured preview content inside combined assistant tool views', () => {
+    const envelope = JSON.stringify({
+      __type: 'tool_execution_envelope',
+      version: 1,
+      tool: 'web_fetch',
+      tool_call_id: 'call_fetch_1',
+      status: 'completed',
+      preview: {
+        kind: 'artifact',
+        renderer: 'file',
+        title: 'Fetched report',
+        artifact: {
+          path: '/tmp/page.html',
+          url: '/api/tool-artifact?path=%2Ftmp%2Fpage.html',
+          display_name: 'page.html',
+          media_type: 'text/html',
+        },
+      },
+      result: 'Fetched page.html',
+    });
+
+    const tree = MessageContent({
+      message: {
+        role: 'assistant',
+        type: 'assistant',
+        content: 'Calling tool: web_fetch',
+        tool_calls: [{
+          id: 'call_fetch_1',
+          type: 'function',
+          function: {
+            name: 'web_fetch',
+            arguments: '{"url":"https://example.com"}',
+          },
+        }],
+        combinedToolResults: [{
+          role: 'tool',
+          type: 'tool',
+          tool_call_id: 'call_fetch_1',
+          content: envelope,
+        }],
+        isToolOutputExpanded: true,
+      },
+      collapsed: false,
+      reasoningCollapsed: true,
+      onToggleReasoningCollapsed: vi.fn(),
+      isToolCallPending: false,
+      showToolHeader: true,
+      streamingDotsLabel: 'model',
+      streamingInputPreview: '',
+    });
+
+    const iframe = findNode(tree, (node) => node?.type === 'iframe' && String(node?.props?.src || '').includes('/api/tool-artifact'));
+
+    expect(iframe).toBeTruthy();
+    expect(String(iframe?.props?.src || '')).toContain('preview=inline-html');
+    expect(collectRenderedText(tree)).toContain('Args');
+    expect(collectRenderedText(tree)).toContain('Result');
+    expect(collectRenderedText(tree)).toContain('page.html');
+    expect(collectRenderedText(tree)).not.toContain('tool_execution_envelope');
+  });
+
+  it('uses envelope tool names for restored combined tool status labels when direct metadata is missing', () => {
+    const makeEnvelope = (tool, callId, label) => JSON.stringify({
+      __type: 'tool_execution_envelope',
+      version: 1,
+      tool,
+      tool_call_id: callId,
+      status: 'completed',
+      preview: {
+        kind: 'text',
+        renderer: 'text',
+        text: label,
+      },
+      result: label,
+    });
+
+    const label = getToolStatusLabel({
+      role: 'assistant',
+      type: 'assistant',
+      content: 'Running restored tool results',
+      combinedToolResults: [
+        { role: 'tool', type: 'tool', tool_call_id: 'call-shell', content: makeEnvelope('shell_cmd', 'call-shell', 'shell ok') },
+        { role: 'tool', type: 'tool', tool_call_id: 'call-fetch', content: makeEnvelope('web_fetch', 'call-fetch', 'fetch ok') },
+      ],
+    });
+
+    expect(label).toBe('tool: shell_cmd - done');
+  });
+
+  it('renders structured preview content from explicit live toolExecution preview payloads', () => {
+    const tree = MessageContent({
+      message: {
+        role: 'tool',
+        type: 'tool',
+        tool_call_id: 'call_live_1',
+        content: 'Completed tool execution',
+        isToolOutputExpanded: true,
+        toolExecution: {
+          toolName: 'web_fetch',
+          preview: {
+            kind: 'artifact',
+            renderer: 'file',
+            title: 'Fetched page',
+            artifact: {
+              path: '/tmp/live.html',
+              url: '/api/tool-artifact?path=%2Ftmp%2Flive.html',
+              display_name: 'live.html',
+              media_type: 'text/html',
+            },
+          },
+          result: 'Fetched live.html',
+        },
+      },
+      collapsed: false,
+      reasoningCollapsed: true,
+      onToggleReasoningCollapsed: vi.fn(),
+      isToolCallPending: false,
+      showToolHeader: true,
+      streamingDotsLabel: 'model',
+      streamingInputPreview: '',
+    });
+
+    const iframe = findNode(tree, (node) => node?.type === 'iframe' && String(node?.props?.src || '').includes('/api/tool-artifact'));
+
+    expect(iframe).toBeTruthy();
+    expect(String(iframe?.props?.src || '')).toContain('preview=inline-html');
+    expect(collectRenderedText(tree)).toContain('live.html');
+  });
+
+  it('keeps non-previewable internal artifacts as stable file-style fallback text', () => {
+    const envelope = JSON.stringify({
+      __type: 'tool_execution_envelope',
+      version: 1,
+      tool: 'load_skill',
+      tool_call_id: 'call_preview_pptx',
+      status: 'completed',
+      preview: {
+        kind: 'artifact',
+        renderer: 'file',
+        title: 'deck.pptx',
+        artifact: {
+          path: '/tmp/deck.pptx',
+          url: '/api/tool-artifact?path=%2Ftmp%2Fdeck.pptx',
+          display_name: 'deck.pptx',
+          media_type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        },
+      },
+      result: 'Generated deck.pptx',
+    });
+
+    const tree = MessageContent({
+      message: {
+        role: 'tool',
+        type: 'tool',
+        tool_call_id: 'call_preview_pptx',
+        content: envelope,
+        isToolOutputExpanded: true,
+      },
+      collapsed: false,
+      reasoningCollapsed: true,
+      onToggleReasoningCollapsed: vi.fn(),
+      isToolCallPending: false,
+      showToolHeader: true,
+      streamingDotsLabel: 'model',
+      streamingInputPreview: '',
+    });
+
+    expect(findNode(tree, (node) => node?.type === 'iframe')).toBeNull();
+    expect(findNode(tree, (node) => node?.type === 'a' && String(node?.props?.href || '').includes('/api/tool-artifact'))).toBeNull();
+    expect(collectRenderedText(tree)).toContain('deck.pptx');
+    expect(collectRenderedText(tree)).toContain('/tmp/deck.pptx');
   });
 
   it('defaults completed assistant reasoning panels to collapsed but keeps streaming reasoning expanded', () => {

@@ -460,10 +460,12 @@ function isToolMessageFailure(message) {
     }
   }
 
+  if (/^error\b/i.test(content)) return true;
   if (/status\s*[:=]\s*failed/i.test(content)) return true;
   if (/timed[_\s-]?out\s*[:=]\s*true/i.test(content)) return true;
   if (/cancel(?:ed|led)\s*[:=]\s*true/i.test(content)) return true;
   if (/reason\s*[:=]\s*(non_zero_exit|execution_error|validation_error|approval_denied|timeout|timed_out|canceled|cancelled)/i.test(content)) return true;
+  if (/tool not found/i.test(content)) return true;
 
   const exitCodeMatch = content.match(/exit[_\s-]?code\s*[:=]\s*(-?\d+)/i);
   if (exitCodeMatch?.[1]) {
@@ -509,58 +511,6 @@ function isToolMessageSuccess(message) {
 function getNarratedAssistantToolCallTone(message, messages) {
   if (!isNarratedAssistantToolCallMessage(message)) {
     return null;
-  }
-
-  const attachedLinkedResults = Array.isArray(message?.narratedToolCallResults)
-    ? message.narratedToolCallResults
-    : [];
-  if (attachedLinkedResults.some((result) => isToolMessageFailure(result))) {
-    return 'failed';
-  }
-  if (attachedLinkedResults.length > 0) {
-    return 'done';
-  }
-
-  const requestedCallIds = collectToolCallIds(message);
-  if (requestedCallIds.length === 0) {
-    return null;
-  }
-
-  const requestMessageId = String(message?.messageId || '').trim();
-  const linkedResults: any[] = [];
-  const seenMessageIds = new Set();
-
-  for (const candidate of Array.isArray(messages) ? messages : []) {
-    const candidateRole = String(candidate?.role || '').trim().toLowerCase();
-    if (candidateRole !== 'tool') {
-      continue;
-    }
-
-    const completionKey = String(candidate?.tool_call_id || candidate?.messageId || '').trim();
-    const replyToMessageId = String(candidate?.replyToMessageId || '').trim();
-    const isLinkedByCallId = completionKey && requestedCallIds.includes(completionKey);
-    const isLinkedByReply = requestMessageId && replyToMessageId === requestMessageId;
-    if (!isLinkedByCallId && !isLinkedByReply) {
-      continue;
-    }
-
-    const candidateMessageId = String(candidate?.messageId || '').trim();
-    if (candidateMessageId) {
-      if (seenMessageIds.has(candidateMessageId)) {
-        continue;
-      }
-      seenMessageIds.add(candidateMessageId);
-    }
-
-    linkedResults.push(candidate);
-  }
-
-  if (linkedResults.some((result) => isToolMessageFailure(result))) {
-    return 'failed';
-  }
-
-  if (linkedResults.length > 0 && linkedResults.every((result) => !isToolMessageFailure(result))) {
-    return 'done';
   }
 
   return null;

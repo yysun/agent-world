@@ -16,6 +16,7 @@
  * - Uses Message type from web/src/types
  *
  * Recent Changes:
+ * - 2026-03-21: Re-consumed placeholder-linked tool result and stream rows so merged web tool cards do not duplicate standalone tool transcript entries.
  * - 2026-03-13: Attached linked tool result rows to narrated assistant tool-call messages so assistant-card styling can reflect final tool success or failure.
  * - 2026-03-13: Backfilled linked assistant tool requests and resolved tool names onto standalone web tool rows so restored/result-only rows match Electron labels.
  * - 2026-03-13: Aligned split/merge/display paths with Electron renderer:
@@ -349,8 +350,7 @@ export function buildCombinedRenderableMessages(messages: Message[]): Message[] 
     toolResultsByKey.set(completionKey, existing);
   }
 
-  const consumedToolResultIds = new Set<string>();
-  const consumedToolStreamIds = new Set<string>();
+  const consumedToolRowIds = new Set<string>();
 
   return messages
     .map((message, currentIndex) => {
@@ -388,18 +388,18 @@ export function buildCombinedRenderableMessages(messages: Message[]): Message[] 
         for (const callId of requestedCallIds) {
           const activeStreams = toolStreamsByKey.get(callId) || [];
           for (const streamRow of activeStreams) {
-            const streamMessageId = String((streamRow as any)?.messageId || '').trim();
-            if (streamMessageId) {
-              consumedToolStreamIds.add(streamMessageId);
+            const streamRowId = String((streamRow as any)?.messageId || streamRow.id || '').trim();
+            if (streamRowId) {
+              consumedToolRowIds.add(streamRowId);
             }
             combinedToolStreams.push(streamRow);
           }
 
           const matches = toolResultsByKey.get(callId) || [];
           for (const match of matches) {
-            const matchMessageId = String((match as any)?.messageId || '').trim();
+            const matchMessageId = String((match as any)?.messageId || match.id || '').trim();
             if (matchMessageId) {
-              consumedToolResultIds.add(matchMessageId);
+              consumedToolRowIds.add(matchMessageId);
               combinedMessageIds.add(matchMessageId);
             }
             combinedToolResults.push(match);
@@ -419,13 +419,13 @@ export function buildCombinedRenderableMessages(messages: Message[]): Message[] 
             continue;
           }
 
-          const candidateMessageId = String((candidate as any)?.messageId || '').trim();
+          const candidateMessageId = String((candidate as any)?.messageId || candidate.id || '').trim();
           if (candidateMessageId && combinedMessageIds.has(candidateMessageId)) {
             continue;
           }
 
           if (candidateMessageId) {
-            consumedToolResultIds.add(candidateMessageId);
+            consumedToolRowIds.add(candidateMessageId);
             combinedMessageIds.add(candidateMessageId);
           }
           combinedToolResults.push(candidate);
@@ -443,22 +443,16 @@ export function buildCombinedRenderableMessages(messages: Message[]): Message[] 
       } as Message;
     })
     .filter((message) => {
-      const anyMsg = message as any;
-      if (Boolean(anyMsg?.isToolStreaming)) {
-        const streamMessageId = String(anyMsg?.messageId || '').trim();
-        if (!streamMessageId) {
-          return true;
-        }
-        return !consumedToolStreamIds.has(streamMessageId);
-      }
-      const role = String(anyMsg?.role || '').trim().toLowerCase();
+      const role = String((message as any)?.role || '').trim().toLowerCase();
       if (role !== 'tool') {
         return true;
       }
-      const messageId = String(anyMsg?.messageId || '').trim();
-      if (!messageId) {
+
+      const toolRowId = String((message as any)?.messageId || message.id || '').trim();
+      if (!toolRowId) {
         return true;
       }
-      return !consumedToolResultIds.has(messageId);
+
+      return !consumedToolRowIds.has(toolRowId);
     });
 }

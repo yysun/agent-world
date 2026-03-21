@@ -5,6 +5,7 @@
  * Supports world/agent/chat management with optimized serialization and error handling.
  *
  * Changes:
+ * - 2026-03-21: Added guarded inline HTML bundle preview rewriting on `/tool-artifact` so relative JS/CSS/image assets resolve through approved artifact roots without exposing raw file URLs.
  * - 2026-03-12: World status now keeps the current chat in `queuedChatIds` while a durable `queued`/`sending`
  *   message_queue row still exists, preventing false-idle status during post-response queue cleanup.
  * - 2026-03-12: Trailing comma cleanup in WorldUpdateSchema; tool_permission is stored in world.variables env key — no dedicated API schema field needed.
@@ -109,6 +110,7 @@ import {
   EventType
 } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/index.js';
+import { buildToolArtifactPreviewUrl } from '../core/tool-execution-envelope.js';
 // Opik integration: optional tracer attach for API-managed world subscriptions.
 import { attachOptionalOpikTracer } from '../core/optional-tracers/opik-runtime.js';
 import { getSkillSourcePath, getSkills } from '../core/skill-registry.js';
@@ -332,6 +334,70 @@ async function resolveToolArtifactPath(requestedPath: string, worldId?: string):
   return null;
 }
 
+const INLINE_HTML_TOOL_PREVIEW_MODE = 'inline-html';
+
+function splitArtifactReferenceSuffix(reference: string): { pathPart: string; suffix: string } {
+  const normalized = String(reference || '').trim();
+  if (!normalized) {
+    return { pathPart: '', suffix: '' };
+  }
+
+  const hashIndex = normalized.indexOf('#');
+  const queryIndex = normalized.indexOf('?');
+  let suffixStart = -1;
+  if (queryIndex >= 0 && hashIndex >= 0) {
+    suffixStart = Math.min(queryIndex, hashIndex);
+  } else {
+    suffixStart = Math.max(queryIndex, hashIndex);
+  }
+
+  if (suffixStart < 0) {
+    return { pathPart: normalized, suffix: '' };
+  }
+
+  return {
+    pathPart: normalized.slice(0, suffixStart),
+    suffix: normalized.slice(suffixStart),
+  };
+}
+
+function shouldRewriteInlineHtmlArtifactReference(reference: string): boolean {
+  const normalized = String(reference || '').trim();
+  if (!normalized) {
+    return false;
+  }
+
+  if (normalized.startsWith('#') || normalized.startsWith('/') || normalized.startsWith('//')) {
+    return false;
+  }
+
+  return !/^[a-zA-Z][a-zA-Z\d+.-]*:/i.test(normalized);
+}
+
+function rewriteInlineHtmlArtifactContent(htmlContent: string, resolvedPath: string, worldId?: string): string {
+  const baseDir = path.dirname(resolvedPath);
+  return String(htmlContent || '').replace(/\b(src|href)\s*=\s*(["'])([^"'<>]+)\2/gi, (match, attribute, quote, rawReference) => {
+    if (!shouldRewriteInlineHtmlArtifactReference(rawReference)) {
+      return match;
+    }
+
+    const { pathPart, suffix } = splitArtifactReferenceSuffix(rawReference);
+    if (!pathPart) {
+      return match;
+    }
+
+    const normalizedReferencePath = normalizeResolvedPath(
+      `${baseDir.replace(/\\/g, '/')}/${pathPart.replace(/\\/g, '/')}`.replace(/\/\.\//g, '/'),
+    );
+
+    const rewrittenUrl = `${buildToolArtifactPreviewUrl({
+      path: normalizedReferencePath,
+      ...(worldId ? { worldId } : {}),
+    })}${suffix}`;
+    return `${attribute}=${quote}${rewrittenUrl}${quote}`;
+  });
+}
+
 async function isAgentNameUnique(worldCtx: ReturnType<typeof createWorldContext>, agentName: string, excludeAgent?: string): Promise<boolean> {
   const normalizedAgentName = toKebabCase(agentName);
   const normalizedExcludeAgent = excludeAgent ? toKebabCase(excludeAgent) : undefined;
@@ -426,6 +492,7 @@ const HitlResponseSchema = z.object({
 const ToolArtifactQuerySchema = z.object({
   path: z.string().min(1),
   worldId: z.string().min(1).optional(),
+  preview: z.enum([INLINE_HTML_TOOL_PREVIEW_MODE]).optional(),
 });
 
 const AgentUpdateSchema = z.object({
@@ -453,6 +520,28 @@ router.get('/tool-artifact', async (req: Request, res: Response): Promise<void> 
   const resolvedPath = await resolveToolArtifactPath(validation.data.path, validation.data.worldId);
   if (!resolvedPath) {
     sendError(res, 404, 'Tool artifact not found', 'TOOL_ARTIFACT_NOT_FOUND');
+    return;
+  }
+
+  if (validation.data.preview === INLINE_HTML_TOOL_PREVIEW_MODE) {
+    if (!/\.html?$/i.test(resolvedPath)) {
+      sendError(res, 400, 'Inline HTML preview requires an HTML artifact', 'INVALID_TOOL_ARTIFACT_PREVIEW');
+      return;
+    }
+
+    let htmlContent: string;
+    try {
+      htmlContent = await fs.readFile(resolvedPath, 'utf8');
+    } catch (error) {
+      loggerWorld.error('Error reading inline tool artifact preview', {
+        error: error instanceof Error ? error.message : error,
+        path: resolvedPath,
+      });
+      sendError(res, 500, 'Failed to read tool artifact preview', 'TOOL_ARTIFACT_PREVIEW_ERROR');
+      return;
+    }
+
+    res.type('html').send(rewriteInlineHtmlArtifactContent(htmlContent, resolvedPath, validation.data.worldId));
     return;
   }
 

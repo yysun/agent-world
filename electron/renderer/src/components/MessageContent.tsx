@@ -13,6 +13,9 @@
  * - Helper functions are scoped to this module because only this component uses them.
  *
  * Recent Changes:
+ * - 2026-03-21: Route Electron HTML artifact iframes through guarded `preview=inline-html` URLs so bundle-relative assets resolve inside inline previews.
+ * - 2026-03-21: Recognize plain-text tool execution failures such as `Error executing tool` / `Tool not found` so Electron tool status dots stay red for failed runs.
+ * - 2026-03-21: Render structured tool envelope previews in Electron tool rows and combined request/result views instead of collapsing adopted previews to plain summary text.
  * - 2026-03-13: Switched the reasoning header to regular-weight text and removed visible `Open` / `Collapse` toggle labels so the control stays arrow-only.
  * - 2026-03-13: Added a separate assistant reasoning toggle so completed messages keep reasoning available in a collapsed section instead of dropping it after stream finalization.
  * - 2026-03-13: Flattened tool rows into dot-status transcript lines and removed the in-body tool card shell so collapsed tool rows stay compact.
@@ -49,6 +52,8 @@ import { renderMarkdown } from '../utils/markdown';
 import { formatLogMessage } from '../utils/formatting';
 import { isToolRelatedMessage } from '../utils/message-utils';
 import {
+  getToolExecutionEnvelope,
+  normalizeToolPreviewItems,
   getToolPreviewDisplayText,
   parseToolExecutionEnvelopeContent,
   stringifyToolEnvelopeResult,
@@ -91,6 +96,117 @@ function normalizeExternalMessageLink(rawHref) {
   } catch {
     return null;
   }
+}
+
+function toLocalFileUrl(filePath) {
+  const normalized = String(filePath || '').trim();
+  if (!normalized || !/^(?:\/|[a-zA-Z]:[\\/])/.test(normalized)) {
+    return '';
+  }
+
+  if (/^[a-zA-Z]:[\\/]/.test(normalized)) {
+    return encodeURI(`file:///${normalized.replace(/\\/g, '/')}`);
+  }
+
+  return encodeURI(`file://${normalized}`);
+}
+
+function resolveToolResultName(message, index = 0) {
+  const directToolName = String(
+    message?.toolName
+    || message?.tool_name
+    || message?.toolExecution?.toolName
+    || getToolExecutionEnvelope(message)?.tool
+    || ''
+  ).trim();
+  if (directToolName) {
+    return directToolName;
+  }
+
+  const toolCallId = String(message?.tool_call_id || message?.messageId || '').trim();
+  return toolCallId || `tool-${index + 1}`;
+}
+
+function getToolPreviewAnchorHref(item) {
+  const source = String(item?.url || item?.artifact?.url || '').trim();
+  if (source) {
+    return source;
+  }
+
+  return String(item?.artifact?.path || '').trim();
+}
+
+function getElectronToolMediaSource(item) {
+  const source = String(item?.url || item?.artifact?.url || '').trim();
+  if (source && canEmbedToolMedia(source)) {
+    return source;
+  }
+
+  const localFileUrl = toLocalFileUrl(item?.artifact?.path);
+  if (localFileUrl) {
+    return localFileUrl;
+  }
+
+  return source;
+}
+
+function appendInlineHtmlPreviewMode(source) {
+  const normalized = String(source || '').trim();
+  if (!normalized || !/^\/api\/tool-artifact(?:\?|$)/.test(normalized)) {
+    return normalized;
+  }
+
+  try {
+    const url = new URL(normalized, 'http://localhost');
+    if (url.searchParams.get('preview') !== 'inline-html') {
+      url.searchParams.set('preview', 'inline-html');
+    }
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return normalized.includes('?')
+      ? `${normalized}&preview=inline-html`
+      : `${normalized}?preview=inline-html`;
+  }
+}
+
+function isPreviewableDocumentMediaType(mediaType) {
+  const normalized = String(mediaType || '').trim().toLowerCase();
+  return normalized === 'text/html' || normalized === 'application/pdf';
+}
+
+function getToolPreviewDocumentSource(item) {
+  const source = getElectronToolMediaSource(item);
+  if (!source || !canEmbedToolMedia(source)) {
+    return '';
+  }
+
+  const mediaType = String(item?.media_type || item?.artifact?.media_type || '').trim().toLowerCase();
+  if (mediaType === 'text/html') {
+    return appendInlineHtmlPreviewMode(source);
+  }
+
+  return source;
+}
+
+function renderToolDocumentPreview(source, displayName, mediaType, key) {
+  const isHtml = String(mediaType || '').trim().toLowerCase() === 'text/html';
+
+  return (
+    <div className="flex flex-col gap-2" key={key}>
+      <div className="flex flex-col gap-1">
+        <div className="break-all text-xs text-foreground">{displayName}</div>
+        <div className="text-xs text-muted-foreground">Inline preview</div>
+      </div>
+      <div className="overflow-hidden rounded border border-border/40 bg-background/50">
+        <iframe
+          src={source}
+          title={displayName}
+          className="h-[28rem] w-full bg-white"
+          sandbox={isHtml ? 'allow-downloads allow-forms allow-modals allow-same-origin allow-scripts' : undefined}
+        />
+      </div>
+    </div>
+  );
 }
 
 export function getExternalMessageLinkFromTarget(target) {
@@ -149,6 +265,11 @@ function extractToolNameFromMessage(message) {
     if (firstToolName) {
       return firstToolName;
     }
+  }
+
+  const combinedToolResults = Array.isArray(message?.combinedToolResults) ? message.combinedToolResults : [];
+  if (combinedToolResults.length > 0) {
+    return resolveToolResultName(combinedToolResults[0]);
   }
 
   const content = String(message?.content || '');
@@ -238,10 +359,12 @@ function isFailedToolResultContent(content) {
     if (exitCode !== null && exitCode !== 0) return true;
   }
 
-  if (/status\s*[:=]\s*failed/i.test(text)) return true;
+  if (/^error\b/i.test(text)) return true;
+  if (/status\s*[:=]\s*(failed|error)/i.test(text)) return true;
   if (/timed[_\s-]?out\s*[:=]\s*true/i.test(text)) return true;
   if (/cancel(?:ed|led)\s*[:=]\s*true/i.test(text)) return true;
   if (/reason\s*[:=]\s*(non_zero_exit|execution_error|validation_error|approval_denied|timeout|timed_out|canceled|cancelled)/i.test(text)) return true;
+  if (/tool not found/i.test(text)) return true;
 
   const exitCodeMatch = text.match(/exit[_\s-]?code\s*[:=]\s*(-?\d+)/i);
   if (exitCodeMatch?.[1]) {
@@ -307,9 +430,7 @@ function buildCombinedToolResultContent(results) {
 
   return results
     .map((result, index) => {
-      const toolName = String(result?.toolName || '').trim();
-      const toolCallId = String(result?.tool_call_id || result?.messageId || '').trim();
-      const title = toolName || toolCallId || `tool-${index + 1}`;
+      const title = resolveToolResultName(result, index);
       const content = String(getToolPreviewDisplayText(result) || result?.content || '').trim() || '(no output)';
       return `[${title}]\n${content}`;
     })
@@ -380,6 +501,242 @@ function buildCombinedRequestAndResultContent(message, combinedResults) {
   }
 
   return `Args:\n${requestText}\n\nResult:\n${resultText}`;
+}
+
+function getToolDisplayText(message) {
+  return String(getToolPreviewDisplayText(message) || message?.content || message?.text || '');
+}
+
+function truncateToolOutput(text) {
+  const normalized = String(text || '');
+  const MAX_LENGTH = 50000;
+  if (normalized.length <= MAX_LENGTH) {
+    return {
+      content: normalized,
+      wasTruncated: false,
+    };
+  }
+
+  return {
+    content: normalized.slice(0, MAX_LENGTH),
+    wasTruncated: true,
+  };
+}
+
+function canEmbedToolMedia(source) {
+  const normalized = String(source || '').trim();
+  return /^https?:\/\//i.test(normalized)
+    || /^data:/i.test(normalized)
+    || normalized.startsWith('blob:')
+    || normalized.startsWith('/');
+}
+
+function renderPlainToolOutputText(textContent) {
+  return (
+    <pre className="text-xs py-2 font-mono whitespace-pre-wrap break-all text-foreground">
+      {textContent}
+    </pre>
+  );
+}
+
+function renderToolPreviewItem(item, key) {
+  const source = getElectronToolMediaSource(item);
+  const displayName = String(item?.artifact?.display_name || item?.title || source || item?.artifact?.path || 'artifact').trim();
+  const mediaType = String(item?.media_type || item?.artifact?.media_type || '').trim();
+  const documentSource = getToolPreviewDocumentSource(item);
+
+  if ((item?.kind === 'markdown' || item?.renderer === 'markdown') && typeof item?.text === 'string') {
+    return (
+      <div
+        className="prose prose-invert max-w-none break-words text-sm text-foreground"
+        key={key}
+        dangerouslySetInnerHTML={{ __html: renderMarkdown(item.text) }}
+      />
+    );
+  }
+
+  if ((item?.kind === 'text' || item?.renderer === 'text') && typeof item?.text === 'string') {
+    return (
+      <div className="rounded-md border border-border/40 bg-background/30 px-2 py-1" key={key}>
+        {renderPlainToolOutputText(item.text)}
+      </div>
+    );
+  }
+
+  if ((item?.renderer === 'image' || item?.renderer === 'svg') && source && canEmbedToolMedia(source)) {
+    return (
+      <div className="flex flex-col gap-2" key={key}>
+        <img src={source} alt={displayName} className="max-w-full rounded border border-border/40" />
+      </div>
+    );
+  }
+
+  if (item?.renderer === 'audio' && source && canEmbedToolMedia(source)) {
+    return (
+      <div className="flex flex-col gap-2" key={key}>
+        <audio controls src={source} className="w-full" />
+      </div>
+    );
+  }
+
+  if (item?.renderer === 'video' && source && canEmbedToolMedia(source)) {
+    return (
+      <div className="flex flex-col gap-2" key={key}>
+        <video controls src={source} className="max-w-full rounded border border-border/40" />
+      </div>
+    );
+  }
+
+  if (item?.renderer === 'file' && isPreviewableDocumentMediaType(mediaType) && documentSource) {
+    return renderToolDocumentPreview(documentSource, displayName, mediaType, key);
+  }
+
+  const href = getToolPreviewAnchorHref(item);
+  const externalHref = normalizeExternalMessageLink(href);
+  const secondaryText = typeof item?.text === 'string' && item.text.trim()
+    ? item.text.trim()
+    : String(item?.artifact?.path || '').trim();
+
+  return (
+    <div className="flex flex-col gap-1 text-xs text-foreground" key={key}>
+      {externalHref
+        ? <a href={externalHref} target="_blank" rel="noopener noreferrer" className="underline break-all">{displayName}</a>
+        : <span className="break-all">{displayName}</span>}
+      {secondaryText && secondaryText !== displayName ? (
+        <div className="break-all text-muted-foreground">{secondaryText}</div>
+      ) : null}
+      {mediaType ? (
+        <div className="text-muted-foreground">{mediaType}</div>
+      ) : null}
+    </div>
+  );
+}
+
+function renderToolPreview(message) {
+  const envelope = getToolExecutionEnvelope(message);
+  if (!envelope) {
+    return null;
+  }
+
+  const items = normalizeToolPreviewItems(envelope.preview);
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {items.map((item, index) => renderToolPreviewItem(item, `tool-preview-${index}`))}
+    </div>
+  );
+}
+
+function renderToolResultBody(message, textContent) {
+  return renderToolPreview(message) || renderPlainToolOutputText(textContent);
+}
+
+function isDirectToolResultMessage(message) {
+  const role = String(message?.role || '').trim().toLowerCase();
+  const type = String(message?.type || '').trim().toLowerCase();
+  return role === 'tool'
+    || type === 'tool'
+    || Boolean(message?.tool_call_id)
+    || message?.toolExecution?.preview !== undefined
+    || message?.toolExecution?.result !== undefined;
+}
+
+function hasMeaningfulPlanningText(message) {
+  const planningText = String(message?.role === 'assistant' ? message?.content || '' : '').trim();
+  return planningText.length > 0 && !/^calling tool\s*:/i.test(planningText);
+}
+
+function renderToolResultRows(resultRows) {
+  if (!Array.isArray(resultRows) || resultRows.length === 0) {
+    return (
+      <div className="text-xs text-muted-foreground">(waiting for output...)</div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {resultRows.map((result, index) => {
+        const toolCallId = String(result?.tool_call_id || result?.messageId || '').trim();
+        const title = resolveToolResultName(result, index);
+        const resultText = getToolDisplayText(result);
+        const { content: visibleContent, wasTruncated } = truncateToolOutput(resultText);
+
+        return (
+          <div className="flex flex-col gap-2" key={toolCallId || `tool-result-${index}`}>
+            {resultRows.length > 1 ? (
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{title}</div>
+            ) : null}
+            <div className="rounded-md border border-border/40 bg-background/30 px-2 py-2">
+              {renderToolResultBody(result, visibleContent || '(no output)')}
+            </div>
+            {wasTruncated ? (
+              <div className="border-t border-border/40 pt-2 text-[11px] text-amber-400">
+                ⚠️ Output truncated (exceeded 50,000 characters)
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function renderStructuredToolBody(message) {
+  const combinedToolResults = Array.isArray(message?.combinedToolResults) ? message.combinedToolResults : [];
+  const hasCombinedResult = combinedToolResults.length > 0;
+  const hasLinkedToolRequest = Array.isArray(message?.linkedToolRequest?.tool_calls)
+    && message.linkedToolRequest.tool_calls.length > 0;
+  const hasInlineToolInput = Boolean(
+    (message?.toolInput && typeof message.toolInput === 'object')
+    || String(message?.command || '').trim()
+  );
+  const shouldRenderRequestAndResult = hasCombinedResult
+    || isToolCallRequestMessage(message)
+    || hasLinkedToolRequest
+    || hasInlineToolInput;
+
+  if (!shouldRenderRequestAndResult) {
+    const { content: visibleContent, wasTruncated } = truncateToolOutput(getToolDisplayText(message));
+    return (
+      <>
+        {renderToolResultBody(message, visibleContent || (message?.isToolStreaming ? '(waiting for output...)' : '(no output)'))}
+        {wasTruncated ? (
+          <div className="border-t border-border/40 pt-2 text-[11px] text-amber-400">
+            ⚠️ Output truncated (exceeded 50,000 characters)
+          </div>
+        ) : null}
+      </>
+    );
+  }
+
+  const requestText = buildToolRequestContent(message);
+  const resultRows = hasCombinedResult
+    ? combinedToolResults
+    : (isDirectToolResultMessage(message) ? [message] : []);
+
+  return (
+    <div className="flex flex-col gap-3">
+      {hasMeaningfulPlanningText(message) ? (
+        <div
+          className="prose prose-invert max-w-none break-words text-sm text-foreground"
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(String(message?.content || '').trim()) }}
+        />
+      ) : null}
+      <div className="flex flex-col gap-1">
+        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Args</div>
+        <pre className="text-xs py-2 font-mono whitespace-pre-wrap break-all text-foreground">
+          {requestText || '(tool request)'}
+        </pre>
+      </div>
+      <div className="flex flex-col gap-1">
+        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Result</div>
+        {renderToolResultRows(resultRows)}
+      </div>
+    </div>
+  );
 }
 
 export function getInitialReasoningCollapsedState(message) {
@@ -464,7 +821,6 @@ export default function MessageContent({
   streamingInputPreview = '',
 }) {
   const isToolMessage = message?.forceAssistantMessage === true ? false : isToolRelatedMessage(message);
-  const MAX_TOOL_OUTPUT_LENGTH = 50000;
   const isAssistantStreaming = message?.isStreaming === true && !isToolMessage;
   const shouldHideStreamingPlaceholder = isAssistantStreaming && isStreamingPlaceholderContent(message?.content);
   const displayContent = shouldHideStreamingPlaceholder ? '' : String(message?.content || '');
@@ -534,9 +890,6 @@ export default function MessageContent({
   }
 
   if (isToolMessage) {
-    const toolContent = getToolBodyContent(message);
-    const isTruncated = toolContent.length > MAX_TOOL_OUTPUT_LENGTH;
-    const visibleContent = isTruncated ? toolContent.slice(0, MAX_TOOL_OUTPUT_LENGTH) : toolContent;
     const toolHeaderLabel = `⚙️ ${getToolStatusLabel(message, isToolCallPending)}`;
     const toolStatusTone = getToolStatusTone(message, isToolCallPending);
     const shouldRenderToolHeader = showToolHeader;
@@ -555,16 +908,7 @@ export default function MessageContent({
         ) : null}
         {!collapsed ? (
           <div className="ml-3 border-l border-border/40 pl-3">
-            <pre
-              className="text-xs py-2 font-mono whitespace-pre-wrap break-all text-foreground"
-            >
-              {visibleContent || (message.isToolStreaming ? '(waiting for output...)' : '(no output)')}
-            </pre>
-            {isTruncated ? (
-              <div className="border-t border-border/40 py-2 text-[11px] text-amber-400">
-                ⚠️ Output truncated (exceeded 50,000 characters)
-              </div>
-            ) : null}
+            {renderStructuredToolBody(message)}
           </div>
         ) : null}
       </div>

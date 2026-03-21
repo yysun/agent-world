@@ -47,7 +47,7 @@ vi.mock('electron', () => ({
     showOpenDialog: showOpenDialogMock,
   },
   shell: {
-    openExternal: openExternalMock
+    openExternal: openExternalMock,
   },
   default: {
     dialog: {

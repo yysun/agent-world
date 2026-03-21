@@ -4326,6 +4326,20 @@ legend {
   padding: 4px 0 0 1.1rem;
 }
 
+.tool-preview-file {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tool-preview-frame {
+  width: 100%;
+  min-height: 22rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 0.5rem;
+  background: #fff;
+}
+
 .tool-output-live .tool-output-content {
   padding-top: 8px;
 }

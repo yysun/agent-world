@@ -19,7 +19,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { getCustomRendererMatch } from '../../web/src/domain/custom-renderers';
-import { getToolPreviewMaxLines } from '../../web/src/domain/message-content';
+import { getToolPreviewItemSource, getToolPreviewMaxLines } from '../../web/src/domain/message-content';
 import { extractToolPayload } from '../../web/src/domain/renderers/custom-renderer-utils';
 import { getToolPreviewDisplayText } from '../../web/src/domain/tool-execution-envelope';
 import type { Message } from '../../web/src/types';
@@ -57,6 +57,32 @@ describe('web tool execution envelope helpers', () => {
 
     expect(getToolPreviewDisplayText(message)).toContain('status: success');
     expect(getToolPreviewDisplayText(message)).toContain('out.txt');
+  });
+
+  it('adds guarded inline-html preview mode for HTML artifact iframe sources', () => {
+    expect(getToolPreviewItemSource({
+      kind: 'artifact',
+      renderer: 'file',
+      artifact: {
+        path: '/tmp/out/index.html',
+        url: '/api/tool-artifact?path=%2Ftmp%2Fout%2Findex.html&worldId=world-1',
+        media_type: 'text/html',
+        display_name: 'index.html',
+      },
+    })).toBe('/api/tool-artifact?path=%2Ftmp%2Fout%2Findex.html&worldId=world-1&preview=inline-html');
+  });
+
+  it('keeps guarded PDF artifact iframe sources unchanged', () => {
+    expect(getToolPreviewItemSource({
+      kind: 'artifact',
+      renderer: 'file',
+      artifact: {
+        path: '/tmp/out/report.pdf',
+        url: '/api/tool-artifact?path=%2Ftmp%2Fout%2Freport.pdf&worldId=world-1',
+        media_type: 'application/pdf',
+        display_name: 'report.pdf',
+      },
+    })).toBe('/api/tool-artifact?path=%2Ftmp%2Fout%2Freport.pdf&worldId=world-1');
   });
 
   it('returns markdown preview text from persisted tool envelopes', () => {

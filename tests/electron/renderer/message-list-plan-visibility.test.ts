@@ -200,7 +200,7 @@ describe('MessageListPanel narrated tool-call visibility', () => {
     expect(visibleMessages[0]?.narratedToolCallResults?.[0]?.messageId).toBe('tool-result-hidden-1');
   });
 
-  it('still merges placeholder calling-tool assistant row with tool result', () => {
+  it('still merges placeholder calling-tool assistant row and hides the consumed standalone tool result', () => {
     const assistantCallingTool = {
       messageId: 'assistant-call-1',
       role: 'assistant',
@@ -234,7 +234,7 @@ describe('MessageListPanel narrated tool-call visibility', () => {
     expect(merged[0]?.combinedToolResults).toHaveLength(1);
   });
 
-  it('merges live shell stdout rows into the placeholder tool request during streaming', () => {
+  it('merges live shell stdout rows into the placeholder tool request during streaming without a duplicate tool row', () => {
     const assistantCallingTool = {
       messageId: 'assistant-call-stream-1',
       role: 'assistant',

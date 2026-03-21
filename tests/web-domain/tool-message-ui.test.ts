@@ -14,6 +14,7 @@
  * - Avoids DOM rendering and external I/O.
  *
  * Recent Changes:
+ * - 2026-03-21: Added narrated tool-call border coverage for enveloped failed tool results so persisted failure state still renders the red assistant border.
  * - 2026-03-13: Refreshed narrated assistant tool-call styling coverage while lightening the success/failure border treatment.
  * - 2026-03-13: Added regression coverage so narrated assistant tool-call messages stay on assistant-card layout instead of compact tool rows.
  * - 2026-03-13: Added narrated assistant tool-call border coverage so assistant-shaped planning rows can reflect final tool success/failure.
@@ -27,6 +28,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatReasoningDuration,
   getReasoningHeaderLabel,
+  getToolOneLineSummary,
   getToolToggleLabel,
   isToolRenderableMessage,
   isReasoningExpanded,
@@ -213,6 +215,38 @@ describe('web/tool message ui', () => {
     } as any)).toBe('agent-message-narrated-tool-failed');
 
     expect(getNarratedToolCallBorderClass({
+      id: 'narrated-envelope-failed',
+      type: 'assistant',
+      role: 'assistant',
+      sender: 'agent-a',
+      text: 'I will run the command.',
+      createdAt: new Date(),
+      narratedToolCallResults: [{
+        id: 'tool-envelope-failed',
+        type: 'tool',
+        role: 'tool',
+        sender: 'agent-a',
+        text: JSON.stringify({
+          __type: 'tool_execution_envelope',
+          version: 1,
+          tool: 'search',
+          tool_call_id: 'call-search-1',
+          status: 'failed',
+          preview: {
+            kind: 'text',
+            renderer: 'text',
+            text: 'Search failed',
+          },
+          result: {
+            status: 'failed',
+            reason: 'execution_error',
+          },
+        }),
+        createdAt: new Date(),
+      } as any],
+    } as any)).toBe('agent-message-narrated-tool-failed');
+
+    expect(getNarratedToolCallBorderClass({
       id: 'plain-assistant',
       type: 'assistant',
       role: 'assistant',
@@ -258,5 +292,38 @@ describe('web/tool message ui', () => {
       { id: 'assistant-2', isStreaming: true },
     ]);
     expect(nextState.needScroll).toBe(false);
+  });
+
+  it('uses envelope tool names for restored combined web tool summaries', () => {
+    const summary = getToolOneLineSummary({
+      id: 'assistant-restored',
+      type: 'assistant',
+      role: 'assistant',
+      sender: 'agent-a',
+      text: 'Restored tool run',
+      createdAt: new Date(),
+      combinedToolResults: [{
+        id: 'tool-restored-1',
+        type: 'tool',
+        role: 'tool',
+        sender: 'agent-a',
+        text: JSON.stringify({
+          __type: 'tool_execution_envelope',
+          version: 1,
+          tool: 'web_fetch',
+          tool_call_id: 'call-fetch-1',
+          status: 'completed',
+          preview: {
+            kind: 'text',
+            renderer: 'text',
+            text: 'Fetched page',
+          },
+          result: 'Fetched page',
+        }),
+        createdAt: new Date(),
+      } as any],
+    } as any);
+
+    expect(summary).toBe('tool: web_fetch - done');
   });
 });

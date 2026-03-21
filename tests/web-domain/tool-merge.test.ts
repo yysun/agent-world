@@ -6,9 +6,9 @@
  *
  * Key Features:
  * - Tool result rows matched by tool_call_id are attached to the request row
- *   as combinedToolResults and filtered from the top-level array.
+ *   as combinedToolResults and removed from the top-level render list.
  * - Linked streaming tool rows (isToolStreaming=true) are attached to the request row
- *   as combinedToolStreams and filtered from the top-level array.
+ *   as combinedToolStreams and removed from the top-level render list.
  * - Messages without matching results pass through unchanged.
  * - Messages that are not tool-related pass through unchanged.
  *
@@ -75,21 +75,19 @@ describe('buildCombinedRenderableMessages', () => {
     expect(result[0].id).toBe('human-1');
   });
 
-  it('merges a tool result into the matching request row', () => {
+  it('merges a tool result into the matching request row and hides the standalone result row', () => {
     const req = makeRequest();
     const res = makeResult();
     const result = buildCombinedRenderableMessages([req, res]);
 
-    // Result row should be consumed (not top-level)
     expect(result).toHaveLength(1);
-    // Request row should have combinedToolResults attached
     const merged = result[0] as any;
     expect(Array.isArray(merged.combinedToolResults)).toBe(true);
     expect(merged.combinedToolResults).toHaveLength(1);
     expect(merged.combinedToolResults[0].id).toBe('res-1');
   });
 
-  it('restores a completed shell card from assistant request plus canonical tool result only', () => {
+  it('restores a completed shell status row without duplicating the canonical tool result', () => {
     const req = makeRequest({
       text: 'Calling tool: shell_cmd',
       tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'shell_cmd', arguments: '{"command":"pwd"}' } }],
@@ -163,6 +161,7 @@ describe('buildCombinedRenderableMessages', () => {
 
     expect(result).toHaveLength(2);
     expect(result[0].id).toBe('human-1');
+    expect(result[1].id).toBe('req-x');
   });
 
   it('keeps narrated assistant tool-call messages as regular cards when content is in text field (web Message shape)', () => {
@@ -280,7 +279,7 @@ describe('buildCombinedRenderableMessages', () => {
     const result = buildCombinedRenderableMessages([req, res]);
 
     expect(result).toHaveLength(1);
-    const merged = result[0] as any;
-    expect(merged.toolName).toBe('shell_cmd');
+    expect((result[0] as any).toolName).toBe('shell_cmd');
+    expect((result[0] as any).combinedToolResults).toHaveLength(1);
   });
 });

@@ -17,6 +17,7 @@
  * - Keeps helper logic local to this domain module for focused maintenance
  *
  * Recent Changes:
+ * - 2026-03-21: Recognize plain-text tool execution failures such as `Error executing tool` / `Tool not found` so failed web tool rows keep failed status styling.
  * - 2026-03-13: Excluded narrated assistant tool-call messages from compact tool-row classification so assistant-card border styling can render in web chat.
  * - 2026-03-13: Resolved restored/result-only tool rows through linked assistant requests and envelope metadata so web summary labels match Electron.
  * - 2026-03-12: Merged attached live tool-stream output into the request card body so running shell output does not
@@ -188,12 +189,29 @@ function isToolResultFailureText(text: string): boolean {
   }
 
   return /^\[error\]/i.test(normalized)
-    || /^error:/i.test(normalized)
+    || /^error\b/i.test(normalized)
     || /status\s*[:=]\s*(failed|error)/i.test(normalized)
     || /exit[_\s-]?code\s*[:=]\s*-?[1-9]\d*/i.test(normalized)
     || /timed[_\s-]?out\s*[:=]\s*true/i.test(normalized)
     || /cancel(?:ed|led)\s*[:=]\s*true/i.test(normalized)
-    || /reason\s*[:=]\s*(non_zero_exit|execution_error|validation_error|approval_denied|timeout|timed_out|canceled|cancelled)/i.test(normalized);
+    || /reason\s*[:=]\s*(non_zero_exit|execution_error|validation_error|approval_denied|timeout|timed_out|canceled|cancelled)/i.test(normalized)
+    || /tool not found/i.test(normalized);
+}
+
+function resolveToolResultDisplayName(message: Message, index: number = 0): string {
+  const directToolName = String(
+    (message as any)?.toolName
+    || (message as any)?.tool_name
+    || (message as any)?.toolExecution?.toolName
+    || getToolExecutionEnvelope(message)?.tool
+    || ''
+  ).trim();
+  if (directToolName) {
+    return directToolName;
+  }
+
+  const toolCallId = String((message as any)?.tool_call_id || (message as any)?.toolCallId || message.id || '').trim();
+  return toolCallId || `tool-${index + 1}`;
 }
 
 function resolveToolDisplayName(message: Message): string {
@@ -245,13 +263,7 @@ function resolveToolDisplayName(message: Message): string {
     ? (message as any).combinedToolResults
     : [];
   if (combinedToolResults.length > 0) {
-    const firstResultName = String(
-      (combinedToolResults[0] as any)?.toolName
-      || (combinedToolResults[0] as any)?.tool_name
-      || (combinedToolResults[0] as any)?.toolExecution?.toolName
-      || getToolExecutionEnvelope(combinedToolResults[0])?.tool
-      || '',
-    ).trim();
+    const firstResultName = resolveToolResultDisplayName(combinedToolResults[0]);
     if (firstResultName) {
       return firstResultName;
     }
@@ -634,13 +646,21 @@ function renderMergedToolCard(message: Message) {
   const isExpanded = (message as any).isToolOutputExpanded || false;
   const fallbackToolCalls = toolCalls.length > 0
     ? toolCalls
-    : [{
-      id: `${String((message as any)?.messageId || message.id || 'tool-request')}-inline`,
-      function: {
-        name: resolveToolDisplayName(message),
-        arguments: requestText,
-      },
-    }];
+    : combinedToolResults.length > 0
+      ? combinedToolResults.map((result: Message, index: number) => ({
+        id: String((result as any)?.tool_call_id || (result as any)?.toolCallId || `${String((message as any)?.messageId || message.id || 'tool-result')}-${index}`),
+        function: {
+          name: resolveToolResultDisplayName(result, index),
+          arguments: '',
+        },
+      }))
+      : [{
+        id: `${String((message as any)?.messageId || message.id || 'tool-request')}-inline`,
+        function: {
+          name: resolveToolDisplayName(message),
+          arguments: requestText,
+        },
+      }];
 
   return (
     <div className="merged-tool-card tool-surface">
