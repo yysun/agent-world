@@ -29,8 +29,65 @@ This document explains the desktop release flow for Agent World and answers comm
 `release:prepare` runs:
 - `npm run version:sync:electron`
 - `npm run version:check:electron`
+- `npm run deps:sync:electron-runtime`
+- `npm run deps:check:electron-runtime`
 
-This syncs and verifies `electron/package.json` version.
+This syncs and verifies the Electron version contract and required runtime dependency alignment.
+
+## Manual GitHub Actions Trigger
+
+Use this flow when you want GitHub Actions to build and publish the release instead of uploading local artifacts manually.
+
+### Preconditions
+
+- Your branch contains the release-ready source changes.
+- Root `package.json` has the target version.
+- `electron/package.json` is kept in sync by running `npm run release:prepare` locally before you push.
+- Required GitHub Actions secrets are configured for macOS signing/notarization and Windows signing.
+
+### Recommended prep before dispatch
+
+From repo root:
+
+```bash
+# 1) bump version and create the version commit/tag locally
+npm version patch
+
+# 2) sync and verify the release contract
+npm run release:prepare
+
+# 3) push the branch commit
+git push origin HEAD
+
+# 4) push the version tag created by npm version
+git push origin --tags
+```
+
+### Trigger from GitHub Actions UI
+
+1. Open the repository on GitHub.
+2. Go to **Actions**.
+3. Select the **Electron Release** workflow.
+4. Click **Run workflow**.
+5. Choose the branch that contains the release-ready version bump commit.
+6. Enter `release_tag` in the exact release format, for example `v0.15.0`.
+7. Click **Run workflow** to start the manual release.
+
+### What the manual workflow does
+
+- Validates that `release_tag` matches the root `package.json` version.
+- Runs `npm run release:prepare` in CI.
+- Creates the GitHub release automatically if it does not already exist.
+- Builds signed macOS and Windows distributables.
+- Publishes installers, updater metadata, and blockmaps to the matching GitHub release.
+
+### Important manual-trigger rules
+
+- `release_tag` must exactly match the version in root `package.json`, including prerelease suffixes.
+- Use stable tags such as `v0.15.0` for stable releases.
+- Use prerelease tags such as `v0.15.0-beta.1` only for prerelease channel publishes.
+- The selected branch must already contain the version bump and any release-related changes; the workflow does not edit or commit files for you.
+- If required signing secrets are missing, the workflow is expected to fail instead of publishing incomplete artifacts.
 
 ## Local Build and Packaging Commands
 
@@ -161,6 +218,8 @@ export WIN_CSC_KEY_PASSWORD="<windows-cert-password>"
 
 ## Recommended Release Sequence (Manual)
 
+This is the fully local packaging path. Use it when you want to build artifacts yourself and upload them manually.
+
 ```bash
 # from clean branch
 npm version patch
@@ -177,6 +236,8 @@ Then:
    - blockmaps
 3. Verify installer download and launch.
 4. Verify update path from previous installed version.
+
+If you want GitHub Actions to do the build and upload, use the manual trigger flow in the **Manual GitHub Actions Trigger** section instead of this local upload sequence.
 
 ## FAQ
 

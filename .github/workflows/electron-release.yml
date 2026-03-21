@@ -16,6 +16,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag to publish, for example v0.15.0
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -52,35 +57,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
-
-          if [[ -z "${TAG}" ]]; then
-            echo "Missing tag ref." >&2
-            exit 1
-          fi
-
-          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z\.-]+)?$ ]]; then
-            echo "Invalid tag format: ${TAG}" >&2
-            echo "Expected: vX.Y.Z or vX.Y.Z-prerelease.N" >&2
-            exit 1
-          fi
-
           ROOT_VERSION="$(node -p "require('./package.json').version")"
-          if [[ "v${ROOT_VERSION}" != "${TAG}" ]]; then
-            echo "Tag/version mismatch: tag=${TAG}, package.json=${ROOT_VERSION}" >&2
-            exit 1
-          fi
+
+          node ./scripts/release-metadata.js \
+            --ref-name "${GITHUB_REF_NAME}" \
+            --input-tag "${{ github.event.inputs.release_tag || '' }}" \
+            --package-version "${ROOT_VERSION}" \
+            >> "${GITHUB_OUTPUT}"
 
           npm run release:prepare
-
-          if [[ "${TAG}" == *-* ]]; then
-            RELEASE_TYPE="prerelease"
-          else
-            RELEASE_TYPE="release"
-          fi
-
-          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
-          echo "release_type=${RELEASE_TYPE}" >> "${GITHUB_OUTPUT}"
 
       - name: Ensure GitHub release exists with notes
         env:

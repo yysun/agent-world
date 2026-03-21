@@ -102,7 +102,7 @@ Phase 1 delivery notes:
   - `version:sync:electron`
   - `version:check:electron`
   - `release:prepare`
-- Synced `electron/package.json` version from `0.1.0` to `0.10.0` and validated with `--check`.
+- Synced `electron/package.json` version to the current root release version and validated with `--check`.
 
 ### Phase 2: Packaging and Artifact Generation
 - [x] Add macOS and Windows packaging configuration for installer-grade outputs and update metadata outputs.
@@ -115,6 +115,7 @@ Phase 1 delivery notes:
 Phase 2 delivery notes:
 - Added packaging configuration + targets in `electron/package.json` (`electron-builder` build block).
 - Added runtime staging script `scripts/prepare-electron-runtime.js` and wired it into Electron packaging scripts.
+- Added runtime dependency sync script `scripts/sync-electron-runtime-deps.js` so packaged Electron builds include the core module dependencies needed by `dist/core`.
 - Added root wrappers for packaging commands (`electron:package:base`, `electron:dist:*`) in `package.json`.
 - Added local verification command documentation in `docs/electron-release-contract.md`.
 - Verified generated artifacts and update metadata:
@@ -130,11 +131,18 @@ Phase 2 delivery notes:
   - Windows arm64 installer validation (native-module cross-build constraints from current host)
 
 ### Phase 3: GitHub Release Automation
-- [ ] Add GitHub Actions workflow to build and publish macOS + Windows release assets on tagged versions.
-- [ ] Configure workflow to upload all installer/update assets and publish release notes.
-- [ ] Add workflow guardrails for failed signing/notarization/publishing paths.
-- [ ] Add channel-aware publish rules for stable vs prerelease releases.
-- [ ] Ensure release process is repeatable without manual artifact renaming/editing.
+- [x] Add GitHub Actions workflow to build and publish macOS + Windows release assets on tagged versions.
+- [x] Configure workflow to upload all installer/update assets and publish release notes.
+- [x] Add workflow guardrails for failed signing/notarization/publishing paths.
+- [x] Add channel-aware publish rules for stable vs prerelease releases.
+- [x] Ensure release process is repeatable without manual artifact renaming/editing.
+
+Phase 3 delivery notes:
+- Added `.github/workflows/electron-release.yml` for tagged release publishing to GitHub Releases.
+- Added a reusable release metadata resolver script: `scripts/release-metadata.js`.
+- Added `workflow_dispatch` support with explicit `release_tag` input for manual release runs.
+- Centralized tag/version/release-channel validation so manual and tag-triggered releases follow the same contract.
+- Fixed Electron packaging manifest drift by requiring `electron-builder` directly in `electron/package.json`.
 
 ### Phase 4: In-App Update Lifecycle
 - [ ] Add updater service in Electron main process for check/download/install lifecycle.

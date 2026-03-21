@@ -1,19 +1,26 @@
 # Agent World
 
-[![Latest Release](https://img.shields.io/github/v/release/yysun/agent-world?label=release)](https://github.com/yysun/agent-world/releases)
-
 <p align="center">
   <img src="electron/assets/icons/agent-world-icon.svg" alt="Agent World Logo" width="120" />
 </p>
 
 *Prompt-defined agent runtime for orchestrating models, tools, skills, MCP servers, and external agent CLIs.*
 
-
-![Agent World screenshot](docs/Screenshot-agents.png)
+<p align="center">
+  <a href="https://github.com/yysun/agent-world/releases/latest" aria-label="Download Agent World for macOS">
+    <img src="https://img.shields.io/badge/Download%20for-macOS-111111?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" />
+  </a>
+  <a href="https://github.com/yysun/agent-world/releases/latest" aria-label="Download Agent World for Windows">
+    <img src="https://img.shields.io/badge/Download%20for-Windows-0078D4?style=for-the-badge&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA4OCA4OCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTAgMTIuNDAyIDM1LjY4NyA3LjU0djM0LjE1OEgwVjEyLjQwMnptMzkuOTk1LTUuNDQ4TDg4IDB2NDEuMzk4SDM5Ljk5NVY2Ljk1NHpNMCA0Ni4zMDJoMzUuNjg3djM0LjIwNUwwIDc1LjY0NVY0Ni4zMDJ6bTM5Ljk5NSAwSDg4djQxLjM5OGwtNDguMDA1LTYuNzZWNDYuMzAyeiIvPjwvc3ZnPg%3D%3D" alt="Download for Windows" />
+  </a>
+</p>
+<p align="center">Coming soon ...</p>
 
 ## Why Agent World
 
 Agent World is an **Agent Harness**, **Agent OS**, and **Agent Runtime** for prompt-defined multi-agent systems.
+
+![Agent World screenshot](docs/Screenshot-agents.png)
 
 You define a world, define agents, give them tools and workflow rules, and run them through Web, CLI, or Electron. The runtime handles message routing, streaming, tool lifecycle, approvals, queueing, and multi-agent coordination for you.
 
