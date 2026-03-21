@@ -16,6 +16,7 @@
  * - Uses mocked in-memory fs APIs only (no filesystem access)
  *
  * Recent changes:
+ * - 2026-03-21: Added durable mixed-artifact preview coverage for markdown, HTML bundles, and PDF outputs from skill scripts.
  * - 2026-03-01: Removed minimal-check mode assertions and updated coverage so load_skill always performs script/reference preflight.
  * - 2026-03-01: Added assertions for acknowledgment-first execution directive steps and regression coverage for empty-description fallback to skill ID.
  * - 2026-02-24: Updated coverage: non-zero exits surface as informational output (not blocking errors).
@@ -239,6 +240,94 @@ describe('core/load-skill-tool', () => {
     expect(JSON.stringify(envelope?.preview || null)).toContain(
       '/api/tool-artifact?path=%2Fskills%2Fpdf-extract%2Fassets%2Fscore.svg&worldId=world-1',
     );
+  });
+
+  it('preserves mixed script artifact metadata for markdown, html bundles, and pdf outputs', async () => {
+    mockedGetSkill.mockReturnValue({
+      skill_id: 'pdf-extract',
+      description: 'Extract PDF content',
+      hash: 'e99a18ad',
+      lastUpdated: '2026-02-14T12:00:00.000Z',
+    });
+    mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
+    vi.mocked(fs.readFile).mockImplementation(async (targetPath: any) => {
+      const normalizedTarget = String(targetPath);
+      if (normalizedTarget.endsWith('/skills/pdf-extract/SKILL.md')) {
+        return [
+          '# PDF Extraction Instructions',
+          'Run `scripts/build.sh` before processing.',
+        ].join('\n') as any;
+      }
+      if (normalizedTarget.endsWith('/skills/pdf-extract/out/notes.md')) {
+        return '# Generated Notes\n\nThis is a rendered markdown summary.' as any;
+      }
+      if (normalizedTarget.endsWith('/skills/pdf-extract/out/index.html')) {
+        return '<html><head><script src="./app.js"></script><link rel="stylesheet" href="./styles.css"></head><body>ready</body></html>' as any;
+      }
+      throw new Error(`ENOENT: ${normalizedTarget}`);
+    });
+    vi.mocked((fs as any).stat).mockImplementation(async (targetPath: string) => {
+      const normalizedTarget = String(targetPath);
+      if (normalizedTarget.endsWith('/skills/pdf-extract/scripts/build.sh')) {
+        return { isFile: () => true, isDirectory: () => false, size: 12 };
+      }
+      if (normalizedTarget.endsWith('/skills/pdf-extract/out/notes.md')) {
+        return { isFile: () => true, isDirectory: () => false, size: 128 };
+      }
+      if (normalizedTarget.endsWith('/skills/pdf-extract/out/index.html')) {
+        return { isFile: () => true, isDirectory: () => false, size: 256 };
+      }
+      if (normalizedTarget.endsWith('/skills/pdf-extract/out/app.js')) {
+        return { isFile: () => true, isDirectory: () => false, size: 64 };
+      }
+      if (normalizedTarget.endsWith('/skills/pdf-extract/out/styles.css')) {
+        return { isFile: () => true, isDirectory: () => false, size: 48 };
+      }
+      if (normalizedTarget.endsWith('/skills/pdf-extract/out/report.pdf')) {
+        return { isFile: () => true, isDirectory: () => false, size: 512 };
+      }
+      throw new Error(`ENOENT: ${normalizedTarget}`);
+    });
+    mockedExecuteShellCommand.mockResolvedValueOnce({
+      executionId: 'exec-3',
+      command: 'bash',
+      parameters: ['scripts/build.sh'],
+      stdout: 'Created out/notes.md\nCreated out/index.html\nCreated out/app.js\nCreated out/styles.css\nCreated out/report.pdf',
+      stderr: '',
+      exitCode: 0,
+      signal: null,
+      executedAt: new Date('2026-02-14T12:00:00.000Z'),
+      duration: 18,
+    } as any);
+
+    const tool = createLoadSkillToolDefinition();
+    const result = await tool.execute(
+      { skill_id: 'pdf-extract' },
+      undefined,
+      undefined,
+      {
+        world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+        chatId: 'chat-1',
+        workingDirectory: '/skills/pdf-extract',
+        persistToolEnvelope: true,
+      },
+    );
+
+    const envelope = parseToolExecutionEnvelopeContent(String(result));
+    const previewText = JSON.stringify(envelope?.preview || null);
+    const resultText = String(envelope?.result || '');
+
+    expect(envelope?.tool).toBe('load_skill');
+    expect(previewText).toContain('# Generated Notes');
+    expect(previewText).toContain('/api/tool-artifact?path=%2Fskills%2Fpdf-extract%2Fout%2Findex.html&worldId=world-1');
+    expect(previewText).toContain('/api/tool-artifact?path=%2Fskills%2Fpdf-extract%2Fout%2Fapp.js&worldId=world-1');
+    expect(previewText).toContain('/api/tool-artifact?path=%2Fskills%2Fpdf-extract%2Fout%2Fstyles.css&worldId=world-1');
+    expect(previewText).toContain('/api/tool-artifact?path=%2Fskills%2Fpdf-extract%2Fout%2Freport.pdf&worldId=world-1');
+    expect(resultText).toContain('Artifacts:');
+    expect(resultText).toContain('out/app.js (text/javascript)');
+    expect(resultText).toContain('out/index.html (text/html)');
+    expect(resultText).toContain('out/styles.css (text/css)');
+    expect(resultText).toContain('out/report.pdf (application/pdf)');
   });
 
   it('requires an explicit chatId for interactive load_skill approval', async () => {

@@ -11,6 +11,7 @@
  * - Mocks global fetch to avoid real network calls
  *
  * Recent Changes:
+ * - 2026-03-21: Added durable tool-envelope coverage for persisted `web_fetch` success and failure paths.
  * - 2026-03-12: Added regression coverage for blocked private targets without world context so execute never falls through to an uncontrolled network fetch.
  * - 2026-02-28: Added initial unit coverage for built-in web_fetch tool.
  * - 2026-03-01: Added coverage for includeLinks=false behavior to ensure anchor text is preserved without markdown links.
@@ -18,6 +19,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parseToolExecutionEnvelopeContent } from '../../core/tool-execution-envelope.js';
 
 const mockLookup = vi.hoisted(() => vi.fn());
 const mockRequestWorldOption = vi.hoisted(() => vi.fn());
@@ -99,6 +101,42 @@ describe('web_fetch tool', () => {
     expect(parsed.markdown).toContain('__NEXT_DATA__');
   });
 
+  it('wraps persisted web_fetch results in a durable tool envelope with preview metadata', async () => {
+    const html = '<html><head><title>Envelope App</title></head><body><h1>Ready</h1><p>Hello world</p></body></html>';
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(html, {
+          status: 200,
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        })
+      )
+    );
+
+    const tool = createWebFetchToolDefinition();
+    const raw = await tool.execute(
+      { url: 'https://example.com/envelope' },
+      undefined,
+      undefined,
+      {
+        toolCallId: 'web-fetch-1',
+        persistToolEnvelope: true,
+      },
+    );
+
+    const envelope = parseToolExecutionEnvelopeContent(String(raw));
+    expect(envelope?.tool).toBe('web_fetch');
+    expect(envelope?.status).toBe('completed');
+    expect(envelope?.tool_call_id).toBe('web-fetch-1');
+    expect(JSON.stringify(envelope?.preview || null)).toContain('# Envelope App');
+    expect(JSON.stringify(envelope?.preview || null)).toContain('https://example.com/envelope');
+
+    const parsedResult = JSON.parse(String(envelope?.result || '{}'));
+    expect(parsedResult.title).toBe('Envelope App');
+    expect(parsedResult.mode).toBe('html');
+  });
+
   it('strips link markup when includeLinks is false while keeping text content', async () => {
     const html = '<html><body><p>Read <a href="https://example.com/docs">the docs</a> now.</p></body></html>';
 
@@ -135,6 +173,26 @@ describe('web_fetch tool', () => {
     const result = await tool.execute({ url: 'http://localhost:3000' });
 
     expect(String(result)).toContain('Error: web_fetch failed - blocked_target: local/private hostnames are not allowed');
+  });
+
+  it('wraps persisted web_fetch failures in a durable tool envelope', async () => {
+    const tool = createWebFetchToolDefinition();
+    const raw = await tool.execute(
+      { url: 'http://localhost:3000' },
+      undefined,
+      undefined,
+      {
+        toolCallId: 'web-fetch-err-1',
+        persistToolEnvelope: true,
+      },
+    );
+
+    const envelope = parseToolExecutionEnvelopeContent(String(raw));
+    expect(envelope?.tool).toBe('web_fetch');
+    expect(envelope?.status).toBe('failed');
+    expect(envelope?.tool_call_id).toBe('web-fetch-err-1');
+    expect(String(envelope?.result || '')).toContain('blocked_target');
+    expect(JSON.stringify(envelope?.preview || null)).toContain('web_fetch failed');
   });
 
   it('requests HITL approval and allows localhost fetch when approved', async () => {

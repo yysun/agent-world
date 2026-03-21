@@ -15,6 +15,7 @@
  * - The helpers here stay transport-agnostic and do not depend on SSE state.
  *
  * Recent Changes:
+ * - 2026-03-21: Added richer artifact media-type detection for markdown, HTML bundles, PDF, and presentation outputs.
  * - 2026-03-06: Initial envelope contract for `shell_cmd` and `load_skill`.
  */
 
@@ -159,6 +160,7 @@ export function guessToolPreviewRenderer(mediaType: string | undefined): ToolPre
   if (normalized.startsWith('audio/')) return 'audio';
   if (normalized.startsWith('video/')) return 'video';
   if (normalized === 'text/markdown') return 'markdown';
+  if (normalized === 'text/html' || normalized === 'application/pdf') return 'file';
   if (normalized.startsWith('text/')) return 'text';
   return 'file';
 }
@@ -168,6 +170,12 @@ export function guessMediaTypeFromPath(filePath: string): string | undefined {
   const mediaTypeByExtension: Record<string, string> = {
     '.md': 'text/markdown',
     '.txt': 'text/plain',
+    '.html': 'text/html',
+    '.htm': 'text/html',
+    '.css': 'text/css',
+    '.js': 'text/javascript',
+    '.mjs': 'text/javascript',
+    '.cjs': 'text/javascript',
     '.svg': 'image/svg+xml',
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
@@ -181,6 +189,8 @@ export function guessMediaTypeFromPath(filePath: string): string | undefined {
     '.mp4': 'video/mp4',
     '.webm': 'video/webm',
     '.mov': 'video/quicktime',
+    '.pdf': 'application/pdf',
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   };
 
   return mediaTypeByExtension[extension];
@@ -198,7 +208,7 @@ export function createTextToolPreview(
   };
 }
 
-export function createArtifactToolPreview(options: ToolArtifactReference & { title?: string; url?: string }): ToolArtifactPreview {
+export function createArtifactToolPreview(options: ToolArtifactReference & { title?: string; url?: string; text?: string }): ToolArtifactPreview {
   const mediaType = options.media_type || guessMediaTypeFromPath(options.path || options.display_name || '');
   const renderer = guessToolPreviewRenderer(mediaType);
   const kind: ToolArtifactPreview['kind'] = mediaType === 'image/svg+xml'
@@ -213,6 +223,7 @@ export function createArtifactToolPreview(options: ToolArtifactReference & { tit
     ...(mediaType ? { media_type: mediaType } : {}),
     ...(options.title ? { title: options.title } : {}),
     ...(options.url ? { url: options.url } : {}),
+    ...(options.text ? { text: options.text } : {}),
     artifact: {
       ...(options.path ? { path: options.path } : {}),
       ...(options.url ? { url: options.url } : {}),

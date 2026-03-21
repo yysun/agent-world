@@ -95,6 +95,28 @@ type LoadSkillExecutionOutcome = {
   cacheableForRun: boolean;
 };
 
+type LoadSkillArtifactRole = 'primary' | 'supporting' | 'reference';
+
+type LoadSkillArtifactReference = {
+  absolutePath: string;
+  displayName: string;
+  relativeLabel: string;
+  mediaType?: string;
+  bytes?: number;
+  role: LoadSkillArtifactRole;
+  primaryArtifactPath?: string;
+};
+
+type SkillScriptExecutionStatus = 'completed' | 'failed' | 'blocked';
+
+type SkillScriptExecutionOutcome = {
+  source: string;
+  status: SkillScriptExecutionStatus;
+  result: string;
+  artifacts: LoadSkillArtifactReference[];
+  previews: ToolPreview[];
+};
+
 const LOAD_SKILL_PREVIEW_SCRIPT_OUTPUT_CHARS = 800;
 
 class SkillScriptExecutionError extends Error {
@@ -195,6 +217,10 @@ function normalizeComparablePath(targetPath: string): string {
 
 function normalizeAbsoluteLocalPath(targetPath: string): string {
   return normalizeComparablePath(targetPath);
+}
+
+function stripQueryAndHash(value: string): string {
+  return String(value || '').replace(/[?#].*$/, '').trim();
 }
 
 function toRootRelativePath(rootPath: string, targetPath: string): string {
@@ -833,7 +859,7 @@ async function executeSkillScripts(options: {
   scriptPaths: string[];
   skillRoot: string;
   context?: LoadSkillToolContext;
-}): Promise<Array<{ source: string; output: string }>> {
+}): Promise<SkillScriptExecutionOutcome[]> {
   const scriptPaths = options.scriptPaths;
   if (scriptPaths.length === 0) {
     return [];
@@ -844,7 +870,10 @@ async function executeSkillScripts(options: {
   if (toolPermission === 'read') {
     return scriptPaths.map((scriptPath) => ({
       source: scriptPath,
-      output: 'Script execution is blocked by the current permission level (read).',
+      status: 'blocked',
+      result: 'Script execution is blocked by the current permission level (read).',
+      artifacts: [],
+      previews: [],
     }));
   }
 
@@ -855,11 +884,14 @@ async function executeSkillScripts(options: {
   if (!worldId || !options.context?.world) {
     return [{
       source: 'approval',
-      output: 'HITL approval channel is unavailable in this runtime. Script execution skipped.',
+      status: 'blocked',
+      result: 'HITL approval channel is unavailable in this runtime. Script execution skipped.',
+      artifacts: [],
+      previews: [],
     }];
   }
 
-  const scriptOutputs: Array<{ source: string; output: string }> = [];
+  const scriptOutputs: SkillScriptExecutionOutcome[] = [];
 
   for (const referencedScript of scriptPaths) {
     const scriptPath = normalizeScriptPath(referencedScript);
@@ -868,7 +900,10 @@ async function executeSkillScripts(options: {
     if (!isPathWithinRoot(options.skillRoot, absoluteScriptPath)) {
       scriptOutputs.push({
         source: scriptPath,
-        output: `Script path rejected: "${scriptPath}" resolves outside skill root.`,
+        status: 'failed',
+        result: `Script path rejected: "${scriptPath}" resolves outside skill root.`,
+        artifacts: [],
+        previews: [],
       });
       continue;
     }
@@ -878,14 +913,20 @@ async function executeSkillScripts(options: {
       if (!scriptStat.isFile()) {
         scriptOutputs.push({
           source: scriptPath,
-          output: `Script path is not a file: "${scriptPath}"`,
+          status: 'failed',
+          result: `Script path is not a file: "${scriptPath}"`,
+          artifacts: [],
+          previews: [],
         });
         continue;
       }
     } catch {
       scriptOutputs.push({
         source: scriptPath,
-        output: `Script not found: "${scriptPath}"`,
+        status: 'failed',
+        result: `Script not found: "${scriptPath}"`,
+        artifacts: [],
+        previews: [],
       });
       continue;
     }
@@ -905,7 +946,10 @@ async function executeSkillScripts(options: {
     if (!scopeValidation.valid) {
       scriptOutputs.push({
         source: relativeScriptPath,
-        output: scopeValidation.error,
+        status: 'failed',
+        result: scopeValidation.error,
+        artifacts: [],
+        previews: [],
       });
       continue;
     }
@@ -924,25 +968,49 @@ async function executeSkillScripts(options: {
       },
     );
 
+    const resultText = executionResult.exitCode !== 0 || executionResult.error
+      ? (() => {
+        const exitCode = executionResult.exitCode === null ? 'unknown' : String(executionResult.exitCode);
+        const stderr = executionResult.stderr.trim();
+        const stdoutPreview = executionResult.stdout.trim();
+        const detail = [
+          `exit code ${exitCode}`,
+          stderr ? `stderr: ${stderr}` : '',
+          stdoutPreview ? `stdout: ${stdoutPreview}` : '',
+        ].filter(Boolean).join(' | ');
+        return `Script exited with ${detail}`;
+      })()
+      : formatResultForLLM(executionResult);
+    const artifactRoots = [
+      options.skillRoot,
+      ...(options.context?.workingDirectory ? [options.context.workingDirectory] : []),
+    ];
+    const artifactText = [executionResult.stdout, executionResult.stderr, resultText].filter(Boolean).join('\n');
+    const artifacts = await collectScriptArtifactReferencesFromText(artifactText, artifactRoots);
+    const previews = await buildScriptOutcomePreviews({
+      source: relativeScriptPath,
+      artifacts,
+      text: artifactText,
+      worldId: typeof options.context?.world?.id === 'string' ? options.context.world.id : undefined,
+    });
+
     if (executionResult.exitCode !== 0 || executionResult.error) {
-      const exitCode = executionResult.exitCode === null ? 'unknown' : String(executionResult.exitCode);
-      const stderr = executionResult.stderr.trim();
-      const stdoutPreview = executionResult.stdout.trim();
-      const detail = [
-        `exit code ${exitCode}`,
-        stderr ? `stderr: ${stderr}` : '',
-        stdoutPreview ? `stdout: ${stdoutPreview}` : '',
-      ].filter(Boolean).join(' | ');
       scriptOutputs.push({
         source: relativeScriptPath,
-        output: `Script exited with ${detail}`,
+        status: 'failed',
+        result: resultText,
+        artifacts,
+        previews,
       });
       continue;
     }
 
     scriptOutputs.push({
       source: relativeScriptPath,
-      output: formatResultForLLM(executionResult),
+      status: 'completed',
+      result: resultText,
+      artifacts,
+      previews,
     });
   }
 
@@ -959,16 +1027,51 @@ function extractUrlsFromText(text: string): string[] {
 }
 
 function extractArtifactPathCandidates(text: string): string[] {
-  const matches = String(text || '').match(/(?:\/[^\s"'`<>]+|\.[/\\][^\s"'`<>]+|[A-Za-z0-9_.-]+\.(?:svg|png|jpg|jpeg|gif|webp|mp3|wav|ogg|m4a|mp4|webm|mov|md|txt))/gi) || [];
+  const matches = String(text || '').match(/(?:\/[^\s"'`<>]+|\.[/\\][^\s"'`<>]+|(?:[A-Za-z0-9_.-]+[/\\])+[A-Za-z0-9_.-]+\.(?:svg|png|jpg|jpeg|gif|webp|mp3|wav|ogg|m4a|mp4|webm|mov|md|txt|html|htm|css|js|mjs|cjs|pdf|pptx)|[A-Za-z0-9_.-]+\.(?:svg|png|jpg|jpeg|gif|webp|mp3|wav|ogg|m4a|mp4|webm|mov|md|txt|html|htm|css|js|mjs|cjs|pdf|pptx))/gi) || [];
   return [...new Set(matches)];
 }
 
-async function resolvePreviewArtifactFromCandidate(
+function extractHtmlCompanionAssetCandidates(htmlContent: string): string[] {
+  const candidates = new Set<string>();
+  const scriptPattern = /<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi;
+  const stylePattern = /<link\b[^>]*\bhref=["']([^"']+)["'][^>]*>/gi;
+
+  for (const pattern of [scriptPattern, stylePattern]) {
+    for (const match of htmlContent.matchAll(pattern)) {
+      const candidate = stripQueryAndHash(match[1] || '');
+      if (!candidate) {
+        continue;
+      }
+      if (/^(?:https?:|data:|blob:|#|javascript:)/i.test(candidate)) {
+        continue;
+      }
+      candidates.add(candidate);
+    }
+  }
+
+  return [...candidates].sort((left, right) => left.localeCompare(right));
+}
+
+function compareArtifactReferences(left: LoadSkillArtifactReference, right: LoadSkillArtifactReference): number {
+  const roleRank = { primary: 0, reference: 1, supporting: 2 } as const;
+  const leftRank = roleRank[left.role] ?? 9;
+  const rightRank = roleRank[right.role] ?? 9;
+  if (leftRank !== rightRank) {
+    return leftRank - rightRank;
+  }
+
+  const leftPath = `${left.relativeLabel}::${left.absolutePath}`;
+  const rightPath = `${right.relativeLabel}::${right.absolutePath}`;
+  return leftPath.localeCompare(rightPath);
+}
+
+async function resolveScriptArtifactReference(
   candidate: string,
   roots: string[],
-  options: { worldId?: string | null } = {},
-): Promise<ToolPreview | null> {
-  const normalizedCandidate = String(candidate || '').trim();
+  role: LoadSkillArtifactRole,
+  primaryArtifactPath?: string,
+): Promise<LoadSkillArtifactReference | null> {
+  const normalizedCandidate = stripQueryAndHash(candidate);
   if (!normalizedCandidate) {
     return null;
   }
@@ -977,24 +1080,27 @@ async function resolvePreviewArtifactFromCandidate(
     const absolutePath = path.isAbsolute(normalizedCandidate)
       ? normalizeAbsoluteLocalPath(normalizedCandidate)
       : normalizeAbsoluteLocalPath(path.resolve(root, normalizedCandidate));
-    const isAllowedPath = roots.some((allowedRoot) => isPathWithinRoot(allowedRoot, absolutePath));
-    if (!isAllowedPath) {
+    const containingRoot = roots.find((allowedRoot) => isPathWithinRoot(allowedRoot, absolutePath));
+    if (!containingRoot) {
       continue;
     }
+
     try {
       const stat = await fs.stat(absolutePath);
       if (!stat.isFile()) {
         continue;
       }
 
-      const mediaType = guessMediaTypeFromPath(absolutePath);
-      return createArtifactToolPreview({
-        path: absolutePath,
+      const relativeLabel = toRootRelativePath(containingRoot, absolutePath) || path.basename(absolutePath);
+      return {
+        absolutePath,
+        displayName: path.basename(absolutePath),
+        relativeLabel,
+        mediaType: guessMediaTypeFromPath(absolutePath),
         bytes: stat.size,
-        media_type: mediaType,
-        display_name: path.basename(absolutePath),
-        url: buildToolArtifactPreviewUrl({ path: absolutePath, worldId: options.worldId }),
-      });
+        role,
+        ...(primaryArtifactPath ? { primaryArtifactPath } : {}),
+      };
     } catch {
       continue;
     }
@@ -1003,18 +1109,213 @@ async function resolvePreviewArtifactFromCandidate(
   return null;
 }
 
-async function collectLoadSkillPreviewArtifacts(options: {
+async function collectHtmlBundleArtifacts(
+  primaryArtifact: LoadSkillArtifactReference,
+  roots: string[],
+): Promise<LoadSkillArtifactReference[]> {
+  if (primaryArtifact.mediaType !== 'text/html') {
+    return [];
+  }
+
+  try {
+    const htmlContent = await fs.readFile(primaryArtifact.absolutePath, 'utf8');
+    const companionCandidates = extractHtmlCompanionAssetCandidates(htmlContent);
+    const companions: LoadSkillArtifactReference[] = [];
+
+    for (const candidate of companionCandidates) {
+      const absoluteCandidate = path.isAbsolute(candidate)
+        ? candidate
+        : path.resolve(path.dirname(primaryArtifact.absolutePath), candidate);
+      const companion = await resolveScriptArtifactReference(
+        absoluteCandidate,
+        roots,
+        'supporting',
+        primaryArtifact.absolutePath,
+      );
+      if (companion) {
+        companions.push(companion);
+      }
+    }
+
+    return companions.sort(compareArtifactReferences);
+  } catch {
+    return [];
+  }
+}
+
+async function collectScriptArtifactReferencesFromText(
+  text: string,
+  roots: string[],
+): Promise<LoadSkillArtifactReference[]> {
+  const references = new Map<string, LoadSkillArtifactReference>();
+  const candidates = extractArtifactPathCandidates(text).sort((left, right) => left.localeCompare(right));
+
+  for (const candidate of candidates) {
+    const primaryArtifact = await resolveScriptArtifactReference(candidate, roots, 'primary');
+    if (!primaryArtifact) {
+      continue;
+    }
+    references.set(primaryArtifact.absolutePath, primaryArtifact);
+
+    const companions = await collectHtmlBundleArtifacts(primaryArtifact, roots);
+    for (const companion of companions) {
+      references.set(companion.absolutePath, companion);
+    }
+  }
+
+  return [...references.values()].sort(compareArtifactReferences);
+}
+
+function getArtifactPreviewPriority(reference: LoadSkillArtifactReference): number {
+  const normalized = String(reference.mediaType || '').toLowerCase();
+  if (reference.role !== 'primary') {
+    return 99;
+  }
+  if (normalized === 'text/markdown') return 0;
+  if (normalized === 'image/svg+xml') return 1;
+  if (normalized.startsWith('image/')) return 2;
+  if (normalized.startsWith('audio/')) return 3;
+  if (normalized.startsWith('video/')) return 4;
+  if (normalized === 'text/html') return 5;
+  if (normalized === 'application/pdf') return 6;
+  return 7;
+}
+
+function selectPrimaryPreviewArtifacts(artifacts: LoadSkillArtifactReference[]): LoadSkillArtifactReference[] {
+  return artifacts
+    .filter((artifact) => artifact.role === 'primary')
+    .sort((left, right) => {
+      const priorityDelta = getArtifactPreviewPriority(left) - getArtifactPreviewPriority(right);
+      if (priorityDelta !== 0) {
+        return priorityDelta;
+      }
+      return compareArtifactReferences(left, right);
+    });
+}
+
+async function buildSupportingArtifactText(
+  primaryArtifact: LoadSkillArtifactReference,
+  artifacts: LoadSkillArtifactReference[],
+): Promise<string | undefined> {
+  const supportingArtifacts = artifacts
+    .filter((artifact) => artifact.role === 'supporting' && artifact.primaryArtifactPath === primaryArtifact.absolutePath)
+    .sort(compareArtifactReferences);
+  if (supportingArtifacts.length === 0) {
+    if (primaryArtifact.mediaType !== 'text/html') {
+      return undefined;
+    }
+
+    try {
+      const htmlContent = await fs.readFile(primaryArtifact.absolutePath, 'utf8');
+      const fallbackAssets = extractHtmlCompanionAssetCandidates(htmlContent)
+        .map((candidate) => {
+          const normalizedCandidate = candidate.replace(/\\/g, '/');
+          if (normalizedCandidate.startsWith('/')) {
+            return normalizedCandidate;
+          }
+          const baseDirectory = path.posix.dirname(primaryArtifact.relativeLabel.replace(/\\/g, '/'));
+          return path.posix.normalize(path.posix.join(baseDirectory, normalizedCandidate));
+        })
+        .sort((left, right) => left.localeCompare(right));
+      return fallbackAssets.length > 0
+        ? `Companion assets: ${fallbackAssets.join(', ')}`
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  return `Companion assets: ${supportingArtifacts.map((artifact) => artifact.relativeLabel).join(', ')}`;
+}
+
+async function createLoadSkillArtifactPreview(options: {
+  artifact: LoadSkillArtifactReference;
+  artifacts: LoadSkillArtifactReference[];
+  worldId?: string | null;
+}): Promise<ToolPreview | null> {
+  const artifact = options.artifact;
+  if (artifact.mediaType === 'text/markdown') {
+    try {
+      const markdown = await fs.readFile(artifact.absolutePath, 'utf8');
+      return createTextToolPreview(truncatePreviewText(markdown, 3200), {
+        markdown: true,
+        title: artifact.relativeLabel,
+      });
+    } catch {
+      // Fall back to file-backed preview below.
+    }
+  }
+
+  return createArtifactToolPreview({
+    path: artifact.absolutePath,
+    bytes: artifact.bytes,
+    media_type: artifact.mediaType,
+    display_name: artifact.displayName,
+    title: artifact.relativeLabel,
+    text: await buildSupportingArtifactText(artifact, options.artifacts),
+    url: buildToolArtifactPreviewUrl({
+      path: artifact.absolutePath,
+      worldId: options.worldId ?? undefined,
+    }),
+  });
+}
+
+async function buildScriptOutcomePreviews(options: {
+  source: string;
+  artifacts: LoadSkillArtifactReference[];
+  text: string;
+  worldId?: string | null;
+}): Promise<ToolPreview[]> {
+  const previews: ToolPreview[] = [];
+  for (const primaryArtifact of selectPrimaryPreviewArtifacts(options.artifacts)) {
+    const artifactPreview = await createLoadSkillArtifactPreview({
+      artifact: primaryArtifact,
+      artifacts: options.artifacts,
+      worldId: options.worldId,
+    });
+    if (artifactPreview) {
+      previews.push(artifactPreview);
+    }
+  }
+
+  for (const url of extractUrlsFromText(options.text)) {
+    previews.push(createUrlToolPreview(url, {
+      renderer: isYouTubeUrl(url) ? 'youtube' : undefined,
+      text: options.source,
+      title: options.source,
+    }));
+  }
+
+  return previews;
+}
+
+function formatLoadSkillArtifactSummary(reference: LoadSkillArtifactReference): string {
+  const suffixParts = [
+    reference.mediaType ? reference.mediaType : '',
+    reference.role === 'supporting' ? 'supporting asset' : '',
+  ].filter(Boolean);
+  return suffixParts.length > 0
+    ? `${reference.relativeLabel} (${suffixParts.join(', ')})`
+    : reference.relativeLabel;
+}
+
+function appendOutcomeArtifactSummary(resultText: string, artifacts: LoadSkillArtifactReference[]): string {
+  const normalizedResult = String(resultText || '').trim();
+  if (artifacts.length === 0) {
+    return normalizedResult;
+  }
+
+  const lines = artifacts.map((artifact) => `- ${formatLoadSkillArtifactSummary(artifact)}`);
+  return [normalizedResult, '', 'Artifacts:', ...lines].filter(Boolean).join('\n');
+}
+
+async function collectLoadSkillReferencePreviews(options: {
   skillRoot: string;
   referenceFiles: string[];
-  scriptOutputs: Array<{ source: string; output: string }>;
   context?: LoadSkillToolContext;
 }): Promise<ToolPreview[]> {
   const previews: ToolPreview[] = [];
   const seen = new Set<string>();
-  const roots = [
-    options.skillRoot,
-    ...(options.context?.workingDirectory ? [options.context.workingDirectory] : []),
-  ];
 
   for (const referenceFile of options.referenceFiles) {
     const absolutePath = path.isAbsolute(referenceFile)
@@ -1032,53 +1333,23 @@ async function collectLoadSkillPreviewArtifacts(options: {
       }
       seen.add(key);
 
-      previews.push(createArtifactToolPreview({
-        path: absolutePath,
-        bytes: stat.size,
-        media_type: guessMediaTypeFromPath(absolutePath),
-        display_name: path.basename(referenceFile),
-        title: referenceFile,
-        url: buildToolArtifactPreviewUrl({
-          path: absolutePath,
-          worldId: typeof options.context?.world?.id === 'string' ? options.context.world.id : undefined,
-        }),
-      }));
-    } catch {
-      continue;
-    }
-  }
-
-  for (const output of options.scriptOutputs) {
-    for (const url of extractUrlsFromText(output.output)) {
-      const key = `url:${url}`;
-      if (seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
-      previews.push(createUrlToolPreview(url, {
-        renderer: isYouTubeUrl(url) ? 'youtube' : undefined,
-        text: output.source,
-        title: output.source,
-      }));
-    }
-
-    for (const candidate of extractArtifactPathCandidates(output.output)) {
-      const preview = await resolvePreviewArtifactFromCandidate(candidate, roots, {
+      const referencePreview = await createLoadSkillArtifactPreview({
+        artifact: {
+          absolutePath,
+          displayName: path.basename(referenceFile),
+          relativeLabel: referenceFile,
+          mediaType: guessMediaTypeFromPath(absolutePath),
+          bytes: stat.size,
+          role: 'reference',
+        },
+        artifacts: [],
         worldId: typeof options.context?.world?.id === 'string' ? options.context.world.id : undefined,
       });
-      if (!preview) {
-        continue;
+      if (referencePreview) {
+        previews.push(referencePreview);
       }
-
-      if (!('artifact' in preview)) {
-        continue;
-      }
-      const key = `artifact:${JSON.stringify((preview as any).artifact)}`;
-      if (seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
-      previews.push(preview as any);
+    } catch {
+      continue;
     }
   }
 
@@ -1089,7 +1360,7 @@ async function buildLoadSkillSuccessPreview(options: {
   skillId: string;
   skillDescription: string;
   skillRoot: string;
-  scriptOutputs: Array<{ source: string; output: string }>;
+  scriptOutputs: SkillScriptExecutionOutcome[];
   referenceFiles: string[];
   scriptPaths: string[];
   context?: LoadSkillToolContext;
@@ -1107,7 +1378,10 @@ async function buildLoadSkillSuccessPreview(options: {
     summaryLines.push('');
     summaryLines.push('Script outputs:');
     for (const scriptOutput of options.scriptOutputs) {
-      summaryLines.push(`- ${scriptOutput.source}: ${truncatePreviewText(scriptOutput.output)}`);
+      summaryLines.push(`- ${scriptOutput.source} [${scriptOutput.status}]: ${truncatePreviewText(scriptOutput.result)}`);
+      if (scriptOutput.artifacts.length > 0) {
+        summaryLines.push(`  Artifacts: ${scriptOutput.artifacts.map((artifact) => formatLoadSkillArtifactSummary(artifact)).join(', ')}`);
+      }
     }
   }
 
@@ -1118,7 +1392,31 @@ async function buildLoadSkillSuccessPreview(options: {
     }),
   ];
 
-  previews.push(...await collectLoadSkillPreviewArtifacts(options));
+  const seenPreviewKeys = new Set(previews.map((preview) => JSON.stringify(preview)));
+  for (const scriptOutput of options.scriptOutputs) {
+    for (const preview of scriptOutput.previews) {
+      const previewKey = JSON.stringify(preview);
+      if (seenPreviewKeys.has(previewKey)) {
+        continue;
+      }
+      seenPreviewKeys.add(previewKey);
+      previews.push(preview);
+    }
+  }
+
+  const referencePreviews = await collectLoadSkillReferencePreviews({
+    skillRoot: options.skillRoot,
+    referenceFiles: options.referenceFiles,
+    context: options.context,
+  });
+  for (const preview of referencePreviews) {
+    const previewKey = JSON.stringify(preview);
+    if (seenPreviewKeys.has(previewKey)) {
+      continue;
+    }
+    seenPreviewKeys.add(previewKey);
+    previews.push(preview);
+  }
   return previews;
 }
 
@@ -1144,7 +1442,7 @@ function buildSuccessResult(options: {
   skillDescription: string;
   skillRoot: string;
   markdown: string;
-  scriptOutputs: Array<{ source: string; output: string }>;
+  scriptOutputs: SkillScriptExecutionOutcome[];
   referenceFiles: string[];
   scriptPaths: string[];
 }): string {
@@ -1164,7 +1462,7 @@ function buildSuccessResult(options: {
   const hasActiveResources = scriptOutputs.length > 0;
   const scriptBlocks = scriptOutputs.flatMap((scriptOutput) => ([
     `    <script_output source="${escapeXmlText(scriptOutput.source)}">`,
-    `${escapeXmlText(scriptOutput.output)}`,
+    `${escapeXmlText(appendOutcomeArtifactSummary(scriptOutput.result, scriptOutput.artifacts))}`,
     '    </script_output>',
   ]));
   const referenceFilesBlock = escapeXmlText(formatReferenceFilesBlock(referenceFiles));

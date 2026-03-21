@@ -840,7 +840,9 @@ export async function processAgentMessage(
             workingDirectory: trustedWorkingDirectory,
             agentName: agent.id,
             llmResultMode: toolCall.function.name === 'shell_cmd' ? 'minimal' : 'verbose',
-            persistToolEnvelope: toolCall.function.name === 'shell_cmd' || toolCall.function.name === 'load_skill',
+            persistToolEnvelope: toolCall.function.name === 'shell_cmd'
+              || toolCall.function.name === 'load_skill'
+              || toolCall.function.name === 'web_fetch',
           };
 
           const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);

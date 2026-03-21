@@ -735,7 +735,9 @@ export async function resumePendingToolCallsForChat(
         llmResultMode: resolveShellContinuationLlmResultMode({
           toolName: toolCall.function.name,
         }),
-        persistToolEnvelope: toolCall.function.name === 'shell_cmd' || toolCall.function.name === 'load_skill',
+        persistToolEnvelope: toolCall.function.name === 'shell_cmd'
+          || toolCall.function.name === 'load_skill'
+          || toolCall.function.name === 'web_fetch',
       };
 
       const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);
@@ -1839,7 +1841,9 @@ export async function continueLLMAfterToolExecution(
           llmResultMode: resolveShellContinuationLlmResultMode({
             toolName: toolCall.function.name,
           }),
-          persistToolEnvelope: toolCall.function.name === 'shell_cmd' || toolCall.function.name === 'load_skill',
+          persistToolEnvelope: toolCall.function.name === 'shell_cmd'
+            || toolCall.function.name === 'load_skill'
+            || toolCall.function.name === 'web_fetch',
         };
 
         const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);

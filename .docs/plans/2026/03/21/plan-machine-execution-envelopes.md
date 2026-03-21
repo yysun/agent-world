@@ -2,7 +2,7 @@
 
 **Date**: 2026-03-21  
 **Type**: Feature  
-**Status**: AR Approved  
+**Status**: SS In Progress  
 **Related Requirement**: [req-machine-execution-envelopes.md](../../reqs/2026/03/21/req-machine-execution-envelopes.md)
 
 ## Overview
@@ -185,39 +185,39 @@ flowchart TD
 
 ### Phase 3: `load_skill` Script Outcome Preservation
 
-- [ ] Change `load_skill` script execution to preserve structured per-script outcomes instead of flattening directly to opaque text.
-- [ ] Capture, per script:
-  - [ ] source identity
-  - [ ] execution status
-  - [ ] bounded result text for model reuse
-  - [ ] preview material for frontend/display assembly
-   - [ ] zero or more artifact references with envelope-compatible metadata
-- [ ] Keep the final durable result as one outer `load_skill` tool result.
-- [ ] Ensure `<script_output>` content in the final `load_skill` result uses the bounded script result content rather than raw preview payloads.
-- [ ] Ensure `load_skill` preview assembly can include derived preview material from script outcomes.
-- [ ] Ensure script outcome normalization can derive success/result/preview from produced artifacts even when stdout is unstructured.
-- [ ] Define protocol handling for representative artifact categories:
-   - [ ] previewable image/graphic outputs such as PNG or SVG
-   - [ ] previewable media outputs such as audio or video
-   - [ ] previewable document outputs such as Markdown or PDF
-   - [ ] previewable HTML bundles with primary HTML plus supporting JS/CSS assets
-   - [ ] non-previewable file outputs such as PPTX
-- [ ] Keep exit status authoritative even when artifact files are present on failure paths.
-- [ ] Define deterministic primary-artifact selection when multiple candidate artifacts are present.
-- [ ] Persist artifact-backed preview data when the artifact type is previewable.
-- [ ] Persist file-style preview or link metadata when the artifact type is not previewable inline.
-- [ ] Keep rendering details frontend-agnostic by limiting the protocol to durable metadata rather than viewer implementation rules.
+- [x] Change `load_skill` script execution to preserve structured per-script outcomes instead of flattening directly to opaque text.
+- [x] Capture, per script:
+   - [x] source identity
+   - [x] execution status
+   - [x] bounded result text for model reuse
+   - [x] preview material for frontend/display assembly
+   - [x] zero or more artifact references with envelope-compatible metadata
+- [x] Keep the final durable result as one outer `load_skill` tool result.
+- [x] Ensure `<script_output>` content in the final `load_skill` result uses the bounded script result content rather than raw preview payloads.
+- [x] Ensure `load_skill` preview assembly can include derived preview material from script outcomes.
+- [x] Ensure script outcome normalization can derive success/result/preview from produced artifacts even when stdout is unstructured.
+- [x] Define protocol handling for representative artifact categories:
+   - [x] previewable image/graphic outputs such as PNG or SVG
+   - [x] previewable media outputs such as audio or video
+   - [x] previewable document outputs such as Markdown or PDF
+   - [x] previewable HTML bundles with primary HTML plus supporting JS/CSS assets
+   - [x] non-previewable file outputs such as PPTX
+- [x] Keep exit status authoritative even when artifact files are present on failure paths.
+- [x] Define deterministic primary-artifact selection when multiple candidate artifacts are present.
+- [x] Persist artifact-backed preview data when the artifact type is previewable.
+- [x] Persist file-style preview or link metadata when the artifact type is not previewable inline.
+- [x] Keep rendering details frontend-agnostic by limiting the protocol to durable metadata rather than viewer implementation rules.
 
 ### Phase 4: Additional Tool Adoption (`web_fetch`)
 
-- [ ] Apply the durable tool envelope model to `web_fetch`.
-- [ ] Define `web_fetch` status mapping for at minimum:
-  - [ ] completed
-  - [ ] failed
-  - [ ] blocked/denied outcomes represented through existing failure semantics
-- [ ] Define `web_fetch` bounded result content for continuation.
-- [ ] Define `web_fetch` preview content for frontend display, including a bounded summary and URL/title context.
-- [ ] Preserve existing approval and safety behavior while changing only the durable result contract.
+- [x] Apply the durable tool envelope model to `web_fetch`.
+- [x] Define `web_fetch` status mapping for at minimum:
+   - [x] completed
+   - [x] failed
+   - [x] blocked/denied outcomes represented through existing failure semantics
+- [x] Define `web_fetch` bounded result content for continuation.
+- [x] Define `web_fetch` preview content for frontend display, including a bounded summary and URL/title context.
+- [x] Preserve existing approval and safety behavior while changing only the durable result contract.
 
 ### Phase 5: Live Preview and Persistence Parity
 
@@ -227,17 +227,17 @@ flowchart TD
 
 ### Phase 6: Replay and Continuation Guardrails
 
-- [ ] Verify continuation paths consume `envelope.result`, not `envelope.preview`.
+- [x] Verify continuation paths consume `envelope.result`, not `envelope.preview`.
 - [ ] Verify replay of durable tool results preserves tool identity and completion linkage.
 - [ ] Confirm adopted tool paths do not regress current chat scoping or tool-result matching behavior.
 
 ### Phase 7: Tests
 
-- [ ] Add targeted unit coverage for `load_skill` structured script outcomes and final envelope assembly.
-- [ ] Add targeted unit coverage for the newly adopted `web_fetch` durable envelope behavior.
-- [ ] Add replay/continuation regression tests proving model preparation consumes bounded result content.
+- [x] Add targeted unit coverage for `load_skill` structured script outcomes and final envelope assembly.
+- [x] Add targeted unit coverage for the newly adopted `web_fetch` durable envelope behavior.
+- [x] Add replay/continuation regression tests proving model preparation consumes bounded result content.
 - [ ] Add frontend-domain regression tests proving durable preview data renders correctly after reload.
-- [ ] Run integration coverage for touched runtime/tool transport paths per project policy.
+- [x] Run integration coverage for touched runtime/tool transport paths per project policy.
 
 ## Expected File Scope
 

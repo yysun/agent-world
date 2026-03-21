@@ -15,6 +15,7 @@
  * - Applies timeout and output-size bounds with explicit truncation metadata
  *
  * Recent Changes:
+ * - 2026-03-21: Added durable tool-envelope preview/result wrapping for persisted `web_fetch` executions.
  * - 2026-03-12: Restored private-target gating in the main execute path so blocked hosts require explicit approval before any network fetch starts.
  * - 2026-03-12: Shared tool approval flow now persists durable approval prompt/resolution messages for replay-safe local/private access denials.
  * - 2026-03-12: Removed permission level gating — web_fetch is now allowed at all levels (read/ask/auto), like read_file.
@@ -33,7 +34,12 @@ import { gfm } from 'turndown-plugin-gfm';
 import { requestToolApproval } from './tool-approval.js';
 import { RELIABILITY_CONFIG } from './reliability-config.js';
 import { type AgentMessage, type World } from './types.js';
-import { getEnvValueFromText } from './utils.js';
+import {
+  createTextToolPreview,
+  createUrlToolPreview,
+  serializeToolExecutionEnvelope,
+  type ToolPreview,
+} from './tool-execution-envelope.js';
 
 type WebFetchArgs = {
   url: string;
@@ -49,6 +55,7 @@ type WebFetchToolContext = {
   toolCallId?: string;
   agentName?: string | null;
   messages?: AgentMessage[];
+  persistToolEnvelope?: boolean;
 };
 
 type WebFetchResult = {
@@ -345,8 +352,8 @@ function applySizeLimit(markdown: string, maxChars: number): { markdown: string;
   };
 }
 
-function buildUnsupportedResponse(url: URL, response: Response, timingMs: number): string {
-  const result: WebFetchResult = {
+function buildUnsupportedResponse(url: URL, response: Response, timingMs: number): WebFetchResult {
+  return {
     url: url.toString(),
     resolvedUrl: response.url || url.toString(),
     status: response.status,
@@ -359,14 +366,98 @@ function buildUnsupportedResponse(url: URL, response: Response, timingMs: number
     truncated: false,
     timingMs,
   };
+}
 
+function stringifyWebFetchResult(result: WebFetchResult): string {
   return JSON.stringify(result, null, 2);
+}
+
+function buildWebFetchSummary(result: WebFetchResult): string {
+  const lines = [
+    `URL: ${result.resolvedUrl || result.url}`,
+    `Status: ${result.status}`,
+    result.title ? `Title: ${result.title}` : '',
+    result.contentType ? `Content-Type: ${result.contentType}` : '',
+    `Mode: ${result.mode}`,
+    result.limitationReason ? `Limitation: ${result.limitationReason}` : '',
+    result.truncated ? 'Output was truncated.' : '',
+  ].filter(Boolean);
+
+  return lines.join('\n');
+}
+
+function buildWebFetchPreview(result: WebFetchResult): ToolPreview[] {
+  const previews: ToolPreview[] = [];
+  const markdown = String(result.markdown || '').trim();
+  if (markdown) {
+    previews.push(createTextToolPreview(markdown, {
+      markdown: true,
+      title: result.title || 'web_fetch result',
+    }));
+  } else {
+    previews.push(createTextToolPreview(buildWebFetchSummary(result), {
+      title: result.title || 'web_fetch result',
+    }));
+  }
+
+  previews.push(createUrlToolPreview(result.resolvedUrl || result.url, {
+    title: result.title || result.url,
+    text: [
+      `Status ${result.status}`,
+      result.contentType || '',
+      result.mode,
+      result.limitationReason || '',
+    ].filter(Boolean).join(' • '),
+  }));
+
+  return previews;
+}
+
+function formatWebFetchReturnContent(options: {
+  result?: WebFetchResult;
+  error?: string;
+  persistToolEnvelope: boolean;
+  toolCallId?: string;
+}): string {
+  if (options.result) {
+    const resultContent = stringifyWebFetchResult(options.result);
+    if (!options.persistToolEnvelope) {
+      return resultContent;
+    }
+
+    return serializeToolExecutionEnvelope({
+      __type: 'tool_execution_envelope',
+      version: 1,
+      tool: 'web_fetch',
+      ...(options.toolCallId ? { tool_call_id: options.toolCallId } : {}),
+      status: 'completed',
+      preview: buildWebFetchPreview(options.result),
+      result: resultContent,
+    });
+  }
+
+  const errorContent = String(options.error || 'Error: web_fetch failed');
+  if (!options.persistToolEnvelope) {
+    return errorContent;
+  }
+
+  return serializeToolExecutionEnvelope({
+    __type: 'tool_execution_envelope',
+    version: 1,
+    tool: 'web_fetch',
+    ...(options.toolCallId ? { tool_call_id: options.toolCallId } : {}),
+    status: 'failed',
+    preview: createTextToolPreview(errorContent, { title: 'web_fetch error' }),
+    result: errorContent,
+  });
 }
 
 async function executeWebFetch(args: WebFetchArgs, context?: WebFetchToolContext): Promise<string> {
   const startedAt = Date.now();
   const activeTimeoutMs = clamp(Number(args.timeoutMs ?? DEFAULT_TIMEOUT_MS), MIN_TIMEOUT_MS, MAX_TIMEOUT_MS);
   let timedOut = false;
+  const persistToolEnvelope = context?.persistToolEnvelope === true;
+  const toolCallId = typeof context?.toolCallId === 'string' ? context.toolCallId : undefined;
 
   // web_fetch is allowed at all permission levels (read/ask/auto), like read_file.
 
@@ -440,7 +531,11 @@ async function executeWebFetch(args: WebFetchArgs, context?: WebFetchToolContext
     }
 
     if (!(contentType.includes('text/html') || contentType.includes('text/plain') || contentType.includes('application/json') || contentType === '')) {
-      return buildUnsupportedResponse(target, response, timingMs);
+      return formatWebFetchReturnContent({
+        result: buildUnsupportedResponse(target, response, timingMs),
+        persistToolEnvelope,
+        toolCallId,
+      });
     }
 
     const payload = await response.text();
@@ -462,7 +557,7 @@ async function executeWebFetch(args: WebFetchArgs, context?: WebFetchToolContext
         truncated: limited.truncated,
         timingMs,
       };
-      return JSON.stringify(result, null, 2);
+      return formatWebFetchReturnContent({ result, persistToolEnvelope, toolCallId });
     }
 
     if (contentType.includes('text/plain')) {
@@ -480,7 +575,7 @@ async function executeWebFetch(args: WebFetchArgs, context?: WebFetchToolContext
         truncated: limited.truncated,
         timingMs,
       };
-      return JSON.stringify(result, null, 2);
+      return formatWebFetchReturnContent({ result, persistToolEnvelope, toolCallId });
     }
 
     const title = extractTitle(payload);
@@ -541,13 +636,21 @@ async function executeWebFetch(args: WebFetchArgs, context?: WebFetchToolContext
       timingMs,
     };
 
-    return JSON.stringify(result, null, 2);
+    return formatWebFetchReturnContent({ result, persistToolEnvelope, toolCallId });
   } catch (error) {
     if (timedOut || isAbortError(error)) {
-      return `Error: web_fetch failed - timeout_error: request exceeded ${activeTimeoutMs}ms`;
+      return formatWebFetchReturnContent({
+        error: `Error: web_fetch failed - timeout_error: request exceeded ${activeTimeoutMs}ms`,
+        persistToolEnvelope,
+        toolCallId,
+      });
     }
     const message = toErrorMessage(error);
-    return `Error: web_fetch failed - ${message}`;
+    return formatWebFetchReturnContent({
+      error: `Error: web_fetch failed - ${message}`,
+      persistToolEnvelope,
+      toolCallId,
+    });
   }
 }
 
