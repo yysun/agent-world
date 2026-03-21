@@ -154,6 +154,7 @@ export function useThemeSettings({
       current.dataPath !== saved.dataPath ||
       current.sqliteDatabase !== saved.sqliteDatabase ||
       current.showToolMessages !== saved.showToolMessages ||
+      current.allowPrereleaseUpdates !== saved.allowPrereleaseUpdates ||
       current.enableGlobalSkills !== saved.enableGlobalSkills ||
       current.enableProjectSkills !== saved.enableProjectSkills ||
       normalizeStringList(current.disabledGlobalSkillIds).join('|') !== normalizeStringList(saved.disabledGlobalSkillIds).join('|') ||

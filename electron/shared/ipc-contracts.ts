@@ -33,6 +33,7 @@
 
 export const DESKTOP_BRIDGE_KEY = 'agentWorldDesktop' as const;
 export const CHAT_EVENT_CHANNEL = 'chat:event' as const;
+export const UPDATE_EVENT_CHANNEL = 'update:event' as const;
 
 export const DESKTOP_INVOKE_CHANNELS = {
   WORKSPACE_GET: 'workspace:get',
@@ -73,6 +74,9 @@ export const DESKTOP_INVOKE_CHANNELS = {
   MESSAGE_DELETE: 'message:delete',
   CHAT_SUBSCRIBE_EVENTS: 'chat:subscribeEvents',
   CHAT_UNSUBSCRIBE_EVENTS: 'chat:unsubscribeEvents',
+  UPDATE_GET_STATE: 'update:getState',
+  UPDATE_CHECK: 'update:check',
+  UPDATE_INSTALL_AND_RESTART: 'update:installAndRestart',
   LOGGING_GET_CONFIG: 'logging:getConfig',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SAVE: 'settings:save',
@@ -240,6 +244,32 @@ export interface RendererLoggingConfig {
   nodeEnv: string;
 }
 
+export type AppUpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'up-to-date'
+  | 'error'
+  | 'unsupported';
+
+export interface AppUpdateState {
+  currentVersion: string;
+  allowPrereleaseUpdates: boolean;
+  isPackaged: boolean;
+  status: AppUpdateStatus;
+  statusMessage: string;
+  availableVersion: string | null;
+  downloadedVersion: string | null;
+  releaseName: string | null;
+  releaseDate: string | null;
+  releaseNotes: string;
+  lastCheckedAt: string | null;
+  downloadProgressPercent: number | null;
+  errorMessage: string | null;
+}
+
 export interface DesktopApi {
   getWorkspace: () => Promise<unknown>;
   openWorkspace: (directoryPath?: string) => Promise<unknown>;
@@ -280,6 +310,10 @@ export interface DesktopApi {
   subscribeChatEvents: (worldId: string, chatId: string, subscriptionId: string) => Promise<unknown>;
   unsubscribeChatEvents: (subscriptionId: string) => Promise<unknown>;
   onChatEvent: (callback: (payload: ChatEventPayload) => void) => () => void;
+  getUpdateState: () => Promise<AppUpdateState>;
+  checkForUpdates: () => Promise<AppUpdateState>;
+  installUpdateAndRestart: () => Promise<{ accepted: boolean; reason?: string }>;
+  onUpdateEvent: (callback: (payload: AppUpdateState) => void) => () => void;
   getLoggingConfig: () => Promise<RendererLoggingConfig>;
   getSettings: () => Promise<unknown>;
   saveSettings: (settings: Record<string, unknown>) => Promise<unknown>;

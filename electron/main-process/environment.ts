@@ -49,6 +49,7 @@ export function applySystemSettings(settings: {
   storageType?: string;
   dataPath?: string;
   sqliteDatabase?: string;
+  allowPrereleaseUpdates?: boolean;
   enableGlobalSkills?: boolean;
   enableProjectSkills?: boolean;
   disabledGlobalSkillIds?: string[];
@@ -62,6 +63,9 @@ export function applySystemSettings(settings: {
   }
   if (settings.sqliteDatabase) {
     process.env.AGENT_WORLD_SQLITE_DATABASE = settings.sqliteDatabase;
+  }
+  if (typeof settings.allowPrereleaseUpdates === 'boolean') {
+    process.env.AGENT_WORLD_ALLOW_PRERELEASE_UPDATES = String(settings.allowPrereleaseUpdates);
   }
   if (typeof settings.enableGlobalSkills === 'boolean') {
     process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS = String(settings.enableGlobalSkills);

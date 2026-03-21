@@ -78,6 +78,7 @@ export interface SystemSettings {
   dataPath?: string;
   sqliteDatabase?: string;
   showToolMessages?: boolean;
+  allowPrereleaseUpdates?: boolean;
   enableGlobalSkills?: boolean;
   enableProjectSkills?: boolean;
   disabledGlobalSkillIds?: string[];

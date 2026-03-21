@@ -71,6 +71,7 @@ import { useStreamingActivity } from './hooks/useStreamingActivity';
 import { useMessageManagement } from './hooks/useMessageManagement';
 import { useSessionManagement } from './hooks/useSessionManagement';
 import { useThemeSettings } from './hooks/useThemeSettings';
+import { useAppUpdater } from './hooks/useAppUpdater';
 import { useWorldManagement } from './hooks/useWorldManagement';
 import { useAppActionHandlers } from './hooks/useAppActionHandlers';
 import {
@@ -832,6 +833,15 @@ function AppContent({ api }: { api: DesktopApi }) {
   });
 
   const {
+    appUpdateState,
+    checkForUpdates,
+    installUpdateAndRestart,
+  } = useAppUpdater({
+    api,
+    setStatusText,
+  });
+
+  const {
     composer,
     setComposer,
     sendingSessionIds,
@@ -1499,6 +1509,9 @@ function AppContent({ api }: { api: DesktopApi }) {
     setLeftSidebarCollapsed,
     DRAG_REGION_STYLE,
     NO_DRAG_REGION_STYLE,
+    appUpdateState,
+    onCheckForUpdates: checkForUpdates,
+    onInstallUpdateAndRestart: installUpdateAndRestart,
     availableWorlds,
     loadedWorld,
     panelMode,

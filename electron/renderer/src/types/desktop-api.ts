@@ -16,6 +16,7 @@
  */
 
 export type {
+  AppUpdateState,
   ChatEventPayload,
   DesktopApi,
   LogLevel,

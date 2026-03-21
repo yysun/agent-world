@@ -30,17 +30,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createDesktopApi, exposeDesktopApi } from '../../../electron/preload/bridge';
 
-vi.mock('electron', () => ({
-  contextBridge: {
-    exposeInMainWorld: vi.fn(),
-  },
-  ipcRenderer: {
-    invoke: vi.fn(),
-    on: vi.fn(),
-    removeListener: vi.fn(),
-  }
-}), { virtual: true });
-
 function createBridgeMocks() {
   return {
     invoke: vi.fn().mockResolvedValue(undefined),
@@ -81,6 +70,10 @@ describe('electron preload bridge', () => {
       stopMessage: expect.any(Function),
       subscribeChatEvents: expect.any(Function),
       unsubscribeChatEvents: expect.any(Function),
+      getUpdateState: expect.any(Function),
+      checkForUpdates: expect.any(Function),
+      installUpdateAndRestart: expect.any(Function),
+      onUpdateEvent: expect.any(Function),
       getLoggingConfig: expect.any(Function),
       onChatEvent: expect.any(Function)
     });
@@ -112,6 +105,9 @@ describe('electron preload bridge', () => {
     api.stopMessage('world-1', 'chat-1');
     api.subscribeChatEvents('world-1', 'chat-1', 'sub-1');
     api.unsubscribeChatEvents('sub-1');
+    api.getUpdateState();
+    api.checkForUpdates();
+    api.installUpdateAndRestart();
     api.getLoggingConfig();
 
     expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'chat:sendMessage', sendPayload);
@@ -156,7 +152,10 @@ describe('electron preload bridge', () => {
     expect(mocks.invoke).toHaveBeenNthCalledWith(17, 'chat:unsubscribeEvents', {
       subscriptionId: 'sub-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(18, 'logging:getConfig');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(18, 'update:getState');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(19, 'update:check');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(20, 'update:installAndRestart');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(21, 'logging:getConfig');
   });
 
   it('wires chat event listener callback and cleanup correctly', () => {
@@ -177,5 +176,25 @@ describe('electron preload bridge', () => {
 
     unsubscribe();
     expect(mocks.removeListener).toHaveBeenCalledWith('chat:event', listener);
+  });
+
+  it('wires update event listener callback and cleanup correctly', () => {
+    const mocks = createBridgeMocks();
+    const api = createDesktopApi({
+      invoke: mocks.invoke,
+      on: mocks.on,
+      removeListener: mocks.removeListener
+    });
+    const callback = vi.fn();
+
+    const unsubscribe = api.onUpdateEvent(callback) as () => void;
+
+    expect(mocks.on).toHaveBeenCalledWith('update:event', expect.any(Function));
+    const listener = mocks.on.mock.calls[0]?.[1] as (event: unknown, payload: unknown) => void;
+    listener({}, { status: 'downloaded', downloadedVersion: '0.16.0' });
+    expect(callback).toHaveBeenCalledWith({ status: 'downloaded', downloadedVersion: '0.16.0' });
+
+    unsubscribe();
+    expect(mocks.removeListener).toHaveBeenCalledWith('update:event', listener);
   });
 });

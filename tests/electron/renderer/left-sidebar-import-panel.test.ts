@@ -97,6 +97,13 @@ function createProps(overrides: Record<string, unknown> = {}) {
     setLeftSidebarCollapsed: () => { },
     dragRegionStyle: {},
     noDragRegionStyle: {},
+    appUpdateState: {
+      isPackaged: false,
+      status: 'idle',
+      downloadedVersion: null,
+    },
+    onCheckForUpdates: () => { },
+    onInstallUpdateAndRestart: () => { },
     availableWorlds: [],
     loadedWorld: null,
     panelMode: 'create-world',
@@ -139,6 +146,61 @@ beforeEach(() => {
 });
 
 describe('LeftSidebarPanel import mode', () => {
+  it('shows a check action for packaged apps and switches to upgrade when a download is ready', () => {
+    const onCheckForUpdates = vi.fn();
+    const onInstallUpdateAndRestart = vi.fn();
+
+    let tree: any = renderTree({
+      appUpdateState: {
+        isPackaged: true,
+        status: 'idle',
+        downloadedVersion: null,
+      },
+      onCheckForUpdates,
+      onInstallUpdateAndRestart,
+    });
+    let nodes = allDescendants(tree);
+    let updateAction = nodes.find((node: any) => node?.props?.['data-testid'] === 'sidebar-update-action');
+
+    expect(updateAction).toBeDefined();
+    expect(updateAction?.props?.children).toBe('Check');
+    updateAction.props.onClick();
+    expect(onCheckForUpdates).toHaveBeenCalledTimes(1);
+
+    tree = renderTree({
+      appUpdateState: {
+        isPackaged: true,
+        status: 'downloaded',
+        downloadedVersion: '0.16.0',
+      },
+      onCheckForUpdates,
+      onInstallUpdateAndRestart,
+    });
+    nodes = allDescendants(tree);
+    updateAction = nodes.find((node: any) => node?.props?.['data-testid'] === 'sidebar-update-action');
+
+    expect(updateAction).toBeDefined();
+    expect(updateAction?.props?.children).toBe('Upgrade');
+    expect(String(updateAction?.props?.className || '')).toContain('bg-sidebar-primary');
+    updateAction.props.onClick();
+    expect(onInstallUpdateAndRestart).toHaveBeenCalledTimes(1);
+
+    tree = renderTree({
+      leftSidebarCollapsed: true,
+      appUpdateState: {
+        isPackaged: true,
+        status: 'downloaded',
+        downloadedVersion: '0.16.0',
+      },
+      onCheckForUpdates,
+      onInstallUpdateAndRestart,
+    });
+    nodes = allDescendants(tree);
+    updateAction = nodes.find((node: any) => node?.props?.['data-testid'] === 'sidebar-update-action');
+
+    expect(updateAction).toBeUndefined();
+  });
+
   it('replaces the normal sidebar, shows import targets, and closes after a successful local world import', async () => {
     const onImportWorld = vi.fn(async () => true);
     const onCloseImportWorldPanel = vi.fn();

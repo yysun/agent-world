@@ -61,6 +61,7 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   dataPath: '',
   sqliteDatabase: '',
   showToolMessages: true,
+  allowPrereleaseUpdates: false,
   enableGlobalSkills: true,
   enableProjectSkills: true,
   disabledGlobalSkillIds: [],

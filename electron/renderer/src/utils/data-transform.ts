@@ -45,6 +45,7 @@ export function normalizeSystemSettings(settings) {
     dataPath: String(settings.dataPath || ''),
     sqliteDatabase: String(settings.sqliteDatabase || ''),
     showToolMessages: settings.showToolMessages !== false,
+    allowPrereleaseUpdates: settings.allowPrereleaseUpdates === true,
     enableGlobalSkills: settings.enableGlobalSkills !== false,
     enableProjectSkills: settings.enableProjectSkills !== false,
     disabledGlobalSkillIds: normalizeStringList(settings.disabledGlobalSkillIds),

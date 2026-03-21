@@ -83,6 +83,7 @@ import { buildMainIpcRoutes } from './main-process/ipc-routes.js';
 import { registerIpcRoutes } from './main-process/ipc-registration.js';
 import { createMainIpcHandlers } from './main-process/ipc-handlers.js';
 import { createHeartbeatManager } from './main-process/heartbeat-manager.js';
+import { createAppUpdaterService } from './main-process/app-updater.js';
 import { resolvePreloadPath, resolveRendererIndexPath } from './main-process/window-paths.js';
 import { setupMainLifecycle } from './main-process/lifecycle.js';
 import type { RealtimeEventsRuntime } from './main-process/realtime-events.js';
@@ -108,6 +109,7 @@ import {
   writeWorkspacePreference,
   writeSystemSettings,
 } from './main-process/preferences.js';
+import { UPDATE_EVENT_CHANNEL } from './shared/ipc-contracts.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -188,6 +190,7 @@ const mainIpcSessionLogger = createCategoryLogger('electron.main.ipc.session');
 const mainIpcMessagesLogger = createCategoryLogger('electron.main.ipc.messages');
 const mainRealtimeLogger = createCategoryLogger('electron.main.realtime');
 const mainWorkspaceLogger = createCategoryLogger('electron.main.workspace');
+const mainUpdaterLogger = createCategoryLogger('electron.main.updater');
 
 function shouldOpenInExternalBrowser(rawUrl: string): boolean {
   try {
@@ -241,6 +244,21 @@ const workspaceRuntime = createWorkspaceRuntime({
 });
 
 ensureCoreReady = workspaceRuntime.ensureCoreReady;
+
+const appUpdater = createAppUpdaterService({
+  currentVersion: app.getVersion(),
+  isPackaged: app.isPackaged,
+  loadSettings: () => readSystemSettings(app),
+  logger: mainUpdaterLogger,
+});
+
+appUpdater.subscribe((updateState) => {
+  const window = mainWindow;
+  if (!window || window.isDestroyed()) {
+    return;
+  }
+  window.webContents.send(UPDATE_EVENT_CHANNEL, updateState);
+});
 
 const {
   getWorkspaceState,
@@ -352,6 +370,9 @@ function registerIpcHandlers() {
     deleteMessageFromChat: ipcHandlers.deleteMessageFromChat,
     subscribeChatEvents,
     unsubscribeChatEvents,
+    getUpdateState: () => appUpdater.getState(),
+    checkForUpdates: () => appUpdater.checkForUpdates({ source: 'manual' }),
+    installUpdateAndRestart: () => appUpdater.installUpdateAndRestart(),
     getLoggingConfig: ipcHandlers.getLoggingConfig,
     getSystemSettings: () => readSystemSettings(app),
     saveSystemSettings: (payload) => {
@@ -360,6 +381,7 @@ function registerIpcHandlers() {
       delete p.restart;
       writeSystemSettings(app, p);
       applySystemSettings(p);
+      appUpdater.applySettings(p);
       if (restart) {
         app.relaunch();
         app.exit(0);
@@ -480,6 +502,7 @@ async function bootstrap() {
   subscribeToLogEvents();
   registerIpcHandlers();
   createMainWindow();
+  await appUpdater.initialize();
   setupAppLifecycle();
 }
 

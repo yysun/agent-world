@@ -31,11 +31,13 @@
  * - 2026-02-12: Added modular preload bridge composition for Phase 4 conversion.
  */
 
-import { contextBridge, ipcRenderer } from 'electron';
+import { createRequire } from 'node:module';
 import {
+  UPDATE_EVENT_CHANNEL,
   CHAT_EVENT_CHANNEL,
   DESKTOP_BRIDGE_KEY,
   DESKTOP_INVOKE_CHANNELS,
+  type AppUpdateState,
   type ChatEventPayload,
   type DesktopApi,
   type HeartbeatJobStatus,
@@ -60,6 +62,8 @@ import {
   toWorldWithPayload
 } from './payloads.js';
 
+const require = createRequire(import.meta.url);
+
 interface IpcRendererLike {
   invoke: (channel: string, payload?: unknown) => Promise<unknown>;
   on: (channel: string, listener: (event: unknown, payload: ChatEventPayload) => void) => void;
@@ -68,6 +72,16 @@ interface IpcRendererLike {
 
 interface ContextBridgeLike {
   exposeInMainWorld: (key: string, api: DesktopApi) => void;
+}
+
+function resolveElectronPreloadBindings(): {
+  contextBridge: ContextBridgeLike;
+  ipcRenderer: IpcRendererLike;
+} {
+  return require('electron') as {
+    contextBridge: ContextBridgeLike;
+    ipcRenderer: IpcRendererLike;
+  };
 }
 
 function onChatEvent(
@@ -83,222 +97,258 @@ function onChatEvent(
   };
 }
 
-export function createDesktopApi(ipcRendererLike: IpcRendererLike = ipcRenderer): DesktopApi {
+function onUpdateEvent(
+  ipcRendererLike: IpcRendererLike,
+  callback: (payload: AppUpdateState) => void,
+): () => void {
+  const listener = (_event: unknown, payload: AppUpdateState) => {
+    callback(payload);
+  };
+  ipcRendererLike.on(UPDATE_EVENT_CHANNEL, listener as any);
+  return () => {
+    ipcRendererLike.removeListener(UPDATE_EVENT_CHANNEL, listener as any);
+  };
+}
+
+export function createDesktopApi(ipcRendererLike?: IpcRendererLike): DesktopApi {
+  const activeIpcRenderer = ipcRendererLike ?? resolveElectronPreloadBindings().ipcRenderer;
+
   return {
-    getWorkspace: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORKSPACE_GET),
+    getWorkspace: () => invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.WORKSPACE_GET),
     openWorkspace: (directoryPath) => invokeDesktopChannel(
-      ipcRendererLike,
+      activeIpcRenderer,
       DESKTOP_INVOKE_CHANNELS.WORKSPACE_OPEN,
       directoryPath ? { directoryPath } : undefined
     ),
     pickDirectory: (defaultPath) => invokeDesktopChannel(
-      ipcRendererLike,
+      activeIpcRenderer,
       DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_DIRECTORY,
       defaultPath ? { defaultPath } : undefined
     ),
     openExternalLink: (url) => invokeDesktopChannel(
-      ipcRendererLike,
+      activeIpcRenderer,
       DESKTOP_INVOKE_CHANNELS.LINK_OPEN_EXTERNAL,
       toExternalLinkPayload(url)
     ),
     loadWorldFromFolder: () =>
-      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_LOAD_FROM_FOLDER),
+      invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.WORLD_LOAD_FROM_FOLDER),
     loadWorld: (worldId) =>
-      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_LOAD, worldId),
-    importWorld: (payload) => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_IMPORT, payload),
-    importAgent: (payload) => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.AGENT_IMPORT, payload),
-    importSkill: (payload) => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.SKILL_IMPORT, payload),
+      invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.WORLD_LOAD, worldId),
+    importWorld: (payload) => invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.WORLD_IMPORT, payload),
+    importAgent: (payload) => invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.AGENT_IMPORT, payload),
+    importSkill: (payload) => invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_IMPORT, payload),
     exportWorld: (worldId) =>
-      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_EXPORT, toWorldPayload(worldId)),
-    listWorlds: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_LIST),
+      invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.WORLD_EXPORT, toWorldPayload(worldId)),
+    listWorlds: () => invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.WORLD_LIST),
     listSkills: (filters) =>
       invokeDesktopChannel<SkillRegistrySummary[]>(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.SKILL_LIST,
         filters
       ),
     createWorld: (payload) =>
-      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_CREATE, payload),
+      invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.WORLD_CREATE, payload),
     updateWorld: (worldId, payload) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.WORLD_UPDATE,
         toWorldWithPayload(worldId, payload)
       ),
     deleteWorld: (worldId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.WORLD_DELETE,
         toWorldPayload(worldId)
       ),
     listHeartbeatJobs: () => invokeDesktopChannel<HeartbeatJobStatus[]>(
-      ipcRendererLike,
+      activeIpcRenderer,
       DESKTOP_INVOKE_CHANNELS.HEARTBEAT_LIST
     ),
     runHeartbeat: (worldId, chatId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.HEARTBEAT_RUN,
         toHeartbeatJobPayload(worldId, chatId)
       ),
     pauseHeartbeat: (worldId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.HEARTBEAT_PAUSE,
         toWorldPayload(worldId)
       ),
     stopHeartbeat: (worldId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.HEARTBEAT_STOP,
         toWorldPayload(worldId)
       ),
     createAgent: (worldId, payload) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.AGENT_CREATE,
         toWorldWithPayload(worldId, payload)
       ),
     updateAgent: (worldId, agentId, payload) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.AGENT_UPDATE,
         toAgentPayload(worldId, agentId, payload)
       ),
     deleteAgent: (worldId, agentId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.AGENT_DELETE,
         toAgentPayload(worldId, agentId)
       ),
     getLastSelectedWorld: () =>
-      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_GET_LAST_SELECTED),
+      invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.WORLD_GET_LAST_SELECTED),
     saveLastSelectedWorld: (worldId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.WORLD_SAVE_LAST_SELECTED,
         toWorldLastSelectedPayload(worldId).worldId
       ),
     listSessions: (worldId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.SESSION_LIST,
         toWorldPayload(worldId)
       ),
     createSession: (worldId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.SESSION_CREATE,
         toWorldPayload(worldId)
       ),
     branchSessionFromMessage: (worldId, chatId, messageId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.SESSION_BRANCH_FROM_MESSAGE,
         toBranchSessionPayload(worldId, chatId, messageId)
       ),
     deleteChat: (worldId, chatId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.CHAT_DELETE,
         toWorldChatPayload(worldId, chatId)
       ),
     deleteSession: (worldId, chatId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.SESSION_DELETE,
         toWorldChatPayload(worldId, chatId)
       ),
     selectSession: (worldId, chatId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.SESSION_SELECT,
         toWorldChatPayload(worldId, chatId)
       ),
     getMessages: (worldId, chatId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.CHAT_GET_MESSAGES,
         toWorldChatPayload(worldId, chatId)
       ),
     getChatEvents: (worldId, chatId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.CHAT_GET_EVENTS,
         toWorldChatPayload(worldId, chatId)
       ),
     sendMessage: (payload) =>
-      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.CHAT_SEND_MESSAGE, payload),
+      invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.CHAT_SEND_MESSAGE, payload),
     editMessage: (worldId, messageId, newContent, chatId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.MESSAGE_EDIT,
         toMessageEditPayload(worldId, messageId, newContent, chatId)
       ),
     respondHitlOption: (worldId, requestId, optionId, chatId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.HITL_RESPOND,
         toHitlResponsePayload(worldId, requestId, optionId, chatId)
       ),
     stopMessage: (worldId, chatId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.CHAT_STOP_MESSAGE,
         toWorldChatPayload(worldId, chatId)
       ),
     deleteMessage: (worldId, messageId, chatId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.MESSAGE_DELETE,
         toMessageDeletePayload(worldId, messageId, chatId)
       ),
     subscribeChatEvents: (worldId, chatId, subscriptionId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.CHAT_SUBSCRIBE_EVENTS,
         toSubscribePayload(worldId, chatId, subscriptionId)
       ),
     unsubscribeChatEvents: (subscriptionId) =>
       invokeDesktopChannel(
-        ipcRendererLike,
+        activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.CHAT_UNSUBSCRIBE_EVENTS,
         toUnsubscribePayload(subscriptionId)
       ),
-    onChatEvent: (callback) => onChatEvent(ipcRendererLike, callback),
+    onChatEvent: (callback) => onChatEvent(activeIpcRenderer, callback),
+    getUpdateState: () => invokeDesktopChannel<AppUpdateState>(
+      activeIpcRenderer,
+      DESKTOP_INVOKE_CHANNELS.UPDATE_GET_STATE,
+    ),
+    checkForUpdates: () => invokeDesktopChannel<AppUpdateState>(
+      activeIpcRenderer,
+      DESKTOP_INVOKE_CHANNELS.UPDATE_CHECK,
+    ),
+    installUpdateAndRestart: () => invokeDesktopChannel<{ accepted: boolean; reason?: string }>(
+      activeIpcRenderer,
+      DESKTOP_INVOKE_CHANNELS.UPDATE_INSTALL_AND_RESTART,
+    ),
+    onUpdateEvent: (callback) => onUpdateEvent(activeIpcRenderer, callback),
     getLoggingConfig: () => invokeDesktopChannel<RendererLoggingConfig>(
-      ipcRendererLike,
+      activeIpcRenderer,
       DESKTOP_INVOKE_CHANNELS.LOGGING_GET_CONFIG
     ),
-    getSettings: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.SETTINGS_GET),
-    saveSettings: (settings) => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.SETTINGS_SAVE, settings),
-    pickFile: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_FILE),
+    getSettings: () => invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SETTINGS_GET),
+    saveSettings: (settings) => invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SETTINGS_SAVE, settings),
+    pickFile: () => invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_FILE),
     addToQueue: (worldId, chatId, content, sender) =>
-      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.QUEUE_ADD, { worldId, chatId, content, sender } as QueueAddPayload),
+      invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.QUEUE_ADD, { worldId, chatId, content, sender } as QueueAddPayload),
     getQueuedMessages: (worldId, chatId) =>
-      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.QUEUE_GET, toWorldChatPayload(worldId, chatId)),
+      invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.QUEUE_GET, toWorldChatPayload(worldId, chatId)),
     removeFromQueue: (worldId, messageId) =>
-      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.QUEUE_REMOVE, { worldId, messageId }),
+      invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.QUEUE_REMOVE, { worldId, messageId }),
     clearQueue: (worldId, chatId) =>
-      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.QUEUE_CLEAR, toWorldChatPayload(worldId, chatId)),
+      invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.QUEUE_CLEAR, toWorldChatPayload(worldId, chatId)),
     pauseChatQueue: (worldId, chatId) =>
-      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.QUEUE_PAUSE, toWorldChatPayload(worldId, chatId)),
+      invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.QUEUE_PAUSE, toWorldChatPayload(worldId, chatId)),
     resumeChatQueue: (worldId, chatId) =>
-      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.QUEUE_RESUME, toWorldChatPayload(worldId, chatId)),
+      invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.QUEUE_RESUME, toWorldChatPayload(worldId, chatId)),
     stopChatQueue: (worldId, chatId) =>
-      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.QUEUE_STOP, toWorldChatPayload(worldId, chatId)),
+      invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.QUEUE_STOP, toWorldChatPayload(worldId, chatId)),
     retryQueueMessage: (worldId, messageId, chatId) =>
-      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.QUEUE_RETRY, { worldId, messageId, chatId }),
+      invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.QUEUE_RETRY, { worldId, messageId, chatId }),
     readSkillContent: (skillId) =>
-      invokeDesktopChannel<string>(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.SKILL_READ_CONTENT, { skillId }),
+      invokeDesktopChannel<string>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_READ_CONTENT, { skillId }),
     saveSkillContent: (skillId, content) =>
-      invokeDesktopChannel<void>(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.SKILL_SAVE_CONTENT, { skillId, content })
+      invokeDesktopChannel<void>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_SAVE_CONTENT, { skillId, content })
   };
 }
 
 export function exposeDesktopApi(
-  contextBridgeLike: ContextBridgeLike = contextBridge,
-  ipcRendererLike: IpcRendererLike = ipcRenderer
+  contextBridgeLike?: ContextBridgeLike,
+  ipcRendererLike?: IpcRendererLike,
 ): void {
-  contextBridgeLike.exposeInMainWorld(DESKTOP_BRIDGE_KEY, createDesktopApi(ipcRendererLike));
+  const electronBindings = contextBridgeLike && ipcRendererLike ? undefined : resolveElectronPreloadBindings();
+  const activeContextBridge = contextBridgeLike ?? electronBindings?.contextBridge;
+  const activeIpcRenderer = ipcRendererLike ?? electronBindings?.ipcRenderer;
+
+  if (!activeContextBridge || !activeIpcRenderer) {
+    throw new Error('Electron preload bindings are unavailable');
+  }
+
+  activeContextBridge.exposeInMainWorld(DESKTOP_BRIDGE_KEY, createDesktopApi(activeIpcRenderer));
 }

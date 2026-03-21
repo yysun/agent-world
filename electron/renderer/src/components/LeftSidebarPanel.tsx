@@ -13,6 +13,7 @@
  * - Receives all domain state/actions from `App.jsx` orchestration.
  *
  * Recent Changes:
+ * - 2026-03-21: Added a single open-sidebar update action that switches between manual check and upgrade states.
  * - 2026-03-14: Redesigned import mode into a multi-form selector with full world, agent, and skill form layouts.
  * - 2026-03-14: Aligned import-mode header spacing with the normal sidebar so `World Import` uses the same section-header placement as `Worlds`.
  * - 2026-03-14: Updated import mode to replace the standard left sidebar content instead of rendering inline within it.
@@ -51,6 +52,9 @@ export default function LeftSidebarPanel({
   setLeftSidebarCollapsed,
   dragRegionStyle,
   noDragRegionStyle,
+  appUpdateState,
+  onCheckForUpdates,
+  onInstallUpdateAndRestart,
   availableWorlds,
   loadedWorld,
   panelMode,
@@ -98,6 +102,39 @@ export default function LeftSidebarPanel({
   const [skillGithubRepo, setSkillGithubRepo] = useState(DEFAULT_GITHUB_REPO);
   const [skillGithubName, setSkillGithubName] = useState('writing-skill');
   const [importingWorld, setImportingWorld] = useState(false);
+  const isSidebarOpen = !leftSidebarCollapsed;
+  const isUpdateReady = appUpdateState?.status === 'downloaded';
+  const isPackagedApp = appUpdateState?.isPackaged === true;
+  const shouldShowUpdateAction = isSidebarOpen && (isUpdateReady || isPackagedApp);
+  const updateActionLabel = isUpdateReady
+    ? 'Upgrade'
+    : appUpdateState?.status === 'checking'
+      ? 'Checking...'
+      : appUpdateState?.status === 'downloading'
+        ? 'Downloading...'
+        : 'Check';
+  const updateActionDisabled = appUpdateState?.status === 'checking' || appUpdateState?.status === 'downloading';
+
+  const updateActionButton = shouldShowUpdateAction ? (
+    <button
+      type="button"
+      onClick={isUpdateReady ? onInstallUpdateAndRestart : onCheckForUpdates}
+      disabled={updateActionDisabled}
+      className={isUpdateReady
+        ? 'rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground transition-colors hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60'
+        : 'rounded-xl border border-sidebar-border px-3 py-1 text-xs font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/10 disabled:cursor-not-allowed disabled:opacity-60'
+      }
+      title={isUpdateReady
+        ? `Upgrade to ${appUpdateState?.downloadedVersion || 'the latest version'}`
+        : 'Check for published desktop updates'
+      }
+      aria-label={updateActionLabel}
+      style={noDragRegionStyle}
+      data-testid="sidebar-update-action"
+    >
+      {updateActionLabel}
+    </button>
+  ) : null;
 
   useEffect(() => {
     if (!workspaceMenuOpen) return undefined;
@@ -228,6 +265,7 @@ export default function LeftSidebarPanel({
           }`}
       >
         <div className="mb-3 flex h-8 shrink-0 items-start justify-end gap-2" style={dragRegionStyle}>
+          {updateActionButton}
           <button
             type="button"
             onClick={() => setLeftSidebarCollapsed(true)}
@@ -557,6 +595,7 @@ export default function LeftSidebarPanel({
         }`}
     >
       <div className="mb-3 flex h-8 shrink-0 items-start justify-end gap-2" style={dragRegionStyle}>
+        {updateActionButton}
         <button
           type="button"
           onClick={() => setLeftSidebarCollapsed(true)}

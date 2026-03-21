@@ -14,6 +14,7 @@
  * - Avoids filesystem and real sqlite usage in unit tests
  *
  * Recent changes:
+ * - 2026-03-21: Added coverage confirming the normal SQLite env startup path initializes defaults, which triggers migration checks for upgraded databases.
  * - 2026-03-05: Added wrapper-level agent-load retry fallback coverage for transient read failures.
  * - 2026-03-05: Added regression coverage to avoid retry delays when agent loads return `null` (not-found) across wrapper/file/sqlite retry helpers.
  * - 2026-03-05: Added deterministic retry-exhausted outcome coverage for file/sqlite load-agent retries after transient errors.
@@ -597,5 +598,25 @@ describe('storage-factory runtime selection', () => {
     await createStorageFromEnv();
     expect(existsSpy).toHaveBeenCalledWith(process.env.AGENT_WORLD_DATA_PATH);
     expect(mkdirSpy).toHaveBeenCalledWith(process.env.AGENT_WORLD_DATA_PATH, { recursive: true });
+  });
+
+  it('initializes sqlite defaults during env startup so upgraded databases run migrations before use', async () => {
+    process.env.AGENT_WORLD_STORAGE_TYPE = 'sqlite';
+    process.env.AGENT_WORLD_DATA_PATH = uniqueRoot('sqlite-upgrade');
+
+    const ctx = { db: { label: 'upgrade-db' } } as any;
+    sqliteStorageMocks.createSQLiteStorageContext.mockResolvedValue(ctx);
+
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+
+    await createStorageFromEnv();
+
+    expect(sqliteStorageMocks.createSQLiteStorageContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        database: `${process.env.AGENT_WORLD_DATA_PATH}/database.db`,
+      })
+    );
+    expect(sqliteStorageMocks.initializeWithDefaults).toHaveBeenCalledTimes(1);
+    expect(sqliteStorageMocks.initializeWithDefaults).toHaveBeenCalledWith(ctx);
   });
 });

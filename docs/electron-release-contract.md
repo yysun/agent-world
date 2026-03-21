@@ -40,6 +40,25 @@ Define the release/version contract for Agent World desktop distribution so pack
 - Updater package artifact(s): generated blockmap assets for installer/update payloads
 - Updater metadata: `latest.yml`
 
+## Runtime Update Behavior
+
+- Packaged desktop builds perform an automatic startup update check.
+- Packaged desktop builds must also provide an explicit user-initiated manual update check.
+- When an update has been downloaded, install remains an explicit user action and should restart the app to finish the upgrade.
+- Release notes must remain visible to the user before the final restart/install confirmation.
+- Non-packaged local/dev runs must not attempt real installs.
+
+## Data Safety After Upgrade
+
+- Existing workspace/world/chat data must remain on the same persisted storage path across app upgrades.
+- If the installed app opens an existing SQLite database with pending migrations, those migrations must run before normal storage-backed operations continue.
+- The current desktop startup chain is expected to be:
+  - `createStorageFromEnv()`
+  - `initializeWithDefaults()`
+  - `ensureInitialized()`
+  - `runMigrations()`
+- Release readiness still requires manual packaged upgrade verification on macOS and Windows using an older installed version and existing user data.
+
 ## Signing / Trust Requirements
 
 ### macOS

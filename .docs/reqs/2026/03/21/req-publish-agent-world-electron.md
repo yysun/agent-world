@@ -43,6 +43,7 @@ Enable Agent World Electron desktop delivery for macOS and Windows so end users 
 - Publish macOS and Windows Electron desktop releases to GitHub for each production version.
 - Provide an installer-based user installation flow (not source-code setup).
 - Provide in-app update detection and upgrade execution for newer published versions.
+- Run any pending SQLite schema migrations automatically on first startup after an app upgrade before normal storage access continues.
 
 ## Functional Requirements
 
@@ -66,6 +67,7 @@ Enable Agent World Electron desktop delivery for macOS and Windows so end users 
 - **REQ-18**: App version displayed in UI and version used for release/update resolution must be derived from a single authoritative version contract.
 - **REQ-19**: The installed app must launch successfully on supported Windows environments for both x64 and arm64 targets (where supported by the packaging stack).
 - **REQ-20**: Windows installer and updater artifacts must be included in each production release.
+- **REQ-21**: If an upgraded app opens an existing SQLite database with pending SQL migrations, the app must run those migrations automatically before normal world/chat storage operations continue.
 
 ## Non-Functional Requirements
 
@@ -106,3 +108,4 @@ Enable Agent World Electron desktop delivery for macOS and Windows so end users 
 - [ ] Published assets include updater-compatible artifacts/metadata needed for in-app install flow.
 - [ ] Displayed app version matches the release/update version contract.
 - [ ] Windows users can install from the published installer and successfully complete in-app upgrade flow.
+- [ ] Upgraded apps automatically apply pending SQLite schema migrations before normal storage-backed world/chat operations resume.

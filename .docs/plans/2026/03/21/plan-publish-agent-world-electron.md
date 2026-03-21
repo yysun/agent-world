@@ -145,20 +145,32 @@ Phase 3 delivery notes:
 - Fixed Electron packaging manifest drift by requiring `electron-builder` directly in `electron/package.json`.
 
 ### Phase 4: In-App Update Lifecycle
-- [ ] Add updater service in Electron main process for check/download/install lifecycle.
-- [ ] Expose update status/events through preload bridge to renderer.
-- [ ] Add renderer UI to show current app version.
-- [ ] Add renderer action to manually check for updates.
-- [ ] Add renderer notification flow for update availability.
-- [ ] Add renderer view/action for release notes before update install.
-- [ ] Add renderer action to trigger update install and restart.
-- [ ] Ensure updater respects configured channel policy (stable by default, prerelease opt-in).
-- [ ] Implement graceful failure states that keep current app functional.
+- [x] Add updater service in Electron main process for check/download/install lifecycle.
+- [x] Expose update status/events through preload bridge to renderer.
+- [x] Add renderer UI to show current app version.
+- [x] Add renderer action to manually check for updates.
+- [x] Add renderer notification flow for update availability.
+- [x] Add renderer view/action for release notes before update install.
+- [x] Add renderer action to trigger update install and restart.
+- [x] Ensure updater respects configured channel policy (stable by default, prerelease opt-in).
+- [x] Implement graceful failure states that keep current app functional.
+
+Phase 4 delivery notes:
+- Added a dedicated Electron main-process updater service in `electron/main-process/app-updater.ts` backed by `electron-updater`.
+- Extended shared IPC contracts and preload bridge with update state, manual check, install/restart, and push-event support.
+- Added a simplified renderer sidebar-header update UX with explicit manual check, primary upgrade action when a download is ready, and release notes shown in the restart confirmation flow.
+- Added focused tests for updater service state transitions plus preload and IPC route coverage for the new update channels.
 
 ### Phase 5: Data Safety and Upgrade Resilience
-- [ ] Validate workspace/world data persistence remains stable across app upgrades.
-- [ ] Add upgrade-path tests/verification for existing-user scenario (install old -> update -> verify data).
-- [ ] Define rollback behavior and user messaging for failed update apply/relaunch.
+- [x] Confirm upgraded SQLite databases run pending SQL migrations automatically on first post-upgrade startup before normal storage access continues.
+- [x] Define minimal rollback behavior and user messaging for failed update apply/relaunch.
+- [ ] Add upgrade-path verification for existing-user scenario (install old -> update -> verify data) on macOS and Windows.
+
+Phase 5 delivery notes:
+- Confirmed the normal desktop storage startup path is `createStorageFromEnv()` -> `initializeWithDefaults()` -> `ensureInitialized()` -> `runMigrations()` for SQLite-backed storage.
+- Confirmed migration discovery remains valid for Electron runtime layouts because `core/storage/sqlite-storage.ts` resolves migrations from root, parent, and bundled module-relative candidates.
+- Minimal rollback contract is now explicit: failed update checks/downloads keep the current app usable, and failed install/relaunch attempts do not change the persisted workspace/world data path.
+- Remaining pre-stable work is manual old-version-to-new-version upgrade verification on macOS and Windows with existing user data.
 
 ### Phase 6: Documentation and Operational Readiness
 - [ ] Update README/docs with end-user installer steps from GitHub release for macOS and Windows.
@@ -171,6 +183,7 @@ Phase 3 delivery notes:
 - [ ] Artifact validation: verify macOS and Windows installers install and launch cleanly.
 - [ ] Update validation: on macOS and Windows, install previous release, publish newer release, perform in-app update.
 - [ ] Failure validation: simulate unavailable release feed / download failure / install failure.
+- [x] Startup migration validation: unit coverage confirms upgraded SQLite databases run pending migrations during first storage initialization.
 - [ ] Data validation: verify pre-existing worlds/chats/workspace settings remain intact post-update.
 - [ ] CI validation: ensure release workflow fails fast on signing/publish errors and reports actionable logs.
 - [ ] Channel validation: stable users do not receive prerelease updates unless explicitly enabled.

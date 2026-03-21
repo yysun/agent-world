@@ -15,7 +15,7 @@ This document explains the desktop release flow for Agent World and answers comm
 
 4. **Does auto-updater check versions from GitHub?**  
    **Yes, by design.** Packaging is configured with GitHub as the publish/update provider.  
-   Runtime update checks in app UI/main process are **pending** the update implementation phase (Phase 4).
+   Packaged desktop builds now perform startup update checks and expose an explicit in-app manual check action.
 
 ## Versioning Rules
 
@@ -163,7 +163,24 @@ Updates are resolved from **GitHub Releases** (configured in Electron builder pu
 ### Current implementation status
 
 - Packaging and updater metadata generation: **implemented**.
-- In-app check/download/install UI flow: **pending** (planned for Phase 4).
+- In-app check/download/install UI flow for packaged desktop builds: **implemented**.
+- Current packaged UX:
+   - startup update check runs automatically
+   - users can trigger an explicit manual check from the open left sidebar header
+   - downloaded updates switch the sidebar action to `Upgrade`
+   - release notes are shown again in the restart confirmation flow before install
+- Local source/dev runs do not install updates and stay in unsupported mode until the app is running as a packaged desktop release.
+
+### Data safety after upgrade
+
+- On first startup after an upgrade, the desktop SQLite path runs pending schema migrations before normal world/chat storage access resumes.
+- Current verified startup chain is:
+   - `createStorageFromEnv()`
+   - `initializeWithDefaults()`
+   - `ensureInitialized()`
+   - `runMigrations()`
+- This covers startup migration behavior in normal desktop runtime initialization.
+- Remaining release validation still includes manual old-version-to-new-version upgrade verification on macOS and Windows.
 
 ## Required Secrets for Production Publishing
 
@@ -235,7 +252,8 @@ Then:
    - `latest*.yml`
    - blockmaps
 3. Verify installer download and launch.
-4. Verify update path from previous installed version.
+4. Verify in-app update path from a previous installed version.
+5. Verify existing workspace/world data survives restart after upgrade and that pending migrations complete before normal storage access resumes.
 
 If you want GitHub Actions to do the build and upload, use the manual trigger flow in the **Manual GitHub Actions Trigger** section instead of this local upload sequence.
 
@@ -246,6 +264,9 @@ No. Keep installers as release assets, not git files.
 
 ### Why do we need both installer and `latest*.yml`?
 Installer is for fresh install. `latest*.yml` is for updater version resolution.
+
+### What is the current in-app updater UX?
+For packaged builds, Agent World checks for updates on startup and also provides a manual `Check` action in the open left sidebar header. Once a new version is downloaded, that action becomes `Upgrade` and the app asks for confirmation before restart, including the release notes.
 
 ### Why sync versions between root and electron package?
 To prevent release drift and updater confusion.

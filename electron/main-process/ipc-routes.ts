@@ -79,6 +79,9 @@ export interface MainIpcHandlers {
   subscribeChatEvents: (payload: unknown) => Promise<unknown> | unknown;
   unsubscribeChatEvents: (payload: unknown) => Promise<unknown> | unknown;
   getLoggingConfig: () => Promise<unknown> | unknown;
+  getUpdateState: () => Promise<unknown> | unknown;
+  checkForUpdates: () => Promise<unknown> | unknown;
+  installUpdateAndRestart: () => Promise<unknown> | unknown;
   getSystemSettings: () => Promise<unknown> | unknown;
   saveSystemSettings: (payload: unknown) => Promise<unknown> | unknown;
   openFileDialog: () => Promise<unknown> | unknown;
@@ -204,6 +207,9 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
       channel: DESKTOP_INVOKE_CHANNELS.CHAT_UNSUBSCRIBE_EVENTS,
       handler: async (_event, payload) => handlers.unsubscribeChatEvents(payload as ChatUnsubscribePayload)
     },
+    { channel: DESKTOP_INVOKE_CHANNELS.UPDATE_GET_STATE, handler: async () => handlers.getUpdateState() },
+    { channel: DESKTOP_INVOKE_CHANNELS.UPDATE_CHECK, handler: async () => handlers.checkForUpdates() },
+    { channel: DESKTOP_INVOKE_CHANNELS.UPDATE_INSTALL_AND_RESTART, handler: async () => handlers.installUpdateAndRestart() },
     { channel: DESKTOP_INVOKE_CHANNELS.LOGGING_GET_CONFIG, handler: async () => handlers.getLoggingConfig() },
     { channel: DESKTOP_INVOKE_CHANNELS.SETTINGS_GET, handler: async () => handlers.getSystemSettings() },
     { channel: DESKTOP_INVOKE_CHANNELS.SETTINGS_SAVE, handler: async (_event, payload) => handlers.saveSystemSettings(payload) },
