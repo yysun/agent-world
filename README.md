@@ -3,239 +3,307 @@
 [![Latest Release](https://img.shields.io/github/v/release/yysun/agent-world?label=release)](https://github.com/yysun/agent-world/releases)
 
 <p align="center">
-	<img src="electron/assets/icons/agent-world-icon.svg" alt="Agent World Logo" width="120" />
+  <img src="electron/assets/icons/agent-world-icon.svg" alt="Agent World Logo" width="120" />
 </p>
 
-*Build AI agent teams with just words—no coding required.*
+*Prompt-defined agent runtime for orchestrating models, tools, skills, MCP servers, and external agent CLIs.*
 
-## Why Agent World?
 
-Traditional AI frameworks force you to write hundreds of lines of code just to make agents talk to each other. Agent World lets you create intelligent agent teams using nothing but plain natural language.
+![Agent World screenshot](docs/Screenshot-agents.png)
 
-https://github.com/user-attachments/assets/cc507c95-01a4-4c27-975a-f8f67d8cf0d7
+## Why Agent World
 
-Audio introduction: [Listen here](https://yysun.github.io/agent-world)
+Agent World is an **Agent Harness**, **Agent OS**, and **Agent Runtime** for prompt-defined multi-agent systems.
 
-**Other frameworks:**
-- Install SDKs → write code → handle loops → deploy containers
-- Learn Python/TypeScript before "Hello, world"
+You define a world, define agents, give them tools and workflow rules, and run them through Web, CLI, or Electron. The runtime handles message routing, streaming, tool lifecycle, approvals, queueing, and multi-agent coordination for you.
 
-**Agent World:**
-- Write prompts → for multiple agents → communicating in a shared world
+### What It Promotes
+
+- **Prompt-defined agent runtime**: use prompts as the primary control plane for roles, routing, guardrails, and workflow state.
+- **Agent Skills**: discover compact skill summaries first, then progressively load full `SKILL.md` instructions only when needed.
+- **MCP server support**: attach MCP servers per world for search, browser control, file tools, code execution, and other external capabilities.
+- **Model and CLI orchestration**: combine hosted providers, local Ollama models, built-in tools, and shell-driven external agent CLIs in one runtime.
+- **Workflow patterns**: run sequential pipelines, routers, debate loops, fan-out/fan-in collectors, and orchestrator-worker flows.
+- **Real-world work**: build coding, support, research, and ops workflows without inventing a separate runtime for each one.
+- **Marketplace-style imports**: bring in worlds, agents, and skills from local folders or curated GitHub sources.
+
+## Core Capabilities
+
+- Prompt-defined agents with shared world context and deterministic mention-based routing
+- Progressive Agent Skills via `load_skill`
+- Built-in tools for files, web fetch, shell, messaging, agent creation, and human intervention
+- MCP integration with `stdio` and `http` transports
+- Multi-provider runtime support: OpenAI, Anthropic, Google, Azure OpenAI, xAI, OpenAI-compatible endpoints, and Ollama
+- Local-model friendly defaults with `OLLAMA_BASE_URL`
+- World-level tool permission modes: `Read`, `Ask`, `Auto`
+- Cross-client HITL approvals in Web, CLI, and Electron
+- Queue-backed send flow, heartbeat scheduling, and stop/resume controls
+- Real-time streaming with tool lifecycle visibility and per-chat isolation
+- Marketplace-style imports for worlds, agents, and skills
+- Web app, CLI, Electron desktop app, and core npm package
+
+## Prompt-Defined Runtime
+
+Agent World is best understood as:
+
+> prompt-defined state machine + message passing + tools + approvals
+
+A world prompt and a set of agent prompts define:
+
+- who responds
+- when they respond
+- how work is routed
+- when humans approve
+- which tools or skills get loaded
+- how results are merged back together
+
+Minimal example:
+
 ```text
-You are @moderator. When someone says "start debate", 
-ask for a topic, then tag @pro and @con to argue.
-```
-Paste that prompt. Agents come alive instantly.
+You are running a coding workflow.
 
-![GitHub](docs/Screenshot-agents.png)
+@orchestrator:
+- Triage the request.
+- If the task needs parallel analysis, fan out to @research, @coder, and @reviewer.
+- Merge results and reply to the human.
+- Use skills before ad hoc tool use when a skill matches.
 
-## Why It Works
+@research:
+- Gather context, docs, and constraints.
 
-- ✅ No Code Required - Agents are defined entirely in natural language
-- ✅ Natural Communication - Agents understand context and conversations
-- ✅ Built-in Rules for Messages - Turn limits to prevent loops
-- ✅ Concurrent Chat Sessions - Isolated `chatId` routing enables parallel conversations
-- ✅ Progressive Agent Skills - Skills are discovered and loaded on demand via `load_skill`
-- ✅ World-Level Tool Permissions - `Read`, `Ask`, and `Auto` modes control write and execution capabilities
-- ✅ Cross-Client HITL Approval - Option-based approvals in CLI, Web, and Electron
-- ✅ Reasoning Controls - World-scoped reasoning effort with separate reasoning-token rendering
-- ✅ Heartbeats & Queueing - Queue-backed world prompts and cron scheduling with explicit controls
-- ✅ Marketplace & Imports - Bring in worlds, agents, and skills from local folders or curated GitHub sources
-- ✅ Runtime Controls - Session-scoped send/stop flows and tool lifecycle visibility
-- ✅ Safer Tool Execution - Trusted-CWD and argument-scope guards for `shell_cmd`
-- ✅ Multiple AI Providers - Use different models for different agents
-- ✅ Web + CLI + Electron - Modern interfaces with real-time streaming and status feedback
+@coder:
+- Make targeted changes with tools.
 
-## Latest Highlights (v0.15.0)
-
-- World-level tool permissions add `Read`, `Ask`, and `Auto` control modes in both the web and Electron composers
-- Supported providers can use world-scoped `reasoning_effort`, with reasoning tokens streamed and rendered separately from final answers
-- World and heartbeat prompts now enter the same queue-backed message flow as human turns, with explicit heartbeat controls and next-run visibility
-- Electron now includes marketplace-style import flows for discovering and importing worlds, agents, and skills
-- Web and Electron transcripts have tighter parity with compact tool rows, improved status rendering, and cleaner working indicators
-- Clicking markdown links in Electron messages now opens the external browser instead of attempting in-app navigation
-
-## Release Notes
-
-- **v0.15.0** - Tool permission modes, reasoning-token support, queue-backed world/heartbeat flow, marketplace imports, and transcript/UI refinements
-- **v0.14.0** - User message queue, `write_file`/`web_fetch`/`send_message`, shell risk gating, E2E harnesses, skill editor, and heartbeat scheduling
-- **v0.13.0** - Better HITL prompts, improved streaming/main-agent UX, and smoother message rendering
-- **v0.12.0** - Web settings/search/branching, built-in `create_agent`, new file tools, Electron folder import/export, and chat/status UX improvements
-- Full history: [CHANGELOG.md](CHANGELOG.md)
-
-## What You Can Build
-
-- Debate Club
-```text
-@moderator: Manages rounds, keeps time
-@pro: Argues for the topic  
-@con: Argues against the topic
-```
-
-- Editorial Pipeline
-```text
-@planner: Assigns articles
-@author: Writes drafts
-@editor: Reviews and edits
-@publisher: Formats and publishes
+@reviewer:
+- Check for regressions and missing tests.
 ```
 
-- Game Master
-```text
-@gm: Runs the game, manages state
-@player1, @player2: Take turns
-@assistant: Helps with rules
-```
+## Workflow Patterns
 
-- Social Simulation
-```text
-@alice: Friendly neighbor
-@bob: Practical problem-solver  
-@charlie: Creative dreamer
-```
+Agent World already supports prompt-driven workflow shapes such as:
 
-- Customer Support
-```text
-@triage: Categorizes requests
-@specialist: Handles technical issues
-@manager: Escalates complaints
-```
+- **Sequential pipeline**: spec -> implement -> test -> deliver
+- **Intent router**: dispatch requests to the right specialist
+- **FSM controller**: carry workflow state inside the transcript
+- **Debate loop**: red-team vs blue-team or design critique
+- **Fan-out**: parallel lanes for research, code, security, or alternatives
+- **Fan-in**: collector agent merges and finalizes lane outputs
+- **Orchestrator-worker**: planner delegates, workers execute, collector returns result
+- **Tool proxy agent**: wrap shell tools or CLIs behind an agent role
+- **Approval gate**: stop at plan/review/deploy boundaries and wait for human choice
+
+For the full pattern catalog, see [docs/Agent World Patterns.md](docs/Agent%20World%20Patterns.md).
+
+## Real-World Workflows
+
+### Coding
+
+- Repo-aware orchestrator + coder + reviewer flows
+- Shell-driven workflows for Git, Docker, migrations, builds, and test runs
+- Skills for standardized development processes
+- MCP servers for browser automation, filesystem access, and structured tooling
+
+### Support
+
+- Triage -> specialist -> manager escalation
+- Approval gates for sensitive actions
+- Shared transcript and queue-backed follow-up handling
+
+### Research
+
+- Fan out multiple researchers
+- Use MCP search/browser tools or `web_fetch`
+- Fan in to a collector that synthesizes a final answer
+
+### Ops
+
+- Incident triage, runbooks, shell execution, and approval checkpoints
+- Local CLI orchestration for deployment, diagnostics, and log collection
+
+## Agent Skills
+
+Agent Skills are reusable capability packs stored as `SKILL.md` files.
+
+- Skills are discovered from:
+  - project roots: `.agents/skills`, `skills`
+  - user roots: `~/.agents/skills`, `~/.codex/skills`
+- The runtime injects compact skill summaries into the prompt
+- Agents call `load_skill` only when full instructions are needed
+- Interactive skill activation is approval-gated
+- Skill-linked scripts are scope-validated and follow the same shell safety rules as built-in tool execution
+
+## MCP Server Support
+
+Each world can define MCP servers in `mcpConfig`. Agent World starts them on demand and exposes their tools to the runtime.
+
+- Supports `stdio` and `http` transports
+- Per-world configuration
+- Registry, health, and restart support in the server runtime
+- Works alongside built-in tools and Agent Skills
+
+## Models, Tools, and External Agent CLIs
+
+Agent World is not limited to a single provider or a single tool surface.
+
+- Use hosted models from OpenAI, Anthropic, Google, Azure OpenAI, xAI, or other OpenAI-compatible endpoints
+- Use local models through Ollama
+- Use built-in tools for common runtime operations
+- Use MCP servers when you want protocol-based external tools
+- Use `shell_cmd` when you want to orchestrate local CLIs directly
+
+That makes it practical to build workflows that combine:
+
+- local reasoning models
+- external search/browser/file tools
+- repo tooling like `git`, `npm`, `docker`
+- external agent CLIs used as worker executors
+
+## Built-In Tools
+
+Available built-ins include:
+
+- `read_file`, `list_files`, `grep`
+- `write_file`
+- `web_fetch`
+- `send_message`
+- `create_agent`
+- `shell_cmd`
+- `load_skill`
+- `human_intervention_request`
+
+World owners can set tool access to:
+
+- `Read`: inspection only
+- `Ask`: approval-gated writes and execution
+- `Auto`: automatic execution inside trusted scope
+
+### `shell_cmd`
+
+The `shell_cmd` tool is the bridge for local automation and CLI orchestration.
+
+- Enforces trusted working-directory scope
+- Validates command and path arguments
+- Tracks lifecycle and supports session-scoped cancellation
+- Streams output back into the active runtime
+
 
 ## How Agents Communicate
 
-Each Agent World has a collection of agents that can communicate through a shared event system. Agents follow simple rules:
+Each world has a shared event system. Agents respond based on public messages and paragraph-start mentions.
 
 ### Message Rules
 
 | Message Shape | Example | Who Responds |
 |--------------|---------|--------------|
-| **Public human or world message** | `Hello everyone!` | All active agents |
-| **Paragraph-start mention** | `@alice Can you help?` | Only mentioned agents |
-| **Paragraph-start mention after text** | `Please review this:\n@alice` | Only mentioned agents |
-| **Mid-text mention only** | `I think @alice should help` | Nobody (event is persisted; no agent-memory save) |
-| **Stop World** | `<world>pass</world>` | No agents |
+| Public human or world message | `Hello everyone!` | All active agents |
+| Paragraph-start mention | `@alice Can you help?` | Only mentioned agents |
+| Paragraph-start mention after text | `Please review this:\n@alice` | Only mentioned agents |
+| Mid-text mention only | `I think @alice should help` | Nobody |
+| Stop World | `<world>pass</world>` | No agents |
 
-### Agent Behavior
+### Behavior Guarantees
 
-**Agents always respond to:**
-- Public human or world messages when there is no paragraph-start mention
-- Direct @mentions at paragraph start
+- Agents respond to public messages with no paragraph-start mention
+- Agents respond to direct paragraph-start mentions
+- Agents do not respond to their own messages
+- Mid-text mentions do not trigger replies
+- Turn limits prevent runaway loops
 
-**Agents never respond to:**
-- Their own messages
-- Other agents (unless @mentioned at paragraph start)
-- Mid-text mentions (not at paragraph start), including world prompts
-
-**When messages are saved to agent memory:**
-- Incoming messages are saved only for agents that will respond
-- Non-responding agents skip agent-memory save (message events are still persisted)
-
-**Turn limits prevent loops:**
-- Default: 5 responses per conversation thread
-- Agents automatically pass control back to humans
-- Configurable per world
-
-
-## Installation & Setup
+## Installation and Quick Start
 
 ### Prerequisites
-- Node.js 20+ 
-- An API key for your preferred LLM provider
 
-### Quick Start
+- Node.js 20+
+- API keys for any hosted providers you want to use
 
-Use npm package invocations (shown below). GitHub shorthand commands such as
-`npx agent-world/agent-world` are not supported entrypoints.
+Use npm package invocations. GitHub shorthand commands such as `npx agent-world/agent-world` are not supported entrypoints.
 
-**Option 1: Web Interface**
+### Web
+
 ```bash
 npx agent-world@latest
 ```
 
-**Option 2: CLI Interface**
-1. Interactive Mode
+### CLI
+
+Interactive mode:
+
 ```bash
 npx -p agent-world@latest agent-world-cli
 ```
-2. Command Mode
+
+Command mode:
+
 ```bash
-npx -p agent-world@latest agent-world-cli -w default-world "hi" 
+npx -p agent-world@latest agent-world-cli -w default-world "hi"
 ```
-3. Pipeline Mode
+
+Pipeline mode:
+
 ```bash
 echo "hi" | npx -p agent-world@latest agent-world-cli -w default-world
 ```
 
-**Option 3: Electron Desktop App (repo)**
+### Electron Desktop App (repo)
+
 ```bash
 npm run electron:dev
 ```
 
-## Project Structure
+## Development
 
-- `core/` - shared runtime, storage, tools, provider integrations, and event flow
+### Project Structure
+
+- `core/` - runtime, storage, tools, skills, MCP integration, and event flow
 - `server/` - REST API and SSE transport
 - `web/` - browser app
-- `electron/` - desktop app (main, preload, renderer)
+- `electron/` - desktop app
 - `cli/` - terminal interface
 
-For broader architecture and usage docs, start with [Docs Home](docs/docs-home.md).
+### Development Scripts
 
-## Development Scripts
-
-Agent World provides simple, consistent npm scripts for three main applications:
-
-### Development (hot reload)
 ```bash
-npm run dev              # Web app with server (default)
-npm run web:dev          # Web app with server (explicit)
-npm run cli:dev          # CLI with watch mode
-npm run electron:dev     # Electron app
+npm run dev
+npm run web:dev
+npm run cli:dev
+npm run electron:dev
 ```
 
-### Production
+### Production Scripts
+
 ```bash
-npm start                # Web server (default)
-npm run web:start        # Web server (explicit)
-npm run cli:start        # CLI (built)
-npm run electron:start   # Electron app
+npm start
+npm run web:start
+npm run cli:start
+npm run electron:start
 ```
 
-### Behind the Scenes
-The scripts handle dependencies automatically:
-- **Web**: Builds core, starts server in watch mode, launches Vite dev server
-- **CLI**: Runs with tsx watch mode for instant feedback
-- **Electron**: Builds core, launches Electron with Vite HMR
+### Build and Check
 
-### Other Useful Scripts
 ```bash
-npm run build            # Build all (core + root + web)
-npm run check            # TypeScript type checking
-npm test                 # Run unit tests
-npm run test:watch       # Watch mode
+npm run build
+npm run check
 ```
 
-### Environment Setup
+## Environment Setup
 
-Export your API keys as environment variables 
 For Azure OpenAI, all four `AZURE_OPENAI_*` variables are required together.
 
 ```bash
-# Required if Choose one or more
 export OPENAI_API_KEY="your-key-here"
-export ANTHROPIC_API_KEY="your-key-here"  
+export ANTHROPIC_API_KEY="your-key-here"
 export GOOGLE_API_KEY="your-key-here"
 export AZURE_OPENAI_API_KEY="your-key-here"
 export AZURE_OPENAI_RESOURCE_NAME="your-resource-name"
 export AZURE_OPENAI_DEPLOYMENT_NAME="your-deployment-name"
 export AZURE_OPENAI_API_VERSION="2024-10-21-preview"
+export XAI_API_KEY="your-key-here"
 
-# Default: For local models
+# Local models
 export OLLAMA_BASE_URL="http://localhost:11434"
 ```
 
-Or create a `.env` file in your working directory with:
+Or create a `.env` file:
 
 ```bash
 OPENAI_API_KEY=your-key-here
@@ -245,10 +313,11 @@ AZURE_OPENAI_API_KEY=your-key-here
 AZURE_OPENAI_RESOURCE_NAME=your-resource-name
 AZURE_OPENAI_DEPLOYMENT_NAME=your-deployment-name
 AZURE_OPENAI_API_VERSION=2024-10-21-preview
+XAI_API_KEY=your-key-here
 OLLAMA_BASE_URL=http://localhost:11434
 ```
 
-### Optional Opik Layer
+## Optional Opik Layer
 
 Opik is optional and fully gated.
 
@@ -282,205 +351,87 @@ Opik is storage-agnostic — it attaches to `world.eventEmitter` and works ident
 
 ## Testing
 
-**Run all tests:**
+Run all tests:
+
 ```bash
-npm test              # Run all unit tests
-npm run test:watch    # Watch mode with hot reload
-npm run test:ui       # Visual test UI
-npm run test:coverage # Generate coverage report
-npm run test:coverage:gate # Coverage + core threshold gate + subsystem scorecard
+npm test
+npm run test:watch
+npm run test:ui
+npm run test:coverage
+npm run test:coverage:gate
 ```
 
-**Run specific tests:**
+Run specific tests:
+
 ```bash
-npm test -- tests/core/events/  # Test a directory
-npm test -- message-saving      # Test files matching pattern
+npm test -- tests/core/events/
+npm test -- message-saving
 ```
 
-**Integration tests:**
+Integration tests:
+
 ```bash
-npm run test:integration  # Run integration tests with real filesystem
-npm run ci:test           # CI gate: coverage threshold + integration
+npm run test:integration
+npm run ci:test
 ```
 
-Agent World uses Vitest for fast, modern testing with native TypeScript support.
+Coverage thresholds enforced by `npm run test:coverage:gate`:
 
-### Coverage Gates
-
-`npm run test:coverage:gate` enforces minimum core coverage thresholds and generates a subsystem scorecard:
 - core statements >= 68%
 - core branches >= 56%
 - core functions >= 75%
 - core lines >= 69%
 
-The scorecard is written to:
-- `coverage/scorecard.md`
-- `coverage/scorecard.json`
-
 ## Logging and Debugging
 
-Agent World uses **scenario-based logging** to help you debug specific issues without noise. Enable only the logs you need for your current task.
+Agent World uses scenario-based logging so you can enable only the categories you need.
 
-### Quick Examples
+Examples:
 
 ```bash
-# Database migration issues
 LOG_STORAGE_MIGRATION=info npm run web:dev
-
-# MCP server problems  
 LOG_MCP=debug npm run web:dev
-
-# Agent response debugging
 LOG_EVENTS_AGENT=debug LOG_LLM=debug npm run web:dev
-
-# Chat restore/HITL replay debugging
 LOG_CHAT_RESTORE=debug LOG_CHAT_RESTORE_RESUME=debug LOG_CHAT_RESTORE_RESUME_TOOLS=debug LOG_HITL=debug npm run web:dev
 ```
 
-**For complete logging documentation**, see [Logging Guide](docs/logging-guide.md).
+See [docs/logging-guide.md](docs/logging-guide.md) for the full guide.
 
 ## Storage Configuration
 
-### World Database Setup
+By default, worlds are stored in SQLite under `~/agent-world`.
 
-The worlds are stored in the SQLite database under the `~/agent-world` directory. You can change the database path by setting the environment variable `AGENT_WORLD_SQLITE_DATABASE`.
-
-Or, you can change the storage type to file-based by setting the environment variable `AGENT_WORLD_STORAGE_TYPE` to `file`. And set the `AGENT_WORLD_DATA_PATH` to your desired directory.
+To change the SQLite database path:
 
 ```bash
-# Use file storage
+export AGENT_WORLD_SQLITE_DATABASE=~/agent-world/database.db
+```
+
+To use file storage instead:
+
+```bash
 export AGENT_WORLD_STORAGE_TYPE=file
 export AGENT_WORLD_DATA_PATH=./data/worlds
 ```
 
 ## Learn More
 
-- **[Docs Home](docs/docs-home.md)** - Central navigation page for all major documentation
-- **[Building Agents with Just Words](docs/Building%20Agents%20with%20Just%20Words.md)** - Complete guide with examples
-- **[Shell Command Tool (shell_cmd)](docs/shell-cmd-tool.md)** - Built-in tool for executing shell commands
-- **[HITL Approval Flow](docs/hitl-approval-flow.md)** - Option-based approval flow across Core/Electron/Web/CLI
-- **[API Reference](openapi.yaml)** - OpenAPI 3.1 spec for the REST API
-- **[Using Core from npm](docs/core-npm-usage.md)** - Integration guide for server and browser apps
-- **[Electron Desktop App](docs/electron-desktop.md)** - Open-folder workflow and local world creation
-
-
-## Built-in Tools
-
-Agent World includes built-in tools that are automatically available to all agents:
-
-- `read_file`, `list_files`, `grep` - inspect project files and source trees
-- `write_file` - update files inside trusted workspace scope
-- `web_fetch` - fetch web pages and convert them to Markdown for agent use
-- `send_message` - dispatch trusted chat-context messages to other agents
-- `create_agent` - create new agents during a conversation
-- `shell_cmd` - run shell commands with trusted-scope validation and lifecycle controls
-- `load_skill` - progressively load `SKILL.md` instructions and related scripts
-- `human_intervention_request` - ask the user for structured options and approvals
-
-World owners can set built-in tool access to `Read`, `Ask`, or `Auto` so write/execute actions are blocked, approval-gated, or automatic depending on the world.
-
-### shell_cmd
-Execute shell commands with full output capture and execution history. Perfect for file operations, system information, and automation tasks.
-
-- Enforces trusted working-directory scope from world/tool context
-- Validates command/path arguments to prevent out-of-scope traversal patterns
-- Supports lifecycle tracking and session-scoped cancellation in active runtimes
-
-```typescript
-// Available to LLMs as 'shell_cmd' tool
-{
-  "command": "ls",
-	"parameters": ["-la", "./"]
-}
-```
-
-See [Shell Command Tool Documentation](docs/shell-cmd-tool.md) for complete details.
-
-### load_skill (Agent Skills)
-
-Agent World includes progressive skill loading through the `load_skill` built-in tool.
-
-- Skills are discovered from `SKILL.md` files in:
-  - Project roots: `.agents/skills`, `skills`
-  - User roots: `~/.agents/skills`, `~/.codex/skills`
-- The model receives compact skill summaries first, then calls `load_skill` only when full instructions are needed.
-- Skill activation in interactive runtimes is HITL-gated.
-- `load_skill` always performs the same preflight flow: script references are discovered from instructions, script execution is HITL-approved and scope-validated, and reference-file context is collected when active resources are present.
-
-Minimal `SKILL.md` example:
-
-```md
----
-name: sql-review
-description: Review SQL migrations for safety and rollback compatibility.
----
-
-# SQL Review Skill
-
-1. Check for destructive DDL.
-2. Verify index and lock impact.
-3. Validate rollback path.
-```
-
-HITL options for skill activation:
-
-- `yes_once`: approve this call only
-- `yes_in_session`: approve this `skill_id` in the current world/chat session
-- `no`: decline
-
-### human_intervention_request (Generic Human Input)
-
-`human_intervention_request` lets the model ask a human question, present options, and optionally require explicit confirmation.
-The tool is options-only (no free-text mode).
-
-Option example:
-
-```json
-{
-  "question": "Choose deployment strategy",
-  "options": ["Blue/Green", "Canary", "Rolling"],
-  "requireConfirmation": true
-}
-```
-
-## Experimental Features
-
-- **MCP Support** - *Currently in experiment* - Model Context Protocol integration for tools like search and code execution. e.g.,
-
-```json
-{
-	"servers": {
-		"playwright": {
-			"command": "npx",
-			"args": [
-				"@playwright/mcp@latest"
-			]
-		}
-	}
-}
-```
-
-It supports transport types `stdio` and `http`.
-
-
-## Future Plans
-
-- **Long Run Worlds** - Worlds can run for days or weeks, with agents evolving over time
-- **Dynamic Worlds** - Worlds can provide real-time data to agents, e.g. date and time
-- **Agent Learning** - Agents will evolve based on interactions
-- **Agent Replication** - Agents can create new agents
+- [docs/docs-home.md](docs/docs-home.md) - documentation hub
+- [docs/Building Agents with Just Words.md](docs/Building%20Agents%20with%20Just%20Words.md) - broader concepts and examples
+- [docs/Agent World Patterns.md](docs/Agent%20World%20Patterns.md) - supported workflow patterns
+- [docs/shell-cmd-tool.md](docs/shell-cmd-tool.md) - shell tool details
+- [docs/hitl-approval-flow.md](docs/hitl-approval-flow.md) - approval model
+- [docs/core-npm-usage.md](docs/core-npm-usage.md) - integrate the core runtime from npm
+- [docs/electron-desktop.md](docs/electron-desktop.md) - desktop workflow
+- [openapi.yaml](openapi.yaml) - REST API spec
+- [CHANGELOG.md](CHANGELOG.md) - release history
 
 ## Contributing
 
-Agent World thrives on community examples and improvements:
-
-1. **Share your agent teams** - Submit interesting prompt combinations
-2. **Report bugs** - Help us improve the core system  
-3. **Suggest features** - What would make agents more useful?
-4. **Write docs** - Help others learn faster
+Agent World benefits from new workflow examples, bug reports, docs improvements, and runtime/tooling contributions.
 
 ## License
 
-MIT License - Build amazing things and share them with the world!
+MIT License
 
 Copyright © 2025 Yiyi Sun
