@@ -13,7 +13,7 @@
  * - Synthetic rows remain ordinary persisted messages in storage, but their content is marked
  *   as display-only so LLM history preparation and agent-processing paths can filter them.
  * - Eligibility is explicit and currently limited to adopted tools with assistant-displayable
- *   content (`shell_cmd`, `load_skill`, `web_fetch`).
+ *   content (`shell_cmd`, `web_fetch`).
  *
  * Summary of Recent Changes:
  * - 2026-03-21: Added persisted synthetic assistant tool-result marker and display-content helpers.
@@ -43,7 +43,7 @@ function isTextualPreview(preview: unknown): preview is { kind: 'text' | 'markdo
 }
 
 function isAdoptedSyntheticTool(toolName: string): boolean {
-  return toolName === 'shell_cmd' || toolName === 'load_skill' || toolName === 'web_fetch';
+  return toolName === 'shell_cmd' || toolName === 'web_fetch';
 }
 
 function extractPreviewDisplayContent(serializedToolResult: string): string | null {

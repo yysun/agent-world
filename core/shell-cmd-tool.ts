@@ -94,6 +94,7 @@ import {
   buildToolArtifactPreviewUrl,
   createArtifactToolPreview,
   createTextToolPreview,
+  parseToolExecutionEnvelopeContent,
   serializeToolExecutionEnvelope,
   type ToolExecutionEnvelope,
 } from './tool-execution-envelope.js';
@@ -293,7 +294,8 @@ export function resolveTrustedShellWorkingDirectory(context?: {
 
 export function validateShellDirectoryRequest(
   requestedDirectory: unknown,
-  trustedWorkingDirectory: string
+  trustedWorkingDirectory: string,
+  additionalTrustedRoots?: string[],
 ): { valid: true } | { valid: false; error: string } {
   if (typeof requestedDirectory !== 'string') {
     return { valid: true };
@@ -306,6 +308,13 @@ export function validateShellDirectoryRequest(
 
   const trusted = String(trustedWorkingDirectory || '').trim() || getDefaultWorkingDirectory();
   if (isPathWithinTrustedDirectory(requested, trusted)) {
+    return { valid: true };
+  }
+
+  const trustedRoots = Array.isArray(additionalTrustedRoots)
+    ? additionalTrustedRoots.map((root) => String(root || '').trim()).filter(Boolean)
+    : [];
+  if (trustedRoots.some((root) => isPathWithinTrustedDirectory(requested, root))) {
     return { valid: true };
   }
 
@@ -999,8 +1008,19 @@ function resolveFromRuntimeSkillsRoot(
 function resolveBareSkillPath(
   param: string,
   runtimeSkillsRoot: string | undefined,
+  activeSkillContexts: Array<{ skillId?: string; skillRoot?: string }> = [],
 ): { absolutePath: string; skillRoot: string } | null {
   if (!param.includes('/')) return null;
+
+  for (const context of activeSkillContexts) {
+    const skillRoot = String(context.skillRoot || '').trim();
+    if (!skillRoot) continue;
+
+    const candidatePath = resolveWithPrefixFallback(skillRoot, param);
+    if (candidatePath && isPathWithinTrustedDirectory(candidatePath, skillRoot)) {
+      return { absolutePath: candidatePath, skillRoot };
+    }
+  }
 
   const runtimeMatch = resolveFromRuntimeSkillsRoot(param, runtimeSkillsRoot);
   if (runtimeMatch) {
@@ -1020,10 +1040,63 @@ function resolveBareSkillPath(
   return null;
 }
 
-function hasActiveSkillContext(messages: unknown, chatId: string | undefined): boolean {
-  if (!Array.isArray(messages)) {
-    return false;
+function decodeSkillContextXmlValue(value: string): string {
+  return value
+    .replace(/&apos;/g, '\'')
+    .replace(/&quot;/g, '"')
+    .replace(/&gt;/g, '>')
+    .replace(/&lt;/g, '<')
+    .replace(/&amp;/g, '&');
+}
+
+function parseActiveSkillContextMetadata(content: string): { skillId?: string; skillRoot?: string } | null {
+  const envelope = parseToolExecutionEnvelopeContent(content);
+  if (!envelope || envelope.tool !== 'load_skill' || envelope.status !== 'completed') {
+    return null;
   }
+
+  const payload = typeof envelope.result === 'string' ? envelope.result : '';
+  const normalizedPayload = String(payload || '');
+  if (!normalizedPayload.includes('<skill_context') || /<error>/i.test(normalizedPayload)) {
+    return null;
+  }
+
+  const skillIdMatch = normalizedPayload.match(/<skill_context\s+id="([^"]+)"/);
+  const skillRootMatch = normalizedPayload.match(/<skill_root>([\s\S]*?)<\/skill_root>/);
+  const skillId = skillIdMatch?.[1] ? decodeSkillContextXmlValue(skillIdMatch[1]).trim() : '';
+  const skillRoot = skillRootMatch?.[1] ? decodeSkillContextXmlValue(skillRootMatch[1]).trim() : '';
+  if (!skillId || !skillRoot) {
+    return null;
+  }
+
+  const sourcePath = getSkillSourcePath(skillId);
+  if (!sourcePath) {
+    return null;
+  }
+
+  const registrySkillRoot = dirname(sourcePath);
+  const normalizedRegistrySkillRoot = normalizeForPlatformComparison(canonicalizePath(registrySkillRoot));
+  const normalizedParsedSkillRoot = normalizeForPlatformComparison(canonicalizePath(skillRoot));
+  if (normalizedRegistrySkillRoot !== normalizedParsedSkillRoot) {
+    return null;
+  }
+
+  return {
+    skillId,
+    skillRoot: registrySkillRoot,
+  };
+}
+
+function getActiveSkillContexts(
+  messages: unknown,
+  chatId: string | undefined,
+): Array<{ skillId?: string; skillRoot?: string }> {
+  if (!Array.isArray(messages)) {
+    return [];
+  }
+
+  const contexts: Array<{ skillId?: string; skillRoot?: string }> = [];
+  const seen = new Set<string>();
 
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index] as any;
@@ -1041,12 +1114,21 @@ function hasActiveSkillContext(messages: unknown, chatId: string | undefined): b
     }
 
     const content = typeof message.content === 'string' ? message.content : '';
-    if (content.includes('<skill_context id="')) {
-      return true;
+    const contextMetadata = parseActiveSkillContextMetadata(content);
+    if (!contextMetadata) {
+      continue;
     }
+
+    const dedupeKey = `${contextMetadata.skillId || ''}::${contextMetadata.skillRoot || ''}`;
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+
+    seen.add(dedupeKey);
+    contexts.push(contextMetadata);
   }
 
-  return false;
+  return contexts;
 }
 
 export function resolveSkillScriptParameters(
@@ -1054,20 +1136,37 @@ export function resolveSkillScriptParameters(
   runtimeSkillsRoot?: string,
   options?: {
     allowBareScriptsResolution?: boolean;
+    activeSkillContexts?: Array<{ skillId?: string; skillRoot?: string }>;
   },
 ): { resolvedParameters: string[]; skillRoots: string[] } {
   const skillRootsSet = new Set<string>();
   const allowBareScriptsResolution = options?.allowBareScriptsResolution === true;
+  const activeSkillContexts = Array.isArray(options?.activeSkillContexts)
+    ? options.activeSkillContexts.filter((context) => {
+      const skillId = String(context?.skillId || '').trim();
+      const skillRoot = String(context?.skillRoot || '').trim();
+      return Boolean(skillId || skillRoot);
+    })
+    : [];
   const resolvedParameters = parameters.map((param) => {
     const parsed = extractSkillIdAndRemainder(param);
     if (parsed) {
       const hasExplicitSkillPrefix = SKILL_DIR_PREFIXES.some((prefix) => param.startsWith(prefix));
+      const activeSkillRoot = activeSkillContexts.find((context) => context.skillId === parsed.skillId)?.skillRoot;
       const sourcePath = getSkillSourcePath(parsed.skillId);
       const hasRuntimeSkillDir = Boolean(runtimeSkillsRoot)
         && existsSync(join(runtimeSkillsRoot!, parsed.skillId));
-      const shouldAttemptExplicitResolution = hasExplicitSkillPrefix || Boolean(sourcePath) || hasRuntimeSkillDir;
+      const shouldAttemptExplicitResolution = hasExplicitSkillPrefix || Boolean(activeSkillRoot) || Boolean(sourcePath) || hasRuntimeSkillDir;
 
       if (shouldAttemptExplicitResolution) {
+        if (activeSkillRoot) {
+          const absolutePath = resolveWithPrefixFallback(activeSkillRoot, parsed.remainder, false);
+          if (absolutePath && isPathWithinTrustedDirectory(absolutePath, activeSkillRoot)) {
+            skillRootsSet.add(activeSkillRoot);
+            return absolutePath;
+          }
+        }
+
         if (sourcePath) {
           const skillRoot = dirname(sourcePath);
           const absolutePath = resolveWithPrefixFallback(skillRoot, parsed.remainder, false);
@@ -1095,7 +1194,7 @@ export function resolveSkillScriptParameters(
       return param;
     }
 
-    const bareMatch = resolveBareSkillPath(param, runtimeSkillsRoot);
+    const bareMatch = resolveBareSkillPath(param, runtimeSkillsRoot, activeSkillContexts);
     if (bareMatch) {
       skillRootsSet.add(bareMatch.skillRoot);
       return bareMatch.absolutePath;
@@ -2246,11 +2345,15 @@ export function createShellCmdToolDefinition() {
       // Resolve skill-relative script paths (e.g. <skill-id>/scripts/foo.py) to absolute paths
       const resolvedDirectory = resolveTrustedShellWorkingDirectory(context);
       const runtimeSkillsRoot = join(resolveDirectory(resolvedDirectory), '.agents', 'skills');
-      const skillOriginatedRequest = hasActiveSkillContext(context?.messages, chatId);
+      const activeSkillContexts = getActiveSkillContexts(context?.messages, chatId);
+      const skillOriginatedRequest = activeSkillContexts.length > 0;
       const { resolvedParameters: validParameters, skillRoots } = resolveSkillScriptParameters(
         rawParameters,
         runtimeSkillsRoot,
-        { allowBareScriptsResolution: skillOriginatedRequest },
+        {
+          allowBareScriptsResolution: skillOriginatedRequest,
+          activeSkillContexts,
+        },
       );
 
       // Extract world and messageId from context for streaming
@@ -2270,7 +2373,8 @@ export function createShellCmdToolDefinition() {
       const stdoutMessageId = streamBaseMessageId ? `${streamBaseMessageId}-stdout` : '';
       const directoryValidation = validateShellDirectoryRequest(
         validation.correctedArgs.directory,
-        resolvedDirectory
+        resolvedDirectory,
+        skillRoots,
       );
       if (!directoryValidation.valid) {
         throw new Error(directoryValidation.error);

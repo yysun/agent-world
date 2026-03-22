@@ -42,6 +42,7 @@ import {
   classifyShellCommandRisk,
   resolveSkillScriptParameters
 } from '../../core/shell-cmd-tool.js';
+import { serializeToolExecutionEnvelope } from '../../core/tool-execution-envelope.js';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -183,6 +184,164 @@ describe('shell command durable approvals', () => {
   });
 });
 
+describe('shell command skill-context resolution', () => {
+  test('resolves bare script paths from the active load_skill skill_root', async () => {
+    mockedGetSkillSourcePath.mockImplementation((skillId) =>
+      skillId === 'music-to-svg'
+        ? '/Users/esun/.agents/skills/music-to-svg/SKILL.md'
+        : undefined
+    );
+    mockedExistsSync.mockImplementation((candidatePath) =>
+      String(candidatePath) === '/Users/esun/.agents/skills/music-to-svg/scripts/convert.py'
+    );
+
+    const tool = createShellCmdToolDefinition();
+    const result = await tool.execute(
+      {
+        command: 'echo',
+        parameters: ['scripts/convert.py'],
+        output_detail: 'full',
+      },
+      undefined,
+      undefined,
+      {
+        world: {
+          id: 'world-1',
+          variables: 'working_directory=/Users/esun/Documents/Projects/test-agent-world',
+        },
+        workingDirectory: '/Users/esun/Documents/Projects/test-agent-world',
+        chatId: 'chat-1',
+        agentName: 'test-agent',
+        messages: [
+          {
+            role: 'tool',
+            chatId: 'chat-1',
+            content: serializeToolExecutionEnvelope({
+              __type: 'tool_execution_envelope',
+              version: 1,
+              tool: 'load_skill',
+              status: 'completed',
+              preview: null,
+              result: [
+                '<skill_context id="music-to-svg">',
+                '  <instructions>Use the converter script.</instructions>',
+                '  <active_resources>',
+                '    <skill_root>/Users/esun/.agents/skills/music-to-svg</skill_root>',
+                '    <script_manifest>',
+                '      <script path="scripts/convert.py" />',
+                '    </script_manifest>',
+                '  </active_resources>',
+                '</skill_context>',
+              ].join('\n'),
+            }),
+          },
+        ],
+      },
+    );
+
+    expect(String(result)).toContain('/Users/esun/.agents/skills/music-to-svg/scripts/convert.py');
+    expect(String(result)).not.toContain('`echo scripts/convert.py`');
+  });
+
+  test('does not enable bare script resolution from failed load_skill envelopes', async () => {
+    mockedGetSkillSourcePath.mockImplementation((skillId) =>
+      skillId === 'music-to-svg'
+        ? '/Users/esun/.agents/skills/music-to-svg/SKILL.md'
+        : undefined
+    );
+    mockedExistsSync.mockImplementation((candidatePath) =>
+      String(candidatePath) === '/Users/esun/.agents/skills/music-to-svg/scripts/convert.py'
+    );
+
+    const tool = createShellCmdToolDefinition();
+    const result = await tool.execute(
+      {
+        command: 'echo',
+        parameters: ['scripts/convert.py'],
+        output_detail: 'full',
+      },
+      undefined,
+      undefined,
+      {
+        world: {
+          id: 'world-1',
+          variables: 'working_directory=/Users/esun/Documents/Projects/test-agent-world',
+        },
+        workingDirectory: '/Users/esun/Documents/Projects/test-agent-world',
+        chatId: 'chat-1',
+        agentName: 'test-agent',
+        messages: [
+          {
+            role: 'tool',
+            chatId: 'chat-1',
+            content: serializeToolExecutionEnvelope({
+              __type: 'tool_execution_envelope',
+              version: 1,
+              tool: 'load_skill',
+              status: 'failed',
+              preview: null,
+              result: [
+                '<skill_context id="music-to-svg">',
+                '  <error>User declined HITL approval for skill "music-to-svg".</error>',
+                '  <active_resources>',
+                '    <skill_root>/Users/esun/.agents/skills/music-to-svg</skill_root>',
+                '  </active_resources>',
+                '</skill_context>',
+              ].join('\n'),
+            }),
+          },
+        ],
+      },
+    );
+
+    expect(String(result)).toContain('scripts/convert.py');
+    expect(String(result)).not.toContain('/Users/esun/.agents/skills/music-to-svg/scripts/convert.py');
+  });
+
+  test('does not trust non-load_skill envelopes to authorize a skill-root directory', async () => {
+    const tool = createShellCmdToolDefinition();
+
+    await expect(tool.execute(
+      {
+        command: 'echo',
+        parameters: ['ok'],
+        directory: '/Users/esun/.agents/skills/music-to-svg',
+      },
+      undefined,
+      undefined,
+      {
+        world: {
+          id: 'world-1',
+          variables: 'working_directory=/Users/esun/Documents/Projects/test-agent-world',
+        },
+        workingDirectory: '/Users/esun/Documents/Projects/test-agent-world',
+        chatId: 'chat-1',
+        agentName: 'test-agent',
+        messages: [
+          {
+            role: 'tool',
+            chatId: 'chat-1',
+            content: serializeToolExecutionEnvelope({
+              __type: 'tool_execution_envelope',
+              version: 1,
+              tool: 'web_fetch',
+              status: 'completed',
+              preview: null,
+              result: [
+                '<skill_context id="music-to-svg">',
+                '  <active_resources>',
+                '    <skill_root>/Users/esun/.agents/skills/music-to-svg</skill_root>',
+                '  </active_resources>',
+                '</skill_context>',
+              ].join('\n'),
+            }),
+          },
+        ],
+      },
+    )).rejects.toThrow('outside world working directory');
+  });
+});
+
 describe('shell command streaming callbacks', () => {
   test('should invoke onStdout callback with output chunks', async () => {
     const stdoutChunks: string[] = [];
@@ -321,6 +480,16 @@ describe('shell command directory request validation', () => {
     if (!result.valid) {
       expect(result.error).toContain('outside world working directory');
     }
+  });
+
+  test('should allow requested directory inside an additional trusted skill root', () => {
+    const result = validateShellDirectoryRequest(
+      '/Users/esun/.agents/skills/music-to-svg',
+      '/Users/esun/Documents/Projects/test-agent-world',
+      ['/Users/esun/.agents/skills/music-to-svg'],
+    );
+
+    expect(result.valid).toBe(true);
   });
 });
 

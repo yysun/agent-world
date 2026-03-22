@@ -7,7 +7,7 @@
  * Features tested:
  * - Loads full SKILL.md content by `skill_id` from registry-provided source path
  * - Requires HITL approval before applying skill instructions in world/chat contexts
- * - Executes instruction-referenced scripts only after approval and scope validation
+ * - Preserves referenced-script guidance without auto-executing scripts during skill load
  * - Returns structured not-found output for unknown IDs
  * - Returns structured read-error output when SKILL.md cannot be read
  *
@@ -16,6 +16,10 @@
  * - Uses mocked in-memory fs APIs only (no filesystem access)
  *
  * Recent changes:
+ * - 2026-03-22: Updated assertions for preview-free `load_skill` envelopes and
+ *   reduced `<active_resources>` metadata (`skill_root` only).
+ * - 2026-03-22: Updated coverage for the pure-load contract so `load_skill` no longer
+ *   auto-executes referenced scripts or emits script-output active resources.
  * - 2026-03-21: Added durable mixed-artifact preview coverage for markdown, HTML bundles, and PDF outputs from skill scripts.
  * - 2026-03-01: Removed minimal-check mode assertions and updated coverage so load_skill always performs script/reference preflight.
  * - 2026-03-01: Added assertions for acknowledgment-first execution directive steps and regression coverage for empty-description fallback to skill ID.
@@ -176,18 +180,19 @@ describe('core/load-skill-tool', () => {
     expect(result).toContain('<skill_context id="pdf-extract">');
     expect(result).toContain('<instructions>');
     expect(result).toContain('# PDF Extraction Instructions');
+    expect(result).toContain('<active_resources>');
+    expect(result).toContain('<skill_root>/skills/pdf-extract</skill_root>');
     expect(result).toContain('<execution_directive>');
-    expect(result).toContain('specialized pdf-extract protocol');
-    expect(result).toContain('Skill purpose: Extract PDF content');
-    expect(result).toContain('1. Acknowledge which skill was loaded and apply it directly to the user request.');
-    expect(result).toContain('4. Execute required steps directly; avoid unnecessary planning narration unless the user explicitly asks for a plan.');
-    expect(result).toContain('5. Keep tool-related assistant text concise and result-focused.');
-    expect(result).not.toContain('first provide a brief intent statement');
-    expect(result).not.toContain('If the workflow is multi-step');
-    expect(result).not.toContain('After each significant step, briefly confirm what was completed and what comes next.');
+    expect(result).toContain('The skill "pdf-extract" is now loaded for this turn.');
+    expect(result).toContain('Apply <instructions> as specialized task guidance for the current user request.');
+    expect(result).toContain('Follow the skill only insofar as it is relevant to the user\'s request.');
+    expect(result).toContain('Continue the task directly; do not stop merely to report that the skill was loaded.');
+    expect(result).toContain('Use shell_cmd only when execution is actually required by the skill or task.');
+    expect(result).toContain('Any script execution must use paths under <skill_root> and remain within runtime safety constraints.');
+    expect(result).toContain('Keep any tool-related narration brief and result-focused.');
   });
 
-  it('falls back to skill id when skill description is empty in execution directive', async () => {
+  it('uses the real skill id in the execution directive when description is empty', async () => {
     mockedGetSkill.mockReturnValue({
       skill_id: 'pdf-extract',
       description: '   ',
@@ -200,10 +205,10 @@ describe('core/load-skill-tool', () => {
     const tool = createLoadSkillToolDefinition();
     const result = await tool.execute({ skill_id: 'pdf-extract' });
 
-    expect(result).toContain('Skill purpose: pdf-extract');
+    expect(result).toContain('The skill "pdf-extract" is now loaded for this turn.');
   });
 
-  it('adds stable preview URLs for persisted load_skill artifact previews', async () => {
+  it('omits preview and display_content for persisted load_skill envelopes', async () => {
     mockedGetSkill.mockReturnValue({
       skill_id: 'pdf-extract',
       description: 'Extract PDF content',
@@ -237,12 +242,11 @@ describe('core/load-skill-tool', () => {
     const envelope = parseToolExecutionEnvelopeContent(String(result));
 
     expect(envelope?.tool).toBe('load_skill');
-    expect(JSON.stringify(envelope?.preview || null)).toContain(
-      '/api/tool-artifact?path=%2Fskills%2Fpdf-extract%2Fassets%2Fscore.svg&worldId=world-1',
-    );
+    expect(envelope?.preview).toBeNull();
+    expect(envelope?.display_content).toBeUndefined();
   });
 
-  it('preserves mixed script artifact metadata for markdown, html bundles, and pdf outputs', async () => {
+  it('persists only canonical load_skill result content without previews', async () => {
     mockedGetSkill.mockReturnValue({
       skill_id: 'pdf-extract',
       description: 'Extract PDF content',
@@ -255,6 +259,9 @@ describe('core/load-skill-tool', () => {
       if (normalizedTarget.endsWith('/skills/pdf-extract/SKILL.md')) {
         return [
           '# PDF Extraction Instructions',
+          '[Notes](out/notes.md)',
+          '[Preview](out/index.html)',
+          '[Report](out/report.pdf)',
           'Run `scripts/build.sh` before processing.',
         ].join('\n') as any;
       }
@@ -288,18 +295,6 @@ describe('core/load-skill-tool', () => {
       }
       throw new Error(`ENOENT: ${normalizedTarget}`);
     });
-    mockedExecuteShellCommand.mockResolvedValueOnce({
-      executionId: 'exec-3',
-      command: 'bash',
-      parameters: ['scripts/build.sh'],
-      stdout: 'Created out/notes.md\nCreated out/index.html\nCreated out/app.js\nCreated out/styles.css\nCreated out/report.pdf',
-      stderr: '',
-      exitCode: 0,
-      signal: null,
-      executedAt: new Date('2026-02-14T12:00:00.000Z'),
-      duration: 18,
-    } as any);
-
     const tool = createLoadSkillToolDefinition();
     const result = await tool.execute(
       { skill_id: 'pdf-extract' },
@@ -314,20 +309,18 @@ describe('core/load-skill-tool', () => {
     );
 
     const envelope = parseToolExecutionEnvelopeContent(String(result));
-    const previewText = JSON.stringify(envelope?.preview || null);
     const resultText = String(envelope?.result || '');
 
     expect(envelope?.tool).toBe('load_skill');
-    expect(previewText).toContain('# Generated Notes');
-    expect(previewText).toContain('/api/tool-artifact?path=%2Fskills%2Fpdf-extract%2Fout%2Findex.html&worldId=world-1');
-    expect(previewText).toContain('/api/tool-artifact?path=%2Fskills%2Fpdf-extract%2Fout%2Fapp.js&worldId=world-1');
-    expect(previewText).toContain('/api/tool-artifact?path=%2Fskills%2Fpdf-extract%2Fout%2Fstyles.css&worldId=world-1');
-    expect(previewText).toContain('/api/tool-artifact?path=%2Fskills%2Fpdf-extract%2Fout%2Freport.pdf&worldId=world-1');
-    expect(resultText).toContain('Artifacts:');
-    expect(resultText).toContain('out/app.js (text/javascript)');
-    expect(resultText).toContain('out/index.html (text/html)');
-    expect(resultText).toContain('out/styles.css (text/css)');
-    expect(resultText).toContain('out/report.pdf (application/pdf)');
+    expect(envelope?.preview).toBeNull();
+    expect(envelope?.display_content).toBeUndefined();
+    expect(resultText).toContain('<active_resources>');
+    expect(resultText).toContain('<skill_root>/skills/pdf-extract</skill_root>');
+    expect(resultText).not.toContain('<reference_files>');
+    expect(resultText).not.toContain('<script_manifest>');
+    expect(resultText).not.toContain('<script_output');
+    expect(resultText).not.toContain('Script outputs:');
+    expect(mockedExecuteShellCommand).not.toHaveBeenCalled();
   });
 
   it('requires an explicit chatId for interactive load_skill approval', async () => {
@@ -421,7 +414,7 @@ describe('core/load-skill-tool', () => {
     expect(result).toContain('EACCES');
   });
 
-  it('requests HITL approval and executes referenced scripts safely', async () => {
+  it('requests HITL approval for referenced-script skills without auto-executing them', async () => {
     mockedGetSkill.mockReturnValue({
       skill_id: 'pdf-extract',
       description: 'Extract PDF content',
@@ -453,29 +446,23 @@ describe('core/load-skill-tool', () => {
     );
 
     expect(mockedRequestWorldOption).toHaveBeenCalledTimes(1);
-    expect(mockedValidateShellCommandScope).toHaveBeenCalledWith(
-      'bash',
-      ['scripts/build.sh'],
-      '/skills/pdf-extract',
-    );
-    expect(mockedExecuteShellCommand).toHaveBeenCalledWith(
-      'bash',
-      [expect.stringContaining('scripts/build.sh')],
-      '/skills/pdf-extract',
+    expect(mockedRequestWorldOption).toHaveBeenCalledWith(
+      expect.anything(),
       expect.objectContaining({
-        timeout: 120000,
-        worldId: 'world-1',
-        chatId: 'chat-1',
+        message: expect.stringContaining('Approve loading and applying this skill now?'),
       }),
     );
+    expect(mockedValidateShellCommandScope).not.toHaveBeenCalled();
+    expect(mockedExecuteShellCommand).not.toHaveBeenCalled();
+    expect(result).toContain('<instructions>');
     expect(result).toContain('<active_resources>');
-    expect(result).toContain('<script_output source="scripts/build.sh">');
-    expect(result).toContain('formatted script output');
-    expect(result).toContain('<reference_files>');
-    expect(mockedFormatResultForLLM).toHaveBeenCalledTimes(1);
+    expect(result).toContain('<skill_root>/skills/pdf-extract</skill_root>');
+    expect(result).not.toContain('<script_manifest>');
+    expect(result).not.toContain('<script_output');
+    expect(mockedFormatResultForLLM).not.toHaveBeenCalled();
   });
 
-  it('runs preflight checks when env var is unset', async () => {
+  it('does not auto-execute referenced scripts when the deprecated minimal-mode env var is unset', async () => {
     delete process.env.AGENT_WORLD_LOAD_SKILL_MINIMAL_CHECK_MODE;
     mockedGetSkill.mockReturnValue({
       skill_id: 'pdf-extract',
@@ -507,19 +494,19 @@ describe('core/load-skill-tool', () => {
       },
     );
 
+    expect(result).toContain('<instructions>');
     expect(result).toContain('<active_resources>');
-    expect(result).toContain('<reference_files>');
-    expect(result).toContain('formatted script output');
-    expect(result).not.toContain('Skill preflight checks for script/data files are disabled in this mode.');
-    expect(result).toContain('skill root: /skills/pdf-extract');
-    expect(mockedExecuteShellCommand).toHaveBeenCalledTimes(1);
-    expect(mockedValidateShellCommandScope).toHaveBeenCalledTimes(1);
-    expect(vi.mocked((fs as any).stat)).toHaveBeenCalled();
-    expect(mockedFormatResultForLLM).toHaveBeenCalledTimes(1);
+    expect(result).toContain('<skill_root>/skills/pdf-extract</skill_root>');
+    expect(result).not.toContain('<script_manifest>');
+    expect(result).not.toContain('Script outputs:');
+    expect(result).toContain('Continue the task directly; do not stop merely to report that the skill was loaded.');
+    expect(result).toContain('Any script execution must use paths under <skill_root> and remain within runtime safety constraints.');
+    expect(mockedExecuteShellCommand).not.toHaveBeenCalled();
+    expect(mockedValidateShellCommandScope).not.toHaveBeenCalled();
     expect(vi.mocked((fs as any).readdir)).not.toHaveBeenCalled();
   });
 
-  it('ignores deprecated minimal-mode env flag and still runs preflight checks', async () => {
+  it('ignores deprecated minimal-mode env flag and still avoids auto-execution', async () => {
     process.env.AGENT_WORLD_LOAD_SKILL_MINIMAL_CHECK_MODE = 'true';
     mockedGetSkill.mockReturnValue({
       skill_id: 'pdf-extract',
@@ -551,17 +538,16 @@ describe('core/load-skill-tool', () => {
       },
     );
 
+    expect(result).toContain('<instructions>');
     expect(result).toContain('<active_resources>');
-    expect(result).toContain('<reference_files>');
-    expect(result).not.toContain('Skill preflight checks for script/data files are disabled in this mode.');
-    expect(mockedExecuteShellCommand).toHaveBeenCalledTimes(1);
-    expect(mockedValidateShellCommandScope).toHaveBeenCalledTimes(1);
-    expect(vi.mocked((fs as any).stat)).toHaveBeenCalled();
-    expect(mockedFormatResultForLLM).toHaveBeenCalledTimes(1);
+    expect(result).not.toContain('<script_manifest>');
+    expect(result).not.toContain('Script outputs:');
+    expect(mockedExecuteShellCommand).not.toHaveBeenCalled();
+    expect(mockedValidateShellCommandScope).not.toHaveBeenCalled();
     expect(vi.mocked((fs as any).readdir)).not.toHaveBeenCalled();
   });
 
-  it('surfaces non-zero script exits as informational output without blocking skill load', async () => {
+  it('does not inject failed script output into load_skill results when a referenced script would require arguments', async () => {
     mockedGetSkill.mockReturnValue({
       skill_id: 'pdf-extract',
       description: 'Extract PDF content',
@@ -579,18 +565,6 @@ describe('core/load-skill-tool', () => {
       }
       throw new Error('ENOENT');
     });
-    mockedExecuteShellCommand.mockResolvedValueOnce({
-      executionId: 'exec-2',
-      command: 'bash',
-      parameters: ['scripts/build.sh'],
-      stdout: 'Usage: build.sh <target>',
-      stderr: '',
-      exitCode: 1,
-      signal: null,
-      error: 'Command exited with code 1',
-      executedAt: new Date('2026-02-14T12:00:00.000Z'),
-      duration: 15,
-    });
 
     const tool = createLoadSkillToolDefinition();
     const result = await tool.execute(
@@ -603,12 +577,12 @@ describe('core/load-skill-tool', () => {
       },
     );
 
-    // Skill loads successfully despite non-zero exit
     expect(result).toContain('<instructions>');
     expect(result).toContain('<active_resources>');
-    // Exit info surfaced so LLM can see the script requires arguments
-    expect(result).toContain('exit code 1');
-    expect(result).toContain('Usage: build.sh');
+    expect(result).not.toContain('<script_manifest>');
+    expect(result).not.toContain('exit code 1');
+    expect(result).not.toContain('Usage: build.sh');
+    expect(mockedExecuteShellCommand).not.toHaveBeenCalled();
   });
 
   it('returns declined output when HITL skill approval is declined', async () => {
@@ -684,7 +658,7 @@ describe('core/load-skill-tool', () => {
     expect(result).not.toContain('<instructions>');
   });
 
-  it('omits active resources section when skill has no referenced scripts', async () => {
+  it('includes active resources metadata when skill has no referenced scripts', async () => {
     mockedGetSkill.mockReturnValue({
       skill_id: 'pdf-extract',
       description: 'Extract PDF content',
@@ -715,9 +689,11 @@ describe('core/load-skill-tool', () => {
     expect(mockedRequestWorldOption).toHaveBeenCalledTimes(1);
     expect(mockedExecuteShellCommand).not.toHaveBeenCalled();
     expect(result).toContain('<instructions>');
-    expect(result).not.toContain('<active_resources>');
-    expect(result).not.toContain('No instruction-referenced scripts were found for this skill.');
-    expect(result).toContain('Use the skill instructions to complete the user\'s specific request.');
+    expect(result).toContain('<active_resources>');
+    expect(result).toContain('<skill_root>/skills/pdf-extract</skill_root>');
+    expect(result).not.toContain('<reference_files>');
+    expect(result).not.toContain('<script_manifest>');
+    expect(result).toContain('Continue the task directly; do not stop merely to report that the skill was loaded.');
   });
 
   it('strips yaml front matter from injected instructions', async () => {
@@ -749,7 +725,7 @@ describe('core/load-skill-tool', () => {
     expect(result).not.toContain('\n---\n');
   });
 
-  it('validates script scope using skill-root-relative path when skill is a subdirectory of cwd', async () => {
+  it('preserves absolute-path execution guidance for referenced scripts when skill is a subdirectory of cwd', async () => {
     mockedGetSkill.mockReturnValue({
       skill_id: 'pdf-extract',
       description: 'Extract PDF content',
@@ -781,27 +757,14 @@ describe('core/load-skill-tool', () => {
       },
     );
 
-    // Scope validation uses skill-root-relative path with skillRoot as the trusted boundary
-    expect(mockedValidateShellCommandScope).toHaveBeenCalledWith(
-      'bash',
-      ['scripts/setup.sh'],
-      '/projects/myapp/skills/my-skill',
-    );
-    // Execution uses absolute path for the script parameter
-    // and project working directory as cwd — not skillRoot
-    expect(mockedExecuteShellCommand).toHaveBeenCalledWith(
-      'bash',
-      ['/projects/myapp/skills/my-skill/scripts/setup.sh'],
-      '/projects/myapp',
-      expect.objectContaining({ timeout: 120000 }),
-    );
+    expect(mockedValidateShellCommandScope).not.toHaveBeenCalled();
+    expect(mockedExecuteShellCommand).not.toHaveBeenCalled();
     expect(result).toContain('<active_resources>');
-    expect(result).toContain('formatted script output');
-    // Skill root injected into execution directive so LLM uses absolute paths for global skills
-    expect(result).toContain('skill root: /projects/myapp/skills/my-skill');
+    expect(result).toContain('<skill_root>/projects/myapp/skills/my-skill</skill_root>');
+    expect(result).not.toContain('<script_manifest>');
   });
 
-  it('omits skill root directive from execution_directive when skill has no referenced scripts', async () => {
+  it('keeps skill root in active_resources instead of execution_directive when no scripts are referenced', async () => {
     mockedGetSkill.mockReturnValue({
       skill_id: 'pdf-extract',
       description: 'Extract PDF content',
@@ -831,7 +794,9 @@ describe('core/load-skill-tool', () => {
     );
 
     expect(result).toContain('<instructions>');
+    expect(result).toContain('<skill_root>/skills/pdf-extract</skill_root>');
     expect(result).not.toContain('skill root:');
+    expect(result).not.toContain('Scripts referenced in <instructions> are located at skill root:');
   });
 
   it('auto-suppresses repeated load_skill for same skill across active run hops', async () => {

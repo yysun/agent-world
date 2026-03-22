@@ -4,6 +4,10 @@
 **Type**: Feature
 **Status**: Draft
 
+> Historical note: this requirement assumes scripts referenced by `SKILL.md` are executed during `load_skill`.
+> That assumption was superseded on 2026-03-22 by [req-load-skill-no-auto-script-run.md](../../03/22/req-load-skill-no-auto-script-run.md).
+> The path-resolution guidance remains useful if/when the LLM later requests an explicit execution tool call.
+
 ## Overview
 
 Define the standard for how agents resolve and execute scripts referenced in a `SKILL.md` file. The rules must ensure portability across different agent implementations and predictable behavior for scripts that manipulate the user's project.

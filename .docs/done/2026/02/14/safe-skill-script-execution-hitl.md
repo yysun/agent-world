@@ -3,6 +3,9 @@
 **Date:** 2026-02-14
 **Status:** Completed
 
+> Historical note: this done doc reflects the older contract where `load_skill` auto-ran instruction-referenced scripts.
+> That behavior was superseded on 2026-03-22 by [req-load-skill-no-auto-script-run.md](../../reqs/2026/03/22/req-load-skill-no-auto-script-run.md).
+
 ## Scope Completed
 
 - Added generic world-level HITL option request/response runtime in core.

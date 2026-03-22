@@ -3,6 +3,9 @@
 **Date:** 2026-02-24
 **Requirement:** `.docs/reqs/2026-02-24/req-skill-script-execution-context.md`
 
+> Historical note: this doc records the older behavior where `load_skill` invoked scripts directly.
+> That contract was superseded on 2026-03-22 by [req-load-skill-no-auto-script-run.md](../../reqs/2026/03/22/req-load-skill-no-auto-script-run.md).
+
 ## Summary
 
 Fixed the execution working directory (CWD) for skill scripts invoked during `load_skill`. Scripts now run with the user's Current Project Directory as CWD, not the skill root. Script paths are still resolved to absolute paths from the skill root.

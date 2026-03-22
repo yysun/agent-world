@@ -136,6 +136,8 @@ Agent Skills are reusable capability packs stored as `SKILL.md` files.
   - user roots: `~/.agents/skills`, `~/.codex/skills`
 - The runtime injects compact skill summaries into the prompt
 - Agents call `load_skill` only when full instructions are needed
+- `load_skill` loads instructions and static skill context only; it does not execute skill scripts
+- If a task requires script execution, the agent must make a later explicit tool call such as `shell_cmd`
 - Interactive skill activation is approval-gated
 - Skill-linked scripts are scope-validated and follow the same shell safety rules as built-in tool execution
 

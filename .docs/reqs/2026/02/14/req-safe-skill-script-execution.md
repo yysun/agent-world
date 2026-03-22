@@ -4,6 +4,10 @@
 **Type**: Feature  
 **Status**: ✅ Implemented
 
+> Superseded in part on 2026-03-22 by [req-load-skill-no-auto-script-run.md](../../03/22/req-load-skill-no-auto-script-run.md).
+> Historical note: this document introduced automatic script execution during `load_skill`.
+> That contract is no longer current. `load_skill` now loads skill context only; later explicit tool calls perform task execution.
+
 ## Architecture Review (AR)
 
 **Review Date**: 2026-02-14  

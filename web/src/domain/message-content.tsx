@@ -17,6 +17,8 @@
  * - Keeps helper logic local to this domain module for focused maintenance
  *
  * Recent Changes:
+ * - 2026-03-22: Restored exported tool-preview source helpers so guarded HTML artifact
+ *   preview URLs remain testable and consistent with inline preview routing.
  * - 2026-03-21: Recognize plain-text tool execution failures such as `Error executing tool` / `Tool not found` so failed web tool rows keep failed status styling.
  * - 2026-03-13: Excluded narrated assistant tool-call messages from compact tool-row classification so assistant-card border styling can render in web chat.
  * - 2026-03-13: Resolved restored/result-only tool rows through linked assistant requests and envelope metadata so web summary labels match Electron.
@@ -458,8 +460,41 @@ function canEmbedWebMedia(source: string): boolean {
   return /^https?:\/\//i.test(source) || /^data:/i.test(source) || source.startsWith('blob:') || source.startsWith('/');
 }
 
-function renderToolPreviewItem(item: ToolPreview, key: string) {
+function appendInlineHtmlPreviewMode(source: string): string {
+  const normalized = String(source || '').trim();
+  if (!normalized || !/^\/api\/tool-artifact(?:\?|$)/.test(normalized)) {
+    return normalized;
+  }
+
+  try {
+    const url = new URL(normalized, 'http://localhost');
+    if (url.searchParams.get('preview') !== 'inline-html') {
+      url.searchParams.set('preview', 'inline-html');
+    }
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return normalized.includes('?')
+      ? `${normalized}&preview=inline-html`
+      : `${normalized}?preview=inline-html`;
+  }
+}
+
+export function getToolPreviewItemSource(item: ToolPreview): string {
   const source = String(item.url || item.artifact?.url || '').trim();
+  if (!source) {
+    return '';
+  }
+
+  const mediaType = String(item.media_type || item.artifact?.media_type || '').trim().toLowerCase();
+  if (mediaType === 'text/html' && canEmbedWebMedia(source)) {
+    return appendInlineHtmlPreviewMode(source);
+  }
+
+  return source;
+}
+
+function renderToolPreviewItem(item: ToolPreview, key: string) {
+  const source = getToolPreviewItemSource(item);
   const displayName = String(item.artifact?.display_name || item.title || source || item.artifact?.path || 'artifact').trim();
   const mediaType = String(item.media_type || item.artifact?.media_type || '').trim();
 

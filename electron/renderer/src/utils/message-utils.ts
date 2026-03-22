@@ -13,6 +13,8 @@
  * - Helper functions are intentionally colocated to preserve behavior parity.
  *
  * Recent Changes:
+ * - 2026-03-22: Restored narrated assistant tool-call status styling by deriving
+ *   success/failure tone from linked tool-result rows and hidden narrated metadata.
  * - 2026-03-13: Added `fullWidthMessage` card-style flag so non-chat Electron views can remove chat-era left offsets when avatars are hidden.
  * - 2026-03-13: Added assistant-card border overrides for narrated assistant tool-call rows so Electron can reflect linked tool success/failure without collapsing into tool-row chrome.
  * - 2026-03-10: Added a red left border for structured `system` error transcript rows so durable failed-turn diagnostics are visually distinct from neutral system notices.
@@ -511,9 +513,77 @@ function isToolMessageSuccess(message) {
   return /status\s*[:=]\s*(success|succeeded|done|completed|ok)/i.test(content);
 }
 
+function collectNarratedAssistantToolResultMessages(message, messages) {
+  const relatedResults = [];
+  const seen = new Set();
+  const assistantMessageId = String(message?.messageId || '').trim();
+  const toolCallIds = new Set(collectToolCallIds(message));
+
+  const appendIfNew = (candidate) => {
+    if (!candidate || typeof candidate !== 'object') {
+      return;
+    }
+
+    const dedupeKey = String(
+      candidate?.messageId
+      || candidate?.tool_call_id
+      || candidate?.toolCallId
+      || candidate?.replyToMessageId
+      || candidate?.content
+      || '',
+    ).trim();
+
+    if (dedupeKey && seen.has(dedupeKey)) {
+      return;
+    }
+
+    if (dedupeKey) {
+      seen.add(dedupeKey);
+    }
+    relatedResults.push(candidate);
+  };
+
+  const inlineResults = Array.isArray(message?.narratedToolCallResults)
+    ? message.narratedToolCallResults
+    : [];
+  for (const candidate of inlineResults) {
+    appendIfNew(candidate);
+  }
+
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return relatedResults;
+  }
+
+  for (const candidate of messages) {
+    const candidateRole = String(candidate?.role || '').trim().toLowerCase();
+    if (candidateRole !== 'tool') {
+      continue;
+    }
+
+    const candidateReplyToMessageId = String(candidate?.replyToMessageId || '').trim();
+    const candidateToolCallId = String(candidate?.tool_call_id || candidate?.toolCallId || '').trim();
+    const matchesAssistant = assistantMessageId && candidateReplyToMessageId === assistantMessageId;
+    const matchesToolCall = candidateToolCallId && toolCallIds.has(candidateToolCallId);
+    if (matchesAssistant || matchesToolCall) {
+      appendIfNew(candidate);
+    }
+  }
+
+  return relatedResults;
+}
+
 function getNarratedAssistantToolCallTone(message, messages) {
   if (!isNarratedAssistantToolCallMessage(message)) {
     return null;
+  }
+
+  const relatedResults = collectNarratedAssistantToolResultMessages(message, messages);
+  if (relatedResults.some((candidate) => isToolMessageFailure(candidate))) {
+    return 'failed';
+  }
+
+  if (relatedResults.some((candidate) => isToolMessageSuccess(candidate))) {
+    return 'done';
   }
 
   return null;

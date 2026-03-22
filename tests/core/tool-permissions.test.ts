@@ -12,6 +12,8 @@
  * - No dedicated DB column — follows the same pattern as `working_directory`.
  *
  * Recent changes:
+ * - 2026-03-22: Updated `load_skill` permission coverage for the pure-load contract so
+ *   skill loading no longer implies or performs script execution at any permission level.
  * - 2026-03-12: Consolidated web_fetch coverage into an explicit allowed-at-all-levels
  *   matrix regression and updated write_file coverage to match the documented permission matrix.
  */
@@ -391,7 +393,7 @@ describe('tool_permission enforcement via world.variables', () => {
   });
 
   describe('load_skill script execution', () => {
-    it('blocks script execution when tool_permission=read without prompting', async () => {
+    it('loads referenced-script skills without prompting or auto-executing when tool_permission=read', async () => {
       mockedGetSkill.mockReturnValue({
         skill_id: 'pdf-extract',
         description: 'Extract PDF content',
@@ -414,7 +416,9 @@ describe('tool_permission enforcement via world.variables', () => {
       );
 
       expect(String(result)).toContain('pdf-extract');
-      expect(String(result)).toContain('blocked by the current permission level');
+      expect(String(result)).toContain('<active_resources>');
+      expect(String(result)).toContain('<skill_root>/skills/pdf-extract</skill_root>');
+      expect(String(result)).not.toContain('blocked by the current permission level');
       expect(mockRequestToolApproval).not.toHaveBeenCalled();
       expect(mockExecuteShellCommand).not.toHaveBeenCalled();
     });
@@ -453,7 +457,7 @@ describe('tool_permission enforcement via world.variables', () => {
       expect(mockExecuteShellCommand).not.toHaveBeenCalled();
     });
 
-    it('runs referenced scripts without approval when tool_permission=auto', async () => {
+    it('loads referenced-script skills without auto-executing when tool_permission=auto', async () => {
       mockedGetSkill.mockReturnValue({
         skill_id: 'pdf-extract',
         description: 'Extract PDF content',
@@ -483,9 +487,12 @@ describe('tool_permission enforcement via world.variables', () => {
         },
       );
 
-      expect(String(result)).toContain('<script_output source="scripts/setup.sh">');
+      expect(String(result)).toContain('<active_resources>');
+      expect(String(result)).toContain('<skill_root>/skills/pdf-extract</skill_root>');
+      expect(String(result)).not.toContain('<script_output source="scripts/setup.sh">');
       expect(String(result)).not.toContain('blocked by the current permission level');
       expect(mockRequestToolApproval).not.toHaveBeenCalled();
+      expect(mockExecuteShellCommand).not.toHaveBeenCalled();
     });
   });
 });

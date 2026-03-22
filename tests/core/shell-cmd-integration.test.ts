@@ -398,7 +398,8 @@ describe('shell_cmd integration with worlds', () => {
     expect(envelope?.tool).toBe('load_skill');
     expect(envelope?.tool_call_id).toBe('tc-load-skill-envelope');
     expect(String(envelope?.result || '')).toContain('not found');
-    expect(JSON.stringify(envelope?.preview || null)).toContain('__missing_skill_for_integration_test__');
+    expect(envelope?.preview).toBeNull();
+    expect(envelope?.display_content).toBeUndefined();
   });
 
   test('should have correct tool schema', async () => {

@@ -4,6 +4,10 @@
 **Status:** Reviewed (AR Complete, Implementation Ready)
 **Focus:** Core (`load-skill-tool.ts`, `utils.ts`)
 
+> Historical note: references below to scripts running during `load_skill` reflect the older contract.
+> Since 2026-03-22, `load_skill` is a pure load step, later explicit tool calls own task execution,
+> and `load_skill` no longer emits assistant-displayable preview/synthetic result content.
+
 ---
 
 ## Architecture Review

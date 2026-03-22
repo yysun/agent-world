@@ -6,18 +6,22 @@
  * - Resolves skills by `skill_id` from core skill registry state
  * - Reads full SKILL.md content only on demand
  * - Enforces HITL approval before applying skill instructions in interactive runtimes
- * - Executes instruction-referenced skill scripts under validated scope checks
+ * - Preserves referenced-script guidance without auto-executing task scripts during skill load
  * - Returns structured success, not-found, and read-error payloads
  *
  * Implementation Notes:
  * - Uses registry metadata as source of truth for lookup and skill name/description
  * - Reads file content from registry-provided source path (no directory rescans)
- * - Reuses shell tool safeguards (`validateShellCommandScope`) for script execution safety
  * - Uses generic HITL option requests for user approval (`yes_once`, `yes_in_session`, `no`)
  * - Session approvals are scoped by world/chat/skill to avoid accidental cross-session reuse
  * - Keeps payload format deterministic for stable downstream parsing
  *
  * Recent Changes:
+ * - 2026-03-22: Removed persisted `load_skill` preview/display content and reduced
+ *   `<active_resources>` to `<skill_root>` only so continuation keeps a single
+ *   canonical skill payload and no synthetic assistant tool-result row is emitted.
+ * - 2026-03-22: Stopped auto-running instruction-referenced scripts during `load_skill`; the
+ *   tool now injects static skill context only and leaves task execution to later explicit tool calls.
  * - 2026-03-12: Added `read` permission level guard to script execution — instructions load normally but all script execution steps are blocked with an inline note when toolPermission is 'read'.
  * - 2026-03-06: Removed `world.currentChatId` fallback from interactive approval/result scoping; interactive `load_skill` now requires explicit `context.chatId`.
  * - 2026-03-01: Removed minimal-check mode branch so `load_skill` always runs script/reference preflight consistently and keeps script-root execution guidance available.
@@ -57,7 +61,6 @@ import {
   createTextToolPreview,
   createUrlToolPreview,
   guessMediaTypeFromPath,
-  normalizeToolPreviewItems,
   parseToolExecutionEnvelopeContent,
   serializeToolExecutionEnvelope,
   type ToolPreview,
@@ -361,13 +364,6 @@ function resolveScriptCommand(scriptPath: string): { command: string; parameters
   return { command: 'bash', parameters: [scriptPath] };
 }
 
-function formatReferenceFilesBlock(referenceFiles: string[]): string {
-  if (referenceFiles.length === 0) {
-    return '(none)';
-  }
-  return referenceFiles.map((filePath) => `- ${filePath}`).join('\n');
-}
-
 function createSessionApprovalKey(worldId: string, chatId: string | null, skillId: string): string {
   return `${worldId}::${chatId ?? 'global'}::${skillId}`;
 }
@@ -632,7 +628,7 @@ async function persistLoadSkillApprovalPromptMessage(options: {
     return;
   }
 
-  const question = `Skill "${options.skillId}" requested execution.${options.scriptPaths.length > 0 ? ` Referenced scripts:\n${options.scriptPaths.map((scriptPath) => `- ${scriptPath}`).join('\n')}` : ''}\n\nApprove applying this skill now?`;
+  const question = `Skill "${options.skillId}" requested loading.${options.scriptPaths.length > 0 ? ` Referenced scripts for later execution:\n${options.scriptPaths.map((scriptPath) => `- ${scriptPath}`).join('\n')}` : ''}\n\nApprove loading and applying this skill now?`;
   const toolArguments = {
     question,
     options: [
@@ -773,7 +769,7 @@ async function requestSkillExecutionApproval(options: {
 
   const approvalPromise = (async (): Promise<boolean> => {
     const scriptSummary = options.scriptPaths.length > 0
-      ? `The skill references local scripts:\n${options.scriptPaths.map((scriptPath) => `- ${scriptPath}`).join('\n')}`
+      ? `The skill references local scripts for later execution:\n${options.scriptPaths.map((scriptPath) => `- ${scriptPath}`).join('\n')}`
       : 'No instruction-referenced local scripts were detected for this skill.';
 
     await persistLoadSkillApprovalPromptMessage({
@@ -788,9 +784,9 @@ async function requestSkillExecutionApproval(options: {
       requestId,
       title: `Run skill ${options.skillId}?`,
       message: [
-        `Skill "${options.skillId}" requested execution.`,
+        `Skill "${options.skillId}" requested loading.`,
         scriptSummary,
-        'Approve applying this skill now?',
+        'Approve loading and applying this skill now?',
       ].join('\n\n'),
       chatId,
       defaultOptionId: APPROVAL_OPTION_NO,
@@ -1300,16 +1296,6 @@ function formatLoadSkillArtifactSummary(reference: LoadSkillArtifactReference): 
     : reference.relativeLabel;
 }
 
-function appendOutcomeArtifactSummary(resultText: string, artifacts: LoadSkillArtifactReference[]): string {
-  const normalizedResult = String(resultText || '').trim();
-  if (artifacts.length === 0) {
-    return normalizedResult;
-  }
-
-  const lines = artifacts.map((artifact) => `- ${formatLoadSkillArtifactSummary(artifact)}`);
-  return [normalizedResult, '', 'Artifacts:', ...lines].filter(Boolean).join('\n');
-}
-
 async function collectLoadSkillReferencePreviews(options: {
   skillRoot: string;
   referenceFiles: string[];
@@ -1426,19 +1412,13 @@ function wrapLoadSkillToolResult(options: {
   preview: ToolPreview | ToolPreview[] | null;
   toolCallId?: string;
 }): string {
-  const displayContent = normalizeToolPreviewItems(options.preview)
-    .find((preview) => (preview.kind === 'markdown' || preview.kind === 'text') && typeof (preview as any).text === 'string');
-
   return serializeToolExecutionEnvelope({
     __type: 'tool_execution_envelope',
     version: 1,
     tool: 'load_skill',
     ...(options.toolCallId ? { tool_call_id: options.toolCallId } : {}),
     status: /<error>/i.test(options.result) ? 'failed' : 'completed',
-    preview: options.preview,
-    ...(displayContent && typeof (displayContent as any).text === 'string' && String((displayContent as any).text).trim()
-      ? { display_content: String((displayContent as any).text).trim() }
-      : {}),
+    preview: null,
     result: options.result,
   });
 }
@@ -1455,53 +1435,21 @@ function buildSuccessResult(options: {
 }): string {
   const {
     skillId,
-    skillName,
-    skillDescription,
     skillRoot,
     markdown,
-    scriptOutputs,
-    referenceFiles,
-    scriptPaths,
   } = options;
   const escapedSkillId = escapeXmlText(skillId);
-  const escapedSkillName = escapeXmlText(skillName);
-  const escapedSkillDescription = escapeXmlText(skillDescription);
-  const hasActiveResources = scriptOutputs.length > 0;
-  const scriptBlocks = scriptOutputs.flatMap((scriptOutput) => ([
-    `    <script_output source="${escapeXmlText(scriptOutput.source)}">`,
-    `${escapeXmlText(appendOutcomeArtifactSummary(scriptOutput.result, scriptOutput.artifacts))}`,
-    '    </script_output>',
-  ]));
-  const referenceFilesBlock = escapeXmlText(formatReferenceFilesBlock(referenceFiles));
-
-  const activeResourcesBlock = hasActiveResources
-    ? [
-      '  <active_resources>',
-      ...scriptBlocks,
-      '',
-      '    <reference_files>',
-      referenceFilesBlock,
-      '    </reference_files>',
-      '  </active_resources>',
-      '',
-    ]
-    : [];
-
-  const hasReferencedScripts = scriptPaths.length > 0;
+  const escapedSkillRoot = escapeXmlText(skillRoot);
   const executionDirective = [
     '  <execution_directive>',
-    `    You are now operating under the specialized ${escapedSkillName} protocol.`,
-    `    Skill purpose: ${escapedSkillDescription}`,
-    '    1. Acknowledge which skill was loaded and apply it directly to the user request.',
-    '    2. Prioritize the logic in <instructions> over generic behavior.',
-    hasActiveResources
-      ? '    3. Use the data in <active_resources> to complete the user\'s specific request.'
-      : '    3. Use the skill instructions to complete the user\'s specific request.',
-    '    4. Execute required steps directly; avoid unnecessary planning narration unless the user explicitly asks for a plan.',
-    '    5. Keep tool-related assistant text concise and result-focused.',
-    ...(hasReferencedScripts
-      ? [`    6. Scripts referenced in <instructions> are located at skill root: ${escapeXmlText(skillRoot)}. When invoking them via shell commands, construct the absolute path (e.g., ${escapeXmlText(skillRoot)}/scripts/example.py) since they may not be accessible via relative paths from the project directory.`]
-      : []),
+    `    The skill "${escapedSkillId}" is now loaded for this turn.`,
+    '',
+    '    Apply <instructions> as specialized task guidance for the current user request.',
+    '    Follow the skill only insofar as it is relevant to the user\'s request.',
+    '    Continue the task directly; do not stop merely to report that the skill was loaded.',
+    '    Use shell_cmd only when execution is actually required by the skill or task.',
+    '    Any script execution must use paths under <skill_root> and remain within runtime safety constraints.',
+    '    Keep any tool-related narration brief and result-focused.',
     '  </execution_directive>',
   ];
 
@@ -1511,7 +1459,10 @@ function buildSuccessResult(options: {
     markdown,
     '  </instructions>',
     '',
-    ...activeResourcesBlock,
+    '  <active_resources>',
+    `    <skill_root>${escapedSkillRoot}</skill_root>`,
+    '  </active_resources>',
+    '',
     ...executionDirective,
     '</skill_context>',
   ].join('\n');
@@ -1614,12 +1565,7 @@ export function createLoadSkillToolDefinition() {
               };
             }
           }
-          const scriptOutputs = await executeSkillScripts({
-            scriptPaths,
-            skillRoot,
-            context,
-          });
-          const referenceFiles = await collectReferenceFiles(skillRoot, instructionsMarkdown);
+          const scriptOutputs: SkillScriptExecutionOutcome[] = [];
           const result = buildSuccessResult({
             skillId: requestedSkillId,
             skillName: entry.skill_id,
@@ -1627,8 +1573,8 @@ export function createLoadSkillToolDefinition() {
             skillRoot,
             markdown: instructionsMarkdown,
             scriptOutputs,
-            referenceFiles,
-            scriptPaths,
+            referenceFiles: [],
+            scriptPaths: [],
           });
 
           if (!persistToolEnvelope) {
@@ -1638,19 +1584,10 @@ export function createLoadSkillToolDefinition() {
             };
           }
 
-          const preview = await buildLoadSkillSuccessPreview({
-            skillId: requestedSkillId,
-            skillDescription: entry.description?.trim() || entry.skill_id,
-            skillRoot,
-            scriptOutputs,
-            referenceFiles,
-            scriptPaths,
-            context,
-          });
           return {
             result: wrapLoadSkillToolResult({
               result,
-              preview,
+              preview: null,
               toolCallId,
             }),
             cacheableForRun: true,
@@ -1665,7 +1602,7 @@ export function createLoadSkillToolDefinition() {
             result: persistToolEnvelope
               ? wrapLoadSkillToolResult({
                 result,
-                preview: createTextToolPreview(message),
+                preview: null,
                 toolCallId,
               })
               : result,
@@ -1679,7 +1616,7 @@ export function createLoadSkillToolDefinition() {
         if (persistToolEnvelope && !parseToolExecutionEnvelopeContent(outcome.result)) {
           return wrapLoadSkillToolResult({
             result: outcome.result,
-            preview: createTextToolPreview(truncatePreviewText(outcome.result, 1600)),
+            preview: null,
             toolCallId,
           });
         }
@@ -1698,7 +1635,7 @@ export function createLoadSkillToolDefinition() {
         if (persistToolEnvelope && !parseToolExecutionEnvelopeContent(result)) {
           return wrapLoadSkillToolResult({
             result,
-            preview: createTextToolPreview(truncatePreviewText(result, 1600)),
+            preview: null,
             toolCallId,
           });
         }
