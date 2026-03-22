@@ -43,6 +43,8 @@ These rules override all other testing instructions unless the user explicitly o
 
 7. For changes touching API transport/runtime paths, also run: `npm run integration`.
 
+8. Do not expose local directory paths, secrets, or internal-only debug logs in test code.
+
 ---
 
 ## App Boundary Rules (Strict)

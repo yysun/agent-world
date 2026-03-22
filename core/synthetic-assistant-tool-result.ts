@@ -21,7 +21,10 @@
 
 import type { AgentMessage } from './types.js';
 import { generateId } from './utils.js';
-import { normalizeToolPreviewItems, parseToolExecutionEnvelopeContent } from './tool-execution-envelope.js';
+import {
+  isAssistantRenderableDisplayContent,
+  parseToolExecutionEnvelopeContent,
+} from './tool-execution-envelope.js';
 
 export interface SyntheticAssistantToolResultContent {
   __type: 'synthetic_assistant_tool_result';
@@ -33,35 +36,8 @@ export interface SyntheticAssistantToolResultContent {
   content: string;
 }
 
-function isTextualPreview(preview: unknown): preview is { kind: 'text' | 'markdown'; text: string } {
-  if (!preview || typeof preview !== 'object' || Array.isArray(preview)) {
-    return false;
-  }
-
-  const record = preview as Record<string, unknown>;
-  return (record.kind === 'text' || record.kind === 'markdown') && typeof record.text === 'string';
-}
-
 function isAdoptedSyntheticTool(toolName: string): boolean {
   return toolName === 'shell_cmd' || toolName === 'web_fetch';
-}
-
-function extractPreviewDisplayContent(serializedToolResult: string): string | null {
-  const envelope = parseToolExecutionEnvelopeContent(serializedToolResult);
-  if (!envelope) {
-    return null;
-  }
-
-  for (const preview of normalizeToolPreviewItems(envelope.preview)) {
-    if (isTextualPreview(preview)) {
-      const text = preview.text.trim();
-      if (text) {
-        return text;
-      }
-    }
-  }
-
-  return null;
 }
 
 export function serializeSyntheticAssistantToolResultContent(
@@ -131,9 +107,7 @@ export function extractSyntheticAssistantDisplayContentFromToolResult(
   const displayContent = typeof envelope.display_content === 'string'
     ? envelope.display_content.trim()
     : '';
-  const fallbackPreviewContent = extractPreviewDisplayContent(serializedToolResult) || '';
-  const resolvedContent = displayContent || fallbackPreviewContent;
-  if (!resolvedContent) {
+  if (!displayContent || !isAssistantRenderableDisplayContent(displayContent)) {
     return null;
   }
 
@@ -141,7 +115,7 @@ export function extractSyntheticAssistantDisplayContentFromToolResult(
   return {
     tool: toolName,
     ...(toolCallId ? { toolCallId } : {}),
-    content: resolvedContent,
+    content: displayContent,
   };
 }
 

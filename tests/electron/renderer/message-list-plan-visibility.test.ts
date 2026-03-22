@@ -270,4 +270,60 @@ describe('MessageListPanel narrated tool-call visibility', () => {
     expect(merged[0]?.combinedToolResults).toHaveLength(1);
     expect(merged[0]?.combinedToolResults?.[0]?.messageId).toBe('tool-live-1-stdout');
   });
+
+  it('drops live shell stdout rows once a terminal tool result exists for the same tool call', () => {
+    const assistantCallingTool = {
+      messageId: 'assistant-call-stream-2',
+      role: 'assistant',
+      sender: 'runner',
+      content: 'Calling tool: shell_cmd',
+      tool_calls: [
+        {
+          id: 'tool-live-2',
+          type: 'function',
+          function: {
+            name: 'shell_cmd',
+            arguments: '{"command":"./scripts/search.sh","parameters":["{\\"query\\": \\"google workspace cli\\"}"]}',
+          },
+        },
+      ],
+    };
+
+    const liveStdoutRow = {
+      messageId: 'tool-live-2-stdout',
+      role: 'tool',
+      sender: 'runner',
+      toolName: 'shell_cmd',
+      content: '{\n  "query": "google workspace cli"\n}',
+      isToolStreaming: true,
+    };
+
+    const terminalToolRow = {
+      messageId: 'tool-result-2',
+      role: 'tool',
+      sender: 'runner',
+      tool_call_id: 'tool-live-2',
+      content: JSON.stringify({
+        __type: 'tool_execution_envelope',
+        version: 1,
+        tool: 'shell_cmd',
+        tool_call_id: 'tool-live-2',
+        status: 'completed',
+        preview: {
+          kind: 'markdown',
+          renderer: 'markdown',
+          text: '### Command Execution\n\n```\n{\n  "query": "google workspace cli"\n}\n```',
+        },
+        result: 'status: success\nexit_code: 0',
+      }),
+    };
+
+    const merged = buildCombinedRenderableMessages([assistantCallingTool, liveStdoutRow, terminalToolRow]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.messageId).toBe('assistant-call-stream-2');
+    expect(Array.isArray(merged[0]?.combinedToolResults)).toBe(true);
+    expect(merged[0]?.combinedToolResults).toHaveLength(1);
+    expect(merged[0]?.combinedToolResults?.[0]?.messageId).toBe('tool-result-2');
+  });
 });

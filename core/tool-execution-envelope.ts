@@ -15,6 +15,7 @@
  * - The helpers here stay transport-agnostic and do not depend on SSE state.
  *
  * Recent Changes:
+ * - 2026-03-22: Prevented top-level valid JSON stdout from being misclassified as directly renderable markdown when nested string fields contain markdown syntax.
  * - 2026-03-21: Added richer artifact media-type detection for markdown, HTML bundles, PDF, and presentation outputs.
  * - 2026-03-06: Initial envelope contract for `shell_cmd` and `load_skill`.
  */
@@ -23,6 +24,17 @@ import { basename, extname } from 'path';
 
 export type ToolPreviewKind = 'text' | 'markdown' | 'artifact' | 'media' | 'graphic' | 'url';
 export type ToolPreviewRenderer = 'text' | 'markdown' | 'image' | 'svg' | 'audio' | 'video' | 'youtube' | 'file';
+export type DirectDisplayContentKind = 'markdown' | 'html' | 'svg';
+
+const HTML_DISPLAY_ROOT_TAGS = new Set([
+  'html', 'body', 'main', 'article', 'section', 'div', 'span', 'p',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table', 'thead', 'tbody',
+  'tr', 'th', 'td', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code',
+  'img', 'a', 'figure', 'figcaption', 'hr', 'br', 'strong', 'em',
+  'u', 'del', 's'
+]);
+
+const HTML_VOID_DISPLAY_TAGS = new Set(['img', 'hr', 'br']);
 
 export interface ToolArtifactReference {
   path?: string;
@@ -126,6 +138,114 @@ export function stringifyToolExecutionResult(result: unknown): string {
   } catch {
     return String(result);
   }
+}
+
+function looksLikeSvgDisplayContent(text: string): boolean {
+  const trimmed = String(text || '').trim();
+  if (!trimmed || !/<svg\b/i.test(trimmed) || !/<\/svg>\s*$/i.test(trimmed)) {
+    return false;
+  }
+
+  return /^(?:<\?xml[\s\S]*?\?>\s*)?(?:<!doctype[\s\S]*?>\s*)?<svg\b/i.test(trimmed);
+}
+
+function looksLikeHtmlDisplayContent(text: string): boolean {
+  const trimmed = String(text || '').trim();
+  if (!trimmed || looksLikeSvgDisplayContent(trimmed)) {
+    return false;
+  }
+
+  if (/^<!doctype html\b/i.test(trimmed) || /^<html\b/i.test(trimmed)) {
+    return true;
+  }
+
+  const openTagMatch = trimmed.match(/^<([a-z][\w-]*)\b[^>]*>/i);
+  if (!openTagMatch?.[1]) {
+    return false;
+  }
+
+  const rootTag = openTagMatch[1].toLowerCase();
+  if (!HTML_DISPLAY_ROOT_TAGS.has(rootTag)) {
+    return false;
+  }
+
+  if (HTML_VOID_DISPLAY_TAGS.has(rootTag)) {
+    return true;
+  }
+
+  const closeTagPattern = new RegExp(`</${rootTag}\\s*>\\s*$`, 'i');
+  return closeTagPattern.test(trimmed);
+}
+
+function looksLikeMarkdownDisplayContent(text: string): boolean {
+  const trimmed = String(text || '').trim();
+  if (!trimmed || looksLikeSvgDisplayContent(trimmed) || looksLikeHtmlDisplayContent(trimmed)) {
+    return false;
+  }
+
+  const markdownPatterns = [
+    /!\[[^\]]*\]\([^)]+\)/,
+    /\[[^\]]+\]\([^)]+\)/,
+    /^#{1,6}\s+\S/m,
+    /```[\s\S]*```/,
+    /^\s*[-*+]\s+\S/m,
+    /^\s*\d+\.\s+\S/m,
+    /^>\s+\S/m,
+    /^\|.+\|\s*$/m,
+    /(?:^|\n)\s*---+\s*(?:\n|$)/,
+    /data:image\/[a-z0-9.+-]+;base64,/i,
+  ];
+
+  return markdownPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function isTopLevelJsonContent(text: string): boolean {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  const firstChar = trimmed[0];
+  if (firstChar !== '{' && firstChar !== '[' && firstChar !== '"') {
+    return false;
+  }
+
+  try {
+    JSON.parse(trimmed);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function classifyDirectDisplayContent(text: string): DirectDisplayContentKind | null {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (isTopLevelJsonContent(trimmed)) {
+    return null;
+  }
+
+  if (looksLikeSvgDisplayContent(trimmed)) {
+    return 'svg';
+  }
+
+  if (looksLikeHtmlDisplayContent(trimmed)) {
+    return 'html';
+  }
+
+  if (looksLikeMarkdownDisplayContent(trimmed)) {
+    return 'markdown';
+  }
+
+  return null;
+}
+
+export function isAssistantRenderableDisplayContent(text: string): boolean {
+  const kind = classifyDirectDisplayContent(text);
+  return kind === 'markdown' || kind === 'html';
 }
 
 export function buildToolArtifactPreviewUrl(options: { path: string; worldId?: string | null }): string {

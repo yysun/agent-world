@@ -13,6 +13,7 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-03-22: Prefer terminal tool result rows over transient `-stdout` shell stream rows when both map to the same tool call, preventing duplicate result blocks inside merged Electron tool cards.
  * - 2026-03-21: Restored web-parity collapse defaults for merged Electron tool rows and keyed tool collapse state by tool-call id when assistant request rows have no message id.
  * - 2026-03-21: Restored collapse-toggle controls for completed merged Electron tool request rows so request/result transcript rows match the web tool affordance.
  * - 2026-03-21: Re-consumed placeholder-linked tool result rows after structured preview work so merged Electron tool cards do not duplicate standalone tool transcript entries.
@@ -215,6 +216,51 @@ function collectToolResultLookupKeys(message) {
   }
 
   return Array.from(lookupKeys);
+}
+
+function resolveCombinedToolResultIdentity(message: any): string {
+  const toolCallId = String(message?.tool_call_id || message?.toolCallId || '').trim();
+  if (toolCallId) {
+    return normalizeToolResultLookupKey(toolCallId);
+  }
+
+  const messageId = String(message?.messageId || '').trim();
+  if (messageId) {
+    return normalizeToolResultLookupKey(messageId);
+  }
+
+  return '';
+}
+
+function filterSupersededStreamingToolRows(results: any[]): any[] {
+  if (!Array.isArray(results) || results.length <= 1) {
+    return Array.isArray(results) ? results : [];
+  }
+
+  const terminalKeys = new Set<string>();
+  for (const result of results) {
+    if (result?.isToolStreaming === true) {
+      continue;
+    }
+
+    const identity = resolveCombinedToolResultIdentity(result);
+    if (identity) {
+      terminalKeys.add(identity);
+    }
+  }
+
+  if (terminalKeys.size === 0) {
+    return results;
+  }
+
+  return results.filter((result) => {
+    if (result?.isToolStreaming !== true) {
+      return true;
+    }
+
+    const identity = resolveCombinedToolResultIdentity(result);
+    return !identity || !terminalKeys.has(identity);
+  });
 }
 
 function isToolRequestMessage(message) {
@@ -572,9 +618,11 @@ export function buildCombinedRenderableMessages(messages) {
         return message;
       }
 
+      const filteredCombinedToolResults = filterSupersededStreamingToolRows(combinedToolResults);
+
       return {
         ...message,
-        combinedToolResults,
+        combinedToolResults: filteredCombinedToolResults,
         ...(syntheticToolResultMessages.length > 0 ? { syntheticToolResultMessages } : {}),
       };
     })

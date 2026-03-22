@@ -623,6 +623,91 @@ describe('shell_cmd integration with worlds', () => {
     expect(parsed.display_content).toBe(markdown);
   });
 
+  test('should persist html stdout as display content without switching minimal result mode', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    const tempRoot = await mkdtemp(path.join(tmpdir(), 'shell-display-html-'));
+    const payloadFile = path.join(tempRoot, 'payload.html');
+    const html = '<div><strong>Build complete.</strong></div>';
+    await writeFile(payloadFile, html, 'utf8');
+
+    let result = '';
+    try {
+      result = await shellCmdTool.execute(
+        {
+          command: 'cat',
+          parameters: ['payload.html']
+        },
+        undefined,
+        undefined,
+        {
+          llmResultMode: 'minimal',
+          persistToolEnvelope: true,
+          toolCallId: 'call-html-display',
+          world: {
+            id: worldId(),
+            variables: `working_directory=${tempRoot}`
+          },
+          workingDirectory: tempRoot,
+        }
+      );
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+
+    const parsed = JSON.parse(result);
+    expect(parsed.display_content).toBe(html);
+    expect(parsed.result).toContain('status: success');
+    expect(parsed.result).toContain('stdout_preview:');
+    expect(parsed.result).not.toContain('### Command Execution');
+  });
+
+  test('should not persist display_content for top-level json stdout even when nested fields contain markdown syntax', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    const tempRoot = await mkdtemp(path.join(tmpdir(), 'shell-display-json-'));
+    const payloadFile = path.join(tempRoot, 'payload.json');
+    const structuredJson = JSON.stringify({
+      query: 'google workspace cli',
+      summary: '**One CLI for all of Google Workspace**',
+      notes: '- install via gws auth setup',
+      htmlLike: '<div>not direct display content</div>',
+    }, null, 2);
+    await writeFile(payloadFile, structuredJson, 'utf8');
+
+    let result = '';
+    try {
+      result = await shellCmdTool.execute(
+        {
+          command: 'cat',
+          parameters: ['payload.json']
+        },
+        undefined,
+        undefined,
+        {
+          llmResultMode: 'minimal',
+          persistToolEnvelope: true,
+          toolCallId: 'call-json-no-display-content',
+          world: {
+            id: worldId(),
+            variables: `working_directory=${tempRoot}`
+          },
+          workingDirectory: tempRoot,
+        }
+      );
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+
+    const parsed = JSON.parse(result);
+    expect(parsed.display_content).toBeUndefined();
+    expect(parsed.result).toContain('status: success');
+    expect(parsed.result).toContain('stdout_preview:');
+    expect(parsed.result).toContain('**One CLI for all of Google Workspace**');
+  });
+
   test('should stream stdout via SSE without persisting a synthetic assistant stdout message', async () => {
     const tools = await getMCPToolsForWorld(worldId());
     const shellCmdTool = tools.shell_cmd;

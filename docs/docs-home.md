@@ -20,6 +20,7 @@ A central entry point to the most important Agent World documentation.
 ## Runtime & Operations
 
 - [Shell Command Tool (shell_cmd)](shell-cmd-tool.md)
+- [Tool Results Contract](Tool%20Results%20Contract.md)
 - [HITL Approval Flow](hitl-approval-flow.md)
 - [Logging Guide](logging-guide.md)
 - [MCP Debug Logging](mcp-debug-logging.md)

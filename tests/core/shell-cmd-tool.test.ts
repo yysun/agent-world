@@ -10,6 +10,7 @@
  * - Output accumulation
  * 
  * Changes:
+ * - 2026-03-22: Added regression coverage so top-level JSON stdout with nested markdown markers does not get classified as directly displayable shell content.
  * - 2026-03-22: Added targeted coverage for both shell executable resolution paths: direct calls stay cwd-relative, skill-originated script calls resolve to `<skill_root>`.
  * - 2026-03-22: Added regression coverage for skill-relative executable resolution (`./scripts/...`) from active load_skill contexts.
  * - 2026-03-12: Added black-box durable approval prompt/resolution coverage for denied shell risk approvals.
@@ -39,13 +40,19 @@ vi.mock('../../core/hitl.js', async () => {
 import {
   createShellCmdToolDefinition,
   executeShellCommand,
+  formatPreviewShellResultForLLM,
+  formatResultForLLM,
   validateShellDirectoryRequest,
   validateShellCommandScope,
   classifyShellCommandRisk,
   resolveSkillScriptCommand,
   resolveSkillScriptParameters
 } from '../../core/shell-cmd-tool.js';
-import { serializeToolExecutionEnvelope } from '../../core/tool-execution-envelope.js';
+import {
+  classifyDirectDisplayContent,
+  parseToolExecutionEnvelopeContent,
+  serializeToolExecutionEnvelope,
+} from '../../core/tool-execution-envelope.js';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -59,6 +66,16 @@ beforeEach(() => {
 });
 
 describe('shell command execution', () => {
+  test('should not classify top-level json stdout as directly displayable when nested strings contain markdown markers', () => {
+    const jsonWithMarkdownLikeFields = JSON.stringify({
+      summary: '**Build complete.**',
+      notes: '- first item',
+      htmlLike: '<div>still json</div>',
+    }, null, 2);
+
+    expect(classifyDirectDisplayContent(jsonWithMarkdownLikeFields)).toBeNull();
+  });
+
   test('should execute command and return result', async () => {
     const result = await executeShellCommand('echo', ['test'], './');
 
@@ -425,6 +442,179 @@ describe('shell command skill-context resolution', () => {
         ],
       },
     )).rejects.toThrow('outside world working directory');
+  });
+
+  test('persists the same envelope contract for direct and skill-script calls while minimal and verbose change only the result payload', async () => {
+    mockedGetSkillSourcePath.mockImplementation((skillId) =>
+      skillId === 'search'
+        ? '/bin/SKILL.md'
+        : undefined
+    );
+    mockedExistsSync.mockImplementation((candidatePath) =>
+      String(candidatePath) === '/bin/echo'
+    );
+
+    const tool = createShellCmdToolDefinition();
+    const baseContext = {
+      world: {
+        id: 'world-1',
+        variables: 'working_directory=/Users/esun/Documents/Projects/test-agent-world',
+      },
+      workingDirectory: '/Users/esun/Documents/Projects/test-agent-world',
+      chatId: 'chat-1',
+      agentName: 'test-agent',
+    };
+
+    const directMinimalEnvelope = parseToolExecutionEnvelopeContent(await tool.execute(
+      {
+        command: 'echo',
+        parameters: ['direct-envelope'],
+      },
+      undefined,
+      undefined,
+      {
+        ...baseContext,
+        toolCallId: 'tool-direct-minimal',
+        llmResultMode: 'minimal',
+        persistToolEnvelope: true,
+        messages: [],
+      },
+    ));
+
+    const directVerboseEnvelope = parseToolExecutionEnvelopeContent(await tool.execute(
+      {
+        command: 'echo',
+        parameters: ['direct-envelope'],
+      },
+      undefined,
+      undefined,
+      {
+        ...baseContext,
+        toolCallId: 'tool-direct-verbose',
+        llmResultMode: 'verbose',
+        persistToolEnvelope: true,
+        messages: [],
+      },
+    ));
+
+    const skillMinimalEnvelope = parseToolExecutionEnvelopeContent(await tool.execute(
+      {
+        command: './echo',
+        parameters: ['skill-envelope'],
+      },
+      undefined,
+      undefined,
+      {
+        ...baseContext,
+        toolCallId: 'tool-skill-minimal',
+        llmResultMode: 'minimal',
+        persistToolEnvelope: true,
+        messages: [
+          {
+            role: 'tool',
+            chatId: 'chat-1',
+            content: serializeToolExecutionEnvelope({
+              __type: 'tool_execution_envelope',
+              version: 1,
+              tool: 'load_skill',
+              status: 'completed',
+              preview: null,
+              result: [
+                '<skill_context id="search">',
+                '  <active_resources>',
+                '    <skill_root>/bin</skill_root>',
+                '  </active_resources>',
+                '</skill_context>',
+              ].join('\n'),
+            }),
+          },
+        ],
+      },
+    ));
+
+    const skillVerboseEnvelope = parseToolExecutionEnvelopeContent(await tool.execute(
+      {
+        command: './echo',
+        parameters: ['skill-envelope'],
+      },
+      undefined,
+      undefined,
+      {
+        ...baseContext,
+        toolCallId: 'tool-skill-verbose',
+        llmResultMode: 'verbose',
+        persistToolEnvelope: true,
+        messages: [
+          {
+            role: 'tool',
+            chatId: 'chat-1',
+            content: serializeToolExecutionEnvelope({
+              __type: 'tool_execution_envelope',
+              version: 1,
+              tool: 'load_skill',
+              status: 'completed',
+              preview: null,
+              result: [
+                '<skill_context id="search">',
+                '  <active_resources>',
+                '    <skill_root>/bin</skill_root>',
+                '  </active_resources>',
+                '</skill_context>',
+              ].join('\n'),
+            }),
+          },
+        ],
+      },
+    ));
+
+    expect(directMinimalEnvelope).not.toBeNull();
+    expect(directVerboseEnvelope).not.toBeNull();
+    expect(skillMinimalEnvelope).not.toBeNull();
+    expect(skillVerboseEnvelope).not.toBeNull();
+
+    expect(directMinimalEnvelope?.tool).toBe('shell_cmd');
+    expect(skillMinimalEnvelope?.tool).toBe('shell_cmd');
+    expect(JSON.stringify(directMinimalEnvelope?.preview || null)).toContain('Command Execution');
+    expect(JSON.stringify(skillMinimalEnvelope?.preview || null)).toContain('Command Execution');
+    expect(JSON.stringify(skillMinimalEnvelope?.preview || null)).toContain('/bin/echo');
+    expect(directMinimalEnvelope?.display_content).toBeUndefined();
+    expect(skillMinimalEnvelope?.display_content).toBeUndefined();
+
+    expect(String(directMinimalEnvelope?.result || '')).toContain('status: success');
+    expect(String(directMinimalEnvelope?.result || '')).toContain('stdout_preview:');
+    expect(String(directMinimalEnvelope?.result || '')).not.toContain('### Command Execution');
+    expect(String(directVerboseEnvelope?.result || '')).toContain('### Command Execution');
+    expect(String(directVerboseEnvelope?.result || '')).toContain('### Standard Output');
+
+    expect(String(skillMinimalEnvelope?.result || '')).toContain('status: success');
+    expect(String(skillMinimalEnvelope?.result || '')).toContain('stdout_preview:');
+    expect(String(skillMinimalEnvelope?.result || '')).not.toContain('### Command Execution');
+    expect(String(skillVerboseEnvelope?.result || '')).toContain('### Command Execution');
+    expect(String(skillVerboseEnvelope?.result || '')).toContain('/bin/echo skill-envelope');
+  });
+
+  test('keeps persisted human preview sizing separate from minimal llm preview sizing', () => {
+    const longStdout = 'A'.repeat(800);
+    const result = {
+      executionId: 'exec-preview-sizing',
+      command: 'echo',
+      parameters: ['preview-sizing'],
+      stdout: longStdout,
+      stderr: '',
+      exitCode: 0,
+      signal: null,
+      executedAt: new Date('2026-03-22T00:00:00.000Z'),
+      duration: 12,
+    };
+
+    const llmPreview = formatPreviewShellResultForLLM(result);
+    const humanPreview = formatResultForLLM(result, { detail: 'minimal' });
+
+    expect(llmPreview).toContain(longStdout);
+    expect(llmPreview).not.toContain('stdout_truncated: true');
+    expect(humanPreview).toContain('### Standard Output (preview)');
+    expect(humanPreview).toContain('Output truncated to minimum necessary preview');
+    expect(humanPreview).not.toContain(longStdout);
   });
 });
 

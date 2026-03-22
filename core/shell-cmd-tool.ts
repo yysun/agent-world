@@ -27,6 +27,7 @@
  * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - 2026-03-22: Increased the bounded LLM continuation preview cap from 1200 to 4096 characters so structured shell outputs keep more complete result sets before truncation.
  * - 2026-03-22: Resolved skill-relative executable paths like `./scripts/foo.sh` against the active skill root before shell execution, so skill scripts no longer depend on the repo working directory.
  * - 2026-03-12: Shared tool approval flow now persists durable approval prompt/resolution messages for replay-safe shell approval history.
  * - 2026-03-12: Added `toolPermission` enforcement: 'read' level blocks execution with an error result; 'ask' level forces every invocation through HITL approval regardless of risk tier.
@@ -93,6 +94,7 @@ import { getDefaultWorkingDirectory, getEnvValueFromText } from './utils.js';
 import { getSkillSourcePath, getSkills } from './skill-registry.js';
 import {
   buildToolArtifactPreviewUrl,
+  classifyDirectDisplayContent,
   createArtifactToolPreview,
   createTextToolPreview,
   parseToolExecutionEnvelopeContent,
@@ -122,6 +124,7 @@ import {
 const logger = createCategoryLogger('shell-cmd');
 const SHELL_RISK_APPROVE_OPTION = 'approve';
 const SHELL_RISK_DENY_OPTION = 'deny';
+const DEFAULT_HUMAN_PREVIEW_OUTPUT_CHARS = 400;
 
 /**
  * Resolve directory path, handling tilde expansion and relative paths
@@ -225,8 +228,8 @@ interface ShellToolReturnOptions {
   worldId?: string;
 }
 
-const DEFAULT_MIN_OUTPUT_CHARS = 400;
-const DEFAULT_LLM_PREVIEW_OUTPUT_CHARS = 1200;
+const DEFAULT_MIN_OUTPUT_CHARS = DEFAULT_HUMAN_PREVIEW_OUTPUT_CHARS;
+const DEFAULT_LLM_PREVIEW_OUTPUT_CHARS = 4096;
 
 function inferShellFailureReason(errorMessage: string): ShellFailureReason | undefined {
   const normalized = String(errorMessage || '').trim().toLowerCase();
@@ -2127,6 +2130,27 @@ function buildShellToolResultContent(
   return formatResultForLLM(result, { detail: options.outputDetail });
 }
 
+function buildHumanShellPreviewContent(
+  result: CommandExecutionResult,
+  options: Pick<ShellToolReturnOptions, 'outputFormat' | 'outputDetail' | 'artifacts'>,
+): string {
+  if (options.outputFormat === 'json') {
+    return JSON.stringify(
+      formatStructuredResult(result, options.artifacts || [], {
+        detail: options.outputDetail,
+        maxOutputChars: DEFAULT_HUMAN_PREVIEW_OUTPUT_CHARS,
+      }),
+      null,
+      2,
+    );
+  }
+
+  return formatResultForLLM(result, {
+    detail: options.outputDetail,
+    maxOutputChars: DEFAULT_HUMAN_PREVIEW_OUTPUT_CHARS,
+  });
+}
+
 function buildShellToolPreviewEnvelope(
   result: CommandExecutionResult,
   options: Omit<ShellToolReturnOptions, 'persistToolEnvelope'>,
@@ -2139,9 +2163,11 @@ function buildShellToolPreviewEnvelope(
   });
   const previewItems = [
     createTextToolPreview(
-      options.outputFormat === 'json'
-        ? resultContent
-        : formatResultForLLM(result, { detail: options.outputDetail }),
+      buildHumanShellPreviewContent(result, {
+        outputFormat: options.outputFormat,
+        outputDetail: options.outputDetail,
+        artifacts: options.artifacts,
+      }),
       { markdown: options.outputFormat !== 'json', title: 'shell_cmd result' },
     ),
     ...(options.artifacts || []).map((artifact) =>
@@ -2153,6 +2179,7 @@ function buildShellToolPreviewEnvelope(
       })
     ),
   ];
+  const displayContent = getShellToolDisplayContent(result, options.outputFormat);
 
   return {
     __type: 'tool_execution_envelope',
@@ -2161,7 +2188,7 @@ function buildShellToolPreviewEnvelope(
     ...(options.toolCallId ? { tool_call_id: options.toolCallId } : {}),
     status: result.exitCode === 0 && !result.error && !result.timedOut && !result.canceled ? 'completed' : 'failed',
     preview: previewItems,
-    ...(getShellToolDisplayContent(result, options.outputFormat) ? { display_content: getShellToolDisplayContent(result, options.outputFormat) } : {}),
+    ...(displayContent ? { display_content: displayContent } : {}),
     result: resultContent,
   };
 }
@@ -2179,8 +2206,7 @@ function getShellToolDisplayContent(
     return '';
   }
 
-  const hasMarkdownImage = /!\[[^\]]*]\([^)]+\)/.test(stdout);
-  return containsImageDataUri(stdout) || hasMarkdownImage ? stdout : '';
+  return classifyDirectDisplayContent(stdout) ? stdout : '';
 }
 
 function formatShellToolReturnContent(

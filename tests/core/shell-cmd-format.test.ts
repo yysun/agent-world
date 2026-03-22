@@ -195,6 +195,44 @@ describe('formatPreviewShellResultForLLM', () => {
     expect(text).toContain('visible to llm');
   });
 
+  test('should keep up to 4096 characters of stdout in the continuation preview before truncating', () => {
+    const visibleStdout = 'A'.repeat(3000);
+    const truncatedStdout = 'B'.repeat(5000);
+
+    const visibleResult: CommandExecutionResult = {
+      executionId: 'visible-preview-boundary',
+      command: 'echo',
+      parameters: ['visible-preview-boundary'],
+      stdout: visibleStdout,
+      stderr: '',
+      exitCode: 0,
+      signal: null,
+      executedAt: new Date(),
+      duration: 10,
+    };
+
+    const truncatedResult: CommandExecutionResult = {
+      executionId: 'truncated-preview-boundary',
+      command: 'echo',
+      parameters: ['truncated-preview-boundary'],
+      stdout: truncatedStdout,
+      stderr: '',
+      exitCode: 0,
+      signal: null,
+      executedAt: new Date(),
+      duration: 10,
+    };
+
+    const visibleText = formatPreviewShellResultForLLM(visibleResult);
+    const truncatedText = formatPreviewShellResultForLLM(truncatedResult);
+
+    expect(visibleText).toContain(visibleStdout);
+    expect(visibleText).not.toContain('stdout_truncated: true');
+    expect(truncatedText).toContain('stdout_preview:');
+    expect(truncatedText).toContain('stdout_truncated: true');
+    expect(truncatedText).not.toContain(truncatedStdout);
+  });
+
   test('should format failed status with bounded stderr preview', () => {
     const result: CommandExecutionResult = {
       executionId: 'test-fail',
