@@ -27,6 +27,7 @@
  * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - 2026-03-22: Resolved skill-relative executable paths like `./scripts/foo.sh` against the active skill root before shell execution, so skill scripts no longer depend on the repo working directory.
  * - 2026-03-12: Shared tool approval flow now persists durable approval prompt/resolution messages for replay-safe shell approval history.
  * - 2026-03-12: Added `toolPermission` enforcement: 'read' level blocks execution with an error result; 'ask' level forces every invocation through HITL approval regardless of risk tier.
  * - 2026-03-06: Added explicit canonical failure reasons for shell validation/policy failures so approval denials and validation errors no longer masquerade as non-zero exits.
@@ -1131,6 +1132,62 @@ function getActiveSkillContexts(
   return contexts;
 }
 
+function hasParentDirectorySegments(pathValue: string): boolean {
+  const normalized = stripWrappingQuotes(pathValue).trim().replace(/\\/g, '/');
+  if (!normalized) {
+    return false;
+  }
+
+  return normalized === '..'
+    || normalized.startsWith('../')
+    || normalized.includes('/../')
+    || normalized.endsWith('/..');
+}
+
+function shouldAttemptSkillRelativeCommandResolution(command: string): boolean {
+  const normalized = stripWrappingQuotes(command).trim().replace(/\\/g, '/');
+  if (!normalized || normalized === '.' || normalized === '..') {
+    return false;
+  }
+
+  if (
+    normalized === '~'
+    || normalized.startsWith('~/')
+    || normalized.startsWith('/')
+    || normalized.startsWith('\\')
+    || /^[A-Za-z]:\//.test(normalized)
+    || hasParentDirectorySegments(normalized)
+  ) {
+    return false;
+  }
+
+  return normalized.startsWith('./')
+    || normalized.startsWith('.agents/skills/')
+    || normalized.startsWith('skills/')
+    || normalized.includes('/');
+}
+
+function shouldValidateRelativeCommandPath(command: string): boolean {
+  const normalized = stripWrappingQuotes(command).trim().replace(/\\/g, '/');
+  if (!normalized) {
+    return false;
+  }
+
+  if (
+    normalized === '~'
+    || normalized.startsWith('~/')
+    || normalized.startsWith('/')
+    || normalized.startsWith('\\')
+    || /^[A-Za-z]:\//.test(normalized)
+  ) {
+    return false;
+  }
+
+  return normalized.startsWith('./')
+    || normalized.startsWith('../')
+    || normalized.includes('/');
+}
+
 export function resolveSkillScriptParameters(
   parameters: string[],
   runtimeSkillsRoot?: string,
@@ -1202,6 +1259,59 @@ export function resolveSkillScriptParameters(
     return param;
   });
   return { resolvedParameters, skillRoots: [...skillRootsSet] };
+}
+
+export function resolveSkillScriptCommand(
+  command: string,
+  runtimeSkillsRoot?: string,
+  options?: {
+    allowBareScriptsResolution?: boolean;
+    activeSkillContexts?: Array<{ skillId?: string; skillRoot?: string }>;
+  },
+): { resolvedCommand: string; skillRoots: string[] } {
+  const normalizedCommand = stripWrappingQuotes(command).trim();
+  if (!shouldAttemptSkillRelativeCommandResolution(normalizedCommand)) {
+    return { resolvedCommand: normalizedCommand, skillRoots: [] };
+  }
+
+  const { resolvedParameters, skillRoots } = resolveSkillScriptParameters(
+    [normalizedCommand],
+    runtimeSkillsRoot,
+    options,
+  );
+
+  return {
+    resolvedCommand: resolvedParameters[0] || normalizedCommand,
+    skillRoots,
+  };
+}
+
+function validateResolvedCommandExecutableScope(
+  resolvedCommand: string,
+  originalCommand: string,
+  trustedWorkingDirectory: string,
+  additionalTrustedRoots?: string[],
+): { valid: true } | { valid: false; error: string } {
+  if (!shouldValidateRelativeCommandPath(originalCommand)) {
+    return { valid: true };
+  }
+
+  const resolvedPath = resolveTokenPath(stripWrappingQuotes(resolvedCommand), trustedWorkingDirectory);
+  if (isPathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory)) {
+    return { valid: true };
+  }
+
+  const trustedRoots = Array.isArray(additionalTrustedRoots)
+    ? additionalTrustedRoots.map((root) => String(root || '').trim()).filter(Boolean)
+    : [];
+  if (trustedRoots.some((root) => isPathWithinTrustedDirectory(resolvedPath, root))) {
+    return { valid: true };
+  }
+
+  return {
+    valid: false,
+    error: `Working directory mismatch: command "${stripWrappingQuotes(originalCommand)}" is outside world working directory "${trustedWorkingDirectory}".`
+  };
 }
 
 export function stopShellCommandsForChat(worldId: string, chatId: string): { killed: number } {
@@ -2342,19 +2452,26 @@ export function createShellCmdToolDefinition() {
       const chatIdRaw = typeof context?.chatId === 'string' ? context.chatId.trim() : '';
       const chatId = chatIdRaw || undefined;
 
-      // Resolve skill-relative script paths (e.g. <skill-id>/scripts/foo.py) to absolute paths
+      // Resolve skill-relative script paths in both the executable and argv.
       const resolvedDirectory = resolveTrustedShellWorkingDirectory(context);
       const runtimeSkillsRoot = join(resolveDirectory(resolvedDirectory), '.agents', 'skills');
       const activeSkillContexts = getActiveSkillContexts(context?.messages, chatId);
       const skillOriginatedRequest = activeSkillContexts.length > 0;
-      const { resolvedParameters: validParameters, skillRoots } = resolveSkillScriptParameters(
+      const skillResolutionOptions = {
+        allowBareScriptsResolution: skillOriginatedRequest,
+        activeSkillContexts,
+      };
+      const { resolvedCommand: validCommand, skillRoots: commandSkillRoots } = resolveSkillScriptCommand(
+        command,
+        runtimeSkillsRoot,
+        skillResolutionOptions,
+      );
+      const { resolvedParameters: validParameters, skillRoots: parameterSkillRoots } = resolveSkillScriptParameters(
         rawParameters,
         runtimeSkillsRoot,
-        {
-          allowBareScriptsResolution: skillOriginatedRequest,
-          activeSkillContexts,
-        },
+        skillResolutionOptions,
       );
+      const skillRoots = [...new Set([...commandSkillRoots, ...parameterSkillRoots])];
 
       // Extract world and messageId from context for streaming
       const world = context?.world;
@@ -2379,8 +2496,17 @@ export function createShellCmdToolDefinition() {
       if (!directoryValidation.valid) {
         throw new Error(directoryValidation.error);
       }
-      const scopeValidation = validateShellCommandScope(
+      const commandScopeValidation = validateResolvedCommandExecutableScope(
+        validCommand,
         command,
+        resolvedDirectory,
+        skillRoots,
+      );
+      if (!commandScopeValidation.valid) {
+        throw new Error(commandScopeValidation.error);
+      }
+      const scopeValidation = validateShellCommandScope(
+        validCommand,
         validParameters,
         resolvedDirectory,
         skillRoots
@@ -2389,7 +2515,7 @@ export function createShellCmdToolDefinition() {
         throw new Error(scopeValidation.error);
       }
 
-      const riskAssessment = classifyShellCommandRisk(command, validParameters);
+      const riskAssessment = classifyShellCommandRisk(validCommand, validParameters);
       if (riskAssessment.tier === 'block') {
         throw new Error(
           `Blocked dangerous operation: ${riskAssessment.reason}. This shell command cannot be executed.`
@@ -2401,7 +2527,7 @@ export function createShellCmdToolDefinition() {
       if (toolPermission === 'read') {
         const blockedResult: CommandExecutionResult = {
           executionId: 'permission-blocked',
-          command,
+          command: validCommand,
           parameters: validParameters,
           exitCode: null,
           signal: null,
@@ -2432,7 +2558,7 @@ export function createShellCmdToolDefinition() {
         const askApproval = await requestShellCommandRiskApproval({
           world,
           chatId: chatId ?? null,
-          command,
+          command: validCommand,
           parameters: validParameters,
           resolvedDirectory,
           risk: { tier: 'hitl_required', reason: 'world permission level is "ask"', tags: ['ask-permission'] },
@@ -2457,7 +2583,7 @@ export function createShellCmdToolDefinition() {
         const approval = await requestShellCommandRiskApproval({
           world,
           chatId: chatId ?? null,
-          command,
+          command: validCommand,
           parameters: validParameters,
           resolvedDirectory,
           risk: riskAssessment,
@@ -2513,7 +2639,7 @@ export function createShellCmdToolDefinition() {
       };
 
       // Execute command with tool-streaming callbacks when world context is available
-      const result = await executeShellCommand(command, validParameters, resolvedDirectory, {
+      const result = await executeShellCommand(validCommand, validParameters, resolvedDirectory, {
         timeout,
         abortSignal,
         worldId: world?.id,

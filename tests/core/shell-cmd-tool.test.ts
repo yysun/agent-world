@@ -10,6 +10,8 @@
  * - Output accumulation
  * 
  * Changes:
+ * - 2026-03-22: Added targeted coverage for both shell executable resolution paths: direct calls stay cwd-relative, skill-originated script calls resolve to `<skill_root>`.
+ * - 2026-03-22: Added regression coverage for skill-relative executable resolution (`./scripts/...`) from active load_skill contexts.
  * - 2026-03-12: Added black-box durable approval prompt/resolution coverage for denied shell risk approvals.
  * - 2026-03-05: Added deterministic timeout outcome coverage (timed_out) for long-running commands and quick-success non-timeout assertions.
  * - 2026-02-28: Added skill-aware script path resolution tests for `resolveSkillScriptParameters`.
@@ -40,6 +42,7 @@ import {
   validateShellDirectoryRequest,
   validateShellCommandScope,
   classifyShellCommandRisk,
+  resolveSkillScriptCommand,
   resolveSkillScriptParameters
 } from '../../core/shell-cmd-tool.js';
 import { serializeToolExecutionEnvelope } from '../../core/tool-execution-envelope.js';
@@ -185,6 +188,89 @@ describe('shell command durable approvals', () => {
 });
 
 describe('shell command skill-context resolution', () => {
+  test('keeps direct tool-call relative executables resolved against cwd', async () => {
+    const tool = createShellCmdToolDefinition();
+    const result = await tool.execute(
+      {
+        command: './echo',
+        parameters: ['cwd executable'],
+        output_detail: 'full',
+      },
+      undefined,
+      undefined,
+      {
+        world: {
+          id: 'world-1',
+          variables: 'working_directory=/bin',
+        },
+        workingDirectory: '/bin',
+        chatId: 'chat-1',
+        agentName: 'test-agent',
+        messages: [],
+      },
+    );
+
+    expect(String(result)).toContain('**Command:** `./echo "cwd executable"`');
+    expect(String(result)).toContain('cwd executable');
+    expect(String(result)).not.toContain('/Users/esun/.agents/skills');
+  });
+
+  test('resolves ./scripts executables from the active load_skill skill_root', async () => {
+    mockedGetSkillSourcePath.mockImplementation((skillId) =>
+      skillId === 'search'
+        ? '/bin/SKILL.md'
+        : undefined
+    );
+    mockedExistsSync.mockImplementation((candidatePath) =>
+      String(candidatePath) === '/bin/echo'
+    );
+
+    const tool = createShellCmdToolDefinition();
+    const result = await tool.execute(
+      {
+        command: './echo',
+        parameters: ['skill-root executable'],
+        output_detail: 'full',
+      },
+      undefined,
+      undefined,
+      {
+        world: {
+          id: 'world-1',
+          variables: 'working_directory=/Users/esun/Documents/Projects/test-agent-world',
+        },
+        workingDirectory: '/Users/esun/Documents/Projects/test-agent-world',
+        chatId: 'chat-1',
+        agentName: 'test-agent',
+        messages: [
+          {
+            role: 'tool',
+            chatId: 'chat-1',
+            content: serializeToolExecutionEnvelope({
+              __type: 'tool_execution_envelope',
+              version: 1,
+              tool: 'load_skill',
+              status: 'completed',
+              preview: null,
+              result: [
+                '<skill_context id="search">',
+                '  <instructions>Use the local search executable.</instructions>',
+                '  <active_resources>',
+                '    <skill_root>/bin</skill_root>',
+                '  </active_resources>',
+                '</skill_context>',
+              ].join('\n'),
+            }),
+          },
+        ],
+      },
+    );
+
+    expect(String(result)).toContain('**Command:** `/bin/echo "skill-root executable"`');
+    expect(String(result)).toContain('skill-root executable');
+    expect(String(result)).not.toContain('`./echo skill-root executable`');
+  });
+
   test('resolves bare script paths from the active load_skill skill_root', async () => {
     mockedGetSkillSourcePath.mockImplementation((skillId) =>
       skillId === 'music-to-svg'
@@ -900,6 +986,51 @@ describe('resolveSkillScriptParameters', () => {
     expect(resolvedParameters[1]).toBe('--file');
     expect(resolvedParameters[2]).toBe('input_music.xml');
     expect(skillRoots).toEqual(['/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg']);
+  });
+});
+
+describe('resolveSkillScriptCommand', () => {
+  beforeEach(() => {
+    mockedGetSkillSourcePath.mockReset();
+    mockedGetSkills.mockReset();
+    mockedExistsSync.mockReset();
+    mockedReaddirSync.mockReset();
+    mockedGetSkills.mockReturnValue([]);
+    mockedExistsSync.mockReturnValue(false);
+    mockedReaddirSync.mockReturnValue([] as any);
+  });
+
+  test('should resolve ./scripts executable from active skill root', () => {
+    const activeSkillContexts = [{ skillId: 'search', skillRoot: '/Users/tester/.agents/skills/search' }];
+    mockedExistsSync.mockImplementation((p) =>
+      String(p) === '/Users/tester/.agents/skills/search/scripts/search.sh'
+    );
+
+    const { resolvedCommand, skillRoots } = resolveSkillScriptCommand(
+      './scripts/search.sh',
+      '/Users/tester/.agents/skills',
+      {
+        allowBareScriptsResolution: true,
+        activeSkillContexts,
+      },
+    );
+
+    expect(resolvedCommand).toBe('/Users/tester/.agents/skills/search/scripts/search.sh');
+    expect(skillRoots).toEqual(['/Users/tester/.agents/skills/search']);
+  });
+
+  test('should leave direct relative executables unchanged without skill context', () => {
+    const { resolvedCommand, skillRoots } = resolveSkillScriptCommand(
+      './scripts/search.sh',
+      '/Users/tester/.agents/skills',
+      {
+        allowBareScriptsResolution: false,
+        activeSkillContexts: [],
+      },
+    );
+
+    expect(resolvedCommand).toBe('./scripts/search.sh');
+    expect(skillRoots).toEqual([]);
   });
 });
 
