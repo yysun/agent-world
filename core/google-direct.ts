@@ -19,6 +19,7 @@
  * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
+ * - 2026-03-22: Added Gemini-safe tool schema normalization so Google function declarations strip unsupported `additionalProperties` fields before API calls.
  * - 2026-03-13: Switched world reasoning overrides to `default`/`none`, where `default` omits thinking config and `none` uses a zero-budget explicit override.
  * - 2026-03-12: Reclassified streaming abort logs as info-level cancellations to suppress expected stop/edit noise.
  * - 2026-02-15: Stopped replaying historical tool call/response parts as Google `functionCall`/`functionResponse` in conversation conversion to avoid 400 errors requiring `thought_signature` on replayed calls.
@@ -78,6 +79,22 @@ function isAbortLikeError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
   return normalized.includes('abort') || normalized.includes('canceled') || normalized.includes('cancelled');
+}
+
+function stripUnsupportedGoogleSchemaFields(schema: unknown): unknown {
+  if (Array.isArray(schema)) {
+    return schema.map((item) => stripUnsupportedGoogleSchemaFields(item));
+  }
+
+  if (!schema || typeof schema !== 'object') {
+    return schema;
+  }
+
+  const normalizedEntries = Object.entries(schema as Record<string, unknown>)
+    .filter(([key]) => key !== 'additionalProperties')
+    .map(([key, value]) => [key, stripUnsupportedGoogleSchemaFields(value)]);
+
+  return Object.fromEntries(normalizedEntries);
 }
 
 /**
@@ -161,7 +178,9 @@ function convertMCPToolsToGoogle(mcpTools: Record<string, any>): any[] {
   return Object.entries(mcpTools).map(([name, tool]) => ({
     name,
     description: tool.description || '',
-    parameters: tool.inputSchema || { type: 'object', properties: {} },
+    parameters: stripUnsupportedGoogleSchemaFields(
+      tool.parameters || tool.inputSchema || { type: 'object', properties: {} }
+    ),
   }));
 }
 

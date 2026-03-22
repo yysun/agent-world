@@ -34,6 +34,8 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-03-22: Updated Agent Skills prompt guidance to emphasize `load_skill` as a
+ *   continue-the-task step instead of requiring a separate post-load acknowledgment.
  * - 2026-03-19: Agent-skills prompt assembly now refreshes skill roots from the active world's `variables` so project-scope skills track `working_directory`.
  * - 2026-03-06: Suppressed empty Agent Skills injections and grouped runtime prompt sections behind a structural separator.
  * - 2026-03-01: Added explicit `grep` prompt guidance to require `includePattern` (no leading dot) and reduce tool-parameter validation failures.
@@ -319,13 +321,16 @@ async function buildAgentSkillsPromptSection(worldVariablesText = ''): Promise<s
 
   const lines: string[] = [
     '## Agent Skills',
-    'You have access to a library of agent skills. Find skill by:',
+    'You have access to a library of agent skills.',
     '1. Review the <available_skills> list below.',
-    "2. If the user's request matches a skill's purpose, use the load_skill with skill id tool",
-    '   to fetch the full instructions.',
+    "2. If a user request would benefit from a skill's specialized instructions, execution guidance, or reference material, call `load_skill` to fetch the full instructions.",
     '3. IMPORTANT: Pass `skill_id` as the exact string from `<id>` (character-for-character).',
-    '   Do not rewrite case, hyphens, or underscores (e.g., keep `skill-creator` exactly as shown).',
-    '4. After successfully loading a skill, ALWAYS acknowledge it to the user: state which skill was loaded and briefly describe what you will do before taking any action.',
+    '   Do not rewrite case, hyphens, or underscores.',
+    '4. Skill IDs in <available_skills> are not tool names. Never call a tool whose name is just the skill ID unless that tool is separately provided in the tool list.',
+    '5. To use a skill, always call `load_skill` with `{ "skill_id": "<id>" }`. Do not call `<id>` directly as a tool.',
+    '6. After loading a skill, continue the user task using the loaded instructions.',
+    '   Do not stop just to announce that the skill was loaded unless that is relevant to the user request.',
+    '7. Only use other tools, such as `shell_cmd`, when the loaded skill or the task actually requires them.',
     '',
     '<available_skills>',
   ];

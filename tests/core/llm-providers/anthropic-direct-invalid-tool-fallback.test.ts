@@ -71,4 +71,78 @@ describe('anthropic direct invalid tool fallback', () => {
     expect(Array.isArray(response.tool_calls)).toBe(true);
     expect(response.tool_calls).toHaveLength(0);
   });
+
+  it('uses tool.parameters when building Anthropic input_schema', async () => {
+    const create = vi.fn().mockResolvedValue({
+      content: [
+        { type: 'text', text: 'ok' },
+      ],
+      usage: {
+        input_tokens: 1,
+        output_tokens: 1,
+      },
+    });
+
+    const fakeClient = {
+      messages: {
+        create,
+      },
+    } as any;
+
+    const agent: Agent = {
+      id: 'a1',
+      name: 'a1',
+      type: 'assistant',
+      provider: 'anthropic' as any,
+      model: 'claude-3-5-sonnet-latest',
+      llmCallCount: 0,
+      memory: [],
+    };
+
+    const world: World = {
+      id: 'w1',
+      name: 'w1',
+      turnLimit: 5,
+      createdAt: new Date(),
+      lastUpdated: new Date(),
+      totalAgents: 0,
+      totalMessages: 0,
+      eventEmitter: {} as any,
+      agents: new Map(),
+      chats: new Map(),
+    };
+
+    await generateAnthropicResponse(
+      fakeClient,
+      'claude-3-5-sonnet-latest',
+      [{ role: 'user', content: 'load a skill' }],
+      agent,
+      {
+        load_skill: {
+          description: 'Load a skill',
+          parameters: {
+            type: 'object',
+            properties: {
+              skill_id: { type: 'string' },
+            },
+            required: ['skill_id'],
+          },
+        },
+      },
+      world
+    );
+
+    const requestParams = create.mock.calls[0]?.[0];
+    expect(requestParams).toEqual(expect.objectContaining({
+      tools: [expect.objectContaining({
+        name: 'load_skill',
+        input_schema: expect.objectContaining({
+          properties: expect.objectContaining({
+            skill_id: { type: 'string' },
+          }),
+          required: ['skill_id'],
+        }),
+      })],
+    }));
+  });
 });

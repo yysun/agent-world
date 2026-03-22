@@ -7,6 +7,7 @@
  * Key Features:
  * - Preserves plain text streaming when the SDK exposes chunk text without `content.parts`.
  * - Routes thought-marked Gemini parts into the separate reasoning channel.
+ * - Confirms Google function declarations strip unsupported nested `additionalProperties` fields.
  *
  * Implementation Notes:
  * - Uses a fully mocked Google client and async iterable stream.
@@ -221,5 +222,149 @@ describe('google direct streaming', () => {
         thinkingConfig: expect.anything(),
       }),
     }));
+  });
+
+  it('uses tool.parameters when building Google function declarations', async () => {
+    const response = {
+      response: {
+        text: () => 'ok',
+        candidates: [{ content: { parts: [{ text: 'ok' }] } }],
+      },
+    };
+    const generateContent = vi.fn().mockResolvedValue(response);
+    const getGenerativeModel = vi.fn().mockReturnValue({ generateContent });
+    const fakeClient = { getGenerativeModel } as any;
+
+    await generateGoogleResponse(
+      fakeClient,
+      'gemini-2.5-flash',
+      [{ role: 'user', content: 'load a skill' } as ChatMessage],
+      createAgent(),
+      {
+        load_skill: {
+          description: 'Load a skill',
+          parameters: {
+            type: 'object',
+            properties: {
+              skill_id: { type: 'string' },
+            },
+            required: ['skill_id'],
+          },
+        },
+      },
+      createWorld('')
+    );
+
+    expect(getGenerativeModel).toHaveBeenCalledWith(expect.objectContaining({
+      tools: [{
+        functionDeclarations: [expect.objectContaining({
+          name: 'load_skill',
+          parameters: expect.objectContaining({
+            properties: expect.objectContaining({
+              skill_id: { type: 'string' },
+            }),
+            required: ['skill_id'],
+          }),
+        })],
+      }],
+    }));
+  });
+
+  it('strips nested additionalProperties from Google function declaration schemas', async () => {
+    const response = {
+      response: {
+        text: () => 'ok',
+        candidates: [{ content: { parts: [{ text: 'ok' }] } }],
+      },
+    };
+    const generateContent = vi.fn().mockResolvedValue(response);
+    const getGenerativeModel = vi.fn().mockReturnValue({ generateContent });
+    const fakeClient = { getGenerativeModel } as any;
+
+    await generateGoogleResponse(
+      fakeClient,
+      'gemini-2.5-flash',
+      [{ role: 'user', content: 'run a tool' } as ChatMessage],
+      createAgent(),
+      {
+        shell_cmd: {
+          description: 'Run shell command',
+          parameters: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              command: { type: 'string' },
+              options: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  env: {
+                    anyOf: [
+                      {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          additionalProperties: false,
+                          properties: {
+                            name: { type: 'string' },
+                            value: {
+                              type: 'object',
+                              additionalProperties: false,
+                              properties: {
+                                nested: { type: 'string' },
+                              },
+                            },
+                          },
+                        },
+                      },
+                      { type: 'null' },
+                    ],
+                  },
+                },
+              },
+            },
+            required: ['command'],
+          },
+        },
+      },
+      createWorld('')
+    );
+
+    const modelConfig = getGenerativeModel.mock.calls[0]?.[0];
+    const parameters = modelConfig?.tools?.[0]?.functionDeclarations?.[0]?.parameters;
+
+    expect(parameters).toEqual({
+      type: 'object',
+      properties: {
+        command: { type: 'string' },
+        options: {
+          type: 'object',
+          properties: {
+            env: {
+              anyOf: [
+                {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      name: { type: 'string' },
+                      value: {
+                        type: 'object',
+                        properties: {
+                          nested: { type: 'string' },
+                        },
+                      },
+                    },
+                  },
+                },
+                { type: 'null' },
+              ],
+            },
+          },
+        },
+      },
+      required: ['command'],
+    });
+    expect(JSON.stringify(parameters)).not.toContain('additionalProperties');
   });
 });

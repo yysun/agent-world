@@ -140,7 +140,7 @@ function convertMCPToolsToAnthropic(mcpTools: Record<string, any>): Anthropic.Me
   return Object.entries(mcpTools).map(([name, tool]) => ({
     name,
     description: tool.description || '',
-    input_schema: tool.inputSchema || { type: 'object', properties: {} },
+    input_schema: tool.parameters || tool.inputSchema || { type: 'object', properties: {} },
   }));
 }
 
