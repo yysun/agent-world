@@ -108,6 +108,9 @@ export function isTrueAgentResponseMessage(message) {
   if (role !== 'assistant') {
     return false;
   }
+  if (message?.syntheticDisplayOnly === true) {
+    return false;
+  }
 
   const sender = String(message?.sender || '').trim().toLowerCase();
   if (sender === 'system' || sender === 'tool') {

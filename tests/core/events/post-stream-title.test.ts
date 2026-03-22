@@ -15,6 +15,8 @@
  * - Exercises subscriber behavior through emitted `world` events.
  *
  * Recent Changes:
+ * - 2026-03-21: Added regression coverage that persisted display-only synthetic assistant
+ *   tool-result rows are excluded from title-generation prompt assembly.
  * - 2026-03-13: Asserted title-generation LLM calls strip world `reasoning_effort` overrides before request dispatch.
  * - 2026-03-10: Added standalone runtime coverage so `startWorld(...)` still binds idle-based
  *   title generation when event persistence is unavailable.
@@ -311,6 +313,48 @@ describe('World activity-based title update', () => {
     expect(promptContent).not.toContain('Very old user message');
     expect(promptContent).toContain('-assistant: Recent turn 29');
     expect(scopedChatId).toBe('chat-1');
+  });
+
+  test('excludes persisted synthetic assistant tool-result rows from title prompt context', async () => {
+    mocks.getMemory.mockImplementationOnce(async () => [
+      { role: 'user', content: 'Make sheet music SVG', messageId: 'u1' },
+      {
+        role: 'assistant',
+        content: JSON.stringify({
+          __type: 'synthetic_assistant_tool_result',
+          version: 1,
+          displayOnly: true,
+          tool: 'shell_cmd',
+          tool_call_id: 'call-svg',
+          source_message_id: 'tool-msg-1',
+          content: '![score](data:image/svg+xml;base64,AAAA)',
+        }),
+        messageId: 'a-synth-1',
+      },
+      { role: 'assistant', content: 'I rendered the notation preview below.', messageId: 'a2' },
+    ]);
+
+    world.eventEmitter.emit('world', {
+      type: 'idle',
+      pendingOperations: 0,
+      activityId: 1,
+      timestamp: new Date().toISOString(),
+      activeSources: [],
+      queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
+      messageId: 'test-msg-id',
+      chatId: 'chat-1'
+    });
+
+    await new Promise(r => setTimeout(r, 10));
+
+    const latestGenerateCall = mocks.generateAgentResponse.mock.calls.at(-1) as any[] | undefined;
+    const promptMessages = latestGenerateCall?.[2] as Array<{ content?: string }> | undefined;
+    const promptContent = promptMessages?.[0]?.content ?? '';
+
+    expect(promptContent).toContain('-user: Make sheet music SVG');
+    expect(promptContent).toContain('-assistant: I rendered the notation preview below.');
+    expect(promptContent).not.toContain('synthetic_assistant_tool_result');
+    expect(promptContent).not.toContain('data:image/svg+xml;base64');
   });
 
   test('forces reasoning_effort=none in title-generation LLM calls to prevent empty responses from thinking models', async () => {

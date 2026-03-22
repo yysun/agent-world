@@ -554,6 +554,11 @@ function renderToolResultBody(message: Message, textContent: string) {
   return renderToolPreview(message) || renderPlainToolOutputText(textContent);
 }
 
+function hasSyntheticToolResultMessages(message: Message): boolean {
+  return Array.isArray((message as any)?.syntheticToolResultMessages)
+    && (message as any).syntheticToolResultMessages.length > 0;
+}
+
 function truncateToolOutput(text: string): { content: string; wasTruncated: boolean } {
   const MAX_LENGTH = 50000;
   if (text.length > MAX_LENGTH) {
@@ -641,6 +646,7 @@ function renderToolSummaryHeader(message: Message, isExpanded: boolean) {
 function renderMergedToolCard(message: Message) {
   const combinedToolResults: Message[] = (message as any).combinedToolResults || [];
   const combinedToolStreams: Message[] = (message as any).combinedToolStreams || [];
+  const hideToolResultBody = hasSyntheticToolResultMessages(message);
   const toolCalls: any[] = Array.isArray((message as any).tool_calls) ? (message as any).tool_calls : [];
   const requestText = getToolRequestText(message);
   const isExpanded = (message as any).isToolOutputExpanded || false;
@@ -695,7 +701,7 @@ function renderMergedToolCard(message: Message) {
                     <pre className="tool-output-text">{args}</pre>
                   </div>
                 )}
-                {truncatedResult !== null && (
+                {truncatedResult !== null && !hideToolResultBody && (
                   <div className="tool-output-content tool-output-stdout">
                     {renderToolResultBody(result as Message, truncatedResult)}
                     {wasTruncated && (
@@ -703,6 +709,11 @@ function renderMergedToolCard(message: Message) {
                         ⚠️ Output truncated (exceeded 50,000 characters)
                       </div>
                     )}
+                  </div>
+                )}
+                {truncatedResult !== null && hideToolResultBody && !args && (
+                  <div className="tool-output-content">
+                    <span className="tool-waiting">Result shown below as assistant content.</span>
                   </div>
                 )}
                 {truncatedResult === null && truncatedLiveOutput !== null && (
@@ -763,6 +774,7 @@ export function renderMessageContent(message: Message) {
   }
 
   if (isToolResultMessage(message)) {
+    const hideToolResultBody = hasSyntheticToolResultMessages(message);
     const { content, wasTruncated } = truncateToolOutput(getToolDisplayText(message));
     const isExpanded = message.isToolOutputExpanded || false;
     const outputClass = isStderrOutput(message) ? 'tool-output-stderr' : 'tool-output-stdout';
@@ -772,8 +784,10 @@ export function renderMessageContent(message: Message) {
         {renderToolSummaryHeader(message, isExpanded)}
         {isExpanded && (
           <div className={`tool-output-content ${outputClass}`}>
-            {renderToolResultBody(message, content)}
-            {wasTruncated && (
+            {!hideToolResultBody ? renderToolResultBody(message, content) : (
+              <span className="tool-waiting">Result shown below as assistant content.</span>
+            )}
+            {!hideToolResultBody && wasTruncated && (
               <div className="tool-output-truncated">
                 ⚠️ Output truncated (exceeded 50,000 characters)
               </div>

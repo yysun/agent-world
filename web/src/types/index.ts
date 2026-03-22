@@ -178,6 +178,13 @@ export interface Message {
 
   // Phase 5: Collapsible tool output
   isToolOutputExpanded?: boolean;
+  syntheticDisplayOnly?: boolean;
+  syntheticToolResult?: {
+    tool: string;
+    toolCallId?: string;
+    sourceMessageId?: string;
+    content: string;
+  };
 
 }
 

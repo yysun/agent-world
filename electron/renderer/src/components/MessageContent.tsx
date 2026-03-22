@@ -634,6 +634,10 @@ function renderToolResultBody(message, textContent) {
   return renderToolPreview(message) || renderPlainToolOutputText(textContent);
 }
 
+function hasSyntheticToolResultMessages(message) {
+  return Array.isArray(message?.syntheticToolResultMessages) && message.syntheticToolResultMessages.length > 0;
+}
+
 function isDirectToolResultMessage(message) {
   const role = String(message?.role || '').trim().toLowerCase();
   const type = String(message?.type || '').trim().toLowerCase();
@@ -663,6 +667,7 @@ function renderToolResultRows(resultRows) {
         const title = resolveToolResultName(result, index);
         const resultText = getToolDisplayText(result);
         const { content: visibleContent, wasTruncated } = truncateToolOutput(resultText);
+        const hideToolResultBody = hasSyntheticToolResultMessages(result);
 
         return (
           <div className="flex flex-col gap-2" key={toolCallId || `tool-result-${index}`}>
@@ -670,9 +675,11 @@ function renderToolResultRows(resultRows) {
               <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{title}</div>
             ) : null}
             <div className="rounded-md border border-border/40 bg-background/30 px-2 py-2">
-              {renderToolResultBody(result, visibleContent || '(no output)')}
+              {!hideToolResultBody
+                ? renderToolResultBody(result, visibleContent || '(no output)')
+                : <span className="text-xs text-muted-foreground">Result shown below as assistant content.</span>}
             </div>
-            {wasTruncated ? (
+            {!hideToolResultBody && wasTruncated ? (
               <div className="border-t border-border/40 pt-2 text-[11px] text-amber-400">
                 ⚠️ Output truncated (exceeded 50,000 characters)
               </div>
@@ -686,6 +693,7 @@ function renderToolResultRows(resultRows) {
 
 function renderStructuredToolBody(message) {
   const combinedToolResults = Array.isArray(message?.combinedToolResults) ? message.combinedToolResults : [];
+  const hideToolResultBody = hasSyntheticToolResultMessages(message);
   const hasCombinedResult = combinedToolResults.length > 0;
   const hasLinkedToolRequest = Array.isArray(message?.linkedToolRequest?.tool_calls)
     && message.linkedToolRequest.tool_calls.length > 0;
@@ -702,8 +710,10 @@ function renderStructuredToolBody(message) {
     const { content: visibleContent, wasTruncated } = truncateToolOutput(getToolDisplayText(message));
     return (
       <>
-        {renderToolResultBody(message, visibleContent || (message?.isToolStreaming ? '(waiting for output...)' : '(no output)'))}
-        {wasTruncated ? (
+        {!hideToolResultBody
+          ? renderToolResultBody(message, visibleContent || (message?.isToolStreaming ? '(waiting for output...)' : '(no output)'))
+          : <span className="text-xs text-muted-foreground">Result shown below as assistant content.</span>}
+        {!hideToolResultBody && wasTruncated ? (
           <div className="border-t border-border/40 pt-2 text-[11px] text-amber-400">
             ⚠️ Output truncated (exceeded 50,000 characters)
           </div>
@@ -733,7 +743,9 @@ function renderStructuredToolBody(message) {
       </div>
       <div className="flex flex-col gap-1">
         <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Result</div>
-        {renderToolResultRows(resultRows)}
+        {!hideToolResultBody
+          ? renderToolResultRows(resultRows)
+          : <div className="text-xs text-muted-foreground">Result shown below as assistant content.</div>}
       </div>
     </div>
   );
@@ -788,6 +800,14 @@ export function getReasoningHeaderLabel(message, elapsedMs) {
 }
 
 export function getToolBodyContent(message) {
+  if (hasSyntheticToolResultMessages(message)) {
+    const requestText = buildToolRequestContent(message);
+    if (requestText) {
+      return `Args:\n${requestText}\n\nResult:\nResult shown below as assistant content.`;
+    }
+    return 'Result shown below as assistant content.';
+  }
+
   const combinedToolResults = Array.isArray(message?.combinedToolResults) ? message.combinedToolResults : [];
   const hasCombinedResult = combinedToolResults.length > 0;
   const isToolCallRequest = isToolCallRequestMessage(message);

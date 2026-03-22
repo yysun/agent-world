@@ -134,7 +134,7 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
 
     // Check if this is a tool result message
     // Parse enhanced format first to detect tool messages
-    const { message: parsedMessage, targetAgentId } = parseMessageContent(routedMessageEvent.content, 'user');
+    const { message: parsedMessage, targetAgentId, syntheticDisplayOnly } = parseMessageContent(routedMessageEvent.content, 'user');
 
     loggerAgent.debug('[subscribeAgentToMessages] After parseMessageContent', {
       agentId: agent.id,
@@ -143,6 +143,14 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
       toolCallId: parsedMessage.role === 'tool' ? parsedMessage.tool_call_id : undefined,
       isToolMessage: parsedMessage.role === 'tool' && !!parsedMessage.tool_call_id
     });
+
+    if (syntheticDisplayOnly === true || (routedMessageEvent as any)?.syntheticDisplayOnly === true) {
+      loggerAgent.debug('[subscribeAgentToMessages] Skipping synthetic display-only assistant message', {
+        agentId: agent.id,
+        messageId: routedMessageEvent.messageId,
+      });
+      return;
+    }
 
     // Tool messages are now handled by subscribeAgentToToolMessages (separate handler)
     // This keeps the message handler focused on user/assistant/system messages only

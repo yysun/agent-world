@@ -1952,8 +1952,26 @@ function buildShellToolPreviewEnvelope(
     ...(options.toolCallId ? { tool_call_id: options.toolCallId } : {}),
     status: result.exitCode === 0 && !result.error && !result.timedOut && !result.canceled ? 'completed' : 'failed',
     preview: previewItems,
+    ...(getShellToolDisplayContent(result, options.outputFormat) ? { display_content: getShellToolDisplayContent(result, options.outputFormat) } : {}),
     result: resultContent,
   };
+}
+
+function getShellToolDisplayContent(
+  result: CommandExecutionResult,
+  outputFormat: ShellToolReturnOptions['outputFormat'],
+): string {
+  if (outputFormat === 'json') {
+    return '';
+  }
+
+  const stdout = String(result.stdout || '').trim();
+  if (!stdout) {
+    return '';
+  }
+
+  const hasMarkdownImage = /!\[[^\]]*]\([^)]+\)/.test(stdout);
+  return containsImageDataUri(stdout) || hasMarkdownImage ? stdout : '';
 }
 
 function formatShellToolReturnContent(

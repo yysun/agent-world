@@ -24,6 +24,7 @@ export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   createdAt?: Date;
+  syntheticDisplayOnly?: boolean;
   // Tool call support for function calling
   tool_calls?: Array<{
     id: string;
@@ -536,6 +537,7 @@ export interface WorldMessageEvent {
   chatId?: string | null;
   replyToMessageId?: string;  // For message threading
   role?: string;
+  syntheticDisplayOnly?: boolean;
   tool_calls?: Array<{
     id: string;
     type?: string;

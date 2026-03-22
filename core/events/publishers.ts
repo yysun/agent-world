@@ -76,7 +76,7 @@ function buildWorldMessageEvent(params: {
   replyToMessageId?: string;
 }): WorldMessageEvent {
   const normalizedSender = normalizeSender(params.sender);
-  const { message: parsedMsg } = parseMessageContent(params.content, 'user');
+  const { message: parsedMsg, syntheticDisplayOnly } = parseMessageContent(params.content, 'user');
 
   let role: string | undefined;
   if (parsedMsg.role === 'tool') {
@@ -101,6 +101,7 @@ function buildWorldMessageEvent(params: {
     ...(typeof (parsedMsg as any).tool_call_id === 'string' && (parsedMsg as any).tool_call_id.trim()
       ? { tool_call_id: (parsedMsg as any).tool_call_id.trim() }
       : {}),
+    ...(syntheticDisplayOnly ? { syntheticDisplayOnly: true } : {}),
   };
 }
 

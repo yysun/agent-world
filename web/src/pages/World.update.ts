@@ -174,9 +174,47 @@ function parseLiveToolResultEnvelope(content: unknown): {
   }
 }
 
+function parseSyntheticAssistantToolResult(content: unknown): {
+  content: string;
+  role: 'assistant';
+  tool: string;
+  toolCallId?: string;
+  sourceMessageId?: string;
+} | null {
+  if (typeof content !== 'string') {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(content);
+    if (!parsed || typeof parsed !== 'object' || parsed.__type !== 'synthetic_assistant_tool_result') {
+      return null;
+    }
+
+    const tool = typeof parsed.tool === 'string' ? parsed.tool.trim() : '';
+    const body = typeof parsed.content === 'string' ? parsed.content : '';
+    if (!tool || !body) {
+      return null;
+    }
+
+    return {
+      content: body,
+      role: 'assistant',
+      tool,
+      ...(typeof parsed.tool_call_id === 'string' ? { toolCallId: parsed.tool_call_id } : {}),
+      ...(typeof parsed.source_message_id === 'string' ? { sourceMessageId: parsed.source_message_id } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
 // Utility functions for message processing
 const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): Message => {
   const sender = toKebabCase(memoryItem.sender || agentName);
+  const syntheticToolResult = parseSyntheticAssistantToolResult(memoryItem.content);
+  const resolvedContent = syntheticToolResult?.content ?? memoryItem.content ?? '';
+  const resolvedRole = syntheticToolResult?.role ?? memoryItem.role;
 
   // Determine message type based on role field from backend
   // role='user' → incoming message (type='user') - saved to agent memory
@@ -186,13 +224,13 @@ const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): M
   let messageType: string;
   if (sender === 'human' || sender === 'user') {
     messageType = 'user';
-  } else if (memoryItem.role === 'tool') {
+  } else if (resolvedRole === 'tool') {
     // Tool result message
     messageType = 'tool';
-  } else if (memoryItem.role === 'user') {
+  } else if (resolvedRole === 'user') {
     // Agent message saved to memory as incoming (not a reply)
     messageType = 'user';
-  } else if (memoryItem.role === 'assistant') {
+  } else if (resolvedRole === 'assistant') {
     // Agent's own reply
     messageType = 'agent';
   } else {
@@ -237,7 +275,7 @@ const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): M
   return {
     id: `msg-${Date.now() + Math.random()}`,
     sender: displaySender,
-    text: memoryItem.content || '',
+    text: resolvedContent,
     messageId: memoryItem.messageId,
     chatId: memoryItem.chatId,
     replyToMessageId: memoryItem.replyToMessageId, // Preserve parent message reference
@@ -245,10 +283,12 @@ const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): M
     type: messageType,
     fromAgentId: displayFromAgentId,
     ownerAgentId: toKebabCase(agentName), // Track which agent's memory this came from
-    role: memoryItem.role, // Preserve role for sorting
+    role: resolvedRole, // Preserve role for sorting
     // Pass through tool_calls and tool_call_id for frontend formatting
     tool_calls: memoryData.tool_calls || memoryData.toolCalls,
     tool_call_id: memoryData.tool_call_id || memoryData.toolCallId,
+    syntheticDisplayOnly: Boolean(syntheticToolResult),
+    syntheticToolResult: syntheticToolResult || undefined,
   } as Message;
 };
 
@@ -1109,6 +1149,7 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
 
   const senderName = messageData.sender;
   const liveToolResult = parseLiveToolResultEnvelope(messageData.content);
+  const syntheticToolResult = parseSyntheticAssistantToolResult(messageData.content);
 
   // Find and update agent message count
   let fromAgentId: string | undefined;
@@ -1123,10 +1164,10 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
     }
   }
 
-  const messageText = liveToolResult?.content ?? messageData.content ?? messageData.message ?? '';
+  const messageText = syntheticToolResult?.content ?? liveToolResult?.content ?? messageData.content ?? messageData.message ?? '';
 
   // Determine message type based on role field
-  const effectiveRole = liveToolResult?.role ?? messageData.role;
+  const effectiveRole = syntheticToolResult?.role ?? liveToolResult?.role ?? messageData.role;
   let messageType: string;
   if (effectiveRole === 'tool') {
     messageType = 'tool';
@@ -1151,6 +1192,8 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
     role: effectiveRole, // Preserve role for filtering
     tool_calls: messageData.tool_calls,
     tool_call_id: liveToolResult?.toolCallId ?? messageData.tool_call_id,
+    syntheticDisplayOnly: Boolean(syntheticToolResult) || messageData.syntheticDisplayOnly === true,
+    syntheticToolResult: syntheticToolResult || messageData.syntheticToolResult,
   };
 
   const existingMessages = state.messages || [];

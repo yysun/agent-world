@@ -66,6 +66,7 @@ export interface ToolExecutionEnvelope<T = unknown> {
   tool_call_id?: string;
   status?: string;
   preview: ToolPreview | ToolPreview[] | null;
+  display_content?: string;
   result: T;
 }
 

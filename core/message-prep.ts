@@ -30,6 +30,7 @@
  */
 
 import { createCategoryLogger } from './logger.js';
+import { parseSyntheticAssistantToolResultContent } from './synthetic-assistant-tool-result.js';
 import { parseToolExecutionEnvelopeContent, stringifyToolExecutionResult } from './tool-execution-envelope.js';
 import type { ChatMessage } from './types.js';
 
@@ -91,7 +92,7 @@ function logPrep(level: 'debug' | 'info' | 'warn' | 'error', message: string, da
 export function parseMessageContent(
   content: string,
   defaultRole: 'user' | 'assistant' = 'user'
-): { message: ChatMessage; targetAgentId?: string } {
+): { message: ChatMessage; targetAgentId?: string; syntheticDisplayOnly?: boolean } {
   try {
     const parsed = JSON.parse(content);
 
@@ -125,6 +126,20 @@ export function parseMessageContent(
         },
         targetAgentId: parsed.agentId // Extract agentId for @mention routing
       };
+    }
+
+    if (parsed.__type === 'synthetic_assistant_tool_result') {
+      const synthetic = parseSyntheticAssistantToolResultContent(content);
+      if (synthetic) {
+        return {
+          message: {
+            role: 'assistant',
+            content: synthetic.content,
+            createdAt: new Date(),
+          },
+          syntheticDisplayOnly: true,
+        };
+      }
     }
 
     // JSON without __type marker - treat as regular text
@@ -165,6 +180,13 @@ export function filterClientSideMessages(messages: ChatMessage[]): ChatMessage[]
 
   // First pass: Filter assistant messages and track tool_call_ids
   for (const message of messages) {
+    if (message.role === 'assistant' && parseSyntheticAssistantToolResultContent(message.content || '')) {
+      logPrep('debug', 'Dropping display-only synthetic assistant tool-result message from LLM history', {
+        messageId: (message as any)?.messageId,
+      });
+      continue;
+    }
+
     // Deep clone to avoid mutating original
     const clonedMessage: ChatMessage = {
       ...message,

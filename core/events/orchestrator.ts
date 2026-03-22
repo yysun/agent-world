@@ -110,6 +110,7 @@ import {
   serializeToolExecutionEnvelope,
   stringifyToolExecutionResult,
 } from '../tool-execution-envelope.js';
+import { createSyntheticAssistantToolResultMessage } from '../synthetic-assistant-tool-result.js';
 import {
   beginChatMessageProcessing,
   isMessageProcessingCanceledError,
@@ -299,6 +300,39 @@ function formatPersistedToolErrorContent(options: {
   }
 
   return message;
+}
+
+function appendSyntheticAssistantToolResult(options: {
+  world: World;
+  agent: Agent;
+  serializedToolResult: string;
+  sourceMessageId: string;
+  replyToMessageId?: string;
+  chatId: string;
+}): void {
+  const syntheticMessage = createSyntheticAssistantToolResultMessage({
+    serializedToolResult: options.serializedToolResult,
+    sourceMessageId: options.sourceMessageId,
+    replyToMessageId: options.replyToMessageId,
+    sender: options.agent.id,
+    chatId: options.chatId,
+    agentId: options.agent.id,
+  });
+  if (!syntheticMessage) {
+    return;
+  }
+
+  options.agent.memory.push(syntheticMessage);
+  options.world.eventEmitter.emit('message', {
+    content: syntheticMessage.content,
+    sender: syntheticMessage.sender || options.agent.id,
+    timestamp: syntheticMessage.createdAt || new Date(),
+    messageId: syntheticMessage.messageId!,
+    chatId: syntheticMessage.chatId,
+    replyToMessageId: syntheticMessage.replyToMessageId,
+    role: 'assistant',
+    syntheticDisplayOnly: true,
+  });
 }
 
 /**
@@ -954,6 +988,14 @@ export async function processAgentMessage(
           };
 
           agent.memory.push(toolResultMessage);
+          appendSyntheticAssistantToolResult({
+            world,
+            agent,
+            serializedToolResult,
+            sourceMessageId: toolResultMessage.messageId!,
+            replyToMessageId: toolResultMessage.replyToMessageId,
+            chatId: targetChatId,
+          });
 
           // Update tool call status to complete
           const toolCallMsg = agent.memory.find(
@@ -1090,6 +1132,14 @@ export async function processAgentMessage(
           };
 
           agent.memory.push(errorMessage);
+          appendSyntheticAssistantToolResult({
+            world,
+            agent,
+            serializedToolResult: errorMessage.content,
+            sourceMessageId: errorMessage.messageId!,
+            replyToMessageId: errorMessage.replyToMessageId,
+            chatId: targetChatId,
+          });
 
           const toolCallMsg = agent.memory.find(
             m => m.role === 'assistant' && (m as any).tool_calls?.some((tc: any) => tc.id === toolCall.id)

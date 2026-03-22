@@ -72,6 +72,43 @@ function deriveEventRole(event: any): string {
   return 'assistant';
 }
 
+function parseSyntheticAssistantToolResultContent(content: unknown): {
+  tool: string;
+  toolCallId?: string;
+  sourceMessageId?: string;
+  content: string;
+} | null {
+  if (typeof content !== 'string') {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(content);
+    if (!parsed || typeof parsed !== 'object' || parsed.__type !== 'synthetic_assistant_tool_result') {
+      return null;
+    }
+
+    const tool = typeof parsed.tool === 'string' ? parsed.tool.trim() : '';
+    const body = typeof parsed.content === 'string' ? parsed.content : '';
+    if (!tool || !body) {
+      return null;
+    }
+
+    return {
+      tool,
+      ...(typeof parsed.tool_call_id === 'string' && parsed.tool_call_id.trim()
+        ? { toolCallId: parsed.tool_call_id.trim() }
+        : {}),
+      ...(typeof parsed.source_message_id === 'string' && parsed.source_message_id.trim()
+        ? { sourceMessageId: parsed.source_message_id.trim() }
+        : {}),
+      content: body,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function toIsoTimestamp(value: Date | string | unknown): string {
   if (value instanceof Date) return value.toISOString();
   if (typeof value === 'string' && value.length > 0) return value;
@@ -165,11 +202,14 @@ export function serializeMessage(message: any): Record<string, unknown> | null {
       ? String(message.createdAt)
       : new Date().toISOString();
 
+  const syntheticToolResult = parseSyntheticAssistantToolResultContent(message?.content);
+  const content = syntheticToolResult?.content || message.content || '';
+
   return {
     id: messageId,
     role: message.role,
     sender: message.sender || message.agentId || 'unknown',
-    content: message.content || '',
+    content,
     createdAt: timestamp,
     chatId: message.chatId || null,
     messageId,
@@ -180,6 +220,8 @@ export function serializeMessage(message: any): Record<string, unknown> | null {
     toolCallStatus: message?.toolCallStatus && typeof message.toolCallStatus === 'object'
       ? message.toolCallStatus
       : undefined,
+    syntheticDisplayOnly: Boolean(syntheticToolResult),
+    syntheticToolResult: syntheticToolResult || undefined,
   };
 }
 
@@ -227,6 +269,8 @@ export function serializeRealtimeMessageEvent(
 
   const createdAt = toIsoTimestamp(event?.timestamp);
   const resolvedChatId = event?.chatId || null;
+  const syntheticToolResult = parseSyntheticAssistantToolResultContent(event?.content);
+  const content = syntheticToolResult?.content || event?.content || '';
 
   return {
     type: 'message',
@@ -236,7 +280,7 @@ export function serializeRealtimeMessageEvent(
       id: messageId,
       role: deriveEventRole(event),
       sender: event?.sender || 'unknown',
-      content: event?.content || '',
+      content,
       createdAt,
       chatId: resolvedChatId,
       messageId,
@@ -246,6 +290,8 @@ export function serializeRealtimeMessageEvent(
       toolCallStatus: event?.toolCallStatus && typeof event.toolCallStatus === 'object'
         ? event.toolCallStatus
         : undefined,
+      syntheticDisplayOnly: event?.syntheticDisplayOnly === true || Boolean(syntheticToolResult),
+      syntheticToolResult: syntheticToolResult || undefined,
     }
   };
 }

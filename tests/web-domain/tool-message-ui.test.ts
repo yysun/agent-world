@@ -32,10 +32,27 @@ import {
   getToolToggleLabel,
   isToolRenderableMessage,
   isReasoningExpanded,
+  renderMessageContent,
 } from '../../web/src/domain/message-content';
 import { getMessageSurfaceShadowClass, getNarratedToolCallBorderClass, getToolRowContainerClass } from '../../web/src/components/world-chat';
 import { worldUpdateHandlers } from '../../web/src/pages/World.update';
 import { SenderType } from '../../web/src/utils/sender-type';
+
+function collectRenderedText(root: any): string {
+  if (typeof root === 'string') {
+    return root;
+  }
+  if (!root || typeof root !== 'object') {
+    return '';
+  }
+
+  const children = root?.props?.children;
+  if (Array.isArray(children)) {
+    return children.map((child) => collectRenderedText(child)).join('');
+  }
+
+  return collectRenderedText(children);
+}
 
 describe('web/tool message ui', () => {
   it('classifies merged assistant tool-call rows as tool renderable and plain assistant replies as normal chat', () => {
@@ -254,6 +271,60 @@ describe('web/tool message ui', () => {
       text: 'Regular assistant reply',
       createdAt: new Date(),
     } as any)).toBe('');
+  });
+
+  it('suppresses adopted tool result body content when a linked synthetic assistant result is present', () => {
+    const rendered = renderMessageContent({
+      id: 'tool-row-1',
+      type: 'assistant',
+      role: 'assistant',
+      sender: 'agent-a',
+      text: 'Calling tool: shell_cmd',
+      createdAt: new Date(),
+      isToolOutputExpanded: true,
+      tool_calls: [{
+        id: 'call-synth',
+        type: 'function',
+        function: {
+          name: 'shell_cmd',
+          arguments: '{"command":"cat","parameters":["score.md"]}',
+        },
+      }],
+      combinedToolResults: [{
+        id: 'tool-result-1',
+        type: 'tool',
+        role: 'tool',
+        sender: 'agent-a',
+        tool_call_id: 'call-synth',
+        text: JSON.stringify({
+          __type: 'tool_execution_envelope',
+          version: 1,
+          tool: 'shell_cmd',
+          tool_call_id: 'call-synth',
+          status: 'completed',
+          display_content: '![score](data:image/svg+xml;base64,AAAA)',
+          preview: {
+            kind: 'markdown',
+            renderer: 'markdown',
+            text: '![score](data:image/svg+xml;base64,AAAA)',
+          },
+          result: 'status: success\nstdout_redacted: true',
+        }),
+        createdAt: new Date(),
+      }],
+      syntheticToolResultMessages: [{
+        id: 'assistant-synth',
+        type: 'agent',
+        role: 'assistant',
+        sender: 'agent-a',
+        text: '![score](data:image/svg+xml;base64,AAAA)',
+        createdAt: new Date(),
+      }],
+    } as any);
+
+    const renderedText = `${collectRenderedText(rendered)} ${JSON.stringify(rendered)}`;
+    expect(rendered).toBeTruthy();
+    expect(renderedText).not.toContain('stdout_redacted: true');
   });
 
   it('toggles tool output expansion only for the targeted message', () => {

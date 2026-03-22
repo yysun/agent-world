@@ -9,6 +9,8 @@
  * - Uses pure helper tests with no Electron runtime dependencies.
  *
  * Recent Changes:
+ * - 2026-03-21: Added regression coverage for persisted synthetic assistant tool-result rows so
+ *   Electron renderer transport receives plain assistant markdown plus display-only linkage metadata.
  * - 2026-03-10: Added regression coverage ensuring activity event serialization includes chatId in nested object (E-Rule 4).
  * - 2026-03-06: Added regression coverage ensuring realtime log serialization preserves world/chat scope for transcript routing.
  * - 2026-02-28: Added regression coverage ensuring realtime tool message serialization preserves `tool_call_id` for renderer-side request/result linking.
@@ -19,6 +21,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   normalizeSessionMessages,
+  serializeMessage,
   serializeChatsWithMessageCounts,
   serializeRealtimeLogEvent,
   serializeRealtimeMessageEvent,
@@ -114,6 +117,70 @@ describe('serializeRealtimeMessageEvent', () => {
         role: 'tool',
         tool_call_id: 'call_shell_1',
       }
+    });
+  });
+
+  it('unwraps synthetic assistant tool-result payloads into plain assistant content', () => {
+    const payload = serializeRealtimeMessageEvent('world-1', {
+      messageId: 'msg-synth-1',
+      role: 'assistant',
+      sender: 'agent-a',
+      content: JSON.stringify({
+        __type: 'synthetic_assistant_tool_result',
+        version: 1,
+        displayOnly: true,
+        tool: 'shell_cmd',
+        tool_call_id: 'call-svg',
+        source_message_id: 'msg-tool-1',
+        content: '![score](data:image/svg+xml;base64,AAAA)',
+      }),
+      chatId: 'chat-1',
+      timestamp: '2026-03-21T12:00:00.000Z'
+    });
+
+    expect(payload).toMatchObject({
+      message: {
+        role: 'assistant',
+        content: '![score](data:image/svg+xml;base64,AAAA)',
+        syntheticDisplayOnly: true,
+        syntheticToolResult: {
+          tool: 'shell_cmd',
+          toolCallId: 'call-svg',
+          sourceMessageId: 'msg-tool-1',
+        },
+      }
+    });
+  });
+});
+
+describe('serializeMessage', () => {
+  it('unwraps persisted synthetic assistant tool-result rows for session hydration', () => {
+    const serialized = serializeMessage({
+      messageId: 'msg-synth-2',
+      role: 'assistant',
+      sender: 'agent-a',
+      chatId: 'chat-1',
+      createdAt: '2026-03-21T12:01:00.000Z',
+      content: JSON.stringify({
+        __type: 'synthetic_assistant_tool_result',
+        version: 1,
+        displayOnly: true,
+        tool: 'web_fetch',
+        tool_call_id: 'call-fetch-1',
+        source_message_id: 'msg-tool-fetch-1',
+        content: '# Heading',
+      }),
+    });
+
+    expect(serialized).toMatchObject({
+      role: 'assistant',
+      content: '# Heading',
+      syntheticDisplayOnly: true,
+      syntheticToolResult: {
+        tool: 'web_fetch',
+        toolCallId: 'call-fetch-1',
+        sourceMessageId: 'msg-tool-fetch-1',
+      },
     });
   });
 });

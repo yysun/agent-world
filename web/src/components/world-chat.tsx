@@ -228,6 +228,7 @@ export function getNarratedToolCallBorderClass(message: Message): string {
 
 export function isBranchableAgentMessage(message: Message): boolean {
   if (!message || message.role !== 'assistant') return false;
+  if ((message as any)?.syntheticDisplayOnly === true) return false;
 
   const sender = String(message.sender || '').toLowerCase().trim();
   if (!sender || sender === 'system' || sender === 'tool' || sender === 'human' || sender === 'user') {

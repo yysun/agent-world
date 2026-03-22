@@ -583,6 +583,45 @@ describe('shell_cmd integration with worlds', () => {
     expect(result).not.toContain('data:image/svg+xml;base64,AAAABBBBCCCCDDDDEEEE');
   });
 
+  test('should persist full markdown SVG display content while keeping llm preview redacted', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    const tempRoot = await mkdtemp(path.join(tmpdir(), 'shell-display-markdown-'));
+    const payloadFile = path.join(tempRoot, 'payload.md');
+    const markdown = '![score](data:image/svg+xml;base64,AAAABBBBCCCCDDDDEEEE)';
+    await writeFile(payloadFile, markdown, 'utf8');
+
+    let result = '';
+    try {
+      result = await shellCmdTool.execute(
+        {
+          command: 'cat',
+          parameters: ['payload.md']
+        },
+        undefined,
+        undefined,
+        {
+          llmResultMode: 'minimal',
+          persistToolEnvelope: true,
+          toolCallId: 'call-svg-display',
+          world: {
+            id: worldId(),
+            variables: `working_directory=${tempRoot}`
+          },
+          workingDirectory: tempRoot,
+        }
+      );
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+
+    const parsed = JSON.parse(result);
+    expect(parsed.result).toContain('stdout_redacted: true');
+    expect(parsed.result).not.toContain(markdown);
+    expect(parsed.display_content).toBe(markdown);
+  });
+
   test('should stream stdout via SSE without persisting a synthetic assistant stdout message', async () => {
     const tools = await getMCPToolsForWorld(worldId());
     const shellCmdTool = tools.shell_cmd;

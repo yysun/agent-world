@@ -432,6 +432,9 @@ function formatWebFetchReturnContent(options: {
       ...(options.toolCallId ? { tool_call_id: options.toolCallId } : {}),
       status: 'completed',
       preview: buildWebFetchPreview(options.result),
+      ...(String(options.result.markdown || '').trim()
+        ? { display_content: String(options.result.markdown).trim() }
+        : {}),
       result: resultContent,
     });
   }

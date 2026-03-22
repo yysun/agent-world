@@ -7,6 +7,8 @@
  * - Uses OpenAI-style ChatMessage fixtures with mixed assistant/tool sequences
  * - Asserts ordering and orphaned tool-message cleanup after filtering
  * Recent changes:
+ * - 2026-03-21: Added coverage that persisted display-only synthetic assistant tool-result rows
+ *   are excluded from future LLM history assembly.
  * - 2026-03-06: Added coverage that persisted tool execution envelopes are unwrapped to their canonical `result` before LLM continuation.
  * - 2026-02-11: Added regression coverage for unresolved assistant tool_calls cleanup.
  * - Removed legacy decision-flow wording and switched to neutral client tool names
@@ -88,6 +90,26 @@ describe('parseMessageContent', () => {
 
       expect(result.role).toBe('assistant');
       expect(result.content).toBe(content);
+    });
+  });
+
+  describe('Enhanced String Protocol - Synthetic Assistant Tool Results', () => {
+    it('parses display-only synthetic assistant tool-result payloads as assistant messages', () => {
+      const content = JSON.stringify({
+        __type: 'synthetic_assistant_tool_result',
+        version: 1,
+        displayOnly: true,
+        tool: 'shell_cmd',
+        tool_call_id: 'call-svg',
+        source_message_id: 'msg-tool-1',
+        content: '![score](data:image/svg+xml;base64,AAAA)',
+      });
+
+      const { message: result, syntheticDisplayOnly } = parseMessageContent(content, 'assistant');
+
+      expect(result.role).toBe('assistant');
+      expect(result.content).toBe('![score](data:image/svg+xml;base64,AAAA)');
+      expect(syntheticDisplayOnly).toBe(true);
     });
   });
 
@@ -519,5 +541,50 @@ describe('filterClientSideMessages', () => {
     expect(result).toHaveLength(2);
     expect(result[1].role).toBe('tool');
     expect(result[1].content).toBe('status: success\nexit_code: 0');
+  });
+
+  it('should exclude persisted display-only synthetic assistant tool-result rows from llm preparation', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'Render the score.' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { id: 'call-svg', type: 'function', function: { name: 'shell_cmd', arguments: '{"command":"cat","parameters":["score.md"]}' } }
+        ]
+      },
+      {
+        role: 'tool',
+        tool_call_id: 'call-svg',
+        content: JSON.stringify({
+          __type: 'tool_execution_envelope',
+          version: 1,
+          tool: 'shell_cmd',
+          tool_call_id: 'call-svg',
+          status: 'completed',
+          display_content: '![score](data:image/svg+xml;base64,AAAA)',
+          preview: { kind: 'markdown', renderer: 'markdown', text: '![score](data:image/svg+xml;base64,AAAA)' },
+          result: 'status: success\nstdout_redacted: true',
+        }),
+      },
+      {
+        role: 'assistant',
+        content: JSON.stringify({
+          __type: 'synthetic_assistant_tool_result',
+          version: 1,
+          displayOnly: true,
+          tool: 'shell_cmd',
+          tool_call_id: 'call-svg',
+          source_message_id: 'msg-tool-call-svg',
+          content: '![score](data:image/svg+xml;base64,AAAA)',
+        }),
+      },
+    ];
+
+    const result = filterClientSideMessages(messages);
+
+    expect(result).toHaveLength(3);
+    expect(result.map((message) => message.role)).toEqual(['user', 'assistant', 'tool']);
+    expect(result.some((message) => message.role === 'assistant' && message.content.includes('data:image/svg+xml'))).toBe(false);
   });
 });

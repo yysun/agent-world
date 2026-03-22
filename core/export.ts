@@ -91,7 +91,9 @@
  * - Tracks which agents received each message via agentIds/agentNames arrays
  * - Consistent with frontend deduplication logic for predictable behavior
  *
-  * Changes:
+ * Changes:
+ * - 2026-03-21: Unwrapped persisted display-only synthetic assistant tool-result rows before
+ *   Markdown export so exports show assistant-visible content instead of raw marker JSON.
  * - 2025-11-11: Removed all content truncation - show full message and event content without cutting off
  * - 2025-11-01: Fixed export to show events for current chat only (not all chats)
  * - 2025-11-01: Reformatted events to show: time ● [type] agent: event-name content
@@ -102,6 +104,7 @@
 // Core module imports
 import { createCategoryLogger } from './logger.js';
 import { getWorld, listAgents, getAgent, getMemory } from './managers.js';
+import { parseSyntheticAssistantToolResultContent } from './synthetic-assistant-tool-result.js';
 
 // Type imports
 import type { World, Agent, Chat, AgentMessage } from './types.js';
@@ -138,6 +141,22 @@ function formatSenderLabel(message: AgentMessage, agentsMap: Map<string, Agent>)
     return raw.toLowerCase() === 'human' ? 'HUMAN' : raw;
   }
   return undefined;
+}
+
+function getRenderableMessageContent(message: AgentMessage): string {
+  const rawContent = typeof message.content === 'string' ? message.content : '';
+  if (!rawContent) {
+    return '';
+  }
+
+  if (message.role === 'assistant') {
+    const synthetic = parseSyntheticAssistantToolResultContent(rawContent);
+    if (synthetic) {
+      return synthetic.content;
+    }
+  }
+
+  return rawContent;
 }
 
 /**
@@ -463,9 +482,10 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
             hasToolCalls = true;
           }
           // Fallback: check content string for tool call JSON objects
-          else if (typeof message.content === 'string') {
+          else {
+            const renderableContent = getRenderableMessageContent(message);
             // Simple heuristic: if content is mostly JSON objects (starts with { and has multiple lines of {})
-            const lines = message.content.trim().split('\n');
+            const lines = renderableContent.trim().split('\n');
             const jsonLines = lines.filter(line => line.trim().startsWith('{') && line.trim().endsWith('}'));
 
             if (jsonLines.length > 0 && jsonLines.length === lines.length) {
@@ -504,9 +524,11 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
           }
 
           // Show regular content with proper markdown code block formatting
-          if (!hasToolCalls && typeof message.content === 'string' && message.content.trim()) {
+          const renderableContent = getRenderableMessageContent(message);
+
+          if (!hasToolCalls && renderableContent.trim()) {
             // Preserve original content with newlines intact and escape any backticks
-            let formattedContent = message.content.trim();
+            let formattedContent = renderableContent.trim();
 
             // Convert literal \n to actual newlines for better readability
             formattedContent = formattedContent.replace(/\\n/g, '\n');
@@ -521,9 +543,9 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
               .join('\n');
 
             markdown += `${index + 1}. **${label}**:\n    \`\`\`\n${indentedContent}\n    \`\`\`\n\n`;
-          } else if (hasToolCalls && typeof message.content === 'string' && message.content.trim() && message.role === 'tool') {
+          } else if (hasToolCalls && renderableContent.trim() && message.role === 'tool') {
             // For tool messages with content, show full content in code block
-            let toolContent = message.content.trim();
+            let toolContent = renderableContent.trim();
 
             // Convert literal \n to actual newlines and escape backticks
             toolContent = toolContent.replace(/\\n/g, '\n').replace(/```/g, '\\`\\`\\`');
@@ -718,7 +740,7 @@ export async function exportChatToMarkdown(worldId: string, chatId: string): Pro
     if (message.chatId && message.chatId !== chatId) {
       markdown += `- **Chat ID:** ${message.chatId}\n`;
     }
-    markdown += `\n${message.content}\n\n`;
+    markdown += `\n${getRenderableMessageContent(message)}\n\n`;
   });
 
   return markdown;

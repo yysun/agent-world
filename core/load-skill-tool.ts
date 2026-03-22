@@ -57,6 +57,7 @@ import {
   createTextToolPreview,
   createUrlToolPreview,
   guessMediaTypeFromPath,
+  normalizeToolPreviewItems,
   parseToolExecutionEnvelopeContent,
   serializeToolExecutionEnvelope,
   type ToolPreview,
@@ -1425,6 +1426,9 @@ function wrapLoadSkillToolResult(options: {
   preview: ToolPreview | ToolPreview[] | null;
   toolCallId?: string;
 }): string {
+  const displayContent = normalizeToolPreviewItems(options.preview)
+    .find((preview) => (preview.kind === 'markdown' || preview.kind === 'text') && typeof (preview as any).text === 'string');
+
   return serializeToolExecutionEnvelope({
     __type: 'tool_execution_envelope',
     version: 1,
@@ -1432,6 +1436,9 @@ function wrapLoadSkillToolResult(options: {
     ...(options.toolCallId ? { tool_call_id: options.toolCallId } : {}),
     status: /<error>/i.test(options.result) ? 'failed' : 'completed',
     preview: options.preview,
+    ...(displayContent && typeof (displayContent as any).text === 'string' && String((displayContent as any).text).trim()
+      ? { display_content: String((displayContent as any).text).trim() }
+      : {}),
     result: options.result,
   });
 }

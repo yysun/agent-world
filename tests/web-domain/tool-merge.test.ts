@@ -16,6 +16,8 @@
  * - Pure function; no I/O, no DOM.
  *
  * Recent Changes:
+ * - 2026-03-21: Added regression coverage for persisted synthetic assistant tool-result rows
+ *   linking back to merged tool requests without being consumed from the transcript.
  * - 2026-03-13: Added regression coverage for narrated assistant tool-call rows inheriting linked result rows without becoming compact tool cards.
  * - 2026-03-13: Added regression coverage for standalone/restored tool rows inheriting tool metadata from their linked assistant request.
  * - 2026-03-11: Added regression coverage for assistant streaming request rows that only carry legacy
@@ -281,5 +283,53 @@ describe('buildCombinedRenderableMessages', () => {
     expect(result).toHaveLength(1);
     expect((result[0] as any).toolName).toBe('shell_cmd');
     expect((result[0] as any).combinedToolResults).toHaveLength(1);
+  });
+
+  it('attaches persisted synthetic assistant tool results to the merged request row without hiding the synthetic row itself', () => {
+    const req = makeRequest({
+      id: 'req-synth',
+      messageId: 'msg-req-synth',
+      text: 'Calling tool: shell_cmd',
+      tool_calls: [{ id: 'call-synth', type: 'function', function: { name: 'shell_cmd', arguments: '{"command":"cat","parameters":["score.md"]}' } }],
+    });
+    const res = makeResult({
+      id: 'res-synth',
+      messageId: 'msg-res-synth',
+      tool_call_id: 'call-synth',
+      content: JSON.stringify({
+        __type: 'tool_execution_envelope',
+        version: 1,
+        tool: 'shell_cmd',
+        tool_call_id: 'call-synth',
+        status: 'completed',
+        display_content: '![score](data:image/svg+xml;base64,AAAA)',
+        preview: { kind: 'markdown', renderer: 'markdown', text: '![score](data:image/svg+xml;base64,AAAA)' },
+        result: 'status: success\nstdout_redacted: true',
+      }),
+    });
+    const synthetic = {
+      id: 'assistant-synth',
+      type: 'agent',
+      sender: 'agent',
+      text: '![score](data:image/svg+xml;base64,AAAA)',
+      createdAt: new Date(),
+      role: 'assistant',
+      messageId: 'msg-assistant-synth',
+      syntheticDisplayOnly: true,
+      syntheticToolResult: {
+        tool: 'shell_cmd',
+        toolCallId: 'call-synth',
+        sourceMessageId: 'msg-res-synth',
+        content: '![score](data:image/svg+xml;base64,AAAA)',
+      },
+    } as unknown as Message;
+
+    const result = buildCombinedRenderableMessages([req, res, synthetic]);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].id).toBe('req-synth');
+    expect(Array.isArray((result[0] as any).syntheticToolResultMessages)).toBe(true);
+    expect((result[0] as any).syntheticToolResultMessages).toHaveLength(1);
+    expect((result[1] as any).syntheticDisplayOnly).toBe(true);
   });
 });

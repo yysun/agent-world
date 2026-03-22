@@ -14,6 +14,8 @@
  * - Uses deterministic in-memory message fixtures.
  *
  * Summary of Recent Changes:
+ * - 2026-03-21: Added regression coverage for linked synthetic assistant tool-result rows so
+ *   Electron tool bodies suppress adopted result previews once the assistant display row exists.
  * - 2026-03-21: Added regression coverage for guarded inline HTML preview URLs so Electron iframe previews use the asset-rewriting route for HTML bundles.
  * - 2026-03-21: Added regression coverage for plain-text tool execution failures so Electron failed-status dots remain red.
  * - 2026-03-21: Added regression coverage for structured envelope preview rendering on standalone and combined Electron tool transcript surfaces.
@@ -363,6 +365,46 @@ describe('message content tool status label', () => {
     expect(content).toContain('Result:');
     expect(content).toContain('preview only');
     expect(content).not.toContain('tool_execution_envelope');
+  });
+
+  it('suppresses adopted tool result body content when a linked synthetic assistant result is present', () => {
+    const content = getToolBodyContent({
+      role: 'assistant',
+      content: 'Calling tool: shell_cmd',
+      tool_calls: [{
+        id: 'call_shell_synth',
+        type: 'function',
+        function: {
+          name: 'shell_cmd',
+          arguments: '{"command":"cat","parameters":["score.md"]}',
+        }
+      }],
+      combinedToolResults: [{
+        role: 'tool',
+        tool_call_id: 'call_shell_synth',
+        content: JSON.stringify({
+          __type: 'tool_execution_envelope',
+          version: 1,
+          tool: 'shell_cmd',
+          tool_call_id: 'call_shell_synth',
+          status: 'completed',
+          display_content: '![score](data:image/svg+xml;base64,AAAA)',
+          preview: {
+            kind: 'markdown',
+            renderer: 'markdown',
+            text: '![score](data:image/svg+xml;base64,AAAA)',
+          },
+          result: 'status: success\nstdout_redacted: true',
+        }),
+      }],
+      syntheticToolResultMessages: [{
+        role: 'assistant',
+        content: '![score](data:image/svg+xml;base64,AAAA)',
+      }],
+    });
+
+    expect(content).toContain('Result shown below as assistant content.');
+    expect(content).not.toContain('stdout_redacted: true');
   });
 
   it('renders structured artifact previews for standalone enveloped tool rows', () => {

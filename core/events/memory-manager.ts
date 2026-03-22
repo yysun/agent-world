@@ -20,6 +20,8 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-03-21: Excluded persisted display-only synthetic assistant tool-result rows from
+ *   chat-title prompt assembly so title generation never re-ingests display payloads.
  * - 2026-03-13: Phase 1 — weak fallback no-commit: `pickFallbackTitle` returns '' instead of 'Chat Session' so low-signal LLM results keep the chat in 'New Chat' state.
  * - 2026-03-13: Phase 2 — bounded context window: `buildTitlePromptMessages` collects up to TITLE_CONTEXT_WINDOW_TURNS*2 recent user+assistant messages for richer prompt context.
  * - 2026-03-13: Improved title-gen prompt: explicit @mention semantics, no-verbatim-copy rule, noun-phrase Title Case format constraint.
@@ -92,6 +94,10 @@ import {
   serializeToolExecutionEnvelope,
   stringifyToolExecutionResult,
 } from '../tool-execution-envelope.js';
+import {
+  createSyntheticAssistantToolResultMessage,
+  parseSyntheticAssistantToolResultContent,
+} from '../synthetic-assistant-tool-result.js';
 import {
   isMessageProcessingCanceledError,
   throwIfMessageProcessingStopped
@@ -303,6 +309,7 @@ function buildTitlePromptMessages(messages: AgentMessage[], content: string): Ti
     const role = String(message.role || '').toLowerCase();
     if (role !== 'user' && role !== 'assistant') continue;
     if (typeof message.content !== 'string') continue;
+    if (role === 'assistant' && parseSyntheticAssistantToolResultContent(message.content)) continue;
     const normalized = normalizeTitlePromptText(message.content);
     if (!normalized) continue;
     window.unshift({
@@ -479,6 +486,39 @@ function formatToolErrorContent(options: {
   return message;
 }
 
+function appendSyntheticAssistantToolResult(options: {
+  world: World;
+  agent: Agent;
+  serializedToolResult: string;
+  sourceMessageId: string;
+  replyToMessageId?: string;
+  chatId: string;
+}): void {
+  const syntheticMessage = createSyntheticAssistantToolResultMessage({
+    serializedToolResult: options.serializedToolResult,
+    sourceMessageId: options.sourceMessageId,
+    replyToMessageId: options.replyToMessageId,
+    sender: options.agent.id,
+    chatId: options.chatId,
+    agentId: options.agent.id,
+  });
+  if (!syntheticMessage) {
+    return;
+  }
+
+  options.agent.memory.push(syntheticMessage);
+  options.world.eventEmitter.emit('message', {
+    content: syntheticMessage.content,
+    sender: syntheticMessage.sender || options.agent.id,
+    timestamp: syntheticMessage.createdAt || new Date(),
+    messageId: syntheticMessage.messageId!,
+    chatId: syntheticMessage.chatId,
+    replyToMessageId: syntheticMessage.replyToMessageId,
+    role: 'assistant',
+    syntheticDisplayOnly: true,
+  });
+}
+
 function resolveShellContinuationLlmResultMode(options: {
   toolName: string;
 }): 'minimal' | 'verbose' {
@@ -627,6 +667,14 @@ export async function resumePendingToolCallsForChat(
         agentId: agent.id,
       };
       agent.memory.push(toolErrorMessage);
+      appendSyntheticAssistantToolResult({
+        world,
+        agent,
+        serializedToolResult: toolErrorMessage.content,
+        sourceMessageId: toolErrorMessage.messageId!,
+        replyToMessageId: toolErrorMessage.replyToMessageId,
+        chatId,
+      });
       if (assistantMessage.toolCallStatus) {
         assistantMessage.toolCallStatus[toolCall.id] = { complete: true, result: errorContent };
       }
@@ -672,6 +720,14 @@ export async function resumePendingToolCallsForChat(
         agentId: agent.id,
       };
       agent.memory.push(toolErrorMessage);
+      appendSyntheticAssistantToolResult({
+        world,
+        agent,
+        serializedToolResult: toolErrorMessage.content,
+        sourceMessageId: toolErrorMessage.messageId!,
+        replyToMessageId: toolErrorMessage.replyToMessageId,
+        chatId,
+      });
       if (assistantMessage.toolCallStatus) {
         assistantMessage.toolCallStatus[toolCall.id] = { complete: true, result: errorContent };
       }
@@ -763,6 +819,14 @@ export async function resumePendingToolCallsForChat(
         agentId: agent.id,
       };
       agent.memory.push(toolResultMessage);
+      appendSyntheticAssistantToolResult({
+        world,
+        agent,
+        serializedToolResult,
+        sourceMessageId: toolResultMessage.messageId!,
+        replyToMessageId: toolResultMessage.replyToMessageId,
+        chatId,
+      });
 
       if (assistantMessage.toolCallStatus) {
         assistantMessage.toolCallStatus[toolCall.id] = {
@@ -830,6 +894,14 @@ export async function resumePendingToolCallsForChat(
         agentId: agent.id,
       };
       agent.memory.push(toolErrorMessage);
+      appendSyntheticAssistantToolResult({
+        world,
+        agent,
+        serializedToolResult: toolErrorMessage.content,
+        sourceMessageId: toolErrorMessage.messageId!,
+        replyToMessageId: toolErrorMessage.replyToMessageId,
+        chatId,
+      });
 
       if (assistantMessage.toolCallStatus) {
         assistantMessage.toolCallStatus[toolCall.id] = {
@@ -1501,6 +1573,14 @@ export async function continueLLMAfterToolExecution(
           agentId: agent.id,
         };
         agent.memory.push(malformedToolResultMessage);
+        appendSyntheticAssistantToolResult({
+          world,
+          agent,
+          serializedToolResult: malformedToolResultMessage.content,
+          sourceMessageId: malformedToolResultMessage.messageId!,
+          replyToMessageId: malformedToolResultMessage.replyToMessageId,
+          chatId: targetChatId,
+        });
 
         publishToolEvent(world, {
           agentName: agent.id,
@@ -1656,6 +1736,14 @@ export async function continueLLMAfterToolExecution(
           agentId: agent.id,
         };
         agent.memory.push(missingToolResult);
+        appendSyntheticAssistantToolResult({
+          world,
+          agent,
+          serializedToolResult: missingToolResult.content,
+          sourceMessageId: missingToolResult.messageId!,
+          replyToMessageId: missingToolResult.replyToMessageId,
+          chatId: targetChatId,
+        });
 
         if (assistantToolCallMessage.toolCallStatus) {
           assistantToolCallMessage.toolCallStatus[toolCall.id] = {
@@ -1711,6 +1799,14 @@ export async function continueLLMAfterToolExecution(
           agentId: agent.id,
         };
         agent.memory.push(parseErrorResult);
+        appendSyntheticAssistantToolResult({
+          world,
+          agent,
+          serializedToolResult: parseErrorResult.content,
+          sourceMessageId: parseErrorResult.messageId!,
+          replyToMessageId: parseErrorResult.replyToMessageId,
+          chatId: targetChatId,
+        });
 
         if (assistantToolCallMessage.toolCallStatus) {
           assistantToolCallMessage.toolCallStatus[toolCall.id] = {
@@ -1767,6 +1863,14 @@ export async function continueLLMAfterToolExecution(
             agentId: agent.id,
           };
           agent.memory.push(reusedToolResultMessage);
+          appendSyntheticAssistantToolResult({
+            world,
+            agent,
+            serializedToolResult: reusedShellCommandResult,
+            sourceMessageId: reusedToolResultMessage.messageId!,
+            replyToMessageId: reusedToolResultMessage.replyToMessageId,
+            chatId: targetChatId,
+          });
 
           if (assistantToolCallMessage.toolCallStatus) {
             assistantToolCallMessage.toolCallStatus[toolCall.id] = {
@@ -1874,6 +1978,14 @@ export async function continueLLMAfterToolExecution(
           agentId: agent.id,
         };
         agent.memory.push(toolResultMessage);
+        appendSyntheticAssistantToolResult({
+          world,
+          agent,
+          serializedToolResult,
+          sourceMessageId: toolResultMessage.messageId!,
+          replyToMessageId: toolResultMessage.replyToMessageId,
+          chatId: targetChatId,
+        });
 
         if (assistantToolCallMessage.toolCallStatus) {
           assistantToolCallMessage.toolCallStatus[toolCall.id] = {
@@ -1925,6 +2037,14 @@ export async function continueLLMAfterToolExecution(
           agentId: agent.id,
         };
         agent.memory.push(toolErrorMessage);
+        appendSyntheticAssistantToolResult({
+          world,
+          agent,
+          serializedToolResult: toolErrorMessage.content,
+          sourceMessageId: toolErrorMessage.messageId!,
+          replyToMessageId: toolErrorMessage.replyToMessageId,
+          chatId: targetChatId,
+        });
 
         if (assistantToolCallMessage.toolCallStatus) {
           assistantToolCallMessage.toolCallStatus[toolCall.id] = {

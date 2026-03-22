@@ -6,7 +6,7 @@
  */
 
 import { describe, test, it, expect, beforeEach, afterEach, vi, type MockedFunction } from 'vitest';
-import { exportWorldToMarkdown } from '../../core/export.js';
+import { exportChatToMarkdown, exportWorldToMarkdown } from '../../core/export.js';
 import * as managers from '../../core/managers.js';
 import { LLMProvider } from '../../core/types.js';
 import { EventEmitter } from 'events';
@@ -976,6 +976,111 @@ describe('Export Module', () => {
       // Verify export metadata shows 0 events
       expect(result).toContain('Events (0)');
     });
+
+    it('exports synthetic assistant tool-result rows as assistant-visible content instead of marker JSON', async () => {
+      const mockChat = {
+        id: 'chat-1',
+        worldId: 'test-world',
+        name: 'Tool Display Chat',
+        createdAt: new Date('2025-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2025-01-01T00:00:00.000Z'),
+        messageCount: 1,
+      };
+
+      const mockWorld = {
+        id: 'test-world',
+        name: 'Test World',
+        description: 'A test world',
+        turnLimit: 5,
+        currentChatId: 'chat-1',
+        createdAt: new Date('2025-01-01T00:00:00.000Z'),
+        lastUpdated: new Date('2025-01-02T00:00:00.000Z'),
+        totalAgents: 0,
+        totalMessages: 1,
+        eventEmitter: new EventEmitter(),
+        agents: new Map(),
+        chats: new Map([['chat-1', mockChat]]),
+      };
+
+      (managers.getWorld as MockedFunction<typeof managers.getWorld>).mockResolvedValue(mockWorld as any);
+      (managers.listAgents as MockedFunction<typeof managers.listAgents>).mockResolvedValue([]);
+      (managers.getMemory as MockedFunction<typeof managers.getMemory>).mockResolvedValue([
+        {
+          role: 'assistant',
+          sender: 'agent-1',
+          content: JSON.stringify({
+            __type: 'synthetic_assistant_tool_result',
+            version: 1,
+            displayOnly: true,
+            tool: 'shell_cmd',
+            tool_call_id: 'call-svg',
+            source_message_id: 'tool-1',
+            content: '![score](data:image/svg+xml;base64,AAAA)',
+          }),
+          createdAt: new Date('2025-01-01T10:00:00.000Z'),
+          chatId: 'chat-1',
+          messageId: 'assistant-1',
+        },
+      ] as any);
+
+      const result = await exportWorldToMarkdown('test-world');
+
+      expect(result).toContain('![score](data:image/svg+xml;base64,AAAA)');
+      expect(result).not.toContain('synthetic_assistant_tool_result');
+    });
+  });
+
+  describe('exportChatToMarkdown', () => {
+    it('exports synthetic assistant tool-result rows as assistant-visible content instead of marker JSON', async () => {
+      const mockChat = {
+        id: 'chat-1',
+        worldId: 'test-world',
+        name: 'Tool Display Chat',
+        createdAt: new Date('2025-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2025-01-01T00:00:00.000Z'),
+        messageCount: 1,
+      };
+
+      const mockWorld = {
+        id: 'test-world',
+        name: 'Test World',
+        description: 'A test world',
+        turnLimit: 5,
+        currentChatId: 'chat-1',
+        createdAt: new Date('2025-01-01T00:00:00.000Z'),
+        lastUpdated: new Date('2025-01-02T00:00:00.000Z'),
+        totalAgents: 0,
+        totalMessages: 1,
+        eventEmitter: new EventEmitter(),
+        agents: new Map(),
+        chats: new Map([['chat-1', mockChat]]),
+      };
+
+      (managers.getWorld as MockedFunction<typeof managers.getWorld>).mockResolvedValue(mockWorld as any);
+      (managers.listAgents as MockedFunction<typeof managers.listAgents>).mockResolvedValue([]);
+      (managers.getMemory as MockedFunction<typeof managers.getMemory>).mockResolvedValue([
+        {
+          role: 'assistant',
+          sender: 'agent-1',
+          content: JSON.stringify({
+            __type: 'synthetic_assistant_tool_result',
+            version: 1,
+            displayOnly: true,
+            tool: 'shell_cmd',
+            tool_call_id: 'call-svg',
+            source_message_id: 'tool-1',
+            content: '![score](data:image/svg+xml;base64,BBBB)',
+          }),
+          createdAt: new Date('2025-01-01T10:00:00.000Z'),
+          chatId: 'chat-1',
+          messageId: 'assistant-1',
+        },
+      ] as any);
+
+      const result = await exportChatToMarkdown('test-world', 'chat-1');
+
+      expect(result).toContain('![score](data:image/svg+xml;base64,BBBB)');
+      expect(result).not.toContain('synthetic_assistant_tool_result');
+    });
   });
 });
-

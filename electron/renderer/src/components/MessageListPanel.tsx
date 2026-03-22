@@ -390,6 +390,14 @@ function hasMergedToolTranscriptContent(message: any): boolean {
   return combinedToolStreams.length > 0;
 }
 
+function getSyntheticToolResultCallId(message: any): string {
+  return String(message?.syntheticToolResult?.toolCallId || '').trim();
+}
+
+function getSyntheticToolResultSourceMessageId(message: any): string {
+  return String(message?.syntheticToolResult?.sourceMessageId || '').trim();
+}
+
 function getToolSummaryDotClassName(statusTone: string): string {
   if (statusTone === 'failed') {
     return 'bg-red-400';
@@ -402,6 +410,8 @@ function getToolSummaryDotClassName(statusTone: string): string {
 
 export function buildCombinedRenderableMessages(messages) {
   const toolResultsByKey = new Map<string, Array<any>>();
+  const syntheticResultsByToolCallId = new Map<string, Array<any>>();
+  const syntheticResultsBySourceMessageId = new Map<string, Array<any>>();
 
   const collectLinkedToolResults = (message) => {
     if (!isNarratedAssistantToolCallMessage(message)) {
@@ -447,6 +457,20 @@ export function buildCombinedRenderableMessages(messages) {
   };
 
   for (const message of messages) {
+    const syntheticToolCallId = getSyntheticToolResultCallId(message);
+    if (syntheticToolCallId) {
+      const existingSyntheticRows = syntheticResultsByToolCallId.get(syntheticToolCallId) || [];
+      existingSyntheticRows.push(message);
+      syntheticResultsByToolCallId.set(syntheticToolCallId, existingSyntheticRows);
+    }
+
+    const syntheticSourceMessageId = getSyntheticToolResultSourceMessageId(message);
+    if (syntheticSourceMessageId) {
+      const existingSyntheticRows = syntheticResultsBySourceMessageId.get(syntheticSourceMessageId) || [];
+      existingSyntheticRows.push(message);
+      syntheticResultsBySourceMessageId.set(syntheticSourceMessageId, existingSyntheticRows);
+    }
+
     const role = String(message?.role || '').trim().toLowerCase();
     if (role !== 'tool') {
       continue;
@@ -475,11 +499,22 @@ export function buildCombinedRenderableMessages(messages) {
         return {
           ...message,
           narratedToolCallResults,
+          syntheticToolResultMessages: collectToolCallIds(message)
+            .flatMap((callId) => syntheticResultsByToolCallId.get(callId) || []),
         };
       }
 
       if (!isToolRelatedMessage(message) || !isToolRequestMessage(message)) {
-        return message;
+        const toolLookupKey = String(message?.tool_call_id || message?.toolCallId || message?.messageId || '').trim();
+        const linkedSyntheticToolResultMessages = [
+          ...(toolLookupKey ? (syntheticResultsByToolCallId.get(toolLookupKey) || []) : []),
+          ...(String(message?.messageId || '').trim()
+            ? (syntheticResultsBySourceMessageId.get(String(message?.messageId || '').trim()) || [])
+            : []),
+        ];
+        return linkedSyntheticToolResultMessages.length > 0
+          ? { ...message, syntheticToolResultMessages: linkedSyntheticToolResultMessages }
+          : message;
       }
 
       const requestedCallIds = collectToolCallIds(message);
@@ -488,9 +523,13 @@ export function buildCombinedRenderableMessages(messages) {
       }
 
       const combinedToolResults: Array<any> = [];
+      const syntheticToolResultMessages: Array<any> = [];
       const requestMessageId = String(message?.messageId || '').trim();
       const combinedMessageIds = new Set<string>();
       for (const callId of requestedCallIds) {
+        for (const syntheticMessage of syntheticResultsByToolCallId.get(callId) || []) {
+          syntheticToolResultMessages.push(syntheticMessage);
+        }
         const matches = toolResultsByKey.get(callId) || [];
         for (const match of matches) {
           const matchMessageId = String(match?.messageId || '').trim();
@@ -521,6 +560,9 @@ export function buildCombinedRenderableMessages(messages) {
           if (candidateMessageId) {
             consumedToolRowIds.add(candidateMessageId);
             combinedMessageIds.add(candidateMessageId);
+            for (const syntheticMessage of syntheticResultsBySourceMessageId.get(candidateMessageId) || []) {
+              syntheticToolResultMessages.push(syntheticMessage);
+            }
           }
           combinedToolResults.push(candidate);
         }
@@ -533,6 +575,7 @@ export function buildCombinedRenderableMessages(messages) {
       return {
         ...message,
         combinedToolResults,
+        ...(syntheticToolResultMessages.length > 0 ? { syntheticToolResultMessages } : {}),
       };
     })
     .filter((message) => {
