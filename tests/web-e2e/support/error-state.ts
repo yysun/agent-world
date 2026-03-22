@@ -16,7 +16,7 @@
  */
 
 export const renderableSystemErrorTextPatterns = [
-  'queue failed to dispatch user turn',
+  'queue failed to dispatch user message',
   'failed to dispatch',
   'retry exhausted',
   'timed out',

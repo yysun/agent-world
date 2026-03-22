@@ -929,10 +929,12 @@ async function setupQueueManagersForMatrix(options?: {
 
   const publishMessageWithId = vi.fn();
   const publishMessage = vi.fn();
+  const publishEvent = vi.fn();
   vi.doMock('../../core/events/index.js', async () => {
     const actual = await vi.importActual<typeof import('../../core/events/index.js')>('../../core/events/index.js');
     return {
       ...actual,
+      publishEvent,
       publishMessageWithId,
       publishMessage,
     };
@@ -976,6 +978,7 @@ async function setupQueueManagersForMatrix(options?: {
     storageWrappers,
     publishMessageWithId,
     publishMessage,
+    publishEvent,
     runtimeWorld,
     getActiveSubscribedWorld,
     queuesByChat,
@@ -1656,7 +1659,7 @@ describe('managers queue branch coverage', () => {
   });
 
   it('routes preflight no-responder failures to explicit recovery error state after one refresh attempt', async () => {
-    const { managers, storageWrappers, publishMessageWithId } = await setupQueueManagersForMatrix({
+    const { managers, storageWrappers, publishEvent, publishMessageWithId } = await setupQueueManagersForMatrix({
       currentChatId: 'chat-a',
       runtimeAgents: [],
     });
@@ -1677,6 +1680,59 @@ describe('managers queue branch coverage', () => {
       expect.anything(),
       'q-no-responder-preflight',
       expect.anything(),
+    );
+    expect(publishEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'system',
+      expect.objectContaining({
+        message: 'Queue failed to dispatch user message: this world has no agents available.',
+        failureKind: 'queue-dispatch',
+      }),
+      'chat-a',
+    );
+  });
+
+  it('names the missing mentioned agent in no-responder queue failures', async () => {
+    const mentionedAgentRuntimeRow = {
+      id: 'gemini',
+      name: 'Gemini',
+      type: 'assistant',
+      provider: 'google',
+      model: 'gemini-2.5-flash',
+      llmCallCount: 0,
+      autoReply: false,
+      status: 'inactive' as const,
+      memory: [],
+    };
+    const { managers, storageWrappers, publishEvent, publishMessageWithId } = await setupQueueManagersForMatrix({
+      currentChatId: 'chat-a',
+      runtimeAgents: [mentionedAgentRuntimeRow],
+    });
+
+    storageWrappers.listAgents.mockResolvedValue([mentionedAgentRuntimeRow]);
+
+    await managers.addToQueue('world-1', 'chat-a', '@composer install the skill-installer locally', 'human', {
+      preassignedMessageId: 'q-missing-mentioned-agent',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(storageWrappers.incrementQueueMessageRetry).toHaveBeenCalledWith('q-missing-mentioned-agent');
+    expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith('q-missing-mentioned-agent', 'error');
+    expect(publishMessageWithId).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      'q-missing-mentioned-agent',
+      expect.anything(),
+    );
+    expect(publishEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'system',
+      expect.objectContaining({
+        message: 'Queue failed to dispatch user message: no agent "@composer" found in this world.',
+        failureKind: 'queue-dispatch',
+      }),
+      'chat-a',
     );
   });
 

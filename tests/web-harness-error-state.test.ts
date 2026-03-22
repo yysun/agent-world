@@ -21,7 +21,7 @@ import { isRenderableSystemErrorText } from './web-e2e/support/error-state.js';
 
 describe('isRenderableSystemErrorText', () => {
   it('matches queue dispatch error messages', () => {
-    expect(isRenderableSystemErrorText('Queue failed to dispatch user turn: no-responder-preflight.')).toBe(true);
+    expect(isRenderableSystemErrorText('Queue failed to dispatch user message: no agent "@composer" found in this world.')).toBe(true);
   });
 
   it('matches generic failure keywords surfaced by system messages', () => {

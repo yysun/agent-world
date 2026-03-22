@@ -94,7 +94,7 @@ describe('web world-chat legend system status', () => {
         eventType: 'error',
         messageId: 'sys-error-1',
         createdAt: null,
-        text: 'Queue failed to dispatch user turn: world is busy.',
+        text: 'Queue failed to dispatch user message: world is busy.',
         kind: 'error',
       },
     )).toBe('world-1 - Chat 1');
@@ -105,7 +105,7 @@ describe('web world-chat legend system status', () => {
       content: {
         eventType: 'error',
         failureKind: 'queue-dispatch',
-        message: 'Queue failed to dispatch user turn: no-responder-preflight.',
+        message: 'Queue failed to dispatch user message: no agent "@composer" found in this world.',
       },
     })).toBe(true);
   });

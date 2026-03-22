@@ -44,9 +44,9 @@ describe('cli/system-events', () => {
         type: 'error',
         eventType: 'error',
         failureKind: 'queue-dispatch',
-        message: 'Queue failed to dispatch user turn: world is busy.',
+        message: 'Queue failed to dispatch user message: world is busy.',
       },
       chatId: 'chat-1',
-    })).toBe('Queue failed to dispatch user turn: world is busy.');
+    })).toBe('Queue failed to dispatch user message: world is busy.');
   });
 });

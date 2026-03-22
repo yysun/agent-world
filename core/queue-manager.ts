@@ -22,6 +22,9 @@
  * - All other dependencies (events/index.js, storage-init.ts, etc.) are static.
  *
  * Recent Changes:
+ * - 2026-03-22: Made queue dispatch failure messages user-facing and mention-aware so
+ *   missing targeted agents surface as "no agent '@name' found in this world" instead of
+ *   exposing the internal `no-responder-preflight` reason code.
  * - 2026-03-14: Allowed `world` sender messages onto the queue so scheduled/system-originated
  *   world prompts use the same ordered ingress and mention preflight rules as human turns.
  * - 2026-03-12: Registered queue advance listeners in the detachable listener map so sequential queued
@@ -444,7 +447,7 @@ async function handleQueueDispatchFailure(
     publishEvent(world, 'system', {
       type: 'error',
       eventType: 'error',
-      message: `Queue failed to dispatch user turn: ${reason}.`,
+      message: formatQueueDispatchFailureMessage(reason, agentStatus),
       triggeringMessageId: messageId,
       failureKind: 'queue-dispatch',
     }, chatId);
@@ -465,6 +468,38 @@ async function handleQueueDispatchFailure(
       error: String(retryErr),
     });
   }
+}
+
+function formatQueueDispatchFailureMessage(
+  reason: string,
+  agentStatus: QueueAgentStatusSnapshot,
+): string {
+  const messagePrefix = 'Queue failed to dispatch user message';
+
+  if (reason !== 'no-responder-preflight') {
+    return `${messagePrefix}: ${reason}.`;
+  }
+
+  const targetedAgent = String(
+    agentStatus.paragraphMentions[0]
+    || agentStatus.effectiveMentions[0]
+    || agentStatus.anyMentions[0]
+    || ''
+  ).trim();
+
+  if (targetedAgent) {
+    return `${messagePrefix}: no agent "@${targetedAgent}" found in this world.`;
+  }
+
+  if (agentStatus.totalAgents === 0) {
+    return `${messagePrefix}: this world has no agents available.`;
+  }
+
+  if (agentStatus.reasonHint === 'no-agent-subscribers' || agentStatus.reasonHint === 'no-message-listeners') {
+    return `${messagePrefix}: this world is not ready to receive messages yet.`;
+  }
+
+  return `${messagePrefix}: no available agent could respond.`;
 }
 
 function attachQueueAdvanceListener(world: World, chatId: string): void {

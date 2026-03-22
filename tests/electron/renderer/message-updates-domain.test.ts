@@ -247,7 +247,7 @@ describe('message-updates domain helpers', () => {
       payload: {
         type: 'error',
         eventType: 'error',
-        message: 'Queue failed to dispatch user turn: no responder.',
+        message: 'Queue failed to dispatch user message: no available agent could respond.',
         triggeringMessageId: 'user-turn-1',
       },
     }, {
@@ -258,7 +258,7 @@ describe('message-updates domain helpers', () => {
       payload: {
         type: 'error',
         eventType: 'error',
-        message: 'Queue failed to dispatch user turn: no responder.',
+        message: 'Queue failed to dispatch user message: no available agent could respond.',
         triggeringMessageId: 'user-turn-1',
       },
     }], 'chat-1');

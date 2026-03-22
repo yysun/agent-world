@@ -114,13 +114,13 @@ describe('web world update system refresh', () => {
         eventType: 'error',
         failureKind: 'queue-dispatch',
         triggeringMessageId: 'user-1',
-        message: 'Queue failed to dispatch user turn: world is busy.',
+        message: 'Queue failed to dispatch user message: world is busy.',
       }
     }), state);
     const nextState = result.finalState;
 
     expect(result.states).toHaveLength(1);
-    expect(nextState.error).toBe('Queue failed to dispatch user turn: world is busy.');
+    expect(nextState.error).toBe('Queue failed to dispatch user message: world is busy.');
     expect(nextState.systemStatus).toBeNull();
     expect(nextState.messages).toHaveLength(1);
     expect(nextState.messages[0]).toMatchObject({
@@ -129,7 +129,7 @@ describe('web world update system refresh', () => {
       sender: 'system',
       type: 'system',
       chatId: 'chat-1',
-      text: 'Queue failed to dispatch user turn: world is busy.',
+      text: 'Queue failed to dispatch user message: world is busy.',
       systemEvent: {
         kind: 'error',
         eventType: 'error',

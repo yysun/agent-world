@@ -65,7 +65,7 @@ describe('session-system-status helpers', () => {
       chatId: 'chat-1',
       messageId: 'sys-queue-fail',
       createdAt: null,
-      content: 'Queue failed to dispatch user turn: world is busy.',
+      content: 'Queue failed to dispatch user message: world is busy.',
     });
 
     expect(timeoutStatus?.text).toContain('timed out');
