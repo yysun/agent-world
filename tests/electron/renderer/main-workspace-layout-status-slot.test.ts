@@ -14,6 +14,7 @@
  * - Uses virtual React JSX-runtime mocks and inspects returned element props directly.
  *
  * Summary of Recent Changes:
+ * - 2026-03-22: Added coverage that full-area editor content hides the world/chat header row and main content area.
  * - 2026-03-05: Added queue-panel slot passthrough assertions to lock in queue-before-composer wiring.
  * - 2026-02-28: Added regression coverage for composer-column status-slot routing with runtime-independent mocks.
  */
@@ -58,6 +59,21 @@ vi.mock('../../../electron/renderer/src/components/MainContentArea', () => ({
 
 import MainWorkspaceLayout from '../../../electron/renderer/src/components/MainWorkspaceLayout';
 
+function toChildArray(children: unknown): Array<{ type: unknown; props?: Record<string, unknown> }> {
+  if (Array.isArray(children)) {
+    return children as Array<{ type: unknown; props?: Record<string, unknown> }>;
+  }
+  if (children && typeof children === 'object' && (children as { type?: unknown }).type === 'Fragment') {
+    const fragmentChildren = (children as { props?: { children?: unknown } }).props?.children;
+    return Array.isArray(fragmentChildren)
+      ? (fragmentChildren as Array<{ type: unknown; props?: Record<string, unknown> }>)
+      : fragmentChildren != null
+        ? [fragmentChildren as { type: unknown; props?: Record<string, unknown> }]
+        : [];
+  }
+  return children != null ? [children as { type: unknown; props?: Record<string, unknown> }] : [];
+}
+
 describe('MainWorkspaceLayout slot routing', () => {
   beforeEach(() => {
     mainContentAreaSpy.mockClear();
@@ -77,12 +93,30 @@ describe('MainWorkspaceLayout slot routing', () => {
       props?: { children?: Array<{ type: unknown; props?: Record<string, unknown> }> };
     };
 
-    const childNodes = tree.props?.children ?? [];
+    const childNodes = toChildArray(tree.props?.children);
     expect(childNodes).toHaveLength(2);
     expect(childNodes[0]?.type).toBe(mainHeaderBarSpy);
     expect(childNodes[1]?.type).toBe(mainContentAreaSpy);
     expect(childNodes[1]?.props?.queuePanel).toBe(queueNode);
     expect(childNodes[1]?.props?.statusBar).toBe(statusNode);
     expect(childNodes[1]?.props?.messageListProps).toEqual({ a: 1 });
+  });
+
+  it('replaces the world/chat header row with full-area editor content when editorContent is present', () => {
+    const editorNode = { id: 'editor-probe' };
+
+    const tree = MainWorkspaceLayout({
+      mainHeaderProps: { title: 'header' },
+      mainContentAreaProps: { messageListProps: { a: 1 } },
+      editorContent: editorNode as unknown as any,
+    }) as {
+      props?: { children?: { props?: { children?: unknown } } };
+    };
+
+    expect(mainHeaderBarSpy).not.toHaveBeenCalled();
+    expect(mainContentAreaSpy).not.toHaveBeenCalled();
+
+    const editorWrapper = tree.props?.children as { props?: { children?: unknown } } | undefined;
+    expect(editorWrapper?.props?.children).toBe(editorNode);
   });
 });

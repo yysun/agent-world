@@ -15,6 +15,8 @@
  * - Runtime validation remains in main-process handlers for behavior parity.
  *
  * Recent Changes:
+ * - 2026-03-22: Extended skill content payloads with optional `relativePath` so the skill editor can open files from the folder tree.
+ * - 2026-03-22: Added `skill:readFolderStructure` contracts and `SkillFolderEntry` so the skill editor can render the skill folder tree in its right pane.
  * - 2026-03-22: Added `skill:delete` invoke contract and `deleteSkill()` bridge method for confirmed skill removal from the editor.
  * - 2026-03-19: Added optional `defaultPath` payload support to `dialog:pickDirectory` while preserving `workspace:open(directoryPath)` direct-path semantics.
  * - 2026-03-19: Changed `skill:list` filtering from renderer-provided `projectPath` to world-scoped `worldId`.
@@ -92,6 +94,7 @@ export const DESKTOP_INVOKE_CHANNELS = {
   QUEUE_STOP: 'queue:stop',
   QUEUE_RETRY: 'queue:retry',
   SKILL_READ_CONTENT: 'skill:readContent',
+  SKILL_READ_FOLDER_STRUCTURE: 'skill:readFolderStructure',
   SKILL_SAVE_CONTENT: 'skill:saveContent',
   SKILL_DELETE: 'skill:delete'
 } as const;
@@ -227,11 +230,20 @@ export interface SkillListFilterPayload {
 
 export interface SkillContentPayload {
   skillId: string;
+  relativePath?: string;
 }
 
 export interface SkillSavePayload {
   skillId: string;
   content: string;
+  relativePath?: string;
+}
+
+export interface SkillFolderEntry {
+  name: string;
+  relativePath: string;
+  type: 'file' | 'directory';
+  children?: SkillFolderEntry[];
 }
 
 export interface PickDirectoryPayload {
@@ -329,7 +341,8 @@ export interface DesktopApi {
   resumeChatQueue: (worldId: string, chatId: string) => Promise<unknown>;
   stopChatQueue: (worldId: string, chatId: string) => Promise<unknown>;
   retryQueueMessage: (worldId: string, messageId: string, chatId: string) => Promise<unknown>;
-  readSkillContent: (skillId: string) => Promise<string>;
-  saveSkillContent: (skillId: string, content: string) => Promise<void>;
+  readSkillContent: (skillId: string, relativePath?: string) => Promise<string>;
+  readSkillFolderStructure: (skillId: string) => Promise<SkillFolderEntry[]>;
+  saveSkillContent: (skillId: string, content: string, relativePath?: string) => Promise<void>;
   deleteSkill: (skillId: string) => Promise<void>;
 }

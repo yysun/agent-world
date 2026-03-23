@@ -12,6 +12,8 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-03-22: Extended skill content read/save handling with optional relative paths so the editor can open files from the folder tree.
+ * - 2026-03-22: Added `readSkillFolderStructure` IPC handling so the skill editor can show the current skill folder tree.
  * - 2026-03-22: Added `deleteSkill` IPC handling to remove a skill folder after renderer confirmation from the skill editor.
  * - 2026-03-19: Restored `openWorkspaceDialog(directoryPath)` immediate-path behavior and added optional `defaultPath` support to `pickDirectoryDialog`.
  * - 2026-03-19: Switched `listSkillRegistry` to world-scoped `world.variables` resolution so project-scope skills no longer depend on `AGENT_WORLD_WORKSPACE_PATH` or `AGENT_WORLD_DATA_PATH`.
@@ -92,6 +94,13 @@ const NOOP_LOGGER: LoggerLike = {
   error: () => undefined
 };
 
+type SkillFolderEntry = {
+  name: string;
+  relativePath: string;
+  type: 'file' | 'directory';
+  children?: SkillFolderEntry[];
+};
+
 const VALID_LOG_LEVELS: LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error'];
 const VALID_LOG_LEVEL_SET = new Set<LogLevel>(VALID_LOG_LEVELS);
 const ALLOWED_EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:', 'sms:', 'xmpp:', 'callto:']);
@@ -150,6 +159,78 @@ function normalizeExternalUrl(rawUrl: unknown): string {
   }
 
   return parsedUrl.toString();
+}
+
+async function readSkillFolderEntries(rootPath: string, currentPath: string = rootPath): Promise<SkillFolderEntry[]> {
+  const rootDir = String(rootPath || currentPath || '');
+  const activeDir = String(currentPath || rootDir);
+  const dirEntries = await fs.promises.readdir(activeDir, { withFileTypes: true });
+  const orderedEntries = [...dirEntries].sort((left, right) => {
+    const leftRank = left.isDirectory() ? 0 : 1;
+    const rightRank = right.isDirectory() ? 0 : 1;
+    if (leftRank !== rightRank) {
+      return leftRank - rightRank;
+    }
+    return left.name.localeCompare(right.name);
+  });
+
+  const results: SkillFolderEntry[] = [];
+  for (const dirEntry of orderedEntries) {
+    const entryName = String(dirEntry?.name || '');
+    const nextPath = path.join(activeDir, entryName);
+    const relativePath = path.relative(rootDir, nextPath).replace(/\\/g, '/');
+    if (dirEntry.isDirectory()) {
+      results.push({
+        name: entryName,
+        relativePath,
+        type: 'directory',
+        children: await readSkillFolderEntries(rootDir, nextPath),
+      });
+      continue;
+    }
+
+    results.push({
+      name: entryName,
+      relativePath,
+      type: 'file',
+    });
+  }
+
+  return results;
+}
+
+function getSkillRootPath(skillPath: string): string {
+  const normalizedSkillPath = String(skillPath || '').trim();
+  return path.basename(normalizedSkillPath).toLowerCase() === 'skill.md'
+    ? path.dirname(normalizedSkillPath)
+    : normalizedSkillPath;
+}
+
+function getDefaultSkillFilePath(skillPath: string): string {
+  const normalizedSkillPath = String(skillPath || '').trim();
+  return path.basename(normalizedSkillPath).toLowerCase() === 'skill.md'
+    ? normalizedSkillPath
+    : path.join(getSkillRootPath(normalizedSkillPath), 'SKILL.md');
+}
+
+function resolveSkillFilePath(skillPath: string, relativePath?: unknown): string {
+  const normalizedRelativePath = String(relativePath || '').trim();
+  if (!normalizedRelativePath) {
+    return getDefaultSkillFilePath(skillPath);
+  }
+
+  if (path.isAbsolute(normalizedRelativePath)) {
+    throw new Error('Skill file path must be relative.');
+  }
+
+  const skillRootPath = getSkillRootPath(skillPath);
+  const resolvedPath = path.resolve(skillRootPath, normalizedRelativePath);
+  const relativeToRoot = path.relative(skillRootPath, resolvedPath);
+  if (!relativeToRoot || relativeToRoot.startsWith('..') || path.isAbsolute(relativeToRoot)) {
+    throw new Error('Skill file path must stay within the skill folder.');
+  }
+
+  return resolvedPath;
 }
 
 async function defaultOpenExternalUrl(url: string) {
@@ -2106,20 +2187,32 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
   async function readSkillContent(payload: unknown) {
     await ensureCoreReady();
     const skillId = String((payload as any)?.skillId || '').trim();
+    const relativePath = (payload as any)?.relativePath;
     if (!skillId) throw new Error('Skill ID is required.');
     const skillPath = getSkillSourcePath(skillId);
     if (!skillPath) throw new Error(`Skill not found in registry: ${skillId}`);
-    return fs.promises.readFile(skillPath, 'utf8');
+    return fs.promises.readFile(resolveSkillFilePath(skillPath, relativePath), 'utf8');
+  }
+
+  async function readSkillFolderStructure(payload: unknown) {
+    await ensureCoreReady();
+    const skillId = String((payload as any)?.skillId || '').trim();
+    if (!skillId) throw new Error('Skill ID is required.');
+    const skillPath = getSkillSourcePath(skillId);
+    if (!skillPath) throw new Error(`Skill not found in registry: ${skillId}`);
+
+    return readSkillFolderEntries(getSkillRootPath(skillPath));
   }
 
   async function saveSkillContent(payload: unknown) {
     await ensureCoreReady();
     const skillId = String((payload as any)?.skillId || '').trim();
     const content = String((payload as any)?.content ?? '');
+    const relativePath = (payload as any)?.relativePath;
     if (!skillId) throw new Error('Skill ID is required.');
     const skillPath = getSkillSourcePath(skillId);
     if (!skillPath) throw new Error(`Skill not found in registry: ${skillId}`);
-    await fs.promises.writeFile(skillPath, content, 'utf8');
+    await fs.promises.writeFile(resolveSkillFilePath(skillPath, relativePath), content, 'utf8');
   }
 
   async function deleteSkill(payload: unknown) {
@@ -2130,12 +2223,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     const skillPath = getSkillSourcePath(skillId);
     if (!skillPath) throw new Error(`Skill not found in registry: ${skillId}`);
 
-    const normalizedSkillPath = String(skillPath).trim();
-    const deleteTarget = path.basename(normalizedSkillPath).toLowerCase() === 'skill.md'
-      ? path.dirname(normalizedSkillPath)
-      : normalizedSkillPath;
-
-    await fs.promises.rm(deleteTarget, { recursive: true, force: true });
+    await fs.promises.rm(getSkillRootPath(skillPath), { recursive: true, force: true });
   }
 
   return {
@@ -2183,6 +2271,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     clearChatQueue: clearChatQueueHandler,
     retryQueueMessage: retryQueueMessageHandler,
     readSkillContent,
+    readSkillFolderStructure,
     saveSkillContent,
     deleteSkill
   };

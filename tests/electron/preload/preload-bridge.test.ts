@@ -12,6 +12,8 @@
  * - Keeps all assertions in-memory with no file-system dependencies.
  *
  * Recent Changes:
+ * - 2026-03-22: Added relative-path coverage for `readSkillContent` and `saveSkillContent` so tree-selected skill files use the same IPC surface.
+ * - 2026-03-22: Added bridge coverage for `readSkillFolderStructure(skillId)` IPC forwarding.
  * - 2026-03-22: Added bridge coverage for `deleteSkill(skillId)` IPC forwarding.
  * - 2026-03-19: Added regression coverage for `pickDirectory(defaultPath)` payload forwarding while preserving `openWorkspace(directoryPath)` wiring.
  * - 2026-02-26: Added coverage for `getLoggingConfig()` IPC bridge wiring.
@@ -64,6 +66,9 @@ describe('electron preload bridge', () => {
       pauseHeartbeat: expect.any(Function),
       stopHeartbeat: expect.any(Function),
       listSkills: expect.any(Function),
+      readSkillContent: expect.any(Function),
+      readSkillFolderStructure: expect.any(Function),
+      saveSkillContent: expect.any(Function),
       deleteSkill: expect.any(Function),
       sendMessage: expect.any(Function),
       branchSessionFromMessage: expect.any(Function),
@@ -111,6 +116,9 @@ describe('electron preload bridge', () => {
     api.checkForUpdates();
     api.installUpdateAndRestart();
     api.getLoggingConfig();
+    api.readSkillContent('skill-1', 'notes/guide.md');
+    api.readSkillFolderStructure('skill-1');
+    api.saveSkillContent('skill-1', '# Updated', 'notes/guide.md');
     api.deleteSkill('skill-1');
 
     expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'chat:sendMessage', sendPayload);
@@ -159,7 +167,10 @@ describe('electron preload bridge', () => {
     expect(mocks.invoke).toHaveBeenNthCalledWith(19, 'update:check');
     expect(mocks.invoke).toHaveBeenNthCalledWith(20, 'update:installAndRestart');
     expect(mocks.invoke).toHaveBeenNthCalledWith(21, 'logging:getConfig');
-    expect(mocks.invoke).toHaveBeenNthCalledWith(22, 'skill:delete', { skillId: 'skill-1' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(22, 'skill:readContent', { skillId: 'skill-1', relativePath: 'notes/guide.md' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(23, 'skill:readFolderStructure', { skillId: 'skill-1' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(24, 'skill:saveContent', { skillId: 'skill-1', content: '# Updated', relativePath: 'notes/guide.md' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(25, 'skill:delete', { skillId: 'skill-1' });
   });
 
   it('wires chat event listener callback and cleanup correctly', () => {

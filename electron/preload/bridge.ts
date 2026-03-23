@@ -14,6 +14,8 @@
  * - Payload normalization helpers preserve existing invoke payload formats.
  *
  * Recent Changes:
+ * - 2026-03-22: Extended `readSkillContent` and `saveSkillContent` bridge wiring with optional relative paths for tree-selected files.
+ * - 2026-03-22: Added `readSkillFolderStructure(skillId)` bridge wiring for the skill editor right-pane folder tree.
  * - 2026-03-22: Added `deleteSkill(skillId)` bridge wiring for confirmed skill deletion from the editor toolbar.
  * - 2026-03-19: Added optional `defaultPath` support to `pickDirectory()` and restored `openWorkspace(directoryPath)` to direct-path payload forwarding only.
  * - 2026-03-19: Updated `listSkills()` bridge payload support to use world-scoped filters instead of renderer project-path injection.
@@ -43,6 +45,7 @@ import {
   type DesktopApi,
   type HeartbeatJobStatus,
   type RendererLoggingConfig,
+  type SkillFolderEntry,
   type SkillRegistrySummary,
   type QueueAddPayload
 } from '../shared/ipc-contracts.js';
@@ -332,10 +335,12 @@ export function createDesktopApi(ipcRendererLike?: IpcRendererLike): DesktopApi 
       invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.QUEUE_STOP, toWorldChatPayload(worldId, chatId)),
     retryQueueMessage: (worldId, messageId, chatId) =>
       invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.QUEUE_RETRY, { worldId, messageId, chatId }),
-    readSkillContent: (skillId) =>
-      invokeDesktopChannel<string>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_READ_CONTENT, { skillId }),
-    saveSkillContent: (skillId, content) =>
-      invokeDesktopChannel<void>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_SAVE_CONTENT, { skillId, content }),
+    readSkillContent: (skillId, relativePath) =>
+      invokeDesktopChannel<string>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_READ_CONTENT, { skillId, relativePath }),
+    readSkillFolderStructure: (skillId) =>
+      invokeDesktopChannel<SkillFolderEntry[]>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_READ_FOLDER_STRUCTURE, { skillId }),
+    saveSkillContent: (skillId, content, relativePath) =>
+      invokeDesktopChannel<void>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_SAVE_CONTENT, { skillId, content, relativePath }),
     deleteSkill: (skillId) =>
       invokeDesktopChannel<void>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_DELETE, { skillId })
   };

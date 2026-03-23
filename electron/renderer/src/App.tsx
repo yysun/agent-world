@@ -13,6 +13,10 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-03-22: Guarded skill file selection against overlapping busy-state requests so stale file loads cannot overwrite the active editor view.
+ * - 2026-03-22: Added skill dirty-state tracking so Save only enables after the current file changes.
+ * - 2026-03-22: Added skill file selection so clicking the tree view loads that file in the left editor pane.
+ * - 2026-03-22: Added skill folder structure loading so the skill editor right pane shows the current skill tree.
  * - 2026-03-22: Added confirmed skill deletion from the skill editor and disabled the editor while save/delete actions are running.
  * - 2026-03-14: Added sidebar heartbeat polling plus start/pause/stop handlers for selected-world cron controls.
  * - 2026-03-13: Added `reasoningEffort` derived from `world.variables` and wired it into the Electron composer dropdown.
@@ -144,7 +148,7 @@ import {
   normalizeUnifiedLogEntry,
   type UnifiedLogEntry,
 } from './domain/panel-log-scope';
-import type { DesktopApi } from './types/desktop-api';
+import type { DesktopApi, SkillFolderEntry } from './types/desktop-api';
 
 type WorkspaceState = {
   workspacePath: string | null;
@@ -181,6 +185,27 @@ const DESKTOP_API_BOOTSTRAP_RETRY_MS = 100;
 
 function normalizeAgentKey(value: unknown): string {
   return String(value || '').trim().toLowerCase();
+}
+
+function findFirstSkillFile(entries: SkillFolderEntry[]): string {
+  for (const entry of entries) {
+    if (entry.type === 'file') {
+      return entry.relativePath;
+    }
+    if (entry.type === 'directory' && Array.isArray(entry.children) && entry.children.length > 0) {
+      const nestedFilePath = findFirstSkillFile(entry.children);
+      if (nestedFilePath) {
+        return nestedFilePath;
+      }
+    }
+  }
+
+  return '';
+}
+
+function getInitialSkillFilePath(entries: SkillFolderEntry[]): string {
+  const defaultSkillFile = entries.find((entry) => entry.type === 'file' && entry.relativePath === 'SKILL.md');
+  return defaultSkillFile?.relativePath || findFirstSkillFile(entries) || 'SKILL.md';
 }
 
 function BridgeUnavailableScreen({ timedOut }: { timedOut: boolean }) {
@@ -264,9 +289,14 @@ function AppContent({ api }: { api: DesktopApi }) {
   // Skill editor state
   const [editorMode, setEditorMode] = useState<'none' | 'skill'>('none');
   const [editingSkillEntry, setEditingSkillEntry] = useState<{ skillId: string; description: string; sourceScope: string } | null>(null);
+  const [editingSkillFilePath, setEditingSkillFilePath] = useState('SKILL.md');
   const [editingSkillContent, setEditingSkillContent] = useState('');
+  const [savedSkillContent, setSavedSkillContent] = useState('');
+  const [editingSkillFolderEntries, setEditingSkillFolderEntries] = useState<SkillFolderEntry[]>([]);
+  const [loadingSkillFileContent, setLoadingSkillFileContent] = useState(false);
   const [savingSkillContent, setSavingSkillContent] = useState(false);
   const [deletingSkillContent, setDeletingSkillContent] = useState(false);
+  const skillFileRequestIdRef = useRef(0);
 
   const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [notification, setNotification] = useState<{ text: string; kind: 'error' | 'success' | 'info' } | null>(null);
@@ -1226,9 +1256,15 @@ function AppContent({ api }: { api: DesktopApi }) {
     const skillId = String(entry?.skillId || '').trim();
     if (!skillId) return;
     try {
-      const content = await api.readSkillContent(skillId);
+      const folderEntries = await api.readSkillFolderStructure(skillId);
+      const normalizedFolderEntries = Array.isArray(folderEntries) ? folderEntries : [];
+      const initialFilePath = getInitialSkillFilePath(normalizedFolderEntries);
+      const content = await api.readSkillContent(skillId, initialFilePath);
       setEditingSkillEntry(entry);
+      setEditingSkillFilePath(initialFilePath);
       setEditingSkillContent(typeof content === 'string' ? content : '');
+      setSavedSkillContent(typeof content === 'string' ? content : '');
+      setEditingSkillFolderEntries(normalizedFolderEntries);
       setEditorMode('skill');
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to load skill content.'), 'error');
@@ -1236,24 +1272,58 @@ function AppContent({ api }: { api: DesktopApi }) {
   }, [api, setStatusText]);
 
   const onCloseSkillEditor = useCallback(() => {
+    skillFileRequestIdRef.current += 1;
     setEditorMode('none');
     setEditingSkillEntry(null);
+    setEditingSkillFilePath('SKILL.md');
     setEditingSkillContent('');
+    setSavedSkillContent('');
+    setEditingSkillFolderEntries([]);
+    setLoadingSkillFileContent(false);
   }, []);
+
+  const onSelectSkillFile = useCallback(async (relativePath: string) => {
+    const skillId = String(editingSkillEntry?.skillId || '').trim();
+    const nextFilePath = String(relativePath || '').trim();
+    if (!skillId || !nextFilePath || nextFilePath === editingSkillFilePath || savingSkillContent || deletingSkillContent || loadingSkillFileContent) return;
+
+    const requestId = skillFileRequestIdRef.current + 1;
+    skillFileRequestIdRef.current = requestId;
+    setLoadingSkillFileContent(true);
+    try {
+      const content = await api.readSkillContent(skillId, nextFilePath);
+      if (skillFileRequestIdRef.current !== requestId) {
+        return;
+      }
+      setEditingSkillFilePath(nextFilePath);
+      setEditingSkillContent(typeof content === 'string' ? content : '');
+      setSavedSkillContent(typeof content === 'string' ? content : '');
+    } catch (error) {
+      if (skillFileRequestIdRef.current !== requestId) {
+        return;
+      }
+      setStatusText(safeMessage(error, 'Failed to load skill file.'), 'error');
+    } finally {
+      if (skillFileRequestIdRef.current === requestId) {
+        setLoadingSkillFileContent(false);
+      }
+    }
+  }, [api, deletingSkillContent, editingSkillEntry, editingSkillFilePath, loadingSkillFileContent, savingSkillContent, setStatusText]);
 
   const onSaveSkillContent = useCallback(async () => {
     const skillId = String(editingSkillEntry?.skillId || '').trim();
     if (!skillId) return;
     setSavingSkillContent(true);
     try {
-      await api.saveSkillContent(skillId, editingSkillContent);
-      setStatusText('Skill saved.', 'success');
+      await api.saveSkillContent(skillId, editingSkillContent, editingSkillFilePath);
+      setSavedSkillContent(editingSkillContent);
+      setStatusText(`Saved ${editingSkillFilePath}.`, 'success');
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to save skill content.'), 'error');
     } finally {
       setSavingSkillContent(false);
     }
-  }, [api, editingSkillContent, editingSkillEntry, setStatusText]);
+  }, [api, editingSkillContent, editingSkillEntry, editingSkillFilePath, setStatusText]);
 
   const onDeleteSkillContent = useCallback(async () => {
     const skillId = String(editingSkillEntry?.skillId || '').trim();
@@ -1625,11 +1695,17 @@ function AppContent({ api }: { api: DesktopApi }) {
             editorMode === 'skill' && editingSkillEntry ? (
               <SkillEditor
                 skillId={editingSkillEntry.skillId}
+                sourceScope={editingSkillEntry.sourceScope}
+                selectedFilePath={editingSkillFilePath}
                 content={editingSkillContent}
                 onContentChange={setEditingSkillContent}
                 onBack={onCloseSkillEditor}
                 onSave={onSaveSkillContent}
                 onDelete={onDeleteSkillContent}
+                onSelectFile={onSelectSkillFile}
+                folderEntries={editingSkillFolderEntries}
+                hasUnsavedChanges={editingSkillContent !== savedSkillContent}
+                loadingFile={loadingSkillFileContent}
                 saving={savingSkillContent}
                 deleting={deletingSkillContent}
               />

@@ -13,6 +13,7 @@
  * - Preserves existing render order and styling classes.
  *
  * Recent Changes:
+ * - 2026-03-22: Hide the world/chat header while full-area editor content is active so the skill editor occupies the full workspace column.
  * - 2026-03-08: Added `editorContent` prop to support full-area editor views (e.g. SkillEditor).
  * - 2026-03-05: Added `queuePanel` slot routing into `MainContentArea` so queue and status can be positioned independently around composer.
  * - 2026-02-28: Routed status bar through `MainContentArea` to keep status alignment tied to composer column layout.
@@ -39,13 +40,15 @@ export default function MainWorkspaceLayout({
 }) {
   return (
     <main className="relative flex min-w-0 flex-1 flex-col bg-background">
-      <MainHeaderBar {...mainHeaderProps} />
       {editorContent != null ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {editorContent}
         </div>
       ) : (
-        <MainContentArea {...mainContentAreaProps} queuePanel={queuePanel} statusBar={statusBar} />
+        <>
+          <MainHeaderBar {...mainHeaderProps} />
+          <MainContentArea {...mainContentAreaProps} queuePanel={queuePanel} statusBar={statusBar} />
+        </>
       )}
     </main>
   );

@@ -11,6 +11,8 @@
  * - Tests route build + registration helpers together.
  *
  * Recent Changes:
+ * - 2026-03-22: Added relative-path payload coverage for `skill:readContent` and `skill:saveContent`.
+ * - 2026-03-22: Added `skill:readFolderStructure` channel/order/payload coverage.
  * - 2026-03-22: Added `skill:delete` channel/order/payload coverage.
  * - 2026-03-19: Added payload-routing coverage for `dialog:pickDirectory(defaultPath)` without changing `workspace:open(directoryPath)` routing.
  * - 2026-03-15: Added canonical channel and payload coverage for `agent:import`
@@ -88,6 +90,7 @@ function createHandlerMocks() {
     stopChatQueue: vi.fn(async () => ({ success: true })),
     retryQueueMessage: vi.fn(async () => ({ success: true })),
     readSkillContent: vi.fn(async () => '# skill content'),
+    readSkillFolderStructure: vi.fn(async () => []),
     saveSkillContent: vi.fn(async () => undefined),
     deleteSkill: vi.fn(async () => undefined)
   };
@@ -154,6 +157,7 @@ describe('buildMainIpcRoutes', () => {
       'queue:stop',
       'queue:retry',
       'skill:readContent',
+      'skill:readFolderStructure',
       'skill:saveContent',
       'skill:delete'
     ]);
@@ -197,6 +201,9 @@ describe('buildMainIpcRoutes', () => {
     await routes.find((route) => route.channel === 'queue:resume')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
     await routes.find((route) => route.channel === 'queue:stop')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
     await routes.find((route) => route.channel === 'queue:retry')?.handler({}, { worldId: 'w-1', messageId: 'm-1', chatId: 'c-1' });
+    await routes.find((route) => route.channel === 'skill:readContent')?.handler({}, { skillId: 'skill-1', relativePath: 'docs/guide.md' });
+    await routes.find((route) => route.channel === 'skill:readFolderStructure')?.handler({}, { skillId: 'skill-1' });
+    await routes.find((route) => route.channel === 'skill:saveContent')?.handler({}, { skillId: 'skill-1', content: '# docs', relativePath: 'docs/guide.md' });
     await routes.find((route) => route.channel === 'skill:delete')?.handler({}, { skillId: 'skill-1' });
 
     expect(handlers.writeWorldPreference).toHaveBeenCalledWith('world-99');
@@ -233,6 +240,9 @@ describe('buildMainIpcRoutes', () => {
     expect(handlers.resumeChatQueue).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1' });
     expect(handlers.stopChatQueue).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1' });
     expect(handlers.retryQueueMessage).toHaveBeenCalledWith({ worldId: 'w-1', messageId: 'm-1', chatId: 'c-1' });
+    expect(handlers.readSkillContent).toHaveBeenCalledWith({ skillId: 'skill-1', relativePath: 'docs/guide.md' });
+    expect(handlers.readSkillFolderStructure).toHaveBeenCalledWith({ skillId: 'skill-1' });
+    expect(handlers.saveSkillContent).toHaveBeenCalledWith({ skillId: 'skill-1', content: '# docs', relativePath: 'docs/guide.md' });
     expect(handlers.deleteSkill).toHaveBeenCalledWith({ skillId: 'skill-1' });
   });
 });

@@ -398,6 +398,7 @@ function registerIpcHandlers() {
     stopChatQueue: ipcHandlers.stopChatQueue,
     retryQueueMessage: ipcHandlers.retryQueueMessage,
     readSkillContent: ipcHandlers.readSkillContent,
+    readSkillFolderStructure: ipcHandlers.readSkillFolderStructure,
     saveSkillContent: ipcHandlers.saveSkillContent,
     deleteSkill: ipcHandlers.deleteSkill
   });

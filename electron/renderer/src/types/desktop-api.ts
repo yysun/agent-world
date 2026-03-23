@@ -20,5 +20,6 @@ export type {
   ChatEventPayload,
   DesktopApi,
   LogLevel,
-  RendererLoggingConfig
+  RendererLoggingConfig,
+  SkillFolderEntry
 } from '../../../shared/ipc-contracts';
