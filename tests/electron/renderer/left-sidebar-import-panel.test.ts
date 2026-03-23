@@ -13,6 +13,7 @@
  * - Avoids DOM runtime dependencies for deterministic unit coverage.
  *
  * Recent Changes:
+ * - 2026-03-22: Updated coverage after removing the sidebar skill import target so the import pane only supports worlds and agents.
  * - 2026-03-14: Updated coverage for the full import-form layouts after removing placeholder status chips.
  * - 2026-03-14: Added coverage for world/agent/skill import targets in the redesigned import form.
  * - 2026-03-14: Added regression coverage for left-sidebar world import rendering.
@@ -112,7 +113,6 @@ function createProps(overrides: Record<string, unknown> = {}) {
     onCloseImportWorldPanel: () => { },
     onImportWorld: async () => false,
     onImportAgent: async () => false,
-    onImportSkill: async () => false,
     onExportWorld: () => { },
     onSelectWorld: () => { },
     loadingWorld: false,
@@ -214,7 +214,6 @@ describe('LeftSidebarPanel import mode', () => {
     const importPanel = nodes.find((node: any) => node?.props?.['data-testid'] === 'left-sidebar-import-panel');
     const worldTarget = nodes.find((node: any) => node?.props?.['data-testid'] === 'import-target-world');
     const agentTarget = nodes.find((node: any) => node?.props?.['data-testid'] === 'import-target-agent');
-    const skillTarget = nodes.find((node: any) => node?.props?.['data-testid'] === 'import-target-skill');
     const worldPanel = nodes.find((node: any) => node?.props?.['data-testid'] === 'left-sidebar-import-world-panel');
     const localImportButton = nodes.find((node: any) => (
       node?.type === 'button' && node?.props?.children === 'Open local world folder'
@@ -225,14 +224,13 @@ describe('LeftSidebarPanel import mode', () => {
     expect(importPanel).toBeDefined();
     expect(worldTarget).toBeDefined();
     expect(agentTarget).toBeDefined();
-    expect(skillTarget).toBeDefined();
     expect(worldPanel).toBeDefined();
     expect(localImportButton).toBeDefined();
     expect(worldSelector).toBeUndefined();
     expect(sessionList).toBeUndefined();
     expect(JSON.stringify(importPanel || {})).toContain('Import World');
     expect(JSON.stringify(importPanel || {})).toContain('Import Agent');
-    expect(JSON.stringify(importPanel || {})).toContain('Import Skill');
+    expect(JSON.stringify(importPanel || {})).not.toContain('Import Skill');
     expect(JSON.stringify(importPanel || {})).not.toContain('Coming soon');
     expect(JSON.stringify(importPanel || {})).not.toContain('From GitHub shorthand');
 
@@ -281,7 +279,7 @@ describe('LeftSidebarPanel import mode', () => {
     expect(onCloseImportWorldPanel).toHaveBeenCalledTimes(1);
   });
 
-  it('switches between world, agent, and skill import detail panels', () => {
+  it('switches between world and agent import detail panels only', () => {
     let tree: any = renderTree({ panelMode: 'import-world' });
     let nodes = allDescendants(tree);
 
@@ -301,19 +299,9 @@ describe('LeftSidebarPanel import mode', () => {
     expect(JSON.stringify(agentPanel || {})).not.toContain('Coming soon');
 
     const skillTarget = nodes.find((node: any) => node?.props?.['data-testid'] === 'import-target-skill');
-    expect(skillTarget).toBeDefined();
-
-    skillTarget.props.onClick();
-    tree = renderTree({ panelMode: 'import-world' });
-    nodes = allDescendants(tree);
-
     const skillPanel = nodes.find((node: any) => node?.props?.['data-testid'] === 'left-sidebar-import-skill-panel');
-    const skillImportButton = nodes.find((node: any) => node?.type === 'button' && node?.props?.children === 'Open local skill folder');
-    expect(skillPanel).toBeDefined();
-    expect(skillImportButton?.props?.disabled).toBe(false);
-    expect(JSON.stringify(skillPanel || {})).toContain('Destination Scope');
-    expect(JSON.stringify(skillPanel || {})).toContain('From GitHub');
-    expect(JSON.stringify(skillPanel || {})).not.toContain('Coming soon');
+    expect(skillTarget).toBeUndefined();
+    expect(skillPanel).toBeUndefined();
   });
 
   it('calls the wired agent import handler and closes after a successful local import', async () => {
@@ -331,24 +319,6 @@ describe('LeftSidebarPanel import mode', () => {
     await agentImportButton.props.onClick();
 
     expect(onImportAgent).toHaveBeenCalledTimes(1);
-    expect(onCloseImportWorldPanel).toHaveBeenCalledTimes(1);
-  });
-
-  it('calls the wired skill import handler and closes after a successful local import', async () => {
-    const onImportSkill = vi.fn(async () => true);
-    const onCloseImportWorldPanel = vi.fn();
-
-    let tree: any = renderTree({ panelMode: 'import-world', onImportSkill, onCloseImportWorldPanel });
-    let nodes = allDescendants(tree);
-    const skillTarget = nodes.find((node: any) => node?.props?.['data-testid'] === 'import-target-skill');
-    skillTarget.props.onClick();
-
-    tree = renderTree({ panelMode: 'import-world', onImportSkill, onCloseImportWorldPanel });
-    nodes = allDescendants(tree);
-    const skillImportButton = nodes.find((node: any) => node?.type === 'button' && node?.props?.children === 'Open local skill folder');
-    await skillImportButton.props.onClick();
-
-    expect(onImportSkill).toHaveBeenCalledTimes(1);
     expect(onCloseImportWorldPanel).toHaveBeenCalledTimes(1);
   });
 

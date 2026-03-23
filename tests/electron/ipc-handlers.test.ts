@@ -126,6 +126,7 @@ describe('createMainIpcHandlers', () => {
       GitHubWorldImportError: Error,
       stageGitHubWorldFromShorthand: async () => ({ stagingRootPath: '', worldFolderPath: '', source: { shorthand: '', owner: '', repo: '', branch: '', worldPath: '', commitSha: null }, cleanup: async () => { } }),
       stageGitHubFolderFromRepo: async () => ({ stagingRootPath: '', folderPath: '', source: { repoInput: '', owner: '', repo: '', branch: '', folderPath: '', commitSha: null }, cleanup: async () => { } }),
+      listGitHubDirectoryNames: async () => ({ directoryNames: [] }),
       heartbeatManager: { startJob: () => ({ started: true, reason: null, job: { status: 'running' } }), restartJob: () => ({ started: true, reason: null, job: { status: 'running' } }), pauseJob: () => { }, resumeJob: () => { }, stopJob: () => { }, stopAll: () => { }, listJobs: () => [] },
     };
 
@@ -190,9 +191,22 @@ describe('createMainIpcHandlers — readSkillContent / readSkillFolderStructure 
       GitHubWorldImportError: Error,
       stageGitHubWorldFromShorthand: async () => ({ stagingRootPath: '', worldFolderPath: '', source: { shorthand: '', owner: '', repo: '', branch: '', worldPath: '', commitSha: null }, cleanup: async () => { } }),
       stageGitHubFolderFromRepo: async () => ({ stagingRootPath: '', folderPath: '', source: { repoInput: '', owner: '', repo: '', branch: '', folderPath: '', commitSha: null }, cleanup: async () => { } }),
+      listGitHubDirectoryNames: async () => ({ directoryNames: [] }),
       heartbeatManager: { startJob: () => ({ started: true, reason: null, job: { status: 'running' } }), restartJob: () => ({ started: true, reason: null, job: { status: 'running' } }), pauseJob: () => { }, resumeJob: () => { }, stopJob: () => { }, stopAll: () => { }, listJobs: () => [] },
     };
   }
+
+  it('listGitHubSkills returns skill directory names from the repo skills folder', async () => {
+    const listGitHubDirectoryNames = vi.fn(async () => ({ directoryNames: ['planner', 'reviewer'] }));
+
+    const handlers = createMainIpcHandlers({
+      ...makeDeps(() => undefined),
+      listGitHubDirectoryNames,
+    } as any);
+
+    await expect((handlers as any).listGitHubSkills({ repo: 'yysun/awesome-agent-world' })).resolves.toEqual(['planner', 'reviewer']);
+    expect(listGitHubDirectoryNames).toHaveBeenCalledWith('yysun/awesome-agent-world', 'skills');
+  });
 
   it('readSkillContent returns file content for a known skill path', async () => {
     const { promises: fsMock } = await import('node:fs');
@@ -323,9 +337,12 @@ describe('createMainIpcHandlers — readSkillContent / readSkillFolderStructure 
     const importedSkillFilePath = absoluteTestPath('imports', 'writing-skill', 'SKILL.md');
     const workspacePath = absoluteTestPath('workspace');
     const targetSkillPath = absoluteTestPath('workspace', 'skills', 'writing-skill');
+    const existingPaths = new Set([
+      path.normalize(importedSkillFolder),
+      path.normalize(importedSkillFilePath),
+    ]);
     fsMockState.existsSync.mockImplementation((targetPath: string) => (
-      targetPath === importedSkillFolder
-      || targetPath === importedSkillFilePath
+      typeof targetPath === 'string' && existingPaths.has(path.normalize(targetPath))
     ));
     fsMockState.statSync.mockImplementation(() => ({ isDirectory: () => true }));
     fsMockState.cp.mockResolvedValue(undefined as any);
@@ -341,6 +358,47 @@ describe('createMainIpcHandlers — readSkillContent / readSkillFolderStructure 
     const result = await (handlers as any).importSkill({ source: importedSkillFolder });
     expect(result.success).toBe(true);
     expect(fsMockState.cp).toHaveBeenCalledWith(importedSkillFolder, targetSkillPath, { recursive: true, force: true });
+    expect(syncSkills).toHaveBeenCalledWith({ projectSkillRoots: [absoluteTestPath('workspace', '.agents', 'skills'), absoluteTestPath('workspace', 'skills')] });
+  });
+
+  it('importSkill copies the source skill first and only overlays edited draft files', async () => {
+    const syncSkills = vi.fn(async () => undefined);
+    const importedSkillFolder = absoluteTestPath('imports', 'writing-skill');
+    const importedSkillFilePath = absoluteTestPath('imports', 'writing-skill', 'SKILL.md');
+    const importedSkillImagePath = absoluteTestPath('imports', 'writing-skill', 'assets', 'banner.png');
+    const workspacePath = absoluteTestPath('workspace');
+    const targetSkillPath = absoluteTestPath('workspace', 'skills', 'writing-skill');
+    const targetSkillFilePath = absoluteTestPath('workspace', 'skills', 'writing-skill', 'SKILL.md');
+
+    const existingPaths = new Set([
+      path.normalize(importedSkillFolder),
+      path.normalize(importedSkillFilePath),
+      path.normalize(importedSkillImagePath),
+    ]);
+    fsMockState.existsSync.mockImplementation((targetPath: string) => (
+      typeof targetPath === 'string' && existingPaths.has(path.normalize(targetPath))
+    ));
+    fsMockState.statSync.mockImplementation(() => ({ isDirectory: () => true }));
+
+    const handlers = createMainIpcHandlers({
+      ...makeDeps(() => undefined),
+      getWorkspaceState: () => ({ workspacePath, storagePath: workspacePath, coreInitialized: true }),
+      getMainWindow: () => ({ isDestroyed: () => false }),
+      syncSkills,
+    } as any);
+
+    const result = await (handlers as any).importSkill({
+      source: importedSkillFolder,
+      itemName: 'writing-skill',
+      files: {
+        'SKILL.md': '# Updated skill',
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(fsMockState.cp).toHaveBeenCalledWith(importedSkillFolder, targetSkillPath, { recursive: true, force: true });
+    expect(fsMockState.writeFile).toHaveBeenCalledWith(targetSkillFilePath, '# Updated skill', 'utf8');
+    expect(fsMockState.writeFile).toHaveBeenCalledTimes(1);
     expect(syncSkills).toHaveBeenCalledWith({ projectSkillRoots: [absoluteTestPath('workspace', '.agents', 'skills'), absoluteTestPath('workspace', 'skills')] });
   });
 });

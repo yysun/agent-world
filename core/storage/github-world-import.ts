@@ -128,6 +128,15 @@ export interface StagedGitHubFolderResult {
   cleanup: () => Promise<void>;
 }
 
+export interface GitHubDirectoryListingResult {
+  repoInput: string;
+  owner: string;
+  repo: string;
+  branch: string;
+  directoryPath: string;
+  directoryNames: string[];
+}
+
 function sanitizeWorldName(worldName: string): string {
   return worldName.trim();
 }
@@ -176,6 +185,14 @@ async function fetchCommitSha(owner: string, repo: string, branch: string, timeo
   }
   const data = await response.json() as { sha?: string };
   return typeof data.sha === 'string' && data.sha ? data.sha : null;
+}
+
+function getPathBasename(value: string): string {
+  const segments = String(value || '')
+    .split('/')
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  return segments[segments.length - 1] || '';
 }
 
 function normalizeRelativePath(worldPath: string, fullPath: string): string {
@@ -373,6 +390,88 @@ export function resolveGitHubRepoSource(repoInput: string): ResolvedGitHubRepoSo
   );
 }
 
+export async function listGitHubDirectoryNames(
+  repoInput: string,
+  directoryPath: string,
+  options: Pick<StageRemoteWorldOptions, 'requestTimeoutMs'> = {}
+): Promise<GitHubDirectoryListingResult> {
+  const requestTimeoutMs = Number.isFinite(options.requestTimeoutMs)
+    ? Math.max(1, Number(options.requestTimeoutMs))
+    : DEFAULT_REQUEST_TIMEOUT_MS;
+  const resolvedRepo = resolveGitHubRepoSource(repoInput);
+  const normalizedDirectoryPath = String(directoryPath || '').trim().replace(/^\/+|\/+$/g, '');
+
+  if (!normalizedDirectoryPath) {
+    throw new GitHubWorldImportError('invalid-shorthand', 'GitHub directory path is required.', {
+      repoInput,
+      directoryPath,
+    });
+  }
+
+  ensureSafeRelativePath(normalizedDirectoryPath);
+
+  const encodedPath = encodeGithubPathSegments(normalizedDirectoryPath);
+  const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(resolvedRepo.owner)}/${encodeURIComponent(resolvedRepo.repo)}/contents/${encodedPath}?ref=${encodeURIComponent(resolvedRepo.branch)}`;
+  const response = await fetchJson(url, requestTimeoutMs);
+
+  if (response.status === 404) {
+    throw new GitHubWorldImportError('source-not-found', `GitHub path not found: ${resolvedRepo.owner}/${resolvedRepo.repo}/${normalizedDirectoryPath}@${resolvedRepo.branch}`, {
+      owner: resolvedRepo.owner,
+      repo: resolvedRepo.repo,
+      branch: resolvedRepo.branch,
+      directoryPath: normalizedDirectoryPath,
+    });
+  }
+
+  if (!response.ok) {
+    throw new GitHubWorldImportError('fetch-failed', `GitHub responded with ${response.status} while listing directory path.`, {
+      owner: resolvedRepo.owner,
+      repo: resolvedRepo.repo,
+      branch: resolvedRepo.branch,
+      directoryPath: normalizedDirectoryPath,
+      status: response.status,
+    });
+  }
+
+  const payload = await response.json() as GitHubContentsEntry[] | GitHubContentsEntry;
+  const entries = Array.isArray(payload) ? payload : [payload];
+  const directoryNames: string[] = [];
+
+  for (const entry of entries) {
+    if (entry.type === 'dir') {
+      const directoryName = getPathBasename(entry.path);
+      if (directoryName) {
+        directoryNames.push(directoryName);
+      }
+      continue;
+    }
+
+    if (entry.type === 'file') {
+      continue;
+    }
+
+    throw new GitHubWorldImportError(
+      'unsupported-entry-type',
+      `Unsupported GitHub entry type '${entry.type}' in directory listing.`,
+      {
+        entryType: entry.type,
+        path: entry.path,
+      }
+    );
+  }
+
+  directoryNames.sort((left, right) => left.localeCompare(right));
+
+  return {
+    repoInput: resolvedRepo.repoInput,
+    owner: resolvedRepo.owner,
+    repo: resolvedRepo.repo,
+    branch: resolvedRepo.branch,
+    directoryPath: normalizedDirectoryPath,
+    directoryNames,
+  };
+}
+
 export async function stageGitHubFolderFromRepo(
   repoInput: string,
   folderPath: string,
@@ -396,8 +495,8 @@ export async function stageGitHubFolderFromRepo(
 
   ensureSafeRelativePath(normalizedFolderPath);
 
-  const requestedFolderName = String(options.folderName || path.basename(normalizedFolderPath)).trim();
-  const folderName = requestedFolderName || path.basename(normalizedFolderPath);
+  const requestedFolderName = String(options.folderName || getPathBasename(normalizedFolderPath)).trim();
+  const folderName = requestedFolderName || getPathBasename(normalizedFolderPath);
   if (!folderName) {
     throw new GitHubWorldImportError('invalid-shorthand', 'GitHub folder name is required.', {
       repoInput,
@@ -407,7 +506,6 @@ export async function stageGitHubFolderFromRepo(
 
   const stagingRootPath = await mkdtemp(path.join(os.tmpdir(), tempPrefix));
   const stagedFolderPath = path.join(stagingRootPath, folderName);
-  const stagedFolderRealPath = path.resolve(stagedFolderPath);
 
   const cleanup = async () => {
     await rm(stagingRootPath, { recursive: true, force: true });
@@ -415,6 +513,7 @@ export async function stageGitHubFolderFromRepo(
 
   let totalBytes = 0;
   try {
+    const stagedFolderRealPath = path.normalize(stagedFolderPath);
     const commitSha = await fetchCommitSha(resolvedRepo.owner, resolvedRepo.repo, resolvedRepo.branch, requestTimeoutMs);
     const files: GitHubContentsEntry[] = [];
     await listGithubFilesRecursively(
@@ -450,7 +549,7 @@ export async function stageGitHubFolderFromRepo(
       }
 
       const relativePath = ensureSafeRelativePath(normalizeRelativePath(normalizedFolderPath, fileEntry.path));
-      const targetPath = path.resolve(stagedFolderPath, relativePath);
+      const targetPath = path.normalize(path.join(stagedFolderPath, relativePath));
       const allowedPrefix = `${stagedFolderRealPath}${path.sep}`;
       if (targetPath !== stagedFolderRealPath && !targetPath.startsWith(allowedPrefix)) {
         throw new GitHubWorldImportError('unsafe-path', 'Fetched content attempted to escape the staging folder.', {

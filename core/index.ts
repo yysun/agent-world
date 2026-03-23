@@ -151,8 +151,10 @@ export {
 
 export {
   GitHubWorldImportError,
+  listGitHubDirectoryNames,
   stageGitHubWorldFromShorthand,
   type GitHubWorldImportErrorCode,
+  type GitHubDirectoryListingResult,
   type ResolvedGitHubWorldSource,
   type StagedGitHubWorldResult,
 } from './storage/github-world-import.js';

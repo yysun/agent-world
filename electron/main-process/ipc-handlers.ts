@@ -58,6 +58,7 @@
  */
 
 import * as fs from 'node:fs';
+import { homedir } from 'node:os';
 import * as path from 'node:path';
 import {
   normalizeSessionMessages,
@@ -99,6 +100,13 @@ type SkillFolderEntry = {
   relativePath: string;
   type: 'file' | 'directory';
   children?: SkillFolderEntry[];
+};
+
+type ResolvedSkillImportSource = {
+  resolvedSkillFolder: string;
+  sourceMetadata: Record<string, unknown> | null;
+  targetSkillName: string;
+  cleanup: () => Promise<void>;
 };
 
 const VALID_LOG_LEVELS: LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error'];
@@ -199,6 +207,75 @@ async function readSkillFolderEntries(rootPath: string, currentPath: string = ro
   return results;
 }
 
+async function readSkillFolderFiles(rootPath: string, currentPath: string = rootPath): Promise<Record<string, string>> {
+  const rootDir = String(rootPath || currentPath || '');
+  const activeDir = String(currentPath || rootDir);
+  const dirEntries = await fs.promises.readdir(activeDir, { withFileTypes: true });
+  const results: Record<string, string> = {};
+
+  for (const dirEntry of dirEntries) {
+    const entryName = String(dirEntry?.name || '');
+    const nextPath = path.join(activeDir, entryName);
+    if (dirEntry.isDirectory()) {
+      Object.assign(results, await readSkillFolderFiles(rootDir, nextPath));
+      continue;
+    }
+
+    const relativePath = path.relative(rootDir, nextPath).replace(/\\/g, '/');
+    const fileBytes = await fs.promises.readFile(nextPath);
+    if (isProbablyBinaryFile(fileBytes)) {
+      continue;
+    }
+    results[relativePath] = fileBytes.toString('utf8');
+  }
+
+  return results;
+}
+
+function isProbablyBinaryFile(fileBytes: Buffer | Uint8Array | string): boolean {
+  if (typeof fileBytes === 'string') {
+    return false;
+  }
+
+  const sample = fileBytes.subarray(0, Math.min(fileBytes.length, 1024));
+  if (sample.length === 0) {
+    return false;
+  }
+
+  let suspiciousByteCount = 0;
+  for (const value of sample) {
+    if (value === 0) {
+      return true;
+    }
+    if (value < 7 || (value > 14 && value < 32)) {
+      suspiciousByteCount += 1;
+    }
+  }
+
+  return suspiciousByteCount / sample.length > 0.3;
+}
+
+function findFirstSkillFilePath(entries: SkillFolderEntry[]): string {
+  for (const entry of entries) {
+    if (entry.type === 'file') {
+      return entry.relativePath;
+    }
+    if (entry.type === 'directory' && Array.isArray(entry.children) && entry.children.length > 0) {
+      const nestedFilePath = findFirstSkillFilePath(entry.children);
+      if (nestedFilePath) {
+        return nestedFilePath;
+      }
+    }
+  }
+
+  return '';
+}
+
+function getInitialSkillPreviewFilePath(entries: SkillFolderEntry[]): string {
+  const defaultSkillFile = entries.find((entry) => entry.type === 'file' && entry.relativePath === 'SKILL.md');
+  return defaultSkillFile?.relativePath || findFirstSkillFilePath(entries) || 'SKILL.md';
+}
+
 function getSkillRootPath(skillPath: string): string {
   const normalizedSkillPath = String(skillPath || '').trim();
   return path.basename(normalizedSkillPath).toLowerCase() === 'skill.md'
@@ -231,6 +308,29 @@ function resolveSkillFilePath(skillPath: string, relativePath?: unknown): string
   }
 
   return resolvedPath;
+}
+
+function getDefaultGlobalSkillRoot(): string {
+  return path.join(homedir(), '.agents', 'skills');
+}
+
+function getDefaultGlobalSkillRoots(): string[] {
+  return [
+    getDefaultGlobalSkillRoot(),
+    path.join(homedir(), '.codex', 'skills'),
+  ];
+}
+
+async function writeSkillFilesToTarget(targetSkillPath: string, files: Record<string, string>): Promise<void> {
+  const normalizedEntries = Object.entries(files)
+    .map(([relativePath, content]) => [String(relativePath || '').trim(), String(content ?? '')] as const)
+    .filter(([relativePath]) => relativePath.length > 0);
+
+  for (const [relativePath, content] of normalizedEntries) {
+    const targetFilePath = resolveSkillFilePath(targetSkillPath, relativePath);
+    await fs.promises.mkdir(path.dirname(targetFilePath), { recursive: true });
+    await fs.promises.writeFile(targetFilePath, content, 'utf8');
+  }
 }
 
 async function defaultOpenExternalUrl(url: string) {
@@ -345,6 +445,7 @@ interface MainIpcHandlerFactoryDependencies {
     folderPath: string,
     options?: { folderName?: string }
   ) => Promise<GitHubFolderImportStagedResult>;
+  listGitHubDirectoryNames: (repoInput: string, directoryPath: string) => Promise<{ directoryNames: string[] }>;
   heartbeatManager: {
     startJob: (world: any, chatId: string) => { started: boolean; reason: string | null; job: { status: 'running' | 'paused' | 'stopped' } | null };
     restartJob: (world: any, chatId: string) => { started: boolean; reason: string | null; job: { status: 'running' | 'paused' | 'stopped' } | null };
@@ -472,6 +573,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     GitHubWorldImportError,
     stageGitHubWorldFromShorthand,
     stageGitHubFolderFromRepo,
+    listGitHubDirectoryNames,
     heartbeatManager
   } = dependencies;
 
@@ -632,11 +734,11 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       return stageGitHubWorldFromShorthand(source);
     }
 
-    if (!repo && !itemName) {
+    if (!repo) {
       return null;
     }
 
-    const normalizedRepo = repo || source;
+    const normalizedRepo = repo;
     const normalizedItemName = normalizeImportItemName(itemName, `${kind[0].toUpperCase()}${kind.slice(1)} name`);
     const candidates = buildGitHubFolderCandidates(kind, normalizedItemName);
     let lastNotFoundError: GitHubWorldImportErrorLike | null = null;
@@ -661,6 +763,84 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     }
 
     return null;
+  }
+
+  function resolveRequestedSkillName(payload?: { source?: unknown; repo?: unknown; itemName?: unknown }): string {
+    const requestedItemName = String(payload?.itemName || '').trim();
+    if (requestedItemName) {
+      return normalizeImportItemName(requestedItemName, 'Skill name');
+    }
+
+    const requestedSource = String(payload?.source || '').trim();
+    if (requestedSource) {
+      return normalizeImportItemName(path.basename(requestedSource), 'Skill name');
+    }
+
+    throw new Error('Skill name is required.');
+  }
+
+  async function resolveSkillImportSource(
+    mainWindow: BrowserWindowLike,
+    payload?: { source?: unknown; repo?: unknown; itemName?: unknown }
+  ): Promise<ResolvedSkillImportSource | null> {
+    const requestedSource = String(payload?.source || '').trim();
+    const requestedRepo = String(payload?.repo || '').trim();
+    const requestedItemName = String(payload?.itemName || '').trim();
+    const selectedSkillFolder = requestedSource || requestedRepo || requestedItemName
+      ? requestedSource
+      : await pickTargetDirectory(mainWindow, 'Import Skill Folder', 'Import');
+
+    if (!selectedSkillFolder && !requestedRepo && !requestedItemName) {
+      return null;
+    }
+
+    let stagedGitHubFolder: GitHubFolderImportStagedResult | null = null;
+
+    try {
+      let resolvedSkillFolder = selectedSkillFolder
+        ? path.resolve(path.normalize(selectedSkillFolder))
+        : '';
+      let sourceMetadata: Record<string, unknown> | null = null;
+
+      const stagedGitHubImport = await stageGitHubImportFolder('skill', payload);
+      if (stagedGitHubImport) {
+        if ('folderPath' in stagedGitHubImport) {
+          stagedGitHubFolder = stagedGitHubImport;
+          resolvedSkillFolder = path.resolve(path.normalize(stagedGitHubImport.folderPath));
+          sourceMetadata = {
+            ...stagedGitHubImport.source,
+            itemName: requestedItemName || path.basename(stagedGitHubImport.folderPath),
+          };
+        } else {
+          throw new Error('Skill GitHub import requires an explicit repo and skill name.');
+        }
+      }
+
+      const validationError = getSkillFolderValidationError(resolvedSkillFolder);
+      if (validationError) {
+        throw new Error(validationError);
+      }
+
+      const targetSkillName = requestedItemName
+        ? normalizeImportItemName(requestedItemName, 'Skill name')
+        : normalizeImportItemName(path.basename(resolvedSkillFolder), 'Skill name');
+
+      return {
+        resolvedSkillFolder,
+        sourceMetadata,
+        targetSkillName,
+        cleanup: async () => {
+          if (stagedGitHubFolder) {
+            await stagedGitHubFolder.cleanup();
+          }
+        },
+      };
+    } catch (error) {
+      if (stagedGitHubFolder) {
+        await stagedGitHubFolder.cleanup();
+      }
+      throw error;
+    }
   }
 
   async function promptForOverwrite(
@@ -1676,75 +1856,117 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     }
   }
 
+  async function previewSkillImport(payload?: any) {
+    const mainWindow = getMainWindow();
+    if (!mainWindow) throw new Error('Main window not initialized');
+
+    let resolvedSource: ResolvedSkillImportSource | null = null;
+
+    try {
+      await ensureCoreReady();
+      resolvedSource = await resolveSkillImportSource(mainWindow, payload);
+
+      if (!resolvedSource) {
+        return null;
+      }
+
+      const entries = await readSkillFolderEntries(resolvedSource.resolvedSkillFolder);
+      const files = await readSkillFolderFiles(resolvedSource.resolvedSkillFolder);
+
+      return {
+        success: true,
+        rootName: resolvedSource.targetSkillName,
+        entries,
+        files,
+        initialFilePath: getInitialSkillPreviewFilePath(entries),
+        source: resolvedSource.sourceMetadata || undefined,
+      };
+    } catch (error) {
+      if (error instanceof GitHubWorldImportError) {
+        throw new Error(`Failed to preview skill import: ${error.message}`);
+      }
+      const err = error as Error;
+      throw new Error(`Failed to preview skill import: ${err.message || 'Unknown error occurred'}`);
+    } finally {
+      if (resolvedSource) {
+        await resolvedSource.cleanup();
+      }
+    }
+  }
+
+  async function listGitHubSkills(payload?: any) {
+    try {
+      await ensureCoreReady();
+      const repo = String(payload?.repo || '').trim();
+      if (!repo) {
+        throw new Error('GitHub repo is required.');
+      }
+
+      const result = await listGitHubDirectoryNames(repo, 'skills');
+      return Array.isArray(result.directoryNames) ? result.directoryNames : [];
+    } catch (error) {
+      if (error instanceof GitHubWorldImportError) {
+        throw new Error(`Failed to list GitHub skills: ${error.message}`);
+      }
+      const err = error as Error;
+      throw new Error(`Failed to list GitHub skills: ${err.message || 'Unknown error occurred'}`);
+    }
+  }
+
   async function importSkill(payload?: any) {
     const mainWindow = getMainWindow();
     if (!mainWindow) throw new Error('Main window not initialized');
 
-    const requestedSource = String(payload?.source || '').trim();
-    const requestedRepo = String(payload?.repo || '').trim();
-    const requestedItemName = String(payload?.itemName || '').trim();
-    const selectedSkillFolder = requestedSource || requestedRepo || requestedItemName
-      ? String(requestedSource || '')
-      : await pickTargetDirectory(mainWindow, 'Import Skill Folder', 'Import');
-    let stagedGitHubFolder: GitHubFolderImportStagedResult | null = null;
-
-    if (!selectedSkillFolder && !requestedRepo && !requestedItemName) {
-      return {
-        success: false,
-        error: 'Import canceled',
-        message: 'Skill import was canceled'
-      };
-    }
+    let resolvedSource: ResolvedSkillImportSource | null = null;
 
     try {
       await ensureCoreReady();
 
+      const targetScope = String(payload?.targetScope || 'project').trim().toLowerCase() === 'global'
+        ? 'global'
+        : 'project';
+      const draftFiles = payload?.files && typeof payload.files === 'object'
+        ? payload.files as Record<string, string>
+        : null;
       const workspacePath = String(getWorkspaceState()?.workspacePath || '').trim();
-      if (!workspacePath) {
+      const targetSkillsRoot = targetScope === 'global'
+        ? getDefaultGlobalSkillRoot()
+        : path.join(workspacePath, 'skills');
+
+      if (targetScope === 'project' && !workspacePath) {
         return {
           success: false,
           error: 'Workspace unavailable',
-          message: 'Workspace path is not available for skill import.',
+          message: 'Workspace path is not available for project skill import.',
         };
       }
 
-      let resolvedSkillFolder = path.resolve(path.normalize(selectedSkillFolder || ''));
       let sourceMetadata: Record<string, unknown> | null = null;
+      let targetSkillName = resolveRequestedSkillName(payload);
+      const shouldResolveSource = draftFiles == null
+        || Boolean(String(payload?.source || '').trim())
+        || Boolean(String(payload?.repo || '').trim());
 
-      const stagedGitHubImport = await stageGitHubImportFolder('skill', payload);
-      if (stagedGitHubImport) {
-        if ('folderPath' in stagedGitHubImport) {
-          stagedGitHubFolder = stagedGitHubImport;
-          resolvedSkillFolder = path.resolve(path.normalize(stagedGitHubImport.folderPath));
-          sourceMetadata = {
-            ...stagedGitHubImport.source,
-            itemName: requestedItemName || path.basename(stagedGitHubImport.folderPath),
+      if (shouldResolveSource) {
+        resolvedSource = await resolveSkillImportSource(mainWindow, payload);
+        if (!resolvedSource) {
+          return {
+            success: false,
+            error: 'Import canceled',
+            message: 'Skill import was canceled'
           };
-        } else {
-          throw new Error('Skill GitHub import requires an explicit repo and skill name.');
         }
+        sourceMetadata = resolvedSource.sourceMetadata;
+        targetSkillName = resolvedSource.targetSkillName;
       }
 
-      const validationError = getSkillFolderValidationError(resolvedSkillFolder);
-      if (validationError) {
-        return {
-          success: false,
-          error: 'Invalid skill folder',
-          message: validationError,
-        };
-      }
-
-      const targetSkillName = requestedItemName
-        ? normalizeImportItemName(requestedItemName, 'Skill name')
-        : normalizeImportItemName(path.basename(resolvedSkillFolder), 'Skill name');
-      const targetSkillsRoot = path.join(workspacePath, 'skills');
       const targetSkillPath = path.join(targetSkillsRoot, targetSkillName);
 
       if (fs.existsSync(targetSkillPath)) {
         const shouldOverwrite = await promptForOverwrite(
           mainWindow,
           'Overwrite Existing Skill?',
-          `A skill folder named '${targetSkillName}' already exists in this workspace.`,
+          `A skill folder named '${targetSkillName}' already exists in this ${targetScope} scope.`,
           targetSkillPath
         );
         if (!shouldOverwrite) {
@@ -1759,18 +1981,32 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       }
 
       await fs.promises.mkdir(targetSkillsRoot, { recursive: true });
-      await fs.promises.cp(resolvedSkillFolder, targetSkillPath, { recursive: true, force: true });
+      if (resolvedSource) {
+        await fs.promises.cp(resolvedSource.resolvedSkillFolder, targetSkillPath, { recursive: true, force: true });
+      } else if (draftFiles) {
+        await fs.promises.mkdir(targetSkillPath, { recursive: true });
+      }
 
-      const projectSkillRoots = [
-        path.join(workspacePath, '.agents', 'skills'),
-        targetSkillsRoot,
-      ];
-      await syncSkills({ projectSkillRoots });
+      if (draftFiles) {
+        await writeSkillFilesToTarget(targetSkillPath, draftFiles);
+      }
+
+      if (targetScope === 'global') {
+        await syncSkills({ userSkillRoots: getDefaultGlobalSkillRoots() });
+      } else {
+        await syncSkills({
+          projectSkillRoots: [
+            path.join(workspacePath, '.agents', 'skills'),
+            targetSkillsRoot,
+          ],
+        });
+      }
 
       return {
         success: true,
         skillId: targetSkillName,
         path: targetSkillPath,
+        targetScope,
         source: sourceMetadata || undefined,
       };
     } catch (error) {
@@ -1788,8 +2024,8 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
         message: `Failed to import skill: ${err.message || 'Unknown error occurred'}`,
       };
     } finally {
-      if (stagedGitHubFolder) {
-        await stagedGitHubFolder.cleanup();
+      if (resolvedSource) {
+        await resolvedSource.cleanup();
       }
     }
   }
@@ -2247,6 +2483,8 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     deleteWorkspaceWorld,
     importWorld,
     importAgent,
+    previewSkillImport,
+    listGitHubSkills,
     importSkill,
     exportWorld,
     listWorldSessions,

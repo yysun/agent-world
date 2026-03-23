@@ -66,6 +66,8 @@ describe('electron preload bridge', () => {
       pauseHeartbeat: expect.any(Function),
       stopHeartbeat: expect.any(Function),
       listSkills: expect.any(Function),
+      previewSkillImport: expect.any(Function),
+      listGitHubSkills: expect.any(Function),
       readSkillContent: expect.any(Function),
       readSkillFolderStructure: expect.any(Function),
       saveSkillContent: expect.any(Function),
@@ -106,6 +108,8 @@ describe('electron preload bridge', () => {
     api.pauseHeartbeat('world-1');
     api.stopHeartbeat('world-1');
     api.listSkills({ worldId: 'world-1' });
+    api.previewSkillImport({ repo: 'yysun/agent-skills', itemName: 'reviewer' });
+    api.listGitHubSkills('yysun/awesome-agent-world');
     api.branchSessionFromMessage('world-1', 'chat-1', 'msg-1');
     api.editMessage('world-1', 'msg-1', 'Updated', 'chat-1');
     api.respondHitlOption('world-1', 'req-1', 'yes_once', 'chat-1');
@@ -134,43 +138,50 @@ describe('electron preload bridge', () => {
     expect(mocks.invoke).toHaveBeenNthCalledWith(9, 'heartbeat:pause', { worldId: 'world-1' });
     expect(mocks.invoke).toHaveBeenNthCalledWith(10, 'heartbeat:stop', { worldId: 'world-1' });
     expect(mocks.invoke).toHaveBeenNthCalledWith(11, 'skill:list', { worldId: 'world-1' });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(12, 'session:branchFromMessage', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(12, 'skill:previewImport', {
+      repo: 'yysun/agent-skills',
+      itemName: 'reviewer'
+    });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(13, 'skill:listGitHubSkills', {
+      repo: 'yysun/awesome-agent-world'
+    });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(14, 'session:branchFromMessage', {
       worldId: 'world-1',
       chatId: 'chat-1',
       messageId: 'msg-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(13, 'message:edit', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(15, 'message:edit', {
       worldId: 'world-1',
       messageId: 'msg-1',
       newContent: 'Updated',
       chatId: 'chat-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(14, 'hitl:respond', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(16, 'hitl:respond', {
       worldId: 'world-1',
       requestId: 'req-1',
       optionId: 'yes_once',
       chatId: 'chat-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(15, 'chat:stopMessage', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(17, 'chat:stopMessage', {
       worldId: 'world-1',
       chatId: 'chat-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(16, 'chat:subscribeEvents', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(18, 'chat:subscribeEvents', {
       worldId: 'world-1',
       chatId: 'chat-1',
       subscriptionId: 'sub-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(17, 'chat:unsubscribeEvents', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(19, 'chat:unsubscribeEvents', {
       subscriptionId: 'sub-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(18, 'update:getState');
-    expect(mocks.invoke).toHaveBeenNthCalledWith(19, 'update:check');
-    expect(mocks.invoke).toHaveBeenNthCalledWith(20, 'update:installAndRestart');
-    expect(mocks.invoke).toHaveBeenNthCalledWith(21, 'logging:getConfig');
-    expect(mocks.invoke).toHaveBeenNthCalledWith(22, 'skill:readContent', { skillId: 'skill-1', relativePath: 'notes/guide.md' });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(23, 'skill:readFolderStructure', { skillId: 'skill-1' });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(24, 'skill:saveContent', { skillId: 'skill-1', content: '# Updated', relativePath: 'notes/guide.md' });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(25, 'skill:delete', { skillId: 'skill-1' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(20, 'update:getState');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(21, 'update:check');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(22, 'update:installAndRestart');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(23, 'logging:getConfig');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(24, 'skill:readContent', { skillId: 'skill-1', relativePath: 'notes/guide.md' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(25, 'skill:readFolderStructure', { skillId: 'skill-1' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(26, 'skill:saveContent', { skillId: 'skill-1', content: '# Updated', relativePath: 'notes/guide.md' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(27, 'skill:delete', { skillId: 'skill-1' });
   });
 
   it('wires chat event listener callback and cleanup correctly', () => {

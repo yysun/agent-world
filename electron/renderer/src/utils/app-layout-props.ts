@@ -148,6 +148,7 @@ export function createMainContentRightPanelContentProps<T extends PropBag>(input
     panelLogs: input.panelLogs,
     onClearPanelLogs: input.onClearPanelLogs,
     onEditSkill: input.onEditSkill,
+    onInstallSkill: input.onInstallSkill,
   };
 }
 
@@ -168,7 +169,6 @@ export function createLeftSidebarProps<T extends PropBag>(input: T) {
     onCloseImportWorldPanel: input.onCloseImportWorldPanel,
     onImportWorld: input.onImportWorld,
     onImportAgent: input.onImportAgent,
-    onImportSkill: input.onImportSkill,
     onExportWorld: input.onExportWorld,
     onSelectWorld: input.onSelectWorld,
     loadingWorld: input.loadingWorld,

@@ -14,6 +14,7 @@
  * - Payload normalization helpers preserve existing invoke payload formats.
  *
  * Recent Changes:
+ * - 2026-03-22: Added `previewSkillImport()` bridge wiring for the skill editor install-mode preview flow.
  * - 2026-03-22: Extended `readSkillContent` and `saveSkillContent` bridge wiring with optional relative paths for tree-selected files.
  * - 2026-03-22: Added `readSkillFolderStructure(skillId)` bridge wiring for the skill editor right-pane folder tree.
  * - 2026-03-22: Added `deleteSkill(skillId)` bridge wiring for confirmed skill deletion from the editor toolbar.
@@ -45,6 +46,7 @@ import {
   type DesktopApi,
   type HeartbeatJobStatus,
   type RendererLoggingConfig,
+  type SkillImportPreviewResult,
   type SkillFolderEntry,
   type SkillRegistrySummary,
   type QueueAddPayload
@@ -141,6 +143,7 @@ export function createDesktopApi(ipcRendererLike?: IpcRendererLike): DesktopApi 
     importWorld: (payload) => invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.WORLD_IMPORT, payload),
     importAgent: (payload) => invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.AGENT_IMPORT, payload),
     importSkill: (payload) => invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_IMPORT, payload),
+    listGitHubSkills: (repo) => invokeDesktopChannel<string[]>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_LIST_GITHUB, { repo }),
     exportWorld: (worldId) =>
       invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.WORLD_EXPORT, toWorldPayload(worldId)),
     listWorlds: () => invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.WORLD_LIST),
@@ -319,6 +322,7 @@ export function createDesktopApi(ipcRendererLike?: IpcRendererLike): DesktopApi 
     getSettings: () => invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SETTINGS_GET),
     saveSettings: (settings) => invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SETTINGS_SAVE, settings),
     pickFile: () => invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_FILE),
+    previewSkillImport: (payload) => invokeDesktopChannel<SkillImportPreviewResult | null>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_PREVIEW_IMPORT, payload),
     addToQueue: (worldId, chatId, content, sender) =>
       invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.QUEUE_ADD, { worldId, chatId, content, sender } as QueueAddPayload),
     getQueuedMessages: (worldId, chatId) =>

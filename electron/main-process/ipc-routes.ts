@@ -10,6 +10,7 @@
  * - Keeps channel naming and payload routing in one module.
  *
  * Recent Changes:
+ * - 2026-03-22: Added `skill:previewImport` route wiring for the skill editor install-mode preview flow.
  * - 2026-03-22: Added `skill:readFolderStructure` route wiring for the skill editor right pane.
  * - 2026-03-22: Added `skill:delete` route wiring for confirmed skill removal from the renderer editor.
  * - 2026-03-19: Routed optional `dialog:pickDirectory` payloads through to the main handler so callers can seed the folder picker without changing `workspace:open`.
@@ -51,6 +52,8 @@ export interface MainIpcHandlers {
   importWorld: (payload?: unknown) => Promise<unknown> | unknown;
   importAgent: (payload?: unknown) => Promise<unknown> | unknown;
   importSkill: (payload?: unknown) => Promise<unknown> | unknown;
+  previewSkillImport: (payload?: unknown) => Promise<unknown> | unknown;
+  listGitHubSkills: (payload?: unknown) => Promise<unknown> | unknown;
   exportWorld: (payload: unknown) => Promise<unknown> | unknown;
   listWorkspaceWorlds: () => Promise<unknown> | unknown;
   listSkillRegistry: (payload?: unknown) => Promise<unknown> | unknown;
@@ -123,6 +126,14 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
     {
       channel: DESKTOP_INVOKE_CHANNELS.SKILL_IMPORT,
       handler: async (_event, payload) => handlers.importSkill(payload)
+    },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.SKILL_PREVIEW_IMPORT,
+      handler: async (_event, payload) => handlers.previewSkillImport(payload)
+    },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.SKILL_LIST_GITHUB,
+      handler: async (_event, payload) => handlers.listGitHubSkills(payload)
     },
     {
       channel: DESKTOP_INVOKE_CHANNELS.WORLD_EXPORT,

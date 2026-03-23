@@ -135,6 +135,7 @@ export default function RightPanelContent({
   panelLogs,
   onClearPanelLogs,
   onEditSkill,
+  onInstallSkill,
 }) {
   const logsContainerRef = useRef<HTMLDivElement | null>(null);
   const shouldStickLogsToBottomRef = useRef(true);
@@ -433,6 +434,27 @@ export default function RightPanelContent({
                       ) : (
                         <p className="px-1 py-1 text-[11px] text-sidebar-foreground/50">No project skills discovered.</p>
                       )}
+                      {typeof onInstallSkill === 'function' ? (
+                        <div className="flex justify-end px-1 pt-1">
+                          <button
+                            type="button"
+                            onClick={onInstallSkill}
+                            className="cursor-pointer text-[11px] font-medium text-sidebar-primary transition-colors hover:text-sidebar-primary/80"
+                          >
+                            Install Skill ...
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : typeof onInstallSkill === 'function' ? (
+                    <div className="flex justify-end px-1 pt-1">
+                      <button
+                        type="button"
+                        onClick={onInstallSkill}
+                        className="cursor-pointer text-[11px] font-medium text-sidebar-primary transition-colors hover:text-sidebar-primary/80"
+                      >
+                        Install Skill ...
+                      </button>
                     </div>
                   ) : null}
                 </div>

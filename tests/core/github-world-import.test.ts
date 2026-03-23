@@ -20,6 +20,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as path from 'node:path';
 
 const fsPromisesMocks = vi.hoisted(() => ({
   mkdir: vi.fn(async () => undefined),
@@ -40,11 +41,15 @@ vi.mock('node:path', async (importOriginal) => {
 import {
   ensureSafeRelativePath,
   GitHubWorldImportError,
+  listGitHubDirectoryNames,
   resolveGitHubRepoSource,
   resolveGitHubWorldShorthand,
   stageGitHubFolderFromRepo,
   stageGitHubWorldFromShorthand,
 } from '../../core/storage/github-world-import.js';
+
+const MOCK_TMP_DIR = path.join(path.sep, 'tmp');
+const MOCK_STAGING_ROOT = path.join(MOCK_TMP_DIR, 'agent-world-github-import-staging');
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -60,7 +65,7 @@ function bytesResponse(text: string, status = 200): Response {
 describe('stageGitHubWorldFromShorthand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    fsPromisesMocks.mkdtemp.mockResolvedValue('/tmp/agent-world-github-import-staging');
+    fsPromisesMocks.mkdtemp.mockResolvedValue(MOCK_STAGING_ROOT);
   });
 
   afterEach(() => {
@@ -97,9 +102,9 @@ describe('stageGitHubWorldFromShorthand', () => {
       requestTimeoutMs: 1_000,
     });
 
-    expect(fsPromisesMocks.mkdtemp).toHaveBeenCalledWith('/tmp/aw-stage-');
-    expect(staged.stagingRootPath).toBe('/tmp/agent-world-github-import-staging');
-    expect(staged.worldFolderPath).toBe('/tmp/agent-world-github-import-staging/infinite-etude');
+    expect(fsPromisesMocks.mkdtemp).toHaveBeenCalledWith(path.join(MOCK_TMP_DIR, 'aw-stage-'));
+    expect(staged.stagingRootPath).toBe(MOCK_STAGING_ROOT);
+    expect(staged.worldFolderPath).toBe(path.join(MOCK_STAGING_ROOT, 'infinite-etude'));
     expect(staged.source).toEqual({
       shorthand: '@awesome-agent-world/infinite-etude',
       owner: 'yysun',
@@ -110,18 +115,18 @@ describe('stageGitHubWorldFromShorthand', () => {
     });
 
     expect(fsPromisesMocks.mkdir).toHaveBeenCalledWith(
-      '/tmp/agent-world-github-import-staging/infinite-etude',
+      path.join(MOCK_STAGING_ROOT, 'infinite-etude'),
       { recursive: true },
     );
     expect(fsPromisesMocks.mkdir).toHaveBeenCalledWith(
-      '/tmp/agent-world-github-import-staging/infinite-etude/agents',
+      path.join(MOCK_STAGING_ROOT, 'infinite-etude', 'agents'),
       { recursive: true },
     );
     expect(fsPromisesMocks.writeFile).toHaveBeenCalledTimes(2);
     expect(fsPromisesMocks.rm).not.toHaveBeenCalled();
 
     await staged.cleanup();
-    expect(fsPromisesMocks.rm).toHaveBeenCalledWith('/tmp/agent-world-github-import-staging', {
+    expect(fsPromisesMocks.rm).toHaveBeenCalledWith(MOCK_STAGING_ROOT, {
       recursive: true,
       force: true,
     });
@@ -139,7 +144,7 @@ describe('stageGitHubWorldFromShorthand', () => {
       code: 'source-not-found',
     });
 
-    expect(fsPromisesMocks.rm).toHaveBeenCalledWith('/tmp/agent-world-github-import-staging', {
+    expect(fsPromisesMocks.rm).toHaveBeenCalledWith(MOCK_STAGING_ROOT, {
       recursive: true,
       force: true,
     });
@@ -164,7 +169,7 @@ describe('stageGitHubWorldFromShorthand', () => {
       code: 'limits-exceeded',
     });
 
-    expect(fsPromisesMocks.rm).toHaveBeenCalledWith('/tmp/agent-world-github-import-staging', {
+    expect(fsPromisesMocks.rm).toHaveBeenCalledWith(MOCK_STAGING_ROOT, {
       recursive: true,
       force: true,
     });
@@ -189,7 +194,7 @@ describe('stageGitHubWorldFromShorthand', () => {
       code: 'fetch-failed',
     });
 
-    expect(fsPromisesMocks.rm).toHaveBeenCalledWith('/tmp/agent-world-github-import-staging', {
+    expect(fsPromisesMocks.rm).toHaveBeenCalledWith(MOCK_STAGING_ROOT, {
       recursive: true,
       force: true,
     });
@@ -212,7 +217,7 @@ describe('stageGitHubWorldFromShorthand', () => {
       code: 'unsupported-entry-type',
     });
 
-    expect(fsPromisesMocks.rm).toHaveBeenCalledWith('/tmp/agent-world-github-import-staging', {
+    expect(fsPromisesMocks.rm).toHaveBeenCalledWith(MOCK_STAGING_ROOT, {
       recursive: true,
       force: true,
     });
@@ -254,7 +259,7 @@ describe('stageGitHubWorldFromShorthand', () => {
 describe('stageGitHubFolderFromRepo', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    fsPromisesMocks.mkdtemp.mockResolvedValue('/tmp/agent-world-github-import-staging');
+    fsPromisesMocks.mkdtemp.mockResolvedValue(MOCK_STAGING_ROOT);
   });
 
   afterEach(() => {
@@ -279,7 +284,7 @@ describe('stageGitHubFolderFromRepo', () => {
       tempPrefix: 'aw-stage-',
     });
 
-    expect(staged.folderPath).toBe('/tmp/agent-world-github-import-staging/research');
+    expect(staged.folderPath).toBe(path.join(MOCK_STAGING_ROOT, 'research'));
     expect(staged.source).toEqual({
       repoInput: 'octo/tools#dev',
       owner: 'octo',
@@ -289,7 +294,7 @@ describe('stageGitHubFolderFromRepo', () => {
       commitSha: 'def456',
     });
     expect(fsPromisesMocks.writeFile).toHaveBeenCalledWith(
-      '/tmp/agent-world-github-import-staging/research/SKILL.md',
+      path.join(MOCK_STAGING_ROOT, 'research', 'SKILL.md'),
       expect.any(Uint8Array),
     );
   });
@@ -298,6 +303,47 @@ describe('stageGitHubFolderFromRepo', () => {
     await expect(stageGitHubFolderFromRepo('octo/tools', '')).rejects.toMatchObject({
       name: 'GitHubWorldImportError',
       code: 'invalid-shorthand',
+    });
+  });
+});
+
+describe('listGitHubDirectoryNames', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('lists and sorts directory names within a repo path', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(jsonResponse([
+      {
+        type: 'dir',
+        path: 'skills/reviewer',
+      },
+      {
+        type: 'file',
+        path: 'skills/README.md',
+      },
+      {
+        type: 'dir',
+        path: 'skills/planner',
+      },
+    ])));
+
+    await expect(listGitHubDirectoryNames('octo/tools#dev', 'skills')).resolves.toEqual({
+      repoInput: 'octo/tools#dev',
+      owner: 'octo',
+      repo: 'tools',
+      branch: 'dev',
+      directoryPath: 'skills',
+      directoryNames: ['planner', 'reviewer'],
+    });
+  });
+
+  it('maps missing repo paths to source-not-found', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response('', { status: 404 })));
+
+    await expect(listGitHubDirectoryNames('octo/tools', 'skills')).rejects.toMatchObject({
+      name: 'GitHubWorldImportError',
+      code: 'source-not-found',
     });
   });
 });

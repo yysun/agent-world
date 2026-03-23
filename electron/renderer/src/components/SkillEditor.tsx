@@ -29,7 +29,11 @@ import type { SkillFolderEntry } from '../types/desktop-api';
 import BaseEditor from './BaseEditor';
 import SkillFolderPane from './SkillFolderPane';
 
+type SkillEditorMode = 'edit' | 'install';
+type SkillInstallSourceType = 'local' | 'github';
+
 export default function SkillEditor({
+  mode = 'edit',
   skillId,
   sourceScope,
   selectedFilePath,
@@ -44,7 +48,27 @@ export default function SkillEditor({
   loadingFile,
   saving,
   deleting,
+  installSourceType = 'github',
+  installSourcePath = '',
+  installRepo = '',
+  installItemName = '',
+  installOptions = [],
+  installTargetScope = 'project',
+  loadingInstallOptions = false,
+  onInstallSourceTypeChange,
+  onInstallSourcePathChange,
+  onInstallRepoChange,
+  onInstallItemNameChange,
+  onInstallTargetScopeChange,
+  onBrowseInstallSource,
+  onLoadInstallOptions,
+  onPreviewInstall,
+  onInstall,
+  installing = false,
+  hasInstallPreview = false,
+  currentFileEditable = true,
 }: {
+  mode?: SkillEditorMode;
   skillId: string;
   sourceScope: string;
   selectedFilePath: string;
@@ -59,10 +83,43 @@ export default function SkillEditor({
   loadingFile: boolean;
   saving: boolean;
   deleting: boolean;
+  installSourceType?: SkillInstallSourceType;
+  installSourcePath?: string;
+  installRepo?: string;
+  installItemName?: string;
+  installOptions?: string[];
+  installTargetScope?: 'global' | 'project';
+  loadingInstallOptions?: boolean;
+  onInstallSourceTypeChange?: (value: SkillInstallSourceType) => void;
+  onInstallSourcePathChange?: (value: string) => void;
+  onInstallRepoChange?: (value: string) => void;
+  onInstallItemNameChange?: (value: string) => void;
+  onInstallTargetScopeChange?: (value: 'global' | 'project') => void;
+  onBrowseInstallSource?: () => void;
+  onLoadInstallOptions?: () => void;
+  onPreviewInstall?: () => void;
+  onInstall?: () => void;
+  installing?: boolean;
+  hasInstallPreview?: boolean;
+  currentFileEditable?: boolean;
 }) {
-  const busy = saving || deleting || loadingFile;
+  const isInstallMode = mode === 'install';
+  const busy = saving || deleting || loadingFile || installing;
   const canSave = !busy && hasUnsavedChanges;
-  const scopeLabel = sourceScope === 'project' ? 'Project skill' : 'Global skill';
+  const canPreview = isInstallMode
+    ? (installSourceType === 'github'
+        ? Boolean(installRepo.trim()) && Boolean(installItemName.trim())
+        : Boolean(installSourcePath.trim()))
+    : false;
+  const canInstall = !busy && hasInstallPreview && Boolean(installItemName.trim());
+  const scopeLabel = isInstallMode
+    ? 'INSTALL SKILL'
+    : (sourceScope === 'project' ? 'Project skill' : 'Global skill');
+  const titleText = skillId;
+  const textareaDisabled = busy || (isInstallMode && !currentFileEditable);
+  const textareaPlaceholder = isInstallMode && !currentFileEditable
+    ? `${selectedFilePath || 'SKILL.md'} cannot be edited in preview.`
+    : `Contents of ${selectedFilePath || 'SKILL.md'}…`;
 
   const toolbar = (
     <div className="flex items-center gap-3">
@@ -89,20 +146,143 @@ export default function SkillEditor({
         </svg>
         Back
       </button>
-      <div className="min-w-0">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{scopeLabel}</p>
-        <p className="truncate text-sm font-medium text-foreground">{skillId}</p>
-      </div>
-      <div className="ml-auto flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={busy}
-          className="rounded-md border border-destructive/35 px-3 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {deleting ? 'Deleting…' : 'Delete'}
-        </button>
-      </div>
+      {isInstallMode ? (
+        <>
+          <p className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{scopeLabel}</p>
+          <div className="ml-auto flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+            <div className="inline-flex items-center rounded-md border border-border bg-muted/30 p-0.5">
+              {(['local', 'github'] as SkillInstallSourceType[]).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => onInstallSourceTypeChange?.(option)}
+                  disabled={busy}
+                  className={`rounded px-2 py-1 text-[11px] font-medium ${installSourceType === option
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                    }`}
+                >
+                  {option === 'local' ? 'Local' : 'GitHub'}
+                </button>
+              ))}
+            </div>
+            {installSourceType === 'local' ? (
+              <div className="flex min-w-[220px] flex-1 items-center gap-2 sm:max-w-[360px]">
+                <input
+                  value={installSourcePath}
+                  onChange={(event) => onInstallSourcePathChange?.(event.target.value)}
+                  disabled={busy}
+                  placeholder="Skill folder path"
+                  className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] text-foreground outline-none placeholder:text-muted-foreground focus:border-ring"
+                />
+                <button
+                  type="button"
+                  onClick={onBrowseInstallSource}
+                  disabled={busy}
+                  className="rounded-md border border-border px-2 py-1 text-[11px] text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Browse
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="relative min-w-[180px] flex-1 sm:max-w-[260px]">
+                  <input
+                    value={installRepo}
+                    onChange={(event) => onInstallRepoChange?.(event.target.value)}
+                    disabled={busy}
+                    placeholder="owner/repo"
+                    className="w-full rounded-md border border-border bg-background px-2 py-1 pr-8 text-[11px] text-foreground outline-none placeholder:text-muted-foreground focus:border-ring"
+                  />
+                  <button
+                    type="button"
+                    onClick={onLoadInstallOptions}
+                    disabled={busy || loadingInstallOptions || !installRepo.trim()}
+                    aria-label={loadingInstallOptions ? 'Loading skills from repo' : 'Load skills from repo'}
+                    title={loadingInstallOptions ? 'Loading skills from repo' : 'Load skills from repo'}
+                    className="absolute right-1 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M21 12a9 9 0 0 1-15.5 6.36" />
+                      <path d="M3 12A9 9 0 0 1 18.5 5.64" />
+                      <path d="M3 16v-4h4" />
+                      <path d="M21 8v4h-4" />
+                    </svg>
+                  </button>
+                </div>
+                <select
+                  value={installItemName}
+                  onChange={(event) => onInstallItemNameChange?.(event.target.value)}
+                  disabled={busy || loadingInstallOptions || installOptions.length === 0}
+                  className="w-40 rounded-md border border-border bg-background px-2 py-1 text-[11px] text-foreground outline-none focus:border-ring"
+                  aria-label="GitHub skill"
+                >
+                  <option value="">
+                    {loadingInstallOptions ? 'Loading skills...' : (installOptions.length > 0 ? 'Select skill' : 'Load skills from repo')}
+                  </option>
+                  {installOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </>
+            )}
+            <select
+              value={installTargetScope}
+              onChange={(event) => onInstallTargetScopeChange?.(event.target.value === 'global' ? 'global' : 'project')}
+              disabled={busy}
+              className="rounded-md border border-border bg-background px-2 py-1 text-[11px] text-foreground outline-none focus:border-ring"
+              aria-label="Install scope"
+            >
+              <option value="project">Project</option>
+              <option value="global">Global</option>
+            </select>
+            <button
+              type="button"
+              onClick={onPreviewInstall}
+              disabled={busy || !canPreview}
+              className="rounded-md border border-border px-2 py-1 text-[11px] font-medium text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loadingFile ? 'Previewing…' : 'Preview'}
+            </button>
+            <button
+              type="button"
+              onClick={onInstall}
+              disabled={!canInstall}
+              className="rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {installing ? 'Installing…' : 'Install'}
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{scopeLabel}</p>
+          <p className="truncate text-sm font-medium text-foreground">{titleText}</p>
+        </div>
+      )}
+      {!isInstallMode ? (
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={busy}
+            className="rounded-md border border-destructive/35 px-3 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {deleting ? 'Deleting…' : 'Delete'}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 
@@ -120,40 +300,46 @@ export default function SkillEditor({
       )}
     >
       <div className="flex h-full min-h-0 flex-col">
-        <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2">
-          <p className="min-w-0 truncate text-xs text-foreground">{selectedFilePath || 'SKILL.md'}</p>
-          <button
-            type="button"
-            onClick={onSave}
-            disabled={!canSave}
-            aria-label={saving ? 'Saving file' : 'Save file'}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M19 21H5a2 2 0 0 1-2-2V7.828a2 2 0 0 1 .586-1.414l2.828-2.828A2 2 0 0 1 7.828 3H17a2 2 0 0 1 2 2z" />
-              <path d="M17 21v-8H7v8" />
-              <path d="M7 3v5h8" />
-            </svg>
-          </button>
+        <div className="border-b border-border px-4 py-2">
+          {isInstallMode ? (
+            <p className="min-w-0 truncate text-xs text-foreground">{selectedFilePath || 'SKILL.md'}</p>
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <p className="min-w-0 truncate text-xs text-foreground">{selectedFilePath || 'SKILL.md'}</p>
+              <button
+                type="button"
+                onClick={onSave}
+                disabled={!canSave}
+                aria-label={saving ? 'Saving file' : 'Save file'}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M19 21H5a2 2 0 0 1-2-2V7.828a2 2 0 0 1 .586-1.414l2.828-2.828A2 2 0 0 1 7.828 3H17a2 2 0 0 1 2 2z" />
+                  <path d="M17 21v-8H7v8" />
+                  <path d="M7 3v5h8" />
+                </svg>
+              </button>
+            </div>
+          )}
         </div>
         <textarea
           className="h-full w-full resize-none bg-background p-4 text-xs leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none"
           value={content}
           onChange={(e) => onContentChange(e.target.value)}
-          disabled={busy}
+          disabled={textareaDisabled}
           spellCheck={false}
-          placeholder={`Contents of ${selectedFilePath || 'SKILL.md'}…`}
+          placeholder={textareaPlaceholder}
           aria-label={`Edit ${selectedFilePath || 'SKILL.md'} for ${skillId}`}
         />
       </div>

@@ -38,11 +38,6 @@ const IMPORT_TARGETS = [
     title: 'Import Agent',
     description: 'Bring a single agent into the currently loaded world.',
   },
-  {
-    key: 'skill',
-    title: 'Import Skill',
-    description: 'Add a reusable skill into the current workspace skill registry.',
-  },
 ];
 
 const DEFAULT_GITHUB_REPO = 'yysun/awesome-agent-world';
@@ -63,7 +58,6 @@ export default function LeftSidebarPanel({
   onCloseImportWorldPanel,
   onImportWorld,
   onImportAgent,
-  onImportSkill,
   onExportWorld,
   onSelectWorld,
   loadingWorld,
@@ -98,9 +92,6 @@ export default function LeftSidebarPanel({
   const [agentImportSourceType, setAgentImportSourceType] = useState('local');
   const [agentGithubRepo, setAgentGithubRepo] = useState(DEFAULT_GITHUB_REPO);
   const [agentGithubName, setAgentGithubName] = useState('agent-kit');
-  const [skillImportSourceType, setSkillImportSourceType] = useState('local');
-  const [skillGithubRepo, setSkillGithubRepo] = useState(DEFAULT_GITHUB_REPO);
-  const [skillGithubName, setSkillGithubName] = useState('writing-skill');
   const [importingWorld, setImportingWorld] = useState(false);
   const isSidebarOpen = !leftSidebarCollapsed;
   const isUpdateReady = appUpdateState?.status === 'downloaded';
@@ -159,9 +150,6 @@ export default function LeftSidebarPanel({
     setAgentImportSourceType('local');
     setAgentGithubRepo(DEFAULT_GITHUB_REPO);
     setAgentGithubName('agent-kit');
-    setSkillImportSourceType('local');
-    setSkillGithubRepo(DEFAULT_GITHUB_REPO);
-    setSkillGithubName('writing-skill');
     setImportingWorld(false);
   }, [panelMode]);
 
@@ -219,37 +207,6 @@ export default function LeftSidebarPanel({
     setImportingWorld(true);
     try {
       const success = await onImportAgent({ repo, itemName });
-      if (success) {
-        onCloseImportWorldPanel();
-      }
-    } finally {
-      setImportingWorld(false);
-    }
-  };
-
-  const onImportSkillFromLocal = async () => {
-    if (importingWorld || typeof onImportSkill !== 'function') return;
-
-    setImportingWorld(true);
-    try {
-      const success = await onImportSkill();
-      if (success) {
-        onCloseImportWorldPanel();
-      }
-    } finally {
-      setImportingWorld(false);
-    }
-  };
-
-  const onImportSkillFromGithub = async () => {
-    if (importingWorld || typeof onImportSkill !== 'function') return;
-    const repo = String(skillGithubRepo || '').trim();
-    const itemName = String(skillGithubName || '').trim();
-    if (!repo || !itemName) return;
-
-    setImportingWorld(true);
-    try {
-      const success = await onImportSkill({ repo, itemName });
       if (success) {
         onCloseImportWorldPanel();
       }
@@ -502,88 +459,7 @@ export default function LeftSidebarPanel({
                 </button>
               )}
             </div>
-          ) : (
-            <div className="mt-3 rounded-md border border-sidebar-border bg-sidebar px-3 py-3" data-testid="left-sidebar-import-skill-panel">
-              <div className="mb-1 text-xs font-semibold text-sidebar-foreground">Skill source</div>
-              <p className="mb-3 text-[11px] leading-4 text-sidebar-foreground/65">
-                Import a reusable skill package into the workspace skill registry used by this desktop app.
-              </p>
-              <div className="space-y-2 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2">
-                <label className="flex cursor-pointer items-center gap-2 text-sidebar-foreground">
-                  <input
-                    type="radio"
-                    name="left-skill-import-source-type"
-                    value="local"
-                    checked={skillImportSourceType === 'local'}
-                    onChange={() => setSkillImportSourceType('local')}
-                    disabled={importingWorld}
-                    className="accent-primary"
-                  />
-                  <span>From local directory</span>
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 text-sidebar-foreground">
-                  <input
-                    type="radio"
-                    name="left-skill-import-source-type"
-                    value="github"
-                    checked={skillImportSourceType === 'github'}
-                    onChange={() => setSkillImportSourceType('github')}
-                    disabled={importingWorld}
-                    className="accent-primary"
-                  />
-                  <span>From GitHub</span>
-                </label>
-              </div>
-
-              <div className="mt-3 rounded-md border border-dashed border-sidebar-border bg-sidebar-accent/70 px-3 py-2">
-                <div className="text-[10px] uppercase tracking-wide text-sidebar-foreground/55">Destination Scope</div>
-                <div className="mt-1 text-[11px] leading-4 text-sidebar-foreground/80">Current workspace</div>
-              </div>
-
-              {skillImportSourceType === 'github' ? (
-                <div className="mt-3 flex flex-col gap-2">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-bold text-sidebar-foreground/90">GitHub Repo</label>
-                    <input
-                      value={skillGithubRepo}
-                      onChange={(event) => setSkillGithubRepo(event.target.value)}
-                      placeholder="owner/repo"
-                      className="w-full rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                      disabled={importingWorld}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-bold text-sidebar-foreground/90">Skill Name</label>
-                    <input
-                      value={skillGithubName}
-                      onChange={(event) => setSkillGithubName(event.target.value)}
-                      placeholder="writing-skill"
-                      className="w-full rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                      disabled={importingWorld}
-                    />
-                  </div>
-                  <span className="text-[10px] text-sidebar-foreground/60">Example: repo yysun/awesome-agent-world, skill writing-skill</span>
-                  <button
-                    type="button"
-                    onClick={onImportSkillFromGithub}
-                    disabled={importingWorld || typeof onImportSkill !== 'function' || !String(skillGithubRepo || '').trim() || !String(skillGithubName || '').trim()}
-                    className="mt-1 w-fit rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {importingWorld ? 'Importing...' : 'Import Skill'}
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={onImportSkillFromLocal}
-                  disabled={importingWorld || typeof onImportSkill !== 'function'}
-                  className="mt-3 w-fit rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {importingWorld ? 'Importing...' : 'Open local skill folder'}
-                </button>
-              )}
-            </div>
-          )}
+          ) : null}
         </div>
       </aside>
     );

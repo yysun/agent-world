@@ -350,4 +350,125 @@ describe('SkillEditor', () => {
     expect(saveBtn?.props?.disabled).toBe(true);
     expect(result.props.rightPane.props.disabled).toBe(true);
   });
+
+  it('defaults install mode to GitHub controls in the toolbar without preview labeling', () => {
+    const onPreviewInstall = vi.fn();
+    const onInstall = vi.fn();
+    const onBrowseInstallSource = vi.fn();
+    const onLoadInstallOptions = vi.fn();
+
+    const result: any = SkillEditor({
+      mode: 'install',
+      skillId: '',
+      sourceScope: 'project',
+      selectedFilePath: 'SKILL.md',
+      content: '# Draft Skill',
+      onContentChange: () => { },
+      onBack: () => { },
+      onSave: () => { },
+      onDelete: () => { },
+      onSelectFile: () => { },
+      folderEntries: [
+        { name: 'SKILL.md', relativePath: 'SKILL.md', type: 'file' },
+      ],
+      hasUnsavedChanges: false,
+      loadingFile: false,
+      saving: false,
+      deleting: false,
+      installRepo: 'yysun/awesome-agent-world',
+      installItemName: 'reviewer',
+      installOptions: ['planner', 'reviewer'],
+      installTargetScope: 'project',
+      onBrowseInstallSource,
+      onLoadInstallOptions,
+      onPreviewInstall,
+      onInstall,
+      hasInstallPreview: true,
+    });
+
+    const toolbarStr = JSON.stringify(result.props.toolbar);
+    expect(toolbarStr).toContain('INSTALL SKILL');
+    expect(toolbarStr).toContain('GitHub');
+    expect(toolbarStr).toContain('owner/repo');
+    expect(toolbarStr).toContain('Project');
+    expect(toolbarStr).toContain('Load skills from repo');
+    expect(toolbarStr).toContain('M21 12');
+    expect(toolbarStr).not.toContain('Delete');
+    expect(toolbarStr).not.toContain('Skill preview');
+
+    const nodes = allDescendants(result.props.children);
+    const previewButton = nodes.find((node: any) => node?.type === 'button' && node?.props?.onClick === onPreviewInstall);
+    const installButton = nodes.find((node: any) => node?.type === 'button' && node?.props?.onClick === onInstall);
+    const browseButton = nodes.find((node: any) => node?.type === 'button' && node?.props?.onClick === onBrowseInstallSource);
+    const contentStr = JSON.stringify(result.props.children);
+
+    expect(previewButton).toBeUndefined();
+    expect(installButton).toBeUndefined();
+    expect(browseButton).toBeUndefined();
+    expect(contentStr).not.toContain('Preview a local or GitHub skill to inspect its files before installing.');
+    expect(contentStr).not.toContain('Skill preview');
+
+    const toolbarNodes = allDescendants(result.props.toolbar);
+    const toolbarPreviewButton = toolbarNodes.find((node: any) => node?.type === 'button' && node?.props?.onClick === onPreviewInstall);
+    const toolbarInstallButton = toolbarNodes.find((node: any) => node?.type === 'button' && node?.props?.onClick === onInstall);
+    const toolbarLoadButton = toolbarNodes.find((node: any) => node?.type === 'button' && node?.props?.onClick === onLoadInstallOptions);
+    const toolbarBrowseButton = toolbarNodes.find((node: any) => node?.type === 'button' && node?.props?.onClick === onBrowseInstallSource);
+    const toolbarSkillSelect = toolbarNodes.find((node: any) => node?.type === 'select' && node?.props?.['aria-label'] === 'GitHub skill');
+
+    expect(toolbarPreviewButton).toBeDefined();
+    expect(toolbarInstallButton).toBeDefined();
+    expect(toolbarInstallButton.props.disabled).toBe(false);
+    expect(toolbarLoadButton).toBeDefined();
+    expect(toolbarBrowseButton).toBeUndefined();
+    expect(toolbarSkillSelect).toBeDefined();
+
+    toolbarLoadButton.props.onClick();
+    toolbarPreviewButton.props.onClick();
+    toolbarInstallButton.props.onClick();
+
+    expect(onLoadInstallOptions).toHaveBeenCalledTimes(1);
+    expect(onPreviewInstall).toHaveBeenCalledTimes(1);
+    expect(onInstall).toHaveBeenCalledTimes(1);
+    expect(onBrowseInstallSource).toHaveBeenCalledTimes(0);
+  });
+
+  it('disables install editing for non-text preview files', () => {
+    const result: any = SkillEditor({
+      mode: 'install',
+      skillId: 'preview-skill',
+      sourceScope: 'project',
+      selectedFilePath: 'assets/banner.png',
+      content: '',
+      onContentChange: () => { },
+      onBack: () => { },
+      onSave: () => { },
+      onDelete: () => { },
+      onSelectFile: () => { },
+      folderEntries: [
+        {
+          name: 'assets',
+          relativePath: 'assets',
+          type: 'directory',
+          children: [
+            { name: 'banner.png', relativePath: 'assets/banner.png', type: 'file' },
+          ],
+        },
+      ],
+      hasUnsavedChanges: false,
+      loadingFile: false,
+      saving: false,
+      deleting: false,
+      installRepo: 'yysun/awesome-agent-world',
+      installItemName: 'preview-skill',
+      installOptions: ['preview-skill'],
+      hasInstallPreview: true,
+      currentFileEditable: false,
+    });
+
+    const nodes = allDescendants(result.props.children);
+    const textarea = nodes.find((node: any) => node?.type === 'textarea');
+
+    expect(textarea?.props?.disabled).toBe(true);
+    expect(textarea?.props?.placeholder).toContain('cannot be edited in preview');
+  });
 });

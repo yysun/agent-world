@@ -45,6 +45,8 @@ function createHandlerMocks() {
     importWorld: vi.fn(async () => ({})),
     importAgent: vi.fn(async () => ({})),
     importSkill: vi.fn(async () => ({})),
+    previewSkillImport: vi.fn(async () => ({})),
+    listGitHubSkills: vi.fn(async () => ([])),
     exportWorld: vi.fn(async () => ({})),
     listWorkspaceWorlds: vi.fn(async () => ([])),
     listSkillRegistry: vi.fn(async () => ([])),
@@ -111,6 +113,8 @@ describe('buildMainIpcRoutes', () => {
       'world:import',
       'agent:import',
       'skill:import',
+      'skill:previewImport',
+      'skill:listGitHubSkills',
       'world:export',
       'world:list',
       'skill:list',
@@ -174,6 +178,8 @@ describe('buildMainIpcRoutes', () => {
     await routes.find((route) => route.channel === 'world:import')?.handler({}, { source: '@awesome-agent-world/infinite-etude' });
     await routes.find((route) => route.channel === 'agent:import')?.handler({}, { repo: 'yysun/agent-worlds', itemName: 'guide-agent' });
     await routes.find((route) => route.channel === 'skill:import')?.handler({}, { repo: 'yysun/agent-skills', itemName: 'reviewer' });
+    await routes.find((route) => route.channel === 'skill:previewImport')?.handler({}, { repo: 'yysun/agent-skills', itemName: 'reviewer' });
+    await routes.find((route) => route.channel === 'skill:listGitHubSkills')?.handler({}, { repo: 'yysun/awesome-agent-world' });
     await routes.find((route) => route.channel === 'world:export')?.handler({}, { worldId: 'w-9' });
     await routes.find((route) => route.channel === 'skill:list')?.handler({});
     await routes.find((route) => route.channel === 'heartbeat:list')?.handler({});
@@ -213,6 +219,8 @@ describe('buildMainIpcRoutes', () => {
     expect(handlers.importWorld).toHaveBeenCalledWith({ source: '@awesome-agent-world/infinite-etude' });
     expect(handlers.importAgent).toHaveBeenCalledWith({ repo: 'yysun/agent-worlds', itemName: 'guide-agent' });
     expect(handlers.importSkill).toHaveBeenCalledWith({ repo: 'yysun/agent-skills', itemName: 'reviewer' });
+    expect(handlers.previewSkillImport).toHaveBeenCalledWith({ repo: 'yysun/agent-skills', itemName: 'reviewer' });
+    expect(handlers.listGitHubSkills).toHaveBeenCalledWith({ repo: 'yysun/awesome-agent-world' });
     expect(handlers.exportWorld).toHaveBeenCalledWith({ worldId: 'w-9' });
     expect(handlers.listSkillRegistry).toHaveBeenCalledTimes(1);
     expect(handlers.listHeartbeatJobs).toHaveBeenCalledTimes(1);
