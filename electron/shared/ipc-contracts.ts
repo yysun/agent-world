@@ -15,6 +15,7 @@
  * - Runtime validation remains in main-process handlers for behavior parity.
  *
  * Recent Changes:
+ * - 2026-03-22: Added `skill:delete` invoke contract and `deleteSkill()` bridge method for confirmed skill removal from the editor.
  * - 2026-03-19: Added optional `defaultPath` payload support to `dialog:pickDirectory` while preserving `workspace:open(directoryPath)` direct-path semantics.
  * - 2026-03-19: Changed `skill:list` filtering from renderer-provided `projectPath` to world-scoped `worldId`.
  * - 2026-03-15: Added `nextRunAt` to heartbeat job status so the renderer can show a live next-run countdown.
@@ -91,7 +92,8 @@ export const DESKTOP_INVOKE_CHANNELS = {
   QUEUE_STOP: 'queue:stop',
   QUEUE_RETRY: 'queue:retry',
   SKILL_READ_CONTENT: 'skill:readContent',
-  SKILL_SAVE_CONTENT: 'skill:saveContent'
+  SKILL_SAVE_CONTENT: 'skill:saveContent',
+  SKILL_DELETE: 'skill:delete'
 } as const;
 
 export type DesktopInvokeChannel =
@@ -329,4 +331,5 @@ export interface DesktopApi {
   retryQueueMessage: (worldId: string, messageId: string, chatId: string) => Promise<unknown>;
   readSkillContent: (skillId: string) => Promise<string>;
   saveSkillContent: (skillId: string, content: string) => Promise<void>;
+  deleteSkill: (skillId: string) => Promise<void>;
 }

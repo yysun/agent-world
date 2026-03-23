@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-03-22: Added confirmed skill deletion from the skill editor and disabled the editor while save/delete actions are running.
  * - 2026-03-14: Added sidebar heartbeat polling plus start/pause/stop handlers for selected-world cron controls.
  * - 2026-03-13: Added `reasoningEffort` derived from `world.variables` and wired it into the Electron composer dropdown.
  * - 2026-03-12: Added `toolPermission` derived from `world.variables` env key and `onSetToolPermission` wired to composer props for the Electron tool permission dropdown.
@@ -265,6 +266,7 @@ function AppContent({ api }: { api: DesktopApi }) {
   const [editingSkillEntry, setEditingSkillEntry] = useState<{ skillId: string; description: string; sourceScope: string } | null>(null);
   const [editingSkillContent, setEditingSkillContent] = useState('');
   const [savingSkillContent, setSavingSkillContent] = useState(false);
+  const [deletingSkillContent, setDeletingSkillContent] = useState(false);
 
   const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [notification, setNotification] = useState<{ text: string; kind: 'error' | 'success' | 'info' } | null>(null);
@@ -1253,6 +1255,30 @@ function AppContent({ api }: { api: DesktopApi }) {
     }
   }, [api, editingSkillContent, editingSkillEntry, setStatusText]);
 
+  const onDeleteSkillContent = useCallback(async () => {
+    const skillId = String(editingSkillEntry?.skillId || '').trim();
+    if (!skillId) return;
+
+    const shouldDelete = window.confirm(`Delete skill "${skillId}"? This action cannot be undone.`);
+    if (!shouldDelete) return;
+
+    setDeletingSkillContent(true);
+    try {
+      await api.deleteSkill(skillId);
+      try {
+        await refreshSkillRegistry();
+      } catch {
+        // Best-effort refresh; the delete already succeeded.
+      }
+      onCloseSkillEditor();
+      setStatusText(`Skill deleted: ${skillId}`, 'success');
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to delete skill.'), 'error');
+    } finally {
+      setDeletingSkillContent(false);
+    }
+  }, [api, editingSkillEntry, onCloseSkillEditor, refreshSkillRegistry, setStatusText]);
+
   const agentStatusInput = useMemo(
     () => worldAgents.map((a: any) => ({ id: String(a.id || ''), name: String(a.name || '') })),
     [worldAgents]
@@ -1603,7 +1629,9 @@ function AppContent({ api }: { api: DesktopApi }) {
                 onContentChange={setEditingSkillContent}
                 onBack={onCloseSkillEditor}
                 onSave={onSaveSkillContent}
+                onDelete={onDeleteSkillContent}
                 saving={savingSkillContent}
+                deleting={deletingSkillContent}
               />
             ) : undefined
           }

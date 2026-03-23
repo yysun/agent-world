@@ -12,6 +12,7 @@
  * - Keeps all assertions in-memory with no file-system dependencies.
  *
  * Recent Changes:
+ * - 2026-03-22: Added bridge coverage for `deleteSkill(skillId)` IPC forwarding.
  * - 2026-03-19: Added regression coverage for `pickDirectory(defaultPath)` payload forwarding while preserving `openWorkspace(directoryPath)` wiring.
  * - 2026-02-26: Added coverage for `getLoggingConfig()` IPC bridge wiring.
  * - 2026-02-26: Added coverage for `importWorld({ source })` payload forwarding to `world:import`.
@@ -63,6 +64,7 @@ describe('electron preload bridge', () => {
       pauseHeartbeat: expect.any(Function),
       stopHeartbeat: expect.any(Function),
       listSkills: expect.any(Function),
+      deleteSkill: expect.any(Function),
       sendMessage: expect.any(Function),
       branchSessionFromMessage: expect.any(Function),
       editMessage: expect.any(Function),
@@ -109,6 +111,7 @@ describe('electron preload bridge', () => {
     api.checkForUpdates();
     api.installUpdateAndRestart();
     api.getLoggingConfig();
+    api.deleteSkill('skill-1');
 
     expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'chat:sendMessage', sendPayload);
     expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'dialog:pickDirectory', { defaultPath: '/tmp/current-project' });
@@ -156,6 +159,7 @@ describe('electron preload bridge', () => {
     expect(mocks.invoke).toHaveBeenNthCalledWith(19, 'update:check');
     expect(mocks.invoke).toHaveBeenNthCalledWith(20, 'update:installAndRestart');
     expect(mocks.invoke).toHaveBeenNthCalledWith(21, 'logging:getConfig');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(22, 'skill:delete', { skillId: 'skill-1' });
   });
 
   it('wires chat event listener callback and cleanup correctly', () => {

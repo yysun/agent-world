@@ -11,6 +11,7 @@
  * - Tests route build + registration helpers together.
  *
  * Recent Changes:
+ * - 2026-03-22: Added `skill:delete` channel/order/payload coverage.
  * - 2026-03-19: Added payload-routing coverage for `dialog:pickDirectory(defaultPath)` without changing `workspace:open(directoryPath)` routing.
  * - 2026-03-15: Added canonical channel and payload coverage for `agent:import`
  *   and `skill:import` route wiring.
@@ -87,7 +88,8 @@ function createHandlerMocks() {
     stopChatQueue: vi.fn(async () => ({ success: true })),
     retryQueueMessage: vi.fn(async () => ({ success: true })),
     readSkillContent: vi.fn(async () => '# skill content'),
-    saveSkillContent: vi.fn(async () => undefined)
+    saveSkillContent: vi.fn(async () => undefined),
+    deleteSkill: vi.fn(async () => undefined)
   };
 }
 
@@ -152,7 +154,8 @@ describe('buildMainIpcRoutes', () => {
       'queue:stop',
       'queue:retry',
       'skill:readContent',
-      'skill:saveContent'
+      'skill:saveContent',
+      'skill:delete'
     ]);
   });
 
@@ -194,6 +197,7 @@ describe('buildMainIpcRoutes', () => {
     await routes.find((route) => route.channel === 'queue:resume')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
     await routes.find((route) => route.channel === 'queue:stop')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
     await routes.find((route) => route.channel === 'queue:retry')?.handler({}, { worldId: 'w-1', messageId: 'm-1', chatId: 'c-1' });
+    await routes.find((route) => route.channel === 'skill:delete')?.handler({}, { skillId: 'skill-1' });
 
     expect(handlers.writeWorldPreference).toHaveBeenCalledWith('world-99');
     expect(handlers.openWorkspaceDialog).toHaveBeenCalledWith({ directoryPath: '/tmp/workspace' });
@@ -229,6 +233,7 @@ describe('buildMainIpcRoutes', () => {
     expect(handlers.resumeChatQueue).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1' });
     expect(handlers.stopChatQueue).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1' });
     expect(handlers.retryQueueMessage).toHaveBeenCalledWith({ worldId: 'w-1', messageId: 'm-1', chatId: 'c-1' });
+    expect(handlers.deleteSkill).toHaveBeenCalledWith({ skillId: 'skill-1' });
   });
 });
 
@@ -248,7 +253,7 @@ describe('registerIpcRoutes', () => {
     );
     expect(ipcMainLike.handle).toHaveBeenNthCalledWith(
       routes.length,
-      'skill:saveContent',
+      'skill:delete',
       expect.any(Function)
     );
   });

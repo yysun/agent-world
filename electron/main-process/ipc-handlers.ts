@@ -12,6 +12,7 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-03-22: Added `deleteSkill` IPC handling to remove a skill folder after renderer confirmation from the skill editor.
  * - 2026-03-19: Restored `openWorkspaceDialog(directoryPath)` immediate-path behavior and added optional `defaultPath` support to `pickDirectoryDialog`.
  * - 2026-03-19: Switched `listSkillRegistry` to world-scoped `world.variables` resolution so project-scope skills no longer depend on `AGENT_WORLD_WORKSPACE_PATH` or `AGENT_WORLD_DATA_PATH`.
  * - 2026-03-14: Heartbeat start now syncs persisted heartbeat config onto the active
@@ -2121,6 +2122,22 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     await fs.promises.writeFile(skillPath, content, 'utf8');
   }
 
+  async function deleteSkill(payload: unknown) {
+    await ensureCoreReady();
+    const skillId = String((payload as any)?.skillId || '').trim();
+    if (!skillId) throw new Error('Skill ID is required.');
+
+    const skillPath = getSkillSourcePath(skillId);
+    if (!skillPath) throw new Error(`Skill not found in registry: ${skillId}`);
+
+    const normalizedSkillPath = String(skillPath).trim();
+    const deleteTarget = path.basename(normalizedSkillPath).toLowerCase() === 'skill.md'
+      ? path.dirname(normalizedSkillPath)
+      : normalizedSkillPath;
+
+    await fs.promises.rm(deleteTarget, { recursive: true, force: true });
+  }
+
   return {
     loadWorldsFromWorkspace,
     loadSpecificWorld,
@@ -2166,6 +2183,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     clearChatQueue: clearChatQueueHandler,
     retryQueueMessage: retryQueueMessageHandler,
     readSkillContent,
-    saveSkillContent
+    saveSkillContent,
+    deleteSkill
   };
 }

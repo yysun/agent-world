@@ -398,7 +398,8 @@ function registerIpcHandlers() {
     stopChatQueue: ipcHandlers.stopChatQueue,
     retryQueueMessage: ipcHandlers.retryQueueMessage,
     readSkillContent: ipcHandlers.readSkillContent,
-    saveSkillContent: ipcHandlers.saveSkillContent
+    saveSkillContent: ipcHandlers.saveSkillContent,
+    deleteSkill: ipcHandlers.deleteSkill
   });
   registerIpcRoutes(ipcMain, routes);
 }

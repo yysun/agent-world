@@ -4,10 +4,10 @@
  * - Editor UI for reading and saving a skill's SKILL.md content.
  *
  * Key Features:
- * - Toolbar with back button and save button.
+ * - Toolbar with back button plus delete/save actions.
  * - Full-height textarea for editing SKILL.md raw markdown content.
  * - Right pane shows EditorChatPane (via BaseEditor).
- * - Calls `onSave` with current content; disables inputs while saving.
+ * - Calls `onSave` / `onDelete`; disables inputs while save/delete work is in flight.
  *
  * Implementation Notes:
  * - Controlled component: content is passed in as prop and managed by App state.
@@ -15,6 +15,7 @@
  * - Back button fires `onBack` without prompting (unsaved changes are parent's concern).
  *
  * Recent Changes:
+ * - 2026-03-22: Added a confirmed delete action to the toolbar immediately left of Save and disabled the editor during delete in-flight state.
  * - 2026-03-08: Initial implementation as part of editor skill-editor feature.
  * - 2026-03-08: Match textarea font to PromptEditorModal (removed font-mono).
  */
@@ -28,21 +29,27 @@ export default function SkillEditor({
   onContentChange,
   onBack,
   onSave,
+  onDelete,
   saving,
+  deleting,
 }: {
   skillId: string;
   content: string;
   onContentChange: (value: string) => void;
   onBack: () => void;
   onSave: () => void;
+  onDelete: () => void;
   saving: boolean;
+  deleting: boolean;
 }) {
+  const busy = saving || deleting;
+
   const toolbar = (
     <div className="flex items-center gap-3">
       <button
         type="button"
         onClick={onBack}
-        disabled={saving}
+        disabled={busy}
         aria-label="Back"
         className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-foreground/70 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
       >
@@ -63,11 +70,19 @@ export default function SkillEditor({
         Back
       </button>
       <span className="text-xs font-medium text-foreground/80 truncate">{skillId}</span>
-      <div className="ml-auto">
+      <div className="ml-auto flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={busy}
+          className="rounded-md border border-destructive/35 px-3 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {deleting ? 'Deleting…' : 'Delete'}
+        </button>
         <button
           type="button"
           onClick={onSave}
-          disabled={saving}
+          disabled={busy}
           className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {saving ? 'Saving…' : 'Save'}
@@ -82,7 +97,7 @@ export default function SkillEditor({
         className="h-full w-full resize-none bg-background p-4 text-xs leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none"
         value={content}
         onChange={(e) => onContentChange(e.target.value)}
-        disabled={saving}
+        disabled={busy}
         spellCheck={false}
         placeholder="SKILL.md content…"
         aria-label={`Edit SKILL.md for ${skillId}`}

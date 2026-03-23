@@ -14,6 +14,7 @@
  * - Payload normalization helpers preserve existing invoke payload formats.
  *
  * Recent Changes:
+ * - 2026-03-22: Added `deleteSkill(skillId)` bridge wiring for confirmed skill deletion from the editor toolbar.
  * - 2026-03-19: Added optional `defaultPath` support to `pickDirectory()` and restored `openWorkspace(directoryPath)` to direct-path payload forwarding only.
  * - 2026-03-19: Updated `listSkills()` bridge payload support to use world-scoped filters instead of renderer project-path injection.
  * - 2026-03-06: Fixed `runHeartbeat()` payload normalization to omit `chatId` when not provided.
@@ -334,7 +335,9 @@ export function createDesktopApi(ipcRendererLike?: IpcRendererLike): DesktopApi 
     readSkillContent: (skillId) =>
       invokeDesktopChannel<string>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_READ_CONTENT, { skillId }),
     saveSkillContent: (skillId, content) =>
-      invokeDesktopChannel<void>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_SAVE_CONTENT, { skillId, content })
+      invokeDesktopChannel<void>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_SAVE_CONTENT, { skillId, content }),
+    deleteSkill: (skillId) =>
+      invokeDesktopChannel<void>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_DELETE, { skillId })
   };
 }
 

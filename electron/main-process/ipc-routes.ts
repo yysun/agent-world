@@ -10,6 +10,7 @@
  * - Keeps channel naming and payload routing in one module.
  *
  * Recent Changes:
+ * - 2026-03-22: Added `skill:delete` route wiring for confirmed skill removal from the renderer editor.
  * - 2026-03-19: Routed optional `dialog:pickDirectory` payloads through to the main handler so callers can seed the folder picker without changing `workspace:open`.
  * - 2026-02-26: Added `logging:getConfig` route wiring for renderer-safe env-derived logging configuration.
  * - 2026-02-25: Updated `world:import` route to pass optional source payload through to main handler.
@@ -95,6 +96,7 @@ export interface MainIpcHandlers {
   retryQueueMessage: (payload: unknown) => Promise<unknown> | unknown;
   readSkillContent: (payload: unknown) => Promise<unknown> | unknown;
   saveSkillContent: (payload: unknown) => Promise<unknown> | unknown;
+  deleteSkill: (payload: unknown) => Promise<unknown> | unknown;
 }
 
 export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
@@ -223,6 +225,7 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
     { channel: DESKTOP_INVOKE_CHANNELS.QUEUE_STOP, handler: async (_event, payload) => handlers.stopChatQueue(payload) },
     { channel: DESKTOP_INVOKE_CHANNELS.QUEUE_RETRY, handler: async (_event, payload) => handlers.retryQueueMessage(payload) },
     { channel: DESKTOP_INVOKE_CHANNELS.SKILL_READ_CONTENT, handler: async (_event, payload) => handlers.readSkillContent(payload) },
-    { channel: DESKTOP_INVOKE_CHANNELS.SKILL_SAVE_CONTENT, handler: async (_event, payload) => handlers.saveSkillContent(payload) }
+    { channel: DESKTOP_INVOKE_CHANNELS.SKILL_SAVE_CONTENT, handler: async (_event, payload) => handlers.saveSkillContent(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.SKILL_DELETE, handler: async (_event, payload) => handlers.deleteSkill(payload) }
   ];
 }

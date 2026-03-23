@@ -5,15 +5,16 @@
  *   and dispatches correct callbacks.
  *
  * Key Features:
- * - Back button fires onBack; Save button fires onSave.
+ * - Back button fires onBack; Delete and Save buttons fire their callbacks.
  * - Textarea displays current content via value prop.
- * - Saving=true disables buttons and shows 'Saving…' label.
+ * - Save/delete busy states disable editor controls and show the active label.
  *
  * Implementation Notes:
  * - Uses virtual React/JSX mocks to avoid jsdom; exercises component output props.
  * - Tests BaseEditor slot contract by inspecting children tree structure.
  *
  * Recent Changes:
+ * - 2026-03-22: Added toolbar coverage for the delete button placement/callback and delete busy state.
  * - 2026-03-08: Initial test suite for SkillEditor component.
  */
 
@@ -72,7 +73,9 @@ describe('SkillEditor', () => {
       onContentChange: () => { },
       onBack: () => { },
       onSave: () => { },
+      onDelete: () => { },
       saving: false,
+      deleting: false,
     });
 
     // The root element should be BaseEditor (via jsxFactory type = baseEditorStub)
@@ -99,7 +102,9 @@ describe('SkillEditor', () => {
       onContentChange: () => { },
       onBack,
       onSave: () => { },
+      onDelete: () => { },
       saving: false,
+      deleting: false,
     });
 
     const nodes = allNodes(result.props.toolbar);
@@ -111,6 +116,27 @@ describe('SkillEditor', () => {
     expect(onBack).toHaveBeenCalledTimes(1);
   });
 
+  it('delete button renders left of save and fires onDelete', () => {
+    const onDelete = vi.fn();
+    const result: any = SkillEditor({
+      skillId: 'my-skill',
+      content: '',
+      onContentChange: () => { },
+      onBack: () => { },
+      onSave: () => { },
+      onDelete,
+      saving: false,
+      deleting: false,
+    });
+
+    const buttons = allNodes(result.props.toolbar).filter((n: any) => n?.type === 'button');
+    expect(JSON.stringify(buttons[1])).toContain('Delete');
+    expect(JSON.stringify(buttons[2])).toContain('Save');
+
+    buttons[1].props.onClick();
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
   it('save button onClick is wired to onSave and shows Save label', () => {
     const onSave = vi.fn();
     const result: any = SkillEditor({
@@ -119,7 +145,9 @@ describe('SkillEditor', () => {
       onContentChange: () => { },
       onBack: () => { },
       onSave,
+      onDelete: () => { },
       saving: false,
+      deleting: false,
     });
 
     const nodes = allNodes(result.props.toolbar);
@@ -141,7 +169,9 @@ describe('SkillEditor', () => {
       onContentChange: () => { },
       onBack: () => { },
       onSave: () => { },
+      onDelete: () => { },
       saving: true,
+      deleting: false,
     });
 
     const textareaNodes = allDescendants(result.props.children);
@@ -156,5 +186,31 @@ describe('SkillEditor', () => {
 
     const toolbarStr = JSON.stringify(result.props.toolbar);
     expect(toolbarStr).toContain('Saving');
+  });
+
+  it('disables textarea and toolbar buttons when deleting=true and shows Deleting label', () => {
+    const result: any = SkillEditor({
+      skillId: 'my-skill',
+      content: 'hello',
+      onContentChange: () => { },
+      onBack: () => { },
+      onSave: () => { },
+      onDelete: () => { },
+      saving: false,
+      deleting: true,
+    });
+
+    const textareaNodes = allDescendants(result.props.children);
+    const textarea = textareaNodes.find((n: any) => n?.type === 'textarea');
+    expect(textarea?.props?.disabled).toBe(true);
+
+    const toolbarNodes = allNodes(result.props.toolbar);
+    const disabledButtons = toolbarNodes.filter(
+      (n: any) => n?.type === 'button' && n?.props?.disabled === true
+    );
+    expect(disabledButtons.length).toBeGreaterThanOrEqual(1);
+
+    const toolbarStr = JSON.stringify(result.props.toolbar);
+    expect(toolbarStr).toContain('Deleting');
   });
 });

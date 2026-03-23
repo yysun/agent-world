@@ -4,8 +4,8 @@
  * Purpose:
  * - Verify `createMainIpcHandlers` constructs handler set when provided with
  *   dependencies where `editUserMessage` accepts an optional `targetWorld` arg.
- * - Verify `readSkillContent` and `saveSkillContent` handlers read/write
- *   skill SKILL.md via `getSkillSourcePath`.
+ * - Verify `readSkillContent`, `saveSkillContent`, and `deleteSkill` handlers
+ *   manage skill SKILL.md paths via `getSkillSourcePath`.
  *
  * Key features:
  * - Provides minimal stub dependencies to exercise the factory function.
@@ -17,6 +17,7 @@
  *   shape used by the Electron main process.
  *
  * Recent changes:
+ * - 2026-03-22: Added delete-skill handler coverage for removing the skill folder behind `SKILL.md`.
  * - 2026-03-08: Added readSkillContent and saveSkillContent handler tests.
  * - 2026-02-28: Added to validate optional `targetWorld` parameter acceptance.
  */
@@ -127,7 +128,7 @@ describe('createMainIpcHandlers', () => {
   });
 });
 
-describe('createMainIpcHandlers — readSkillContent / saveSkillContent', () => {
+describe('createMainIpcHandlers — readSkillContent / saveSkillContent / deleteSkill', () => {
   function makeDeps(getSkillSourcePathImpl: (id: string) => string | undefined): any {
     return {
       ensureCoreReady: async () => { },
@@ -203,6 +204,15 @@ describe('createMainIpcHandlers — readSkillContent / saveSkillContent', () => 
     const handlers = createMainIpcHandlers(makeDeps(() => '/skills/my-skill/SKILL.md'));
     await (handlers as any).saveSkillContent({ skillId: 'my-skill', content: '# Updated' });
     expect(fsMock.writeFile).toHaveBeenCalledWith('/skills/my-skill/SKILL.md', '# Updated', 'utf8');
+  });
+
+  it('deleteSkill removes the containing skill folder for a known skill path', async () => {
+    const { promises: fsMock } = await import('node:fs');
+    vi.mocked(fsMock.rm).mockResolvedValue(undefined as any);
+
+    const handlers = createMainIpcHandlers(makeDeps(() => '/skills/my-skill/SKILL.md'));
+    await (handlers as any).deleteSkill({ skillId: 'my-skill' });
+    expect(fsMock.rm).toHaveBeenCalledWith('/skills/my-skill', { recursive: true, force: true });
   });
 
   it('importAgent saves a standalone local agent into the selected world', async () => {
