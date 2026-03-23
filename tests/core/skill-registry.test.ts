@@ -193,6 +193,45 @@ describe('core/skill-registry', () => {
     expect(getSkill('pdf-extract')?.hash).toMatch(/^[a-f0-9]{8}$/);
   });
 
+  it('parses description from CRLF front matter without dropping the last field', async () => {
+    setupFsScenario(
+      {
+        'user-root': [{ name: 'rpd-folder', type: 'directory' }],
+        'user-root/rpd-folder': [{ name: 'SKILL.md', type: 'file' }],
+      },
+      {
+        'user-root/rpd-folder/SKILL.md': {
+          content: [
+            '---',
+            'name: rpd',
+            'description: Use this skill when the message contains an RPD keyword.',
+            '---',
+            '',
+            '# RPD',
+          ].join('\r\n'),
+          mtime: new Date('2026-03-22T08:00:00.000Z'),
+        },
+      },
+    );
+
+    const result = await syncSkills({
+      userSkillRoots: ['user-root'],
+      projectSkillRoots: [],
+    });
+
+    expect(result).toEqual({
+      added: 1,
+      updated: 0,
+      removed: 0,
+      unchanged: 0,
+      total: 1,
+    });
+    expect(getSkill('rpd')).toMatchObject({
+      skill_id: 'rpd',
+      description: 'Use this skill when the message contains an RPD keyword.',
+    });
+  });
+
   it('filters skills by source scope for system prompts', async () => {
     setupFsScenario(
       {

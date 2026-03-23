@@ -14,8 +14,14 @@
  * - Preserve existing string output behavior to avoid UI regressions.
  *
  * Recent Changes:
+ * - 2026-03-22: Added full-length skill description formatting for Electron welcome-card skill entries while preserving the compact formatter for constrained list UIs.
  * - 2026-02-16: Extracted from App.jsx into dedicated utility module.
  */
+
+function normalizeSkillDescription(description) {
+  const normalized = String(description || '').replace(/\s+/g, ' ').trim();
+  return normalized || 'No description provided.';
+}
 
 export function formatLogMessage(logEvent) {
   const baseMessage = String(logEvent?.message || '');
@@ -52,9 +58,12 @@ export function getRefreshWarning(result) {
   return trimmed.length > 0 ? trimmed : '';
 }
 
+export function formatFullSkillDescription(description) {
+  return normalizeSkillDescription(description);
+}
+
 export function compactSkillDescription(description) {
-  const normalized = String(description || '').replace(/\s+/g, ' ').trim();
-  if (!normalized) return 'No description provided.';
+  const normalized = normalizeSkillDescription(description);
   if (normalized.length <= 96) return normalized;
   return `${normalized.slice(0, 93)}...`;
 }

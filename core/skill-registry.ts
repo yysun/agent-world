@@ -198,7 +198,8 @@ function normalizeFrontMatterValue(value: string): string {
 }
 
 function parseSkillFrontMatter(content: string): SkillFrontMatter {
-  const frontMatterMatch = content.match(/^---\s*\n([\s\S]*?)\n---\s*(?:\n|$)/);
+  const normalizedContent = content.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+  const frontMatterMatch = normalizedContent.match(/^---\s*\n([\s\S]*?)\n---\s*(?:\n|$)/);
   if (!frontMatterMatch || !frontMatterMatch[1]) {
     return {};
   }

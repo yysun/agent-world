@@ -40,6 +40,7 @@ import {
 } from '../../../electron/renderer/src/utils/data-transform';
 import {
   compactSkillDescription,
+  formatFullSkillDescription,
   formatLogMessage,
   formatTime,
   getRefreshWarning,
@@ -136,6 +137,11 @@ describe('extracted formatting utils', () => {
     const value = compactSkillDescription('a'.repeat(120));
     expect(value.length).toBe(96);
     expect(value.endsWith('...')).toBe(true);
+  });
+
+  it('preserves full skill descriptions for welcome-card entries', () => {
+    const value = formatFullSkillDescription('a'.repeat(120));
+    expect(value).toBe('a'.repeat(120));
   });
 });
 

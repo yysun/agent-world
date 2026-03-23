@@ -13,6 +13,7 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-03-22: Render full skill descriptions in the welcome-card skill list instead of truncating them.
  * - 2026-03-22: Prefer terminal tool result rows over transient `-stdout` shell stream rows when both map to the same tool call, preventing duplicate result blocks inside merged Electron tool cards.
  * - 2026-03-21: Restored web-parity collapse defaults for merged Electron tool rows and keyed tool collapse state by tool-call id when assistant request rows have no message id.
  * - 2026-03-21: Restored collapse-toggle controls for completed merged Electron tool request rows so request/result transcript rows match the web tool affordance.
@@ -72,7 +73,7 @@ import MessageContent, {
   getToolStatusTone
 } from './MessageContent';
 import ElapsedTimeCounter from './ElapsedTimeCounter';
-import { compactSkillDescription, formatTime } from '../utils/formatting';
+import { formatFullSkillDescription, formatTime } from '../utils/formatting';
 import {
   getGridContainerClassName,
   getGridLaneClassName,
@@ -1075,7 +1076,7 @@ export default function MessageListPanel({
                         >
                           <p className="text-[13px] font-medium leading-4 text-foreground">{entry.skillId}</p>
                           <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-                            {compactSkillDescription(entry.description)}
+                            {formatFullSkillDescription(entry.description)}
                           </p>
                         </li>
                       ))}
