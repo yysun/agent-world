@@ -49,12 +49,20 @@ const { mainContentAreaSpy, mainHeaderBarSpy } = vi.hoisted(() => ({
   mainHeaderBarSpy: vi.fn(() => null),
 }));
 
+const { sidebarToggleButtonSpy } = vi.hoisted(() => ({
+  sidebarToggleButtonSpy: vi.fn(() => null),
+}));
+
 vi.mock('../../../electron/renderer/src/components/MainHeaderBar', () => ({
   default: mainHeaderBarSpy,
 }));
 
 vi.mock('../../../electron/renderer/src/components/MainContentArea', () => ({
   default: mainContentAreaSpy,
+}));
+
+vi.mock('../../../electron/renderer/src/components/SidebarToggleButton', () => ({
+  default: sidebarToggleButtonSpy,
 }));
 
 import MainWorkspaceLayout from '../../../electron/renderer/src/components/MainWorkspaceLayout';
@@ -78,6 +86,7 @@ describe('MainWorkspaceLayout slot routing', () => {
   beforeEach(() => {
     mainContentAreaSpy.mockClear();
     mainHeaderBarSpy.mockClear();
+    sidebarToggleButtonSpy.mockClear();
   });
 
   it('passes queuePanel and statusBar to MainContentArea through main-content slot props', () => {
@@ -116,7 +125,35 @@ describe('MainWorkspaceLayout slot routing', () => {
     expect(mainHeaderBarSpy).not.toHaveBeenCalled();
     expect(mainContentAreaSpy).not.toHaveBeenCalled();
 
-    const editorWrapper = tree.props?.children as { props?: { children?: unknown } } | undefined;
-    expect(editorWrapper?.props?.children).toBe(editorNode);
+    const childNodes = toChildArray(tree.props?.children).filter(Boolean) as Array<{ props?: { children?: unknown } }>;
+    expect(childNodes).toHaveLength(1);
+    expect(childNodes[0]?.props?.children).toBe(editorNode);
+  });
+
+  it('shows the collapsed-sidebar restore button above editor content when the sidebar is closed', () => {
+    const editorNode = { id: 'editor-probe' };
+    const setLeftSidebarCollapsed = vi.fn();
+
+    const tree = MainWorkspaceLayout({
+      mainHeaderProps: {
+        leftSidebarCollapsed: true,
+        setLeftSidebarCollapsed,
+        noDragRegionStyle: { appRegion: 'no-drag' },
+      },
+      mainContentAreaProps: { messageListProps: { a: 1 } },
+      editorContent: editorNode as unknown as any,
+    }) as {
+      props?: { children?: unknown };
+    };
+
+    expect(mainHeaderBarSpy).not.toHaveBeenCalled();
+    expect(mainContentAreaSpy).not.toHaveBeenCalled();
+
+    const childNodes = toChildArray(tree.props?.children);
+    expect(childNodes).toHaveLength(2);
+    expect(childNodes[0]?.type).toBe(sidebarToggleButtonSpy);
+    expect(childNodes[0]?.props?.collapsed).toBe(true);
+    expect(childNodes[0]?.props?.onToggle).toBe(setLeftSidebarCollapsed);
+    expect(childNodes[1]?.props?.children).toBe(editorNode);
   });
 });

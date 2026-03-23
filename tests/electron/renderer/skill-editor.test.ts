@@ -15,6 +15,7 @@
  * - Tests BaseEditor slot contract by inspecting children tree structure.
  *
  * Recent Changes:
+ * - 2026-03-23: Added coverage that collapsed-sidebar mode forwards toolbar inset spacing into BaseEditor.
  * - 2026-03-22: Updated coverage for the restored back button and icon-only save button with dirty-state gating.
  * - 2026-03-22: Added selected-file and loading-state coverage for tree-driven skill file switching.
  * - 2026-03-22: Added folder-pane coverage so the right side shows the skill folder tree.
@@ -146,6 +147,28 @@ describe('SkillEditor', () => {
     expect(backBtn.props['aria-label']).toBe('Back');
     backBtn.props.onClick();
     expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards collapsed-sidebar toolbar inset into BaseEditor', () => {
+    const result: any = SkillEditor({
+      skillId: 'my-skill',
+      sourceScope: 'global',
+      leftSidebarCollapsed: true,
+      selectedFilePath: 'SKILL.md',
+      content: '',
+      onContentChange: () => { },
+      onBack: () => { },
+      onSave: () => { },
+      onDelete: () => { },
+      onSelectFile: () => { },
+      folderEntries: [],
+      hasUnsavedChanges: false,
+      loadingFile: false,
+      saving: false,
+      deleting: false,
+    });
+
+    expect(result.props.reserveTrafficLightSpace).toBe(true);
   });
 
   it('delete button remains in the top row and fires onDelete', () => {

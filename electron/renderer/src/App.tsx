@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-03-23: Passed the collapsed-sidebar state into the full-area skill editor so its toolbar clears the macOS traffic lights.
  * - 2026-03-22: Guarded skill file selection against overlapping busy-state requests so stale file loads cannot overwrite the active editor view.
  * - 2026-03-22: Added skill dirty-state tracking so Save only enables after the current file changes.
  * - 2026-03-22: Added skill file selection so clicking the tree view loads that file in the left editor pane.
@@ -1481,15 +1482,15 @@ function AppContent({ api }: { api: DesktopApi }) {
     try {
       const previewPayload = installSkillSourceType === 'github'
         ? {
-            repo: installSkillRepo.trim(),
-            itemName: installSkillItemName.trim(),
-          }
+          repo: installSkillRepo.trim(),
+          itemName: installSkillItemName.trim(),
+        }
         : (installSkillSourcePath.trim()
-            ? {
-                source: installSkillSourcePath.trim(),
-                ...(installSkillItemName.trim() ? { itemName: installSkillItemName.trim() } : {}),
-              }
-            : undefined);
+          ? {
+            source: installSkillSourcePath.trim(),
+            ...(installSkillItemName.trim() ? { itemName: installSkillItemName.trim() } : {}),
+          }
+          : undefined);
       const preview = await api.previewSkillImport(previewPayload);
       if (!preview) {
         return;
@@ -1940,6 +1941,7 @@ function AppContent({ api }: { api: DesktopApi }) {
                 mode={editorMode === 'install' ? 'install' : 'edit'}
                 skillId={editorMode === 'edit' ? String(editingSkillEntry?.skillId || '') : installSkillItemName}
                 sourceScope={editorMode === 'edit' ? String(editingSkillEntry?.sourceScope || 'project') : installSkillTargetScope}
+                leftSidebarCollapsed={leftSidebarCollapsed}
                 selectedFilePath={editingSkillFilePath}
                 content={editingSkillContent}
                 onContentChange={onChangeSkillEditorContent}

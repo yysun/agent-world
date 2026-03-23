@@ -32,6 +32,7 @@ export { default as WorkingStatusBar } from './WorkingStatusBar';
 export { default as EditorModalsHost } from './EditorModalsHost';
 export { default as BaseEditor } from './BaseEditor';
 export { default as EditorChatPane } from './EditorChatPane';
+export { default as SidebarToggleButton } from './SidebarToggleButton';
 export { default as SkillFolderPane } from './SkillFolderPane';
 export { default as SkillEditor } from './SkillEditor';
 export { default as LeftSidebarPanel } from './LeftSidebarPanel';

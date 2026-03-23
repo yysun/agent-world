@@ -29,6 +29,7 @@
  */
 
 import { useState } from 'react';
+import SidebarToggleButton from './SidebarToggleButton';
 
 function normalizeMainAgentValue(value: unknown): string {
   return String(value || '').trim().toLowerCase();
@@ -149,27 +150,12 @@ export default function MainHeaderBar({
     >
       <div className="flex min-w-0 items-center gap-3">
         {leftSidebarCollapsed ? (
-          <button
-            type="button"
-            onClick={() => setLeftSidebarCollapsed(false)}
-            className="flex h-6 w-6 self-start items-center justify-center rounded-md bg-card text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            title="Show sidebar"
-            aria-label="Show sidebar"
+          <SidebarToggleButton
+            collapsed={leftSidebarCollapsed}
+            onToggle={setLeftSidebarCollapsed}
+            className="flex h-7 w-7 self-start items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
             style={noDragRegionStyle}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-4 w-4"
-            >
-              <polyline points="9 6 15 12 9 18" />
-            </svg>
-          </button>
+          />
         ) : null}
         <div>
           <div className="text-sm font-semibold text-foreground">

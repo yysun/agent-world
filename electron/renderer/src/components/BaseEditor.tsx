@@ -14,6 +14,8 @@
  * - Fills the full available height of MainWorkspaceLayout main region.
  *
  * Recent Changes:
+ * - 2026-03-23: Increased collapsed-editor toolbar inset so the Back button clears the floating restore button with more space.
+ * - 2026-03-23: Added optional toolbar inset support so full-area editors can clear the macOS traffic lights when the left sidebar is collapsed.
  * - 2026-03-08: Initial implementation as part of editor skill-editor feature.
  */
 
@@ -25,16 +27,18 @@ export default function BaseEditor({
   children,
   chatPaneContext,
   rightPane,
+  reserveTrafficLightSpace = false,
 }: {
   toolbar?: React.ReactNode;
   children: React.ReactNode;
   chatPaneContext?: string;
   rightPane?: React.ReactNode;
+  reserveTrafficLightSpace?: boolean;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       {toolbar ? (
-        <div className="flex-none border-b border-border bg-background px-4 py-2">
+        <div className={`flex-none border-b border-border bg-background pt-2 ${reserveTrafficLightSpace ? 'pb-3 pl-36 pr-5' : 'px-4 py-2'}`}>
           {toolbar}
         </div>
       ) : null}

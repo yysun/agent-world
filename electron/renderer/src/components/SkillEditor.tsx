@@ -15,6 +15,7 @@
  * - Back button fires `onBack` without prompting (unsaved changes are parent's concern).
  *
  * Recent Changes:
+ * - 2026-03-23: Reserve extra left toolbar space when the main sidebar is collapsed so the back button clears the macOS traffic lights.
  * - 2026-03-22: Propagated busy state into the file tree so save/delete/load work disables file switching consistently.
  * - 2026-03-22: Restored the back button, removed the close button, and changed Save to an icon button that stays disabled until the file is dirty.
  * - 2026-03-22: Added selected-file state so tree clicks load that file in the left editor pane.
@@ -67,6 +68,7 @@ export default function SkillEditor({
   installing = false,
   hasInstallPreview = false,
   currentFileEditable = true,
+  leftSidebarCollapsed = false,
 }: {
   mode?: SkillEditorMode;
   skillId: string;
@@ -102,14 +104,15 @@ export default function SkillEditor({
   installing?: boolean;
   hasInstallPreview?: boolean;
   currentFileEditable?: boolean;
+  leftSidebarCollapsed?: boolean;
 }) {
   const isInstallMode = mode === 'install';
   const busy = saving || deleting || loadingFile || installing;
   const canSave = !busy && hasUnsavedChanges;
   const canPreview = isInstallMode
     ? (installSourceType === 'github'
-        ? Boolean(installRepo.trim()) && Boolean(installItemName.trim())
-        : Boolean(installSourcePath.trim()))
+      ? Boolean(installRepo.trim()) && Boolean(installItemName.trim())
+      : Boolean(installSourcePath.trim()))
     : false;
   const canInstall = !busy && hasInstallPreview && Boolean(installItemName.trim());
   const scopeLabel = isInstallMode
@@ -128,7 +131,7 @@ export default function SkillEditor({
         onClick={onBack}
         disabled={busy}
         aria-label="Back"
-        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-foreground/70 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex self-start items-center gap-1.5 rounded-md px-2 py-1 text-xs text-foreground/70 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -288,6 +291,7 @@ export default function SkillEditor({
 
   return (
     <BaseEditor
+      reserveTrafficLightSpace={leftSidebarCollapsed}
       toolbar={toolbar}
       rightPane={(
         <SkillFolderPane
