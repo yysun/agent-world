@@ -30,6 +30,12 @@ import {
   clearProcessExecutionStateForTests
 } from '../../core/shell-cmd-tool.js';
 
+const cancelScript = 'setTimeout(() => console.log("should-not-finish"), 1000);';
+const timeoutScript = 'setTimeout(() => console.log("done"), 2000);';
+const deleteScript = 'setTimeout(() => console.log("delete-test"), 1000);';
+const chatAScript = 'setTimeout(() => console.log("chat-a"), 1000);';
+const chatBScript = 'setTimeout(() => console.log("chat-b"), 1000);';
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -71,7 +77,7 @@ describe('shell process lifecycle management', () => {
   it('supports cancel by execution id and idempotent repeated cancellation', async () => {
     let executionId = '';
 
-    const commandPromise = executeShellCommand('sh', ['-c', 'sleep 1; echo should-not-finish'], './', {
+    const commandPromise = executeShellCommand('node', ['-e', cancelScript], './', {
       worldId: 'world-cancel',
       chatId: 'chat-cancel',
       onStatusChange: (event) => {
@@ -93,7 +99,7 @@ describe('shell process lifecycle management', () => {
   });
 
   it('marks execution as timed_out when command exceeds timeout limit', async () => {
-    const result = await executeShellCommand('sh', ['-c', 'sleep 2'], './', {
+    const result = await executeShellCommand('node', ['-e', timeoutScript], './', {
       worldId: 'world-timeout',
       chatId: 'chat-timeout',
       timeout: 50,
@@ -109,7 +115,7 @@ describe('shell process lifecycle management', () => {
   it('blocks delete for active execution and allows delete after terminal state', async () => {
     let executionId = '';
 
-    const commandPromise = executeShellCommand('sh', ['-c', 'sleep 1; echo delete-test'], './', {
+    const commandPromise = executeShellCommand('node', ['-e', deleteScript], './', {
       worldId: 'world-delete',
       chatId: 'chat-delete',
       onStatusChange: (event) => {
@@ -138,12 +144,12 @@ describe('shell process lifecycle management', () => {
     const chatA = 'chat-a';
     const chatB = 'chat-b';
 
-    const promiseA = executeShellCommand('sh', ['-c', 'sleep 1; echo chat-a'], './', {
+    const promiseA = executeShellCommand('node', ['-e', chatAScript], './', {
       worldId,
       chatId: chatA
     });
 
-    const promiseB = executeShellCommand('sh', ['-c', 'sleep 1; echo chat-b'], './', {
+    const promiseB = executeShellCommand('node', ['-e', chatBScript], './', {
       worldId,
       chatId: chatB
     });

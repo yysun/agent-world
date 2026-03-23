@@ -14,12 +14,14 @@
 import { describe, test, expect } from 'vitest';
 import { executeShellCommand } from '../../core/shell-cmd-tool.js';
 
+const testWorkingDirectory = process.cwd();
+
 describe('Shell Command Parameter Quoting', () => {
   test('should handle parameters with spaces correctly', async () => {
     const result = await executeShellCommand(
-      'echo',
-      ['hello world'],
-      '/tmp'
+      'node',
+      ['-e', 'console.log(process.argv.slice(1).join(" "))', 'hello world'],
+      testWorkingDirectory
     );
 
     expect(result.exitCode).toBe(0);
@@ -29,9 +31,9 @@ describe('Shell Command Parameter Quoting', () => {
 
   test('should handle multiple parameters with spaces', async () => {
     const result = await executeShellCommand(
-      'echo',
-      ['first param', 'second param'],
-      '/tmp'
+      'node',
+      ['-e', 'console.log(process.argv.slice(1).join(" "))', 'first param', 'second param'],
+      testWorkingDirectory
     );
 
     expect(result.exitCode).toBe(0);
@@ -40,9 +42,9 @@ describe('Shell Command Parameter Quoting', () => {
 
   test('should handle mixed parameters (some with spaces, some without)', async () => {
     const result = await executeShellCommand(
-      'echo',
-      ['hello world', 'and', 'more text'],
-      '/tmp'
+      'node',
+      ['-e', 'console.log(process.argv.slice(1).join(" "))', 'hello world', 'and', 'more text'],
+      testWorkingDirectory
     );
 
     expect(result.exitCode).toBe(0);
@@ -52,9 +54,9 @@ describe('Shell Command Parameter Quoting', () => {
 
   test('should handle parameters with quotes', async () => {
     const result = await executeShellCommand(
-      'echo',
-      ['say "hello"'],
-      '/tmp'
+      'node',
+      ['-e', 'console.log(process.argv.slice(1).join(" "))', 'say "hello"'],
+      testWorkingDirectory
     );
 
     expect(result.exitCode).toBe(0);
@@ -65,7 +67,7 @@ describe('Shell Command Parameter Quoting', () => {
     const result = await executeShellCommand(
       'echo',
       ['hello', 'world'],
-      '/tmp'
+      testWorkingDirectory
     );
 
     expect(result.exitCode).toBe(0);
@@ -77,7 +79,7 @@ describe('Shell Command Parameter Quoting', () => {
     const result = await executeShellCommand(
       'node',
       ['-e', 'console.log("test with spaces")'],
-      '/tmp'
+      testWorkingDirectory
     );
 
     expect(result.exitCode).toBe(0);

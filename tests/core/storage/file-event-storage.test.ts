@@ -27,6 +27,10 @@ const { mockFiles } = vi.hoisted(() => ({
   mockFiles: new Map<string, string>()
 }));
 
+function normalizePath(pathValue: string): string {
+  return String(pathValue).replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '');
+}
+
 vi.mock('fs/promises', () => ({
   readFile: vi.fn(),
   writeFile: vi.fn(),
@@ -47,7 +51,7 @@ describe('FileEventStorage', () => {
     mockFiles.clear();
 
     vi.mocked(fsModule.existsSync).mockImplementation((filePath: any) => {
-      const key = String(filePath);
+      const key = normalizePath(String(filePath));
       if (mockFiles.has(key)) return true;
       const prefix = `${key.replace(/\/$/, '')}/`;
       return Array.from(mockFiles.keys()).some((path) => path.startsWith(prefix));
@@ -57,7 +61,7 @@ describe('FileEventStorage', () => {
     vi.mocked(fsPromises.rmdir).mockResolvedValue(undefined);
 
     vi.mocked(fsPromises.readdir).mockImplementation(async (dirPath: any) => {
-      const dir = `${String(dirPath).replace(/\/$/, '')}/`;
+      const dir = `${normalizePath(String(dirPath)).replace(/\/$/, '')}/`;
       const fileNames = Array.from(mockFiles.keys())
         .filter((filePath) => filePath.startsWith(dir))
         .map((filePath) => filePath.slice(dir.length))
@@ -66,7 +70,7 @@ describe('FileEventStorage', () => {
     });
 
     vi.mocked(fsPromises.readFile).mockImplementation(async (filePath: any) => {
-      const key = String(filePath);
+      const key = normalizePath(String(filePath));
       if (!mockFiles.has(key)) {
         const err = new Error(`ENOENT: no such file or directory, open '${key}'`) as Error & { code?: string };
         err.code = 'ENOENT';
@@ -76,12 +80,12 @@ describe('FileEventStorage', () => {
     });
 
     vi.mocked(fsPromises.writeFile).mockImplementation(async (filePath: any, content: any) => {
-      mockFiles.set(String(filePath), String(content));
+      mockFiles.set(normalizePath(String(filePath)), String(content));
     });
 
     vi.mocked(fsPromises.rename).mockImplementation(async (fromPath: any, toPath: any) => {
-      const from = String(fromPath);
-      const to = String(toPath);
+      const from = normalizePath(String(fromPath));
+      const to = normalizePath(String(toPath));
       if (!mockFiles.has(from)) {
         const err = new Error(`ENOENT: no such file or directory, rename '${from}' -> '${to}'`) as Error & { code?: string };
         err.code = 'ENOENT';
@@ -93,7 +97,7 @@ describe('FileEventStorage', () => {
     });
 
     vi.mocked(fsPromises.unlink).mockImplementation(async (filePath: any) => {
-      mockFiles.delete(String(filePath));
+      mockFiles.delete(normalizePath(String(filePath)));
     });
   });
 

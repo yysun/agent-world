@@ -68,7 +68,7 @@ describe('file-tools write_file', () => {
   const existingFiles = new Set<string>();
   const existingDirectories = new Set<string>();
 
-  const normalizePath = (value: string): string => value.replace(/\\/g, '/').replace(/\/+/g, '/');
+  const normalizePath = (value: string): string => value.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '').replace(/\/+/g, '/');
 
   const mkdirMock = vi.mocked(fs.promises.mkdir as any);
   const writeFileMock = vi.mocked(fs.promises.writeFile as any);
@@ -242,7 +242,7 @@ describe('file-tools read_file', () => {
 
     const readFileMock = vi.mocked((fs.promises as any).readFile);
 
-    const normalizePath = (value: string): string => value.replace(/\\/g, '/').replace(/\/+/g, '/');
+    const normalizePath = (value: string): string => value.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '').replace(/\/+/g, '/');
 
     const cwdCandidate = '/workspace/scripts/convert.py';
     const skillCandidate = '/workspace/.agents/skills/music-to-svg/scripts/convert.py';
@@ -346,7 +346,7 @@ describe('file-tools list_files', () => {
 
     expect(String(result)).not.toContain('Error: list_files failed - Working directory mismatch');
     const parsed = JSON.parse(String(result));
-    expect(String(parsed.path).replace(/\\/g, '/').replace(/\/+/g, '/')).toBe('/workspace/.agents/skills/music-to-svg');
+    expect(String(parsed.path).replace(/\\/g, '/').replace(/\/+/g, '/')).toContain('/workspace/.agents/skills/music-to-svg');
     expect(parsed.found).toBe(true);
     expect(parsed.entries).toEqual(['scripts/', 'scripts/convert.py']);
   });

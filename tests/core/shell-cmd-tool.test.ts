@@ -25,7 +25,18 @@
  * - 2026-02-08: Initial test suite for streaming callback functionality
  */
 
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
+
+function normalizeForAssertion(value: string): string {
+  return value.replace(/\\/g, '/');
+}
+
+function isMatchingPath(candidatePath: unknown, expectedPath: string): boolean {
+  return normalizeForAssertion(String(candidatePath)) === normalizeForAssertion(expectedPath);
+}
 
 const mockRequestWorldOption = vi.hoisted(() => vi.fn());
 
@@ -121,7 +132,7 @@ describe('shell command execution', () => {
   });
 
   test('should mark timeout deterministically for long-running command', async () => {
-    const result = await executeShellCommand('sh', ['-c', 'sleep 2'], './', {
+    const result = await executeShellCommand('node', ['-e', 'setTimeout(() => console.log("done"), 2000);'], './', {
       timeout: 50,
     });
 
@@ -229,7 +240,7 @@ describe('shell command skill-context resolution', () => {
 
     expect(String(result)).toContain('**Command:** `./echo "cwd executable"`');
     expect(String(result)).toContain('cwd executable');
-    expect(String(result)).not.toContain('/Users/esun/.agents/skills');
+    expect(normalizeForAssertion(String(result))).not.toContain('/Users/esun/.agents/skills');
   });
 
   test('resolves ./scripts executables from the active load_skill skill_root', async () => {
@@ -238,9 +249,7 @@ describe('shell command skill-context resolution', () => {
         ? '/bin/SKILL.md'
         : undefined
     );
-    mockedExistsSync.mockImplementation((candidatePath) =>
-      String(candidatePath) === '/bin/echo'
-    );
+    mockedExistsSync.mockImplementation((candidatePath) => isMatchingPath(candidatePath, '/bin/echo'));
 
     const tool = createShellCmdToolDefinition();
     const result = await tool.execute(
@@ -283,9 +292,9 @@ describe('shell command skill-context resolution', () => {
       },
     );
 
-    expect(String(result)).toContain('**Command:** `/bin/echo "skill-root executable"`');
+    expect(normalizeForAssertion(String(result))).toContain('**Command:** `/bin/echo "skill-root executable"`');
     expect(String(result)).toContain('skill-root executable');
-    expect(String(result)).not.toContain('`./echo skill-root executable`');
+    expect(normalizeForAssertion(String(result))).not.toContain('`./echo skill-root executable`');
   });
 
   test('resolves bare script paths from the active load_skill skill_root', async () => {
@@ -295,7 +304,7 @@ describe('shell command skill-context resolution', () => {
         : undefined
     );
     mockedExistsSync.mockImplementation((candidatePath) =>
-      String(candidatePath) === '/Users/esun/.agents/skills/music-to-svg/scripts/convert.py'
+      isMatchingPath(candidatePath, '/Users/esun/.agents/skills/music-to-svg/scripts/convert.py')
     );
 
     const tool = createShellCmdToolDefinition();
@@ -342,8 +351,8 @@ describe('shell command skill-context resolution', () => {
       },
     );
 
-    expect(String(result)).toContain('/Users/esun/.agents/skills/music-to-svg/scripts/convert.py');
-    expect(String(result)).not.toContain('`echo scripts/convert.py`');
+    expect(normalizeForAssertion(String(result))).toContain('/Users/esun/.agents/skills/music-to-svg/scripts/convert.py');
+    expect(normalizeForAssertion(String(result))).not.toContain('`echo scripts/convert.py`');
   });
 
   test('does not enable bare script resolution from failed load_skill envelopes', async () => {
@@ -353,7 +362,7 @@ describe('shell command skill-context resolution', () => {
         : undefined
     );
     mockedExistsSync.mockImplementation((candidatePath) =>
-      String(candidatePath) === '/Users/esun/.agents/skills/music-to-svg/scripts/convert.py'
+      isMatchingPath(candidatePath, '/Users/esun/.agents/skills/music-to-svg/scripts/convert.py')
     );
 
     const tool = createShellCmdToolDefinition();
@@ -398,7 +407,7 @@ describe('shell command skill-context resolution', () => {
     );
 
     expect(String(result)).toContain('scripts/convert.py');
-    expect(String(result)).not.toContain('/Users/esun/.agents/skills/music-to-svg/scripts/convert.py');
+    expect(normalizeForAssertion(String(result))).not.toContain('/Users/esun/.agents/skills/music-to-svg/scripts/convert.py');
   });
 
   test('does not trust non-load_skill envelopes to authorize a skill-root directory', async () => {
@@ -445,152 +454,168 @@ describe('shell command skill-context resolution', () => {
   });
 
   test('persists the same envelope contract for direct and skill-script calls while minimal and verbose change only the result payload', async () => {
+    const runtimeWorkingDirectory = process.cwd();
+    const tempWorkingDirectory = await mkdtemp(join(tmpdir(), 'agent-world-shell-envelope-'));
+    const skillRoot = join(tempWorkingDirectory, 'search-skill');
+    const skillScriptPath = join(skillRoot, 'scripts', 'skill-envelope.js');
+
     mockedGetSkillSourcePath.mockImplementation((skillId) =>
       skillId === 'search'
-        ? '/bin/SKILL.md'
+        ? join(skillRoot, 'SKILL.md')
         : undefined
     );
-    mockedExistsSync.mockImplementation((candidatePath) =>
-      String(candidatePath) === '/bin/echo'
+    mockedExistsSync.mockImplementation((candidatePath) => isMatchingPath(candidatePath, skillScriptPath));
+
+    await mkdir(join(skillRoot, 'scripts'), { recursive: true });
+    await writeFile(
+      skillScriptPath,
+      'console.log(process.argv.slice(2).join(" "))\n',
+      'utf8',
     );
 
     const tool = createShellCmdToolDefinition();
     const baseContext = {
       world: {
         id: 'world-1',
-        variables: 'working_directory=/Users/esun/Documents/Projects/test-agent-world',
+        variables: `working_directory=${runtimeWorkingDirectory}`,
       },
-      workingDirectory: '/Users/esun/Documents/Projects/test-agent-world',
+      workingDirectory: tempWorkingDirectory,
       chatId: 'chat-1',
       agentName: 'test-agent',
     };
+    const normalizeRenderedPath = (value: string) => normalizeForAssertion(value).replace(/\/+/g, '/');
+    try {
+      const directMinimalEnvelope = parseToolExecutionEnvelopeContent(await tool.execute(
+        {
+          command: 'echo',
+          parameters: ['direct-envelope'],
+        },
+        undefined,
+        undefined,
+        {
+          ...baseContext,
+          toolCallId: 'tool-direct-minimal',
+          llmResultMode: 'minimal',
+          persistToolEnvelope: true,
+          messages: [],
+        },
+      ));
 
-    const directMinimalEnvelope = parseToolExecutionEnvelopeContent(await tool.execute(
-      {
-        command: 'echo',
-        parameters: ['direct-envelope'],
-      },
-      undefined,
-      undefined,
-      {
-        ...baseContext,
-        toolCallId: 'tool-direct-minimal',
-        llmResultMode: 'minimal',
-        persistToolEnvelope: true,
-        messages: [],
-      },
-    ));
+      const directVerboseEnvelope = parseToolExecutionEnvelopeContent(await tool.execute(
+        {
+          command: 'echo',
+          parameters: ['direct-envelope'],
+        },
+        undefined,
+        undefined,
+        {
+          ...baseContext,
+          toolCallId: 'tool-direct-verbose',
+          llmResultMode: 'verbose',
+          persistToolEnvelope: true,
+          messages: [],
+        },
+      ));
 
-    const directVerboseEnvelope = parseToolExecutionEnvelopeContent(await tool.execute(
-      {
-        command: 'echo',
-        parameters: ['direct-envelope'],
-      },
-      undefined,
-      undefined,
-      {
-        ...baseContext,
-        toolCallId: 'tool-direct-verbose',
-        llmResultMode: 'verbose',
-        persistToolEnvelope: true,
-        messages: [],
-      },
-    ));
+      const skillMinimalEnvelope = parseToolExecutionEnvelopeContent(await tool.execute(
+        {
+          command: 'node',
+          parameters: ['search/scripts/skill-envelope.js', 'skill-envelope'],
+        },
+        undefined,
+        undefined,
+        {
+          ...baseContext,
+          toolCallId: 'tool-skill-minimal',
+          llmResultMode: 'minimal',
+          persistToolEnvelope: true,
+          messages: [
+            {
+              role: 'tool',
+              chatId: 'chat-1',
+              content: serializeToolExecutionEnvelope({
+                __type: 'tool_execution_envelope',
+                version: 1,
+                tool: 'load_skill',
+                status: 'completed',
+                preview: null,
+                result: [
+                  '<skill_context id="search">',
+                  '  <active_resources>',
+                  `    <skill_root>${skillRoot}</skill_root>`,
+                  '  </active_resources>',
+                  '</skill_context>',
+                ].join('\n'),
+              }),
+            },
+          ],
+        },
+      ));
 
-    const skillMinimalEnvelope = parseToolExecutionEnvelopeContent(await tool.execute(
-      {
-        command: './echo',
-        parameters: ['skill-envelope'],
-      },
-      undefined,
-      undefined,
-      {
-        ...baseContext,
-        toolCallId: 'tool-skill-minimal',
-        llmResultMode: 'minimal',
-        persistToolEnvelope: true,
-        messages: [
-          {
-            role: 'tool',
-            chatId: 'chat-1',
-            content: serializeToolExecutionEnvelope({
-              __type: 'tool_execution_envelope',
-              version: 1,
-              tool: 'load_skill',
-              status: 'completed',
-              preview: null,
-              result: [
-                '<skill_context id="search">',
-                '  <active_resources>',
-                '    <skill_root>/bin</skill_root>',
-                '  </active_resources>',
-                '</skill_context>',
-              ].join('\n'),
-            }),
-          },
-        ],
-      },
-    ));
+      const skillVerboseEnvelope = parseToolExecutionEnvelopeContent(await tool.execute(
+        {
+          command: 'node',
+          parameters: ['search/scripts/skill-envelope.js', 'skill-envelope'],
+        },
+        undefined,
+        undefined,
+        {
+          ...baseContext,
+          toolCallId: 'tool-skill-verbose',
+          llmResultMode: 'verbose',
+          persistToolEnvelope: true,
+          messages: [
+            {
+              role: 'tool',
+              chatId: 'chat-1',
+              content: serializeToolExecutionEnvelope({
+                __type: 'tool_execution_envelope',
+                version: 1,
+                tool: 'load_skill',
+                status: 'completed',
+                preview: null,
+                result: [
+                  '<skill_context id="search">',
+                  '  <active_resources>',
+                  `    <skill_root>${skillRoot}</skill_root>`,
+                  '  </active_resources>',
+                  '</skill_context>',
+                ].join('\n'),
+              }),
+            },
+          ],
+        },
+      ));
 
-    const skillVerboseEnvelope = parseToolExecutionEnvelopeContent(await tool.execute(
-      {
-        command: './echo',
-        parameters: ['skill-envelope'],
-      },
-      undefined,
-      undefined,
-      {
-        ...baseContext,
-        toolCallId: 'tool-skill-verbose',
-        llmResultMode: 'verbose',
-        persistToolEnvelope: true,
-        messages: [
-          {
-            role: 'tool',
-            chatId: 'chat-1',
-            content: serializeToolExecutionEnvelope({
-              __type: 'tool_execution_envelope',
-              version: 1,
-              tool: 'load_skill',
-              status: 'completed',
-              preview: null,
-              result: [
-                '<skill_context id="search">',
-                '  <active_resources>',
-                '    <skill_root>/bin</skill_root>',
-                '  </active_resources>',
-                '</skill_context>',
-              ].join('\n'),
-            }),
-          },
-        ],
-      },
-    ));
+      expect(directMinimalEnvelope).not.toBeNull();
+      expect(directVerboseEnvelope).not.toBeNull();
+      expect(skillMinimalEnvelope).not.toBeNull();
+      expect(skillVerboseEnvelope).not.toBeNull();
 
-    expect(directMinimalEnvelope).not.toBeNull();
-    expect(directVerboseEnvelope).not.toBeNull();
-    expect(skillMinimalEnvelope).not.toBeNull();
-    expect(skillVerboseEnvelope).not.toBeNull();
+      expect(directMinimalEnvelope?.tool).toBe('shell_cmd');
+      expect(skillMinimalEnvelope?.tool).toBe('shell_cmd');
+      expect(JSON.stringify(directMinimalEnvelope?.preview || null)).toContain('Command Execution');
+      expect(JSON.stringify(skillMinimalEnvelope?.preview || null)).toContain('Command Execution');
+      expect(normalizeRenderedPath(JSON.stringify(skillMinimalEnvelope?.preview || null))).toContain(normalizeRenderedPath(skillScriptPath));
+      expect(directMinimalEnvelope?.display_content).toBeUndefined();
+      expect(skillMinimalEnvelope?.display_content).toBeUndefined();
 
-    expect(directMinimalEnvelope?.tool).toBe('shell_cmd');
-    expect(skillMinimalEnvelope?.tool).toBe('shell_cmd');
-    expect(JSON.stringify(directMinimalEnvelope?.preview || null)).toContain('Command Execution');
-    expect(JSON.stringify(skillMinimalEnvelope?.preview || null)).toContain('Command Execution');
-    expect(JSON.stringify(skillMinimalEnvelope?.preview || null)).toContain('/bin/echo');
-    expect(directMinimalEnvelope?.display_content).toBeUndefined();
-    expect(skillMinimalEnvelope?.display_content).toBeUndefined();
+      expect(String(directMinimalEnvelope?.result || '')).toContain('status: success');
+      expect(String(directMinimalEnvelope?.result || '')).toContain('stdout_preview:');
+      expect(String(directMinimalEnvelope?.result || '')).not.toContain('### Command Execution');
+      expect(String(directVerboseEnvelope?.result || '')).toContain('### Command Execution');
+      expect(String(directVerboseEnvelope?.result || '')).toContain('### Standard Output');
 
-    expect(String(directMinimalEnvelope?.result || '')).toContain('status: success');
-    expect(String(directMinimalEnvelope?.result || '')).toContain('stdout_preview:');
-    expect(String(directMinimalEnvelope?.result || '')).not.toContain('### Command Execution');
-    expect(String(directVerboseEnvelope?.result || '')).toContain('### Command Execution');
-    expect(String(directVerboseEnvelope?.result || '')).toContain('### Standard Output');
-
-    expect(String(skillMinimalEnvelope?.result || '')).toContain('status: success');
-    expect(String(skillMinimalEnvelope?.result || '')).toContain('stdout_preview:');
-    expect(String(skillMinimalEnvelope?.result || '')).not.toContain('### Command Execution');
-    expect(String(skillVerboseEnvelope?.result || '')).toContain('### Command Execution');
-    expect(String(skillVerboseEnvelope?.result || '')).toContain('/bin/echo skill-envelope');
+      expect(String(skillMinimalEnvelope?.result || '')).toContain('status: success');
+      expect(String(skillMinimalEnvelope?.result || '')).toContain('stdout_preview:');
+      expect(String(skillMinimalEnvelope?.result || '')).not.toContain('### Command Execution');
+      expect(String(skillVerboseEnvelope?.result || '')).toContain('### Command Execution');
+      expect(normalizeRenderedPath(String(skillVerboseEnvelope?.result || ''))).toContain(normalizeRenderedPath(skillScriptPath));
+      expect(String(skillVerboseEnvelope?.result || '')).toContain('skill-envelope.js');
+      expect(String(skillVerboseEnvelope?.result || '')).toContain('skill-envelope');
+    } finally {
+      await rm(tempWorkingDirectory, { recursive: true, force: true });
+    }
   });
 
   test('keeps persisted human preview sizing separate from minimal llm preview sizing', () => {
@@ -667,9 +692,9 @@ describe('shell command streaming callbacks', () => {
 
     // Command that outputs to both stdout and stderr
     // Using sh -c to ensure both streams are used
-    const result = await executeShellCommand('sh', [
-      '-c',
-      'echo "to stdout"; echo "to stderr" >&2'
+    const result = await executeShellCommand('node', [
+      '-e',
+      'process.stdout.write("to stdout\\n"); process.stderr.write("to stderr\\n");'
     ], './', {
       onStdout: (chunk) => stdoutChunks.push(chunk),
       onStderr: (chunk) => stderrChunks.push(chunk)
@@ -942,10 +967,10 @@ describe('resolveSkillScriptParameters', () => {
     const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
       'music-to-svg/scripts/convert.py', '--file', 'input.musicxml'
     ]);
-    expect(resolvedParameters[0]).toBe('/Users/tester/.agents/skills/music-to-svg/scripts/convert.py');
+    expect(normalizeForAssertion(resolvedParameters[0])).toBe('/Users/tester/.agents/skills/music-to-svg/scripts/convert.py');
     expect(resolvedParameters[1]).toBe('--file');
     expect(resolvedParameters[2]).toBe('input.musicxml');
-    expect(skillRoots).toEqual(['/Users/tester/.agents/skills/music-to-svg']);
+    expect(skillRoots.map(normalizeForAssertion)).toEqual(['/Users/tester/.agents/skills/music-to-svg']);
   });
 
   test('should leave parameters unchanged when skill is not found', () => {
@@ -962,8 +987,8 @@ describe('resolveSkillScriptParameters', () => {
     const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
       'my-skill/data/file.txt'
     ]);
-    expect(resolvedParameters[0]).toBe('/home/user/.agents/skills/my-skill/data/file.txt');
-    expect(skillRoots).toEqual(['/home/user/.agents/skills/my-skill']);
+    expect(normalizeForAssertion(resolvedParameters[0])).toBe('/home/user/.agents/skills/my-skill/data/file.txt');
+    expect(skillRoots.map(normalizeForAssertion)).toEqual(['/home/user/.agents/skills/my-skill']);
   });
 
   test('should resolve .agents/skills/<skill-id>/scripts/file.py prefix', () => {
@@ -971,10 +996,10 @@ describe('resolveSkillScriptParameters', () => {
     const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
       '.agents/skills/music-to-svg/scripts/convert.py', '--file', 'tmp_input.musicxml'
     ]);
-    expect(resolvedParameters[0]).toBe('/Users/tester/.agents/skills/music-to-svg/scripts/convert.py');
+    expect(normalizeForAssertion(resolvedParameters[0])).toBe('/Users/tester/.agents/skills/music-to-svg/scripts/convert.py');
     expect(resolvedParameters[1]).toBe('--file');
     expect(resolvedParameters[2]).toBe('tmp_input.musicxml');
-    expect(skillRoots).toEqual(['/Users/tester/.agents/skills/music-to-svg']);
+    expect(skillRoots.map(normalizeForAssertion)).toEqual(['/Users/tester/.agents/skills/music-to-svg']);
   });
 
   test('should resolve skills/<skill-id>/scripts/file.py prefix', () => {
@@ -982,8 +1007,8 @@ describe('resolveSkillScriptParameters', () => {
     const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
       'skills/pdf-extract/scripts/run.sh'
     ]);
-    expect(resolvedParameters[0]).toBe('/Users/tester/.agents/skills/pdf-extract/scripts/run.sh');
-    expect(skillRoots).toEqual(['/Users/tester/.agents/skills/pdf-extract']);
+    expect(normalizeForAssertion(resolvedParameters[0])).toBe('/Users/tester/.agents/skills/pdf-extract/scripts/run.sh');
+    expect(skillRoots.map(normalizeForAssertion)).toEqual(['/Users/tester/.agents/skills/pdf-extract']);
   });
 
   test('should resolve .agents/skills/<skill-id>/non-scripts paths', () => {
@@ -991,8 +1016,8 @@ describe('resolveSkillScriptParameters', () => {
     const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
       '.agents/skills/my-tool/data/input.json'
     ]);
-    expect(resolvedParameters[0]).toBe('/Users/tester/.agents/skills/my-tool/data/input.json');
-    expect(skillRoots).toEqual(['/Users/tester/.agents/skills/my-tool']);
+    expect(normalizeForAssertion(resolvedParameters[0])).toBe('/Users/tester/.agents/skills/my-tool/data/input.json');
+    expect(skillRoots.map(normalizeForAssertion)).toEqual(['/Users/tester/.agents/skills/my-tool']);
   });
 
   test('should resolve bare relative path by scanning registered skills', () => {
@@ -1004,16 +1029,14 @@ describe('resolveSkillScriptParameters', () => {
         ? '/Users/tester/.agents/skills/music-to-svg/SKILL.md'
         : undefined
     );
-    mockedExistsSync.mockImplementation((p) =>
-      String(p) === '/Users/tester/.agents/skills/music-to-svg/scripts/convert.py'
-    );
+    mockedExistsSync.mockImplementation((p) => isMatchingPath(p, '/Users/tester/.agents/skills/music-to-svg/scripts/convert.py'));
     const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
       'scripts/convert.py', '--file', 'input.musicxml'
     ], undefined, { allowBareScriptsResolution: true });
-    expect(resolvedParameters[0]).toBe('/Users/tester/.agents/skills/music-to-svg/scripts/convert.py');
+    expect(normalizeForAssertion(resolvedParameters[0])).toBe('/Users/tester/.agents/skills/music-to-svg/scripts/convert.py');
     expect(resolvedParameters[1]).toBe('--file');
     expect(resolvedParameters[2]).toBe('input.musicxml');
-    expect(skillRoots).toEqual(['/Users/tester/.agents/skills/music-to-svg']);
+    expect(skillRoots.map(normalizeForAssertion)).toEqual(['/Users/tester/.agents/skills/music-to-svg']);
   });
 
   test('should leave bare relative path unchanged when no skill has that file', () => {
@@ -1042,8 +1065,8 @@ describe('resolveSkillScriptParameters', () => {
       },
     ] as any);
     mockedExistsSync.mockImplementation((p) =>
-      String(p) === '/Users/esun/Documents/Projects/test-agent-world/.agents/skills'
-      || String(p) === '/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg/convert.py'
+      isMatchingPath(p, '/Users/esun/Documents/Projects/test-agent-world/.agents/skills')
+      || isMatchingPath(p, '/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg/convert.py')
     );
 
     const { resolvedParameters, skillRoots } = resolveSkillScriptParameters(
@@ -1052,10 +1075,10 @@ describe('resolveSkillScriptParameters', () => {
       { allowBareScriptsResolution: true },
     );
 
-    expect(resolvedParameters[0]).toBe('/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg/convert.py');
+    expect(normalizeForAssertion(resolvedParameters[0])).toBe('/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg/convert.py');
     expect(resolvedParameters[1]).toBe('--file');
     expect(resolvedParameters[2]).toBe('input_music.xml');
-    expect(skillRoots).toEqual(['/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg']);
+    expect(skillRoots.map(normalizeForAssertion)).toEqual(['/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg']);
   });
 
   test('should resolve bare relative path when skill folder is a symlink', () => {
@@ -1068,8 +1091,8 @@ describe('resolveSkillScriptParameters', () => {
       },
     ] as any);
     mockedExistsSync.mockImplementation((p) =>
-      String(p) === '/Users/esun/Documents/Projects/test-agent-world/.agents/skills'
-      || String(p) === '/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg/convert.py'
+      isMatchingPath(p, '/Users/esun/Documents/Projects/test-agent-world/.agents/skills')
+      || isMatchingPath(p, '/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg/convert.py')
     );
 
     const { resolvedParameters, skillRoots } = resolveSkillScriptParameters(
@@ -1078,8 +1101,8 @@ describe('resolveSkillScriptParameters', () => {
       { allowBareScriptsResolution: true },
     );
 
-    expect(resolvedParameters[0]).toBe('/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg/convert.py');
-    expect(skillRoots).toEqual(['/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg']);
+    expect(normalizeForAssertion(resolvedParameters[0])).toBe('/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg/convert.py');
+    expect(skillRoots.map(normalizeForAssertion)).toEqual(['/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg']);
   });
 
   test('should keep bare relative path unchanged when request is not skill-originated', () => {
@@ -1162,8 +1185,8 @@ describe('resolveSkillScriptParameters', () => {
       },
     ] as any);
     mockedExistsSync.mockImplementation((p) =>
-      String(p) === '/Users/esun/Documents/Projects/test-agent-world/.agents/skills'
-      || String(p) === '/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg/convert.py'
+      isMatchingPath(p, '/Users/esun/Documents/Projects/test-agent-world/.agents/skills')
+      || isMatchingPath(p, '/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg/convert.py')
     );
 
     const { resolvedParameters, skillRoots } = resolveSkillScriptParameters(
@@ -1172,10 +1195,10 @@ describe('resolveSkillScriptParameters', () => {
       { allowBareScriptsResolution: true },
     );
 
-    expect(resolvedParameters[0]).toBe('/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg/convert.py');
+    expect(normalizeForAssertion(resolvedParameters[0])).toBe('/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg/convert.py');
     expect(resolvedParameters[1]).toBe('--file');
     expect(resolvedParameters[2]).toBe('input_music.xml');
-    expect(skillRoots).toEqual(['/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg']);
+    expect(skillRoots.map(normalizeForAssertion)).toEqual(['/Users/esun/Documents/Projects/test-agent-world/.agents/skills/music-to-svg']);
   });
 });
 
@@ -1192,9 +1215,7 @@ describe('resolveSkillScriptCommand', () => {
 
   test('should resolve ./scripts executable from active skill root', () => {
     const activeSkillContexts = [{ skillId: 'search', skillRoot: '/Users/tester/.agents/skills/search' }];
-    mockedExistsSync.mockImplementation((p) =>
-      String(p) === '/Users/tester/.agents/skills/search/scripts/search.sh'
-    );
+    mockedExistsSync.mockImplementation((p) => isMatchingPath(p, '/Users/tester/.agents/skills/search/scripts/search.sh'));
 
     const { resolvedCommand, skillRoots } = resolveSkillScriptCommand(
       './scripts/search.sh',
@@ -1205,8 +1226,8 @@ describe('resolveSkillScriptCommand', () => {
       },
     );
 
-    expect(resolvedCommand).toBe('/Users/tester/.agents/skills/search/scripts/search.sh');
-    expect(skillRoots).toEqual(['/Users/tester/.agents/skills/search']);
+    expect(normalizeForAssertion(resolvedCommand)).toBe('/Users/tester/.agents/skills/search/scripts/search.sh');
+    expect(skillRoots.map(normalizeForAssertion)).toEqual(['/Users/tester/.agents/skills/search']);
   });
 
   test('should leave direct relative executables unchanged without skill context', () => {

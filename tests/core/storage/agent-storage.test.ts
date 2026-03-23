@@ -50,7 +50,7 @@ const fs = vi.mocked(fsModule.promises);
 const virtualFiles = new Map<string, string>();
 
 function normalizePath(value: string): string {
-  return String(value).replace(/\/+/g, '/').replace(/\/$/, '');
+  return String(value).replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '');
 }
 
 function missingPathError(filePath: string): Error & { code?: string } {

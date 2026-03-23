@@ -25,6 +25,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 
+function normalizeForAssertion(value: string): string {
+  return String(value).replace(/\\/g, '/');
+}
+
 const sqliteStorageMocks = vi.hoisted(() => ({
   createSQLiteStorageContext: vi.fn(async () => ({ db: { label: 'mock-db' } })),
   saveWorld: vi.fn(async () => undefined),
@@ -574,10 +578,12 @@ describe('storage-factory runtime selection', () => {
 
   it('resolves default root path correctly for absolute, relative, and fallback env states', () => {
     process.env.AGENT_WORLD_DATA_PATH = '/tmp/absolute-root';
-    expect(getDefaultRootPath()).toBe('/tmp/absolute-root');
+    expect(normalizeForAssertion(getDefaultRootPath())).toBe('/tmp/absolute-root');
 
     process.env.AGENT_WORLD_DATA_PATH = 'relative-root';
-    expect(getDefaultRootPath()).toBe('/relative-root');
+    expect(normalizeForAssertion(getDefaultRootPath())).toBe(
+      normalizeForAssertion(`${process.cwd().replace(/[\\/]$/, '')}/relative-root`)
+    );
 
     delete process.env.AGENT_WORLD_DATA_PATH;
     delete process.env.HOME;
@@ -585,7 +591,7 @@ describe('storage-factory runtime selection', () => {
     expect(getDefaultRootPath()).toBe('./agent-world');
 
     process.env.HOME = '/home/test-user';
-    expect(getDefaultRootPath()).toBe('/home/test-user/agent-world');
+    expect(normalizeForAssertion(getDefaultRootPath())).toBe('/home/test-user/agent-world');
   });
 
   it('creates storage root directory for non-memory env storage when path does not exist', async () => {
@@ -611,10 +617,8 @@ describe('storage-factory runtime selection', () => {
 
     await createStorageFromEnv();
 
-    expect(sqliteStorageMocks.createSQLiteStorageContext).toHaveBeenCalledWith(
-      expect.objectContaining({
-        database: `${process.env.AGENT_WORLD_DATA_PATH}/database.db`,
-      })
+    expect(normalizeForAssertion(sqliteStorageMocks.createSQLiteStorageContext.mock.calls[0][0].database)).toBe(
+      `${normalizeForAssertion(process.env.AGENT_WORLD_DATA_PATH || '')}/database.db`
     );
     expect(sqliteStorageMocks.initializeWithDefaults).toHaveBeenCalledTimes(1);
     expect(sqliteStorageMocks.initializeWithDefaults).toHaveBeenCalledWith(ctx);

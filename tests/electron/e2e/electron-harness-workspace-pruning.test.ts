@@ -23,6 +23,10 @@ import {
   pruneWorkspaceRuns,
 } from '../../electron-e2e/support/workspace-pruning';
 
+function normalizeForAssertion(value: string): string {
+  return String(value).replace(/\\/g, '/');
+}
+
 function createDirectoryEntry(name: string, isDirectory: boolean = true) {
   return {
     name,
@@ -61,9 +65,7 @@ describe('electron harness workspace pruning', () => {
 
     expect(prunedDirectories).toEqual(['run-100-oldest']);
     expect(rmSync).toHaveBeenCalledTimes(1);
-    expect(rmSync).toHaveBeenCalledWith(
-      '/tmp/electron-playwright-workspace/run-100-oldest',
-      { recursive: true, force: true },
-    );
+    expect(normalizeForAssertion(rmSync.mock.calls[0][0])).toBe('/tmp/electron-playwright-workspace/run-100-oldest');
+    expect(rmSync.mock.calls[0][1]).toEqual({ recursive: true, force: true });
   });
 });

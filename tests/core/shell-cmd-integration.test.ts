@@ -53,6 +53,16 @@ import { clearExecutionHistory, getExecutionHistory } from '../../core/shell-cmd
 describe('shell_cmd integration with worlds', () => {
   const workspaceRoot = fileURLToPath(new URL('../../', import.meta.url));
 
+  function normalizeForAssertion(value: string): string {
+    return value.replace(/\\/g, '/');
+  }
+
+  async function writeNodeScript(rootPath: string, fileName: string, source: string): Promise<string> {
+    const scriptPath = path.join(rootPath, fileName);
+    await writeFile(scriptPath, source, 'utf8');
+    return scriptPath;
+  }
+
   const { worldId, getWorld: getTestWorld } = setupTestWorld({
     name: 'test-world-shell-cmd',
     description: 'Test world for shell_cmd tool',
@@ -453,33 +463,40 @@ describe('shell_cmd integration with worlds', () => {
     const tools = await getMCPToolsForWorld(worldId());
     const shellCmdTool = tools.shell_cmd;
 
+    const tempRoot = await mkdtemp(path.join(tmpdir(), 'shell-artifact-json-'));
     const artifactTarget = 'artifact-test-output.txt';
-    const absoluteArtifactPath = fileURLToPath(new URL(`../../${artifactTarget}`, import.meta.url));
+    const absoluteArtifactPath = path.join(tempRoot, artifactTarget);
+    await writeFile(absoluteArtifactPath, 'artifact-test', 'utf8');
 
-    const rawResult = await shellCmdTool.execute(
-      {
-        command: 'echo',
-        parameters: ['artifact-test'],
-        output_format: 'json',
-        artifact_paths: [absoluteArtifactPath]
-      },
-      undefined,
-      undefined,
-      {
-        world: {
-          id: worldId(),
-          variables: `working_directory=${workspaceRoot}`
+    try {
+      const rawResult = await shellCmdTool.execute(
+        {
+          command: 'echo',
+          parameters: ['artifact-test'],
+          output_format: 'json',
+          artifact_paths: [absoluteArtifactPath]
+        },
+        undefined,
+        undefined,
+        {
+          world: {
+            id: worldId(),
+            variables: `working_directory=${tempRoot}`
+          },
+          workingDirectory: tempRoot,
         }
-      }
-    );
+      );
 
-    const parsed = JSON.parse(rawResult);
-    expect(parsed.artifacts.length).toBeGreaterThanOrEqual(1);
-    const artifact = parsed.artifacts.find((item: any) => String(item.path).endsWith(artifactTarget));
-    expect(artifact).toBeDefined();
-    expect(artifact.sha256).toMatch(/^[a-f0-9]{64}$/);
-    expect(typeof artifact.bytes).toBe('number');
-    expect(artifact.bytes).toBeGreaterThanOrEqual(0);
+      const parsed = JSON.parse(rawResult);
+      expect(parsed.artifacts.length).toBeGreaterThanOrEqual(1);
+      const artifact = parsed.artifacts.find((item: any) => String(item.path).endsWith(artifactTarget));
+      expect(artifact).toBeDefined();
+      expect(artifact.sha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(typeof artifact.bytes).toBe('number');
+      expect(artifact.bytes).toBeGreaterThanOrEqual(0);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   test('should reject artifact paths outside world working_directory', async () => {
@@ -559,10 +576,15 @@ describe('shell_cmd integration with worlds', () => {
 
     let result = '';
     try {
+      await writeNodeScript(
+        tempRoot,
+        'print-file.js',
+        'const fs = require("node:fs"); process.stdout.write(fs.readFileSync(process.argv[2], "utf8"));',
+      );
       result = await shellCmdTool.execute(
         {
-          command: 'cat',
-          parameters: ['payload.txt']
+          command: 'node',
+          parameters: ['print-file.js', 'payload.txt']
         },
         undefined,
         undefined,
@@ -595,10 +617,15 @@ describe('shell_cmd integration with worlds', () => {
 
     let result = '';
     try {
+      await writeNodeScript(
+        tempRoot,
+        'print-file.js',
+        'const fs = require("node:fs"); process.stdout.write(fs.readFileSync(process.argv[2], "utf8"));',
+      );
       result = await shellCmdTool.execute(
         {
-          command: 'cat',
-          parameters: ['payload.md']
+          command: 'node',
+          parameters: ['print-file.js', 'payload.md']
         },
         undefined,
         undefined,
@@ -634,10 +661,15 @@ describe('shell_cmd integration with worlds', () => {
 
     let result = '';
     try {
+      await writeNodeScript(
+        tempRoot,
+        'print-file.js',
+        'const fs = require("node:fs"); process.stdout.write(fs.readFileSync(process.argv[2], "utf8"));',
+      );
       result = await shellCmdTool.execute(
         {
-          command: 'cat',
-          parameters: ['payload.html']
+          command: 'node',
+          parameters: ['print-file.js', 'payload.html']
         },
         undefined,
         undefined,
@@ -679,10 +711,15 @@ describe('shell_cmd integration with worlds', () => {
 
     let result = '';
     try {
+      await writeNodeScript(
+        tempRoot,
+        'print-file.js',
+        'const fs = require("node:fs"); process.stdout.write(fs.readFileSync(process.argv[2], "utf8"));',
+      );
       result = await shellCmdTool.execute(
         {
-          command: 'cat',
-          parameters: ['payload.json']
+          command: 'node',
+          parameters: ['print-file.js', 'payload.json']
         },
         undefined,
         undefined,
@@ -728,10 +765,15 @@ describe('shell_cmd integration with worlds', () => {
     world.eventEmitter.on('message', messageListener);
 
     try {
+      await writeNodeScript(
+        workspaceRoot,
+        'emit-shell-streams.js',
+        'process.stdout.write("stdout-line\\n"); process.stderr.write("stderr-line\\n");',
+      );
       await shellCmdTool.execute(
         {
-          command: 'ls',
-          parameters: ['.', './__shell_stream_missing_path__']
+          command: 'node',
+          parameters: ['emit-shell-streams.js']
         },
         undefined,
         undefined,
@@ -748,6 +790,7 @@ describe('shell_cmd integration with worlds', () => {
     } finally {
       world.eventEmitter.off('sse', sseListener);
       world.eventEmitter.off('message', messageListener);
+      await rm(path.join(workspaceRoot, 'emit-shell-streams.js'), { force: true });
     }
 
     const streamStarts = sseEvents.filter((event) => event.type === 'start' && event.toolName === 'shell_cmd');
@@ -770,23 +813,29 @@ describe('shell_cmd integration with worlds', () => {
     const tools = await getMCPToolsForWorld(worldId());
     const shellCmdTool = tools.shell_cmd;
 
-    const result = await shellCmdTool.execute(
-      {
-        command: 'echo',
-        parameters: ['fallback-directory-test']
-      },
-      undefined,
-      undefined,
-      {
-        world: {
-          id: worldId(),
-          variables: 'working_directory=/tmp'
-        }
-      }
-    );
+    const tempRoot = await mkdtemp(path.join(tmpdir(), 'shell-world-working-directory-'));
 
-    expect(result).toContain('fallback-directory-test');
-    expect(result).toContain('Exit code 0');
+    try {
+      const result = await shellCmdTool.execute(
+        {
+          command: 'echo',
+          parameters: ['fallback-directory-test']
+        },
+        undefined,
+        undefined,
+        {
+          world: {
+            id: worldId(),
+            variables: `working_directory=${tempRoot}`
+          }
+        }
+      );
+
+      expect(result).toContain('fallback-directory-test');
+      expect(result).toContain('Exit code 0');
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   test('should fail when model-provided directory differs from world working_directory', async () => {
@@ -1011,14 +1060,14 @@ describe('shell_cmd integration with worlds', () => {
 
     // Execute a command that will fail
     const result = await shellCmdTool.execute({
-      command: 'ls',
+      command: 'node',
       parameters: ['./this-directory-does-not-exist-xyz']
     });
 
     // Verify error is captured in result
-    expect(result).toContain('**Command:** `ls ./this-directory-does-not-exist-xyz`');
+    expect(result).toContain('**Command:** `node ./this-directory-does-not-exist-xyz`');
     expect(result).toContain('Error:');
-    expect(result.toLowerCase()).toContain('no such file');
+    expect(result.toLowerCase()).toMatch(/cannot find|module not found|not recognized/);
   });
 
   test('should silently strip workingDirectory when passed as a tool arg (context field, not tool param)', async () => {

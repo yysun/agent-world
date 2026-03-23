@@ -68,6 +68,22 @@ function getRecordValue<T>(record: Record<string, T>, key: string): T | undefine
   const normalized = normalizePathKey(key);
   const noLeadingSlash = normalized.replace(/^\/+/, '');
   const withLeadingSlash = `/${noLeadingSlash}`;
+  const normalizedCwd = normalizePathKey(process.cwd()).replace(/\/+$/, '');
+  const cwdRelative = normalized.startsWith(`${normalizedCwd}/`)
+    ? normalized.slice(normalizedCwd.length + 1)
+    : undefined;
+
+  if (cwdRelative) {
+    const cwdRelativeNoLeadingSlash = cwdRelative.replace(/^\/+/, '');
+    const cwdRelativeWithLeadingSlash = `/${cwdRelativeNoLeadingSlash}`;
+    return record[normalized]
+      ?? record[noLeadingSlash]
+      ?? record[withLeadingSlash]
+      ?? record[cwdRelative]
+      ?? record[cwdRelativeNoLeadingSlash]
+      ?? record[cwdRelativeWithLeadingSlash];
+  }
+
   return record[normalized] ?? record[noLeadingSlash] ?? record[withLeadingSlash];
 }
 
@@ -78,6 +94,9 @@ function setupFsScenario(
   const fsAny = fs as any;
   if (!fsAny.stat) {
     fsAny.stat = vi.fn();
+  }
+  if (!fsAny.realpath) {
+    fsAny.realpath = vi.fn();
   }
 
   vi.mocked(fsAny.access).mockImplementation(async (targetPath: any) => {
@@ -127,6 +146,8 @@ function setupFsScenario(
     }
     return file.content as any;
   });
+
+  vi.mocked(fsAny.realpath).mockImplementation(async (targetPath: any) => normalizePathKey(String(targetPath)) as any);
 }
 
 describe('core/skill-registry', () => {
@@ -339,7 +360,7 @@ describe('core/skill-registry', () => {
       total: 1,
     });
     expect(getSkill('shared-skill')?.description).toBe('From user root');
-    expect(getSkillSourcePath('shared-skill')).toContain('user-root/shared/SKILL.md');
+    expect(normalizePathKey(getSkillSourcePath('shared-skill') || '')).toContain('user-root/shared/SKILL.md');
 
     const mergedResult = await syncSkills({
       userSkillRoots: ['user-root'],
@@ -354,7 +375,7 @@ describe('core/skill-registry', () => {
       total: 1,
     });
     expect(getSkill('shared-skill')?.description).toBe('From project root');
-    expect(getSkillSourcePath('shared-skill')).toContain('project-root/shared/SKILL.md');
+    expect(normalizePathKey(getSkillSourcePath('shared-skill') || '')).toContain('project-root/shared/SKILL.md');
   });
 
   it('keeps project scope as winner when same skill_id has identical content hash across global and project', async () => {
@@ -391,7 +412,7 @@ describe('core/skill-registry', () => {
       projectSkillRoots: [],
     });
     expect(getSkillSourceScope('shared-skill')).toBe('global');
-    expect(getSkillSourcePath('shared-skill')).toContain('user-root/shared/SKILL.md');
+    expect(normalizePathKey(getSkillSourcePath('shared-skill') || '')).toContain('user-root/shared/SKILL.md');
 
     const mergedResult = await syncSkills({
       userSkillRoots: ['user-root'],
@@ -406,7 +427,7 @@ describe('core/skill-registry', () => {
       total: 1,
     });
     expect(getSkillSourceScope('shared-skill')).toBe('project');
-    expect(getSkillSourcePath('shared-skill')).toContain('project-root/shared/SKILL.md');
+    expect(normalizePathKey(getSkillSourcePath('shared-skill') || '')).toContain('project-root/shared/SKILL.md');
   });
 
   it('includes both .agents and .codex directories in default user roots', async () => {
@@ -417,7 +438,7 @@ describe('core/skill-registry', () => {
       .mocked((fs as any).access)
       .mock
       .calls
-      .map((call: any[]) => String(call[0]));
+      .map((call: any[]) => normalizePathKey(String(call[0])));
 
     expect(accessCalls.some((value) => value.includes('.agents/skills'))).toBe(true);
     expect(accessCalls.some((value) => value.includes('.codex/skills'))).toBe(true);
@@ -435,7 +456,7 @@ describe('core/skill-registry', () => {
       .mocked((fs as any).access)
       .mock
       .calls
-      .map((call: any[]) => String(call[0]));
+      .map((call: any[]) => normalizePathKey(String(call[0])));
 
     expect(accessCalls.some((value) => value.endsWith('/workspace/test-agent-world/.agents/skills'))).toBe(true);
     expect(accessCalls.some((value) => value.endsWith('/workspace/test-agent-world/skills'))).toBe(true);
@@ -450,9 +471,9 @@ describe('core/skill-registry', () => {
       .mocked((fs as any).access)
       .mock
       .calls
-      .map((call: any[]) => String(call[0]));
+      .map((call: any[]) => normalizePathKey(String(call[0])));
 
-    expect(accessCalls.some((value) => value.endsWith(`${homedir()}/skills`))).toBe(true);
+    expect(accessCalls.some((value) => value.endsWith(normalizePathKey(`${homedir()}/skills`)))).toBe(true);
   });
 
   it('updates when file is newer and full SKILL.md content hash changes', async () => {
@@ -547,7 +568,7 @@ describe('core/skill-registry', () => {
       total: 1,
     });
     expect(getSkill('music-to-svg')?.description).toBe('Convert music prompts into SVG visuals');
-    expect(getSkillSourcePath('music-to-svg')).toContain('project-root/music-to-svg/SKILL.md');
+    expect(normalizePathKey(getSkillSourcePath('music-to-svg') || '')).toContain('project-root/music-to-svg/SKILL.md');
   });
 
   it('skips skills missing front-matter name', async () => {

@@ -37,15 +37,22 @@ type FsState = {
   files: Map<string, string>;
 };
 
+function normalizePath(pathValue: string): string {
+  const normalized = String(pathValue).replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '');
+  return normalized || '/';
+}
+
 function parentDir(filePath: string): string {
-  const idx = filePath.lastIndexOf('/');
+  const normalized = normalizePath(filePath);
+  const idx = normalized.lastIndexOf('/');
   if (idx <= 0) return '/';
-  return filePath.slice(0, idx);
+  return normalized.slice(0, idx);
 }
 
 function addDirRecursive(dirs: Set<string>, dirPath: string): void {
-  const isAbs = dirPath.startsWith('/');
-  const parts = dirPath.split('/').filter(Boolean);
+  const normalizedDir = normalizePath(dirPath);
+  const isAbs = normalizedDir.startsWith('/');
+  const parts = normalizedDir.split('/').filter(Boolean);
   if (isAbs) {
     dirs.add('/');
   }
@@ -78,59 +85,65 @@ function setupInMemoryFs(initialDirs: string[] = ['/data']): FsState {
   const readdirMock = vi.mocked(fs.promises.readdir as any);
 
   accessMock.mockImplementation(async (targetPath: string) => {
-    if (state.dirs.has(targetPath) || state.files.has(targetPath)) {
+    const normalizedTarget = normalizePath(targetPath);
+    if (state.dirs.has(normalizedTarget) || state.files.has(normalizedTarget)) {
       return;
     }
-    throw new Error(`ENOENT: ${targetPath}`);
+    throw new Error(`ENOENT: ${normalizedTarget}`);
   });
 
   mkdirMock.mockImplementation(async (targetPath: string) => {
-    addDirRecursive(state.dirs, targetPath);
+    addDirRecursive(state.dirs, normalizePath(targetPath));
   });
 
   writeFileMock.mockImplementation(async (targetPath: string, data: string) => {
-    addDirRecursive(state.dirs, parentDir(targetPath));
-    state.files.set(targetPath, String(data));
+    const normalizedTarget = normalizePath(targetPath);
+    addDirRecursive(state.dirs, parentDir(normalizedTarget));
+    state.files.set(normalizedTarget, String(data));
   });
 
   readFileMock.mockImplementation(async (targetPath: string) => {
-    if (!state.files.has(targetPath)) {
-      throw new Error(`ENOENT: ${targetPath}`);
+    const normalizedTarget = normalizePath(targetPath);
+    if (!state.files.has(normalizedTarget)) {
+      throw new Error(`ENOENT: ${normalizedTarget}`);
     }
-    return state.files.get(targetPath)!;
+    return state.files.get(normalizedTarget)!;
   });
 
   unlinkMock.mockImplementation(async (targetPath: string) => {
-    if (!state.files.has(targetPath)) {
-      throw new Error(`ENOENT: ${targetPath}`);
+    const normalizedTarget = normalizePath(targetPath);
+    if (!state.files.has(normalizedTarget)) {
+      throw new Error(`ENOENT: ${normalizedTarget}`);
     }
-    state.files.delete(targetPath);
+    state.files.delete(normalizedTarget);
   });
 
   rmMock.mockImplementation(async (targetPath: string) => {
-    const prefix = targetPath.endsWith('/') ? targetPath : `${targetPath}/`;
+    const normalizedTarget = normalizePath(targetPath);
+    const prefix = normalizedTarget.endsWith('/') ? normalizedTarget : `${normalizedTarget}/`;
     for (const filePath of Array.from(state.files.keys())) {
-      if (filePath === targetPath || filePath.startsWith(prefix)) {
+      if (filePath === normalizedTarget || filePath.startsWith(prefix)) {
         state.files.delete(filePath);
       }
     }
     for (const dirPath of Array.from(state.dirs.values())) {
-      if (dirPath === targetPath || dirPath.startsWith(prefix)) {
+      if (dirPath === normalizedTarget || dirPath.startsWith(prefix)) {
         state.dirs.delete(dirPath);
       }
     }
   });
 
   readdirMock.mockImplementation(async (targetPath: string, options?: any) => {
-    if (!state.dirs.has(targetPath)) {
-      throw new Error(`ENOENT: ${targetPath}`);
+    const normalizedTarget = normalizePath(targetPath);
+    if (!state.dirs.has(normalizedTarget)) {
+      throw new Error(`ENOENT: ${normalizedTarget}`);
     }
 
-    const prefix = targetPath.endsWith('/') ? targetPath : `${targetPath}/`;
+    const prefix = normalizedTarget.endsWith('/') ? normalizedTarget : `${normalizedTarget}/`;
     const kindByName = new Map<string, 'file' | 'dir'>();
 
     for (const dirPath of state.dirs) {
-      if (!dirPath.startsWith(prefix) || dirPath === targetPath) continue;
+      if (!dirPath.startsWith(prefix) || dirPath === normalizedTarget) continue;
       const relative = dirPath.slice(prefix.length);
       if (!relative || relative.includes('/')) continue;
       kindByName.set(relative, 'dir');
@@ -193,10 +206,10 @@ describe('world-storage behavior', () => {
     } as any);
 
     const worldDir = worldStorage.getWorldDir('/data', 'My World');
-    expect(worldDir).toBe('/data/my-world');
+    expect(normalizePath(worldDir)).toBe('/data/my-world');
 
-    const configPath = '/data/my-world/config.json';
-    const mcpPath = '/data/my-world/mcp.json';
+    const configPath = normalizePath('/data/my-world/config.json');
+    const mcpPath = normalizePath('/data/my-world/mcp.json');
     expect(fsState.files.has(configPath)).toBe(true);
     expect(fsState.files.has(mcpPath)).toBe(true);
 

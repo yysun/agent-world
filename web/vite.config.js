@@ -16,10 +16,13 @@
  */
 
 import { defineConfig } from 'vite';
+import { fileURLToPath } from 'node:url';
+
+const webRoot = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig({
   appType: 'spa',
-  root: new URL('.', import.meta.url).pathname,
+  root: webRoot,
   build: {
     emptyOutDir: true, // Set to false to prevent clearing the output directory
   },

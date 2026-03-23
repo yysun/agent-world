@@ -139,6 +139,10 @@ function createMockResponse(): MockResponse {
   };
 }
 
+function normalizePathForAssertion(value: string): string {
+  return String(value).replace(/\\/g, '/').replace(/^[A-Za-z]:/, '').replace(/\/+/g, '/');
+}
+
 function getRouteHandler(router: any, method: 'get', path: string) {
   const layer = router.stack.find(
     (entry: any) => entry.route?.path === path && entry.route?.methods?.[method],
@@ -168,14 +172,14 @@ describe('API tool artifact route', () => {
 
   it('serves files from symlinked registered skill roots using realpath authorization', async () => {
     statMock.mockImplementation(async (targetPath: string) => {
-      const normalizedPath = String(targetPath).replace(/\/+/g, '/');
+      const normalizedPath = normalizePathForAssertion(targetPath);
       if (normalizedPath === '/Users/esun/dev/music-to-svg/assets/score.svg') {
         return { isFile: () => true };
       }
       throw new Error('ENOENT');
     });
     realpathMock.mockImplementation(async (targetPath: string) => {
-      const normalizedPath = String(targetPath).replace(/\/+/g, '/');
+      const normalizedPath = normalizePathForAssertion(targetPath);
       if (normalizedPath === '/Users/esun/.agents/skills/music-to-svg/SKILL.md') {
         return '/Users/esun/dev/music-to-svg/SKILL.md';
       }
@@ -197,13 +201,13 @@ describe('API tool artifact route', () => {
     await handler(req, res);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual({ filePath: '/Users/esun/dev/music-to-svg/assets/score.svg' });
+    expect(normalizePathForAssertion(res.body.filePath)).toBe('/Users/esun/dev/music-to-svg/assets/score.svg');
   });
 
   it('rejects symlink escapes outside approved skill and world roots', async () => {
     statMock.mockResolvedValue({ isFile: () => true });
     realpathMock.mockImplementation(async (targetPath: string) => {
-      const normalizedPath = String(targetPath).replace(/\/+/g, '/');
+      const normalizedPath = normalizePathForAssertion(targetPath);
       if (normalizedPath === '/tmp/world-work') {
         return '/tmp/world-work';
       }
@@ -237,14 +241,14 @@ describe('API tool artifact route', () => {
 
   it('rewrites relative HTML bundle assets through the guarded artifact route for inline preview mode', async () => {
     statMock.mockImplementation(async (targetPath: string) => {
-      const normalizedPath = String(targetPath).replace(/\/+/g, '/');
+      const normalizedPath = normalizePathForAssertion(targetPath);
       if (normalizedPath === '/tmp/world-work/out/index.html') {
         return { isFile: () => true };
       }
       throw new Error('ENOENT');
     });
     realpathMock.mockImplementation(async (targetPath: string) => {
-      const normalizedPath = String(targetPath).replace(/\/+/g, '/');
+      const normalizedPath = normalizePathForAssertion(targetPath);
       if (normalizedPath === '/tmp/world-work') {
         return '/tmp/world-work';
       }
@@ -273,21 +277,21 @@ describe('API tool artifact route', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.contentType).toBe('html');
-    expect(String(res.body)).toContain('/api/tool-artifact?path=%2Ftmp%2Fworld-work%2Fout%2Fapp.js&worldId=world-1');
-    expect(String(res.body)).toContain('/api/tool-artifact?path=%2Ftmp%2Fworld-work%2Fout%2Fstyles.css&worldId=world-1');
-    expect(String(res.body)).toContain('/api/tool-artifact?path=%2Ftmp%2Fworld-work%2Fout%2Fimages%2Fcover.png&worldId=world-1');
+    expect(String(res.body)).toMatch(/\/api\/tool-artifact\?path=(?:C%3A)?%2Ftmp%2Fworld-work%2Fout%2Fapp\.js&worldId=world-1/);
+    expect(String(res.body)).toMatch(/\/api\/tool-artifact\?path=(?:C%3A)?%2Ftmp%2Fworld-work%2Fout%2Fstyles\.css&worldId=world-1/);
+    expect(String(res.body)).toMatch(/\/api\/tool-artifact\?path=(?:C%3A)?%2Ftmp%2Fworld-work%2Fout%2Fimages%2Fcover\.png&worldId=world-1/);
   });
 
   it('rejects inline HTML preview mode for non-HTML artifacts', async () => {
     statMock.mockImplementation(async (targetPath: string) => {
-      const normalizedPath = String(targetPath).replace(/\/+/g, '/');
+      const normalizedPath = normalizePathForAssertion(targetPath);
       if (normalizedPath === '/tmp/world-work/out/report.pdf') {
         return { isFile: () => true };
       }
       throw new Error('ENOENT');
     });
     realpathMock.mockImplementation(async (targetPath: string) => {
-      const normalizedPath = String(targetPath).replace(/\/+/g, '/');
+      const normalizedPath = normalizePathForAssertion(targetPath);
       if (normalizedPath === '/tmp/world-work') {
         return '/tmp/world-work';
       }

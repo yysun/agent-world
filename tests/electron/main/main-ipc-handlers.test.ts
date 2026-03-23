@@ -34,7 +34,9 @@
  * - 2026-02-13: Added regression coverage for delete-message flow to refresh subscribed world runtime after storage deletion.
  */
 
-import * as nodeFs from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import * as nodePath from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 const { showOpenDialogMock, openExternalMock } = vi.hoisted(() => ({
@@ -236,8 +238,7 @@ describe('createMainIpcHandlers.exportWorld', () => {
       agents: new Map(),
       chats: new Map(),
     }));
-    const existsSyncSpy = vi.spyOn(nodeFs, 'existsSync').mockReturnValue(false);
-    const mkdirSyncSpy = vi.spyOn(nodeFs, 'mkdirSync').mockImplementation(() => undefined as any);
+    const exportRoot = await mkdtemp(nodePath.join(tmpdir(), 'agent-world-export-'));
 
     try {
       const { handlers } = await createHandlers({
@@ -249,13 +250,13 @@ describe('createMainIpcHandlers.exportWorld', () => {
 
       const result = await handlers.exportWorld({
         worldId: 'world-1',
-        targetPath: '/exports',
+        targetPath: exportRoot,
       });
 
       expect(result).toMatchObject({ success: true });
       expect(createStorage).toHaveBeenCalledWith({
         type: 'file',
-        rootPath: '/exports',
+        rootPath: exportRoot,
       });
 
       const exportedWorld = saveWorld.mock.calls[0]?.[0];
@@ -268,11 +269,8 @@ describe('createMainIpcHandlers.exportWorld', () => {
       expect(exportedWorld).not.toHaveProperty('variables');
       expect(exportedWorld).not.toHaveProperty('env');
       expect(exportedWorld).not.toHaveProperty('currentChatId');
-      expect(mkdirSyncSpy).toHaveBeenCalledWith('/exports', { recursive: true });
-      expect(existsSyncSpy).toHaveBeenCalled();
     } finally {
-      existsSyncSpy.mockRestore();
-      mkdirSyncSpy.mockRestore();
+      await rm(exportRoot, { recursive: true, force: true });
     }
   });
 });

@@ -14,6 +14,11 @@
  * - SQLite mocks prevent browser environment errors
  */
 
+import { fileURLToPath } from 'node:url';
+import * as classicFs from 'fs';
+import * as classicFsPromises from 'fs/promises';
+import * as nodeFs from 'node:fs';
+import * as nodeFsPromises from 'node:fs/promises';
 import { vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 
 // Configure test environment before any module imports
@@ -70,29 +75,104 @@ const { getNanoidId } = vi.hoisted(() => {
   };
 });
 
-// Mock fs module (both promises and sync methods)
-vi.mock('fs', () => ({
+const {
+  actualNodeFs,
+  actualNodeFsPromises,
+  actualFs,
+  actualFsPromises,
+} = vi.hoisted(() => ({
+  actualNodeFs: require('node:fs') as typeof import('node:fs'),
+  actualNodeFsPromises: require('node:fs/promises') as typeof import('node:fs/promises'),
+  actualFs: require('fs') as typeof import('fs'),
+  actualFsPromises: require('fs/promises') as typeof import('fs/promises'),
+}));
+
+vi.mock('node:fs', () => ({
+  ...actualNodeFs,
+  existsSync: vi.fn(actualNodeFs.existsSync.bind(actualNodeFs)),
+  mkdirSync: vi.fn(actualNodeFs.mkdirSync.bind(actualNodeFs)),
+  readFileSync: vi.fn(actualNodeFs.readFileSync.bind(actualNodeFs)),
+  readdirSync: vi.fn(actualNodeFs.readdirSync.bind(actualNodeFs)),
+  rmSync: vi.fn(actualNodeFs.rmSync.bind(actualNodeFs)),
+  statSync: vi.fn(actualNodeFs.statSync.bind(actualNodeFs)),
+  writeFileSync: vi.fn(actualNodeFs.writeFileSync.bind(actualNodeFs)),
   promises: {
-    readFile: vi.fn<any>().mockResolvedValue('{}'),
-    writeFile: vi.fn<any>().mockResolvedValue(undefined),
-    mkdir: vi.fn<any>().mockResolvedValue(undefined),
-    rm: vi.fn<any>().mockResolvedValue(undefined),
-    access: vi.fn<any>().mockResolvedValue(undefined),
-    readdir: vi.fn<any>().mockResolvedValue([]),
-    rename: vi.fn<any>().mockResolvedValue(undefined),
-    unlink: vi.fn<any>().mockResolvedValue(undefined)
+    ...actualNodeFs.promises,
+    access: vi.fn(actualNodeFs.promises.access.bind(actualNodeFs.promises)),
+    appendFile: vi.fn(actualNodeFs.promises.appendFile.bind(actualNodeFs.promises)),
+    chmod: vi.fn(actualNodeFs.promises.chmod.bind(actualNodeFs.promises)),
+    copyFile: vi.fn(actualNodeFs.promises.copyFile.bind(actualNodeFs.promises)),
+    mkdir: vi.fn(actualNodeFs.promises.mkdir.bind(actualNodeFs.promises)),
+    readdir: vi.fn(actualNodeFs.promises.readdir.bind(actualNodeFs.promises)),
+    readFile: vi.fn(actualNodeFs.promises.readFile.bind(actualNodeFs.promises)),
+    realpath: vi.fn(actualNodeFs.promises.realpath.bind(actualNodeFs.promises)),
+    rename: vi.fn(actualNodeFs.promises.rename.bind(actualNodeFs.promises)),
+    rm: vi.fn(actualNodeFs.promises.rm.bind(actualNodeFs.promises)),
+    stat: vi.fn(actualNodeFs.promises.stat.bind(actualNodeFs.promises)),
+    unlink: vi.fn(actualNodeFs.promises.unlink.bind(actualNodeFs.promises)),
+    writeFile: vi.fn(actualNodeFs.promises.writeFile.bind(actualNodeFs.promises)),
   },
-  existsSync: vi.fn(() => true),
-  mkdirSync: vi.fn(() => undefined),
-  readFileSync: vi.fn(() => '{}'),
-  writeFileSync: vi.fn(() => undefined),
-  readdirSync: vi.fn(() => []),
-  statSync: vi.fn(() => ({
-    isDirectory: () => false,
-    isFile: () => true
-  })),
-  unlinkSync: vi.fn(() => undefined),
-  rmdirSync: vi.fn(() => undefined)
+}));
+
+vi.mock('fs', () => ({
+  ...actualFs,
+  existsSync: vi.fn(actualFs.existsSync.bind(actualFs)),
+  mkdirSync: vi.fn(actualFs.mkdirSync.bind(actualFs)),
+  readFileSync: vi.fn(actualFs.readFileSync.bind(actualFs)),
+  readdirSync: vi.fn(actualFs.readdirSync.bind(actualFs)),
+  rmSync: vi.fn(actualFs.rmSync.bind(actualFs)),
+  statSync: vi.fn(actualFs.statSync.bind(actualFs)),
+  writeFileSync: vi.fn(actualFs.writeFileSync.bind(actualFs)),
+  promises: {
+    ...actualFs.promises,
+    access: vi.fn(actualFs.promises.access.bind(actualFs.promises)),
+    appendFile: vi.fn(actualFs.promises.appendFile.bind(actualFs.promises)),
+    chmod: vi.fn(actualFs.promises.chmod.bind(actualFs.promises)),
+    copyFile: vi.fn(actualFs.promises.copyFile.bind(actualFs.promises)),
+    mkdir: vi.fn(actualFs.promises.mkdir.bind(actualFs.promises)),
+    readdir: vi.fn(actualFs.promises.readdir.bind(actualFs.promises)),
+    readFile: vi.fn(actualFs.promises.readFile.bind(actualFs.promises)),
+    realpath: vi.fn(actualFs.promises.realpath.bind(actualFs.promises)),
+    rename: vi.fn(actualFs.promises.rename.bind(actualFs.promises)),
+    rm: vi.fn(actualFs.promises.rm.bind(actualFs.promises)),
+    stat: vi.fn(actualFs.promises.stat.bind(actualFs.promises)),
+    unlink: vi.fn(actualFs.promises.unlink.bind(actualFs.promises)),
+    writeFile: vi.fn(actualFs.promises.writeFile.bind(actualFs.promises)),
+  },
+}));
+
+vi.mock('node:fs/promises', () => ({
+  ...actualNodeFsPromises,
+  access: vi.fn(actualNodeFsPromises.access.bind(actualNodeFsPromises)),
+  appendFile: vi.fn(actualNodeFsPromises.appendFile.bind(actualNodeFsPromises)),
+  chmod: vi.fn(actualNodeFsPromises.chmod.bind(actualNodeFsPromises)),
+  copyFile: vi.fn(actualNodeFsPromises.copyFile.bind(actualNodeFsPromises)),
+  mkdir: vi.fn(actualNodeFsPromises.mkdir.bind(actualNodeFsPromises)),
+  readdir: vi.fn(actualNodeFsPromises.readdir.bind(actualNodeFsPromises)),
+  readFile: vi.fn(actualNodeFsPromises.readFile.bind(actualNodeFsPromises)),
+  realpath: vi.fn(actualNodeFsPromises.realpath.bind(actualNodeFsPromises)),
+  rename: vi.fn(actualNodeFsPromises.rename.bind(actualNodeFsPromises)),
+  rm: vi.fn(actualNodeFsPromises.rm.bind(actualNodeFsPromises)),
+  stat: vi.fn(actualNodeFsPromises.stat.bind(actualNodeFsPromises)),
+  unlink: vi.fn(actualNodeFsPromises.unlink.bind(actualNodeFsPromises)),
+  writeFile: vi.fn(actualNodeFsPromises.writeFile.bind(actualNodeFsPromises)),
+}));
+
+vi.mock('fs/promises', () => ({
+  ...actualFsPromises,
+  access: vi.fn(actualFsPromises.access.bind(actualFsPromises)),
+  appendFile: vi.fn(actualFsPromises.appendFile.bind(actualFsPromises)),
+  chmod: vi.fn(actualFsPromises.chmod.bind(actualFsPromises)),
+  copyFile: vi.fn(actualFsPromises.copyFile.bind(actualFsPromises)),
+  mkdir: vi.fn(actualFsPromises.mkdir.bind(actualFsPromises)),
+  readdir: vi.fn(actualFsPromises.readdir.bind(actualFsPromises)),
+  readFile: vi.fn(actualFsPromises.readFile.bind(actualFsPromises)),
+  realpath: vi.fn(actualFsPromises.realpath.bind(actualFsPromises)),
+  rename: vi.fn(actualFsPromises.rename.bind(actualFsPromises)),
+  rm: vi.fn(actualFsPromises.rm.bind(actualFsPromises)),
+  stat: vi.fn(actualFsPromises.stat.bind(actualFsPromises)),
+  unlink: vi.fn(actualFsPromises.unlink.bind(actualFsPromises)),
+  writeFile: vi.fn(actualFsPromises.writeFile.bind(actualFsPromises)),
 }));
 
 // Mock storage modules to prevent disk I/O
@@ -163,28 +243,6 @@ vi.mock('./core/llm-manager', () => ({
   isOpenAIProvider: vi.fn<any>().mockReturnValue(false),
   isAnthropicProvider: vi.fn<any>().mockReturnValue(false),
   isGoogleProvider: vi.fn<any>().mockReturnValue(false)
-}));
-
-// Mock path module
-vi.mock('path', () => ({
-  join: (...paths: string[]) => paths.filter(p => p).join('/'),
-  dirname: (path: string) => path.split('/').slice(0, -1).join('/'),
-  basename: (path: string) => path.split('/').pop() || '',
-  extname: (path: string) => {
-    const name = path.split('/').pop() || '';
-    const lastDot = name.lastIndexOf('.');
-    return lastDot >= 0 ? name.substring(lastDot) : '';
-  },
-  resolve: (...paths: string[]) => '/' + paths.filter(p => p).join('/').replace(/\/+/g, '/'),
-  relative: (from: string, to: string) => to,
-  isAbsolute: (path: string) => path.startsWith('/'),
-  parse: (path: string) => ({
-    root: '/',
-    dir: path.split('/').slice(0, -1).join('/'),
-    base: path.split('/').pop() || '',
-    ext: '',
-    name: path.split('/').pop() || ''
-  })
 }));
 
 // Mock LLM SDK packages
@@ -312,18 +370,88 @@ vi.mock('sqlite3', () => ({
   OPEN_CREATE: 4
 }));
 
+function resetFsMocksToActuals() {
+  vi.mocked(nodeFs.existsSync).mockImplementation(actualNodeFs.existsSync.bind(actualNodeFs));
+  vi.mocked(nodeFs.mkdirSync).mockImplementation(actualNodeFs.mkdirSync.bind(actualNodeFs));
+  vi.mocked(nodeFs.readFileSync).mockImplementation(actualNodeFs.readFileSync.bind(actualNodeFs));
+  vi.mocked(nodeFs.readdirSync).mockImplementation(actualNodeFs.readdirSync.bind(actualNodeFs));
+  vi.mocked(nodeFs.rmSync).mockImplementation(actualNodeFs.rmSync.bind(actualNodeFs));
+  vi.mocked(nodeFs.statSync).mockImplementation(actualNodeFs.statSync.bind(actualNodeFs));
+  vi.mocked(nodeFs.writeFileSync).mockImplementation(actualNodeFs.writeFileSync.bind(actualNodeFs));
+
+  vi.mocked(classicFs.existsSync).mockImplementation(actualFs.existsSync.bind(actualFs));
+  vi.mocked(classicFs.mkdirSync).mockImplementation(actualFs.mkdirSync.bind(actualFs));
+  vi.mocked(classicFs.readFileSync).mockImplementation(actualFs.readFileSync.bind(actualFs));
+  vi.mocked(classicFs.readdirSync).mockImplementation(actualFs.readdirSync.bind(actualFs));
+  vi.mocked(classicFs.rmSync).mockImplementation(actualFs.rmSync.bind(actualFs));
+  vi.mocked(classicFs.statSync).mockImplementation(actualFs.statSync.bind(actualFs));
+  vi.mocked(classicFs.writeFileSync).mockImplementation(actualFs.writeFileSync.bind(actualFs));
+
+  vi.mocked(nodeFs.promises.access).mockImplementation(actualNodeFs.promises.access.bind(actualNodeFs.promises));
+  vi.mocked(nodeFs.promises.appendFile).mockImplementation(actualNodeFs.promises.appendFile.bind(actualNodeFs.promises));
+  vi.mocked(nodeFs.promises.chmod).mockImplementation(actualNodeFs.promises.chmod.bind(actualNodeFs.promises));
+  vi.mocked(nodeFs.promises.copyFile).mockImplementation(actualNodeFs.promises.copyFile.bind(actualNodeFs.promises));
+  vi.mocked(nodeFs.promises.mkdir).mockImplementation(actualNodeFs.promises.mkdir.bind(actualNodeFs.promises));
+  vi.mocked(nodeFs.promises.readdir).mockImplementation(actualNodeFs.promises.readdir.bind(actualNodeFs.promises));
+  vi.mocked(nodeFs.promises.readFile).mockImplementation(actualNodeFs.promises.readFile.bind(actualNodeFs.promises));
+  vi.mocked(nodeFs.promises.realpath).mockImplementation(actualNodeFs.promises.realpath.bind(actualNodeFs.promises));
+  vi.mocked(nodeFs.promises.rename).mockImplementation(actualNodeFs.promises.rename.bind(actualNodeFs.promises));
+  vi.mocked(nodeFs.promises.rm).mockImplementation(actualNodeFs.promises.rm.bind(actualNodeFs.promises));
+  vi.mocked(nodeFs.promises.stat).mockImplementation(actualNodeFs.promises.stat.bind(actualNodeFs.promises));
+  vi.mocked(nodeFs.promises.unlink).mockImplementation(actualNodeFs.promises.unlink.bind(actualNodeFs.promises));
+  vi.mocked(nodeFs.promises.writeFile).mockImplementation(actualNodeFs.promises.writeFile.bind(actualNodeFs.promises));
+
+  vi.mocked(classicFs.promises.access).mockImplementation(actualFs.promises.access.bind(actualFs.promises));
+  vi.mocked(classicFs.promises.appendFile).mockImplementation(actualFs.promises.appendFile.bind(actualFs.promises));
+  vi.mocked(classicFs.promises.chmod).mockImplementation(actualFs.promises.chmod.bind(actualFs.promises));
+  vi.mocked(classicFs.promises.copyFile).mockImplementation(actualFs.promises.copyFile.bind(actualFs.promises));
+  vi.mocked(classicFs.promises.mkdir).mockImplementation(actualFs.promises.mkdir.bind(actualFs.promises));
+  vi.mocked(classicFs.promises.readdir).mockImplementation(actualFs.promises.readdir.bind(actualFs.promises));
+  vi.mocked(classicFs.promises.readFile).mockImplementation(actualFs.promises.readFile.bind(actualFs.promises));
+  vi.mocked(classicFs.promises.realpath).mockImplementation(actualFs.promises.realpath.bind(actualFs.promises));
+  vi.mocked(classicFs.promises.rename).mockImplementation(actualFs.promises.rename.bind(actualFs.promises));
+  vi.mocked(classicFs.promises.rm).mockImplementation(actualFs.promises.rm.bind(actualFs.promises));
+  vi.mocked(classicFs.promises.stat).mockImplementation(actualFs.promises.stat.bind(actualFs.promises));
+  vi.mocked(classicFs.promises.unlink).mockImplementation(actualFs.promises.unlink.bind(actualFs.promises));
+  vi.mocked(classicFs.promises.writeFile).mockImplementation(actualFs.promises.writeFile.bind(actualFs.promises));
+
+  vi.mocked(nodeFsPromises.access).mockImplementation(actualNodeFsPromises.access.bind(actualNodeFsPromises));
+  vi.mocked(nodeFsPromises.appendFile).mockImplementation(actualNodeFsPromises.appendFile.bind(actualNodeFsPromises));
+  vi.mocked(nodeFsPromises.chmod).mockImplementation(actualNodeFsPromises.chmod.bind(actualNodeFsPromises));
+  vi.mocked(nodeFsPromises.copyFile).mockImplementation(actualNodeFsPromises.copyFile.bind(actualNodeFsPromises));
+  vi.mocked(nodeFsPromises.mkdir).mockImplementation(actualNodeFsPromises.mkdir.bind(actualNodeFsPromises));
+  vi.mocked(nodeFsPromises.readdir).mockImplementation(actualNodeFsPromises.readdir.bind(actualNodeFsPromises));
+  vi.mocked(nodeFsPromises.readFile).mockImplementation(actualNodeFsPromises.readFile.bind(actualNodeFsPromises));
+  vi.mocked(nodeFsPromises.realpath).mockImplementation(actualNodeFsPromises.realpath.bind(actualNodeFsPromises));
+  vi.mocked(nodeFsPromises.rename).mockImplementation(actualNodeFsPromises.rename.bind(actualNodeFsPromises));
+  vi.mocked(nodeFsPromises.rm).mockImplementation(actualNodeFsPromises.rm.bind(actualNodeFsPromises));
+  vi.mocked(nodeFsPromises.stat).mockImplementation(actualNodeFsPromises.stat.bind(actualNodeFsPromises));
+  vi.mocked(nodeFsPromises.unlink).mockImplementation(actualNodeFsPromises.unlink.bind(actualNodeFsPromises));
+  vi.mocked(nodeFsPromises.writeFile).mockImplementation(actualNodeFsPromises.writeFile.bind(actualNodeFsPromises));
+
+  vi.mocked(classicFsPromises.access).mockImplementation(actualFsPromises.access.bind(actualFsPromises));
+  vi.mocked(classicFsPromises.appendFile).mockImplementation(actualFsPromises.appendFile.bind(actualFsPromises));
+  vi.mocked(classicFsPromises.chmod).mockImplementation(actualFsPromises.chmod.bind(actualFsPromises));
+  vi.mocked(classicFsPromises.copyFile).mockImplementation(actualFsPromises.copyFile.bind(actualFsPromises));
+  vi.mocked(classicFsPromises.mkdir).mockImplementation(actualFsPromises.mkdir.bind(actualFsPromises));
+  vi.mocked(classicFsPromises.readdir).mockImplementation(actualFsPromises.readdir.bind(actualFsPromises));
+  vi.mocked(classicFsPromises.readFile).mockImplementation(actualFsPromises.readFile.bind(actualFsPromises));
+  vi.mocked(classicFsPromises.realpath).mockImplementation(actualFsPromises.realpath.bind(actualFsPromises));
+  vi.mocked(classicFsPromises.rename).mockImplementation(actualFsPromises.rename.bind(actualFsPromises));
+  vi.mocked(classicFsPromises.rm).mockImplementation(actualFsPromises.rm.bind(actualFsPromises));
+  vi.mocked(classicFsPromises.stat).mockImplementation(actualFsPromises.stat.bind(actualFsPromises));
+  vi.mocked(classicFsPromises.unlink).mockImplementation(actualFsPromises.unlink.bind(actualFsPromises));
+  vi.mocked(classicFsPromises.writeFile).mockImplementation(actualFsPromises.writeFile.bind(actualFsPromises));
+}
+
 // Lifecycle hooks
-const originalCwd = process.cwd;
-
-beforeAll(() => {
-  process.cwd = vi.fn<any>().mockReturnValue('/test');
-});
-
-afterAll(() => {
-  process.cwd = originalCwd;
-});
+const originalCwd = process.cwd.bind(process);
+const workspaceCwd = fileURLToPath(new URL('..', import.meta.url));
 
 beforeEach(() => {
+  process.cwd = (() => workspaceCwd) as typeof process.cwd;
+  resetFsMocksToActuals();
+
   // Note: Storage mocks maintain state via shared Maps for test isolation
   // Tests using beforeAll() preserve data across individual tests
   // Each test suite uses unique IDs (nanoid) for isolation
@@ -338,6 +466,10 @@ afterEach(() => {
   delete process.env.SYNC_EVENT_PERSISTENCE;
   delete process.env.AGENT_WORLD_STORAGE_TYPE;
   delete process.env.DISABLE_EVENT_PERSISTENCE;
+});
+
+afterAll(() => {
+  process.cwd = originalCwd;
 });
 
 // Error suppression for SQLite initialization errors during module loading
