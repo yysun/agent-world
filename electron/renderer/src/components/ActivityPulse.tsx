@@ -1,32 +1,23 @@
 /**
- * ActivityPulse Component - Visual Indicator During Active Operations
+ * Activity Pulse Component
  *
  * Purpose:
- * - Pulsing dot indicator when agents/tools are working
- * - Compact header-friendly display
- * - Color-coded states (active, idle)
+ * - Provide a compact renderer status indicator for active/idle work states.
  *
  * Key Features:
- * - CSS animation for pulsing effect
- * - Optional label text
- * - Accessible status announcement
+ * - Accessible status announcement.
+ * - Optional label text.
+ * - Pure CSS pulse animation.
  *
  * Implementation Notes:
- * - Receives isBusy boolean from parent
- * - Pure CSS animation, no JS timers
+ * - Shared within renderer feature components, but intentionally kept out of design-system primitives.
  *
  * Recent Changes:
- * - 2026-02-10: Initial implementation
+ * - 2026-03-23: Moved out of the primitive layer because it is a specialized status widget.
  */
 
 import React from 'react';
 
-/**
- * @param {Object} props
- * @param {boolean} props.isActive - Whether activity is in progress
- * @param {string} [props.label] - Optional label text
- * @param {string} [props.className] - Additional CSS classes
- */
 export default function ActivityPulse({ isActive, label, className = '' }) {
   return (
     <div

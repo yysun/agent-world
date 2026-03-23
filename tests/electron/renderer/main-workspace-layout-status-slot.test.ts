@@ -53,19 +53,19 @@ const { sidebarToggleButtonSpy } = vi.hoisted(() => ({
   sidebarToggleButtonSpy: vi.fn(() => null),
 }));
 
-vi.mock('../../../electron/renderer/src/components/MainHeaderBar', () => ({
+vi.mock('../../../electron/renderer/src/app/shell/components/MainHeaderBar', () => ({
   default: mainHeaderBarSpy,
 }));
 
-vi.mock('../../../electron/renderer/src/components/MainContentArea', () => ({
+vi.mock('../../../electron/renderer/src/app/shell/components/MainContentArea', () => ({
   default: mainContentAreaSpy,
 }));
 
-vi.mock('../../../electron/renderer/src/components/SidebarToggleButton', () => ({
+vi.mock('../../../electron/renderer/src/app/shell/components/SidebarToggleButton', () => ({
   default: sidebarToggleButtonSpy,
 }));
 
-import MainWorkspaceLayout from '../../../electron/renderer/src/components/MainWorkspaceLayout';
+import { MainWorkspaceLayout } from '../../../electron/renderer/src/app/shell';
 
 function toChildArray(children: unknown): Array<{ type: unknown; props?: Record<string, unknown> }> {
   if (Array.isArray(children)) {

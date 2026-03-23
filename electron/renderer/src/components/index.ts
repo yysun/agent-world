@@ -1,46 +1,28 @@
 /**
- * Components Index - Export All UI Components
+ * Renderer Components Compatibility Barrel
  *
  * Purpose:
- * - Single import point for all components
- * - Clean module organization
+ * - Provide a temporary import surface for renderer UI that has not yet moved into an explicit app-shell or feature boundary.
+ *
+ * Key Features:
+ * - Exposes only unmigrated component-owned UI.
+ * - Excludes design-system primitives, app-shell composition, and migrated feature-owned UI.
+ *
+ * Implementation Notes:
+ * - New business-specific renderer UI should prefer `app/shell` or `features/<domain>` instead of this barrel.
+ * - This file exists to keep the remaining migration incremental and should shrink over time.
  *
  * Recent Changes:
- * - 2026-03-22: Added export for `SkillFolderPane`.
- * - 2026-03-08: Added exports for `BaseEditor`, `EditorChatPane`, and `SkillEditor`.
- * - 2026-02-14: Added exports for `PromptEditorModal` and `WorldConfigEditorModal`.
- * - 2026-02-14: Added exports for `WorldInfoCard`, `ComposerBar`, and `AgentFormFields`.
- * - 2026-02-10: Initial implementation with streaming indicators
+ * - 2026-03-23: Reframed the barrel as a transitional compatibility surface after moving shell and feature exports to explicit boundaries.
+ * - 2026-03-23: Narrowed the exports to unmigrated component-owned UI only.
+ * - 2026-02-10: Initial implementation with streaming indicators.
  */
 
-export { default as ThinkingIndicator } from './ThinkingIndicator';
 export { default as ToolExecutionStatus } from './ToolExecutionStatus';
-export { default as ActivityPulse } from './ActivityPulse';
-export { default as AgentQueueDisplay } from './AgentQueueDisplay';
-export { default as ElapsedTimeCounter } from './ElapsedTimeCounter';
 export { default as WorldInfoCard } from './WorldInfoCard';
-export { default as ComposerBar } from './ComposerBar';
 export { default as AgentFormFields } from './AgentFormFields';
 export { default as PromptEditorModal } from './PromptEditorModal';
 export { default as WorldConfigEditorModal } from './WorldConfigEditorModal';
-export { default as SettingsSwitch } from './SettingsSwitch';
-export { default as SettingsSkillSwitch } from './SettingsSkillSwitch';
-export { default as MessageContent } from './MessageContent';
-export { default as MessageListPanel } from './MessageListPanel';
 export { default as RightPanelContent } from './RightPanelContent';
 export { default as WorkingStatusBar } from './WorkingStatusBar';
 export { default as EditorModalsHost } from './EditorModalsHost';
-export { default as BaseEditor } from './BaseEditor';
-export { default as EditorChatPane } from './EditorChatPane';
-export { default as SidebarToggleButton } from './SidebarToggleButton';
-export { default as SkillFolderPane } from './SkillFolderPane';
-export { default as SkillEditor } from './SkillEditor';
-export { default as LeftSidebarPanel } from './LeftSidebarPanel';
-export { default as MainHeaderBar } from './MainHeaderBar';
-export { default as RightPanelShell } from './RightPanelShell';
-export { default as MainContentArea } from './MainContentArea';
-export { default as AppFrameLayout } from './AppFrameLayout';
-export { default as MainWorkspaceLayout } from './MainWorkspaceLayout';
-export { default as AppOverlaysHost } from './AppOverlaysHost';
-export { default as MessageQueuePanel } from './MessageQueuePanel';
-export { default as QueueMessageItem } from './QueueMessageItem';

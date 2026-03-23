@@ -52,11 +52,12 @@ const { baseEditorStub } = vi.hoisted(() => ({
   baseEditorStub: Symbol('BaseEditor'),
 }));
 
-vi.mock('../../../electron/renderer/src/components/BaseEditor', () => ({
+vi.mock('../../../electron/renderer/src/design-system/patterns/BaseEditor', () => ({
   default: baseEditorStub,
 }));
 
-import SkillEditor from '../../../electron/renderer/src/components/SkillEditor';
+import { SkillEditor } from '../../../electron/renderer/src/features/skills';
+import { Select, Textarea } from '../../../electron/renderer/src/design-system/primitives';
 
 function allDescendants(node: any): any[] {
   if (!node || typeof node !== 'object') return [];
@@ -98,7 +99,7 @@ describe('SkillEditor', () => {
 
     // The textarea in children should have the content as value
     const nodes = allDescendants(result.props.children);
-    const textarea = nodes.find((n: any) => n?.type === 'textarea');
+    const textarea = nodes.find((n: any) => n?.type === Textarea);
     expect(textarea).toBeDefined();
     expect(textarea.props.value).toBe('# RPD Skill');
     expect(textarea.props.disabled).toBe(false);
@@ -269,7 +270,7 @@ describe('SkillEditor', () => {
     });
 
     const textareaNodes = allDescendants(result.props.children);
-    const textarea = textareaNodes.find((n: any) => n?.type === 'textarea');
+    const textarea = textareaNodes.find((n: any) => n?.type === Textarea);
     expect(textarea?.props?.disabled).toBe(true);
 
     const toolbarNodes = allNodes(result.props.toolbar);
@@ -298,7 +299,7 @@ describe('SkillEditor', () => {
     });
 
     const textareaNodes = allDescendants(result.props.children);
-    const textarea = textareaNodes.find((n: any) => n?.type === 'textarea');
+    const textarea = textareaNodes.find((n: any) => n?.type === Textarea);
     expect(textarea?.props?.disabled).toBe(true);
 
     const toolbarNodes = allNodes(result.props.toolbar);
@@ -363,7 +364,7 @@ describe('SkillEditor', () => {
     });
 
     const textareaNodes = allDescendants(result.props.children);
-    const textarea = textareaNodes.find((n: any) => n?.type === 'textarea');
+    const textarea = textareaNodes.find((n: any) => n?.type === Textarea);
     expect(textarea?.props?.disabled).toBe(true);
 
     const toolbarStr = JSON.stringify(result.props.toolbar);
@@ -436,7 +437,7 @@ describe('SkillEditor', () => {
     const toolbarInstallButton = toolbarNodes.find((node: any) => node?.type === 'button' && node?.props?.onClick === onInstall);
     const toolbarLoadButton = toolbarNodes.find((node: any) => node?.type === 'button' && node?.props?.onClick === onLoadInstallOptions);
     const toolbarBrowseButton = toolbarNodes.find((node: any) => node?.type === 'button' && node?.props?.onClick === onBrowseInstallSource);
-    const toolbarSkillSelect = toolbarNodes.find((node: any) => node?.type === 'select' && node?.props?.['aria-label'] === 'GitHub skill');
+    const toolbarSkillSelect = toolbarNodes.find((node: any) => node?.type === Select && node?.props?.['aria-label'] === 'GitHub skill');
 
     expect(toolbarPreviewButton).toBeDefined();
     expect(toolbarInstallButton).toBeDefined();
@@ -489,7 +490,7 @@ describe('SkillEditor', () => {
     });
 
     const nodes = allDescendants(result.props.children);
-    const textarea = nodes.find((node: any) => node?.type === 'textarea');
+    const textarea = nodes.find((node: any) => node?.type === Textarea);
 
     expect(textarea?.props?.disabled).toBe(true);
     expect(textarea?.props?.placeholder).toContain('cannot be edited in preview');

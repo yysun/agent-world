@@ -33,7 +33,7 @@
  * - 2026-02-16: Extracted from App.jsx into dedicated utility module.
  */
 
-import { HUMAN_SENDER_VALUES } from '../constants/app-constants';
+import { HUMAN_SENDER_VALUES } from '../constants/app-defaults';
 import {
   parseToolExecutionEnvelopeContent,
   stringifyToolEnvelopeResult,

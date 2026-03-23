@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { shouldForceHumanMessageActionsVisible } from '../../../electron/renderer/src/components/MessageListPanel';
+import { shouldForceHumanMessageActionsVisible } from '../../../electron/renderer/src/features/chat';
 
 describe('MessageListPanel failed-turn user action visibility', () => {
   it('forces user action visibility when only diagnostic error rows follow the last user message', () => {

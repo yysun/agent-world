@@ -1,31 +1,23 @@
 /**
- * ThinkingIndicator Component - Animated Placeholder During LLM Response
+ * Thinking Indicator Component
  *
  * Purpose:
- * - Display animated dots while waiting for first chunk
- * - Show "Thinking..." text with pulsing animation
- * - Provide visual feedback that the system is working
+ * - Show the renderer's animated pending-work text widget.
  *
  * Key Features:
- * - Pure CSS animation (no JS timers)
- * - Accessible aria-live for screen readers
- * - Configurable text and styling
+ * - Accessible status announcement.
+ * - Optional text override.
+ * - Pure CSS dot animation.
  *
  * Implementation Notes:
- * - Show when streaming starts, hide once first chunk arrives
- * - Uses Tailwind utilities for animation
+ * - Shared within renderer status displays, but intentionally kept out of design-system primitives.
  *
  * Recent Changes:
- * - 2026-02-10: Initial implementation
+ * - 2026-03-23: Moved out of the primitive layer because it is a specialized pending-state widget.
  */
 
 import React from 'react';
 
-/**
- * @param {Object} props
- * @param {string} [props.text] - Custom thinking text
- * @param {string} [props.className] - Additional CSS classes
- */
 export default function ThinkingIndicator({ text = 'Thinking', className = '' }) {
   return (
     <div

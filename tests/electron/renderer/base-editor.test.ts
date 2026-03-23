@@ -1,17 +1,18 @@
 /**
  * BaseEditor Component Tests
  * Purpose:
- * - Verify the shared editor shell applies the correct toolbar chrome for full-area editor views.
+ * - Verify the generic editor shell applies the correct layout and toolbar chrome for full-area editor views.
  *
  * Key Features:
  * - Confirms collapsed-sidebar mode adds the left titlebar inset used to clear macOS traffic lights.
  * - Confirms the default toolbar padding remains unchanged when no inset is requested.
+ * - Confirms the secondary pane is opt-in rather than a built-in business-specific default.
  *
  * Implementation Notes:
  * - Uses virtual React/JSX mocks and inspects the returned element tree directly.
- * - Mocks `EditorChatPane` because these tests only care about toolbar wrapper classes.
  *
  * Recent Changes:
+ * - 2026-03-23: Added coverage that the generic pattern renders an explicit secondary pane only when supplied.
  * - 2026-03-23: Initial regression coverage for toolbar inset spacing in full-area editors.
  */
 
@@ -40,11 +41,7 @@ vi.mock('react/jsx-dev-runtime', () => ({
   jsxDEV: jsxFactory,
 }), { virtual: true });
 
-vi.mock('../../../electron/renderer/src/components/EditorChatPane', () => ({
-  default: Symbol('EditorChatPane'),
-}));
-
-import BaseEditor from '../../../electron/renderer/src/components/BaseEditor';
+import BaseEditor from '../../../electron/renderer/src/design-system/patterns/BaseEditor';
 
 function toChildArray(children: unknown): Array<{ type: unknown; props?: Record<string, unknown> }> {
   return Array.isArray(children)
@@ -78,5 +75,31 @@ describe('BaseEditor', () => {
     const childNodes = toChildArray(tree.props?.children);
     expect(childNodes[0]?.props?.className).toContain('px-4');
     expect(childNodes[0]?.props?.className).not.toContain('pl-24');
+  });
+
+  it('renders the secondary pane only when a caller supplies one explicitly', () => {
+    const withoutRightPane = BaseEditor({
+      children: { id: 'content' } as unknown as any,
+    }) as { props?: { children?: unknown } };
+
+    const withoutRightPaneChildren = toChildArray(withoutRightPane.props?.children).filter(Boolean);
+    expect(withoutRightPaneChildren).toHaveLength(1);
+    expect(withoutRightPaneChildren[0]?.props?.className).toContain('flex min-h-0 flex-1');
+
+    const withoutRightPaneContentRow = toChildArray(withoutRightPaneChildren[0]?.props?.children).filter(Boolean);
+    expect(withoutRightPaneContentRow).toHaveLength(1);
+    expect(withoutRightPaneContentRow[0]?.props?.className).toContain('flex-1');
+
+    const rightPaneNode = { id: 'secondary-pane' } as unknown as any;
+    const withRightPane = BaseEditor({
+      children: { id: 'content' } as unknown as any,
+      rightPane: rightPaneNode,
+    }) as { props?: { children?: unknown } };
+
+    const withRightPaneChildren = toChildArray(withRightPane.props?.children).filter(Boolean);
+    const contentRowChildren = toChildArray(withRightPaneChildren[0]?.props?.children);
+    expect(contentRowChildren).toHaveLength(2);
+    expect(contentRowChildren[0]?.props?.className).toContain('flex-[3]');
+    expect(contentRowChildren[1]?.props?.children).toBe(rightPaneNode);
   });
 });

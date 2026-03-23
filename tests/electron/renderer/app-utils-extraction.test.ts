@@ -32,6 +32,11 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_TURN_LIMIT,
+  DEFAULT_WORLD_CHAT_LLM_MODEL,
+  DEFAULT_WORLD_CHAT_LLM_PROVIDER,
+} from '../../../electron/renderer/src/constants/app-defaults';
+import {
   normalizeStringList,
   normalizeSystemSettings,
   removeEnvVariable,
@@ -152,11 +157,13 @@ describe('extracted validation utils', () => {
 
     const validResult = validateWorldForm({
       name: 'World',
-      turnLimit: 3,
       mcpConfig: '{"ok":true}'
     });
     expect(validResult.valid).toBe(true);
     expect(validResult.data?.name).toBe('World');
+    expect(validResult.data?.turnLimit).toBe(DEFAULT_TURN_LIMIT);
+    expect(validResult.data?.chatLLMProvider).toBe(DEFAULT_WORLD_CHAT_LLM_PROVIDER);
+    expect(validResult.data?.chatLLMModel).toBe(DEFAULT_WORLD_CHAT_LLM_MODEL);
   });
 
   it('rejects invalid world mcp json', () => {

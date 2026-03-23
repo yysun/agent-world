@@ -35,7 +35,7 @@ vi.mock('react/jsx-dev-runtime', () => ({
   jsxDEV: jsxFactory,
 }), { virtual: true });
 
-import { hasPendingToolCallsForMessage } from '../../../electron/renderer/src/components/MessageListPanel';
+import { hasPendingToolCallsForMessage } from '../../../electron/renderer/src/features/chat';
 
 describe('MessageListPanel tool pending detection', () => {
   it('marks a single tool call complete when a reply-linked tool result has no tool_call_id', () => {

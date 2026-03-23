@@ -36,7 +36,7 @@ import {
   DEFAULT_AGENT_FORM,
   DEFAULT_WORLD_CHAT_LLM_MODEL,
   DEFAULT_WORLD_CHAT_LLM_PROVIDER,
-} from '../constants/app-constants';
+} from '../constants/app-defaults';
 import { computeCanStopCurrentSession } from '../domain/chat-stop-state';
 import { safeMessage } from '../domain/desktop-api';
 import { getChatStatus, getRegistry } from '../domain/status-registry';

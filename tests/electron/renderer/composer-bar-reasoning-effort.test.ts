@@ -36,7 +36,8 @@ vi.mock('react/jsx-dev-runtime', () => ({
   jsxDEV: jsxFactory,
 }), { virtual: true });
 
-import ComposerBar from '../../../electron/renderer/src/components/ComposerBar';
+import { ComposerBar } from '../../../electron/renderer/src/features/chat';
+import { Select } from '../../../electron/renderer/src/design-system/primitives';
 
 function allDescendants(node: any): any[] {
   if (!node || typeof node !== 'object') return [];
@@ -69,7 +70,7 @@ describe('ComposerBar reasoning effort', () => {
 
     const nodes = allDescendants(tree);
     const reasoningSelect = nodes.find((node: any) => (
-      node?.type === 'select' && node?.props?.['aria-label'] === 'Reasoning effort'
+      node?.type === Select && node?.props?.['aria-label'] === 'Reasoning effort'
     ));
     const defaultOption = nodes.find((node: any) => (
       node?.type === 'option' && node?.props?.value === 'default'

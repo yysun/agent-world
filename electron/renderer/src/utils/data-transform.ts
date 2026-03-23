@@ -20,7 +20,7 @@
  * - 2026-02-16: Extracted from App.jsx into dedicated utility module.
  */
 
-import { DEFAULT_SYSTEM_SETTINGS } from '../constants/app-constants';
+import { DEFAULT_SYSTEM_SETTINGS } from '../constants/app-defaults';
 
 export function normalizeStringList(values) {
   if (!Array.isArray(values)) {

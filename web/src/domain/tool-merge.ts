@@ -12,7 +12,7 @@
  * - Fully pure — no state mutation, returns new array
  *
  * Implementation Notes:
- * - Ported from electron/renderer/src/components/MessageListPanel.tsx buildCombinedRenderableMessages
+ * - Ported from electron/renderer/src/features/chat/components/MessageListPanel.tsx buildCombinedRenderableMessages
  * - Uses Message type from web/src/types
  *
  * Recent Changes:

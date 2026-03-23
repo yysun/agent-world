@@ -30,7 +30,7 @@ import {
   DEFAULT_WORLD_CHAT_LLM_MODEL,
   DEFAULT_WORLD_CHAT_LLM_PROVIDER,
   MIN_TURN_LIMIT,
-} from '../constants/app-constants';
+} from '../constants/app-defaults';
 
 export function getAgentDisplayName(agent: unknown, fallbackIndex: number): string {
   const name = typeof (agent as { name?: unknown })?.name === 'string'

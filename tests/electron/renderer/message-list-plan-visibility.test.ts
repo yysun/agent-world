@@ -52,7 +52,7 @@ import {
   shouldShowMessageAvatar,
   shouldRenderNonChatSectionLabels,
   shouldShowMessageChrome,
-} from '../../../electron/renderer/src/components/MessageListPanel';
+} from '../../../electron/renderer/src/features/chat';
 
 describe('MessageListPanel narrated tool-call visibility', () => {
   it('shows message chrome only for chat view', () => {

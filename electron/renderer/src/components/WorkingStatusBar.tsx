@@ -21,6 +21,7 @@
  */
 
 import React from 'react';
+import { MAIN_CONTENT_COLUMN_MAX_WIDTH_CLASS } from '../constants/ui-constants';
 import type { SessionSystemStatusEntry } from '../domain/session-system-status';
 import type { WorkingStatus } from '../domain/status-types';
 import ActivityPulse from './ActivityPulse';
@@ -44,7 +45,7 @@ export default function WorkingStatusBar({ chatStatus, agentStatuses, notificati
     return (
       <div className="px-4 pb-1" data-testid="working-status-bar">
         <div
-          className={`mx-auto flex min-h-5 w-full max-w-[750px] items-center gap-1.5 text-xs ${notificationTextClass[notification.kind] ?? 'text-muted-foreground'}`}
+          className={`mx-auto flex min-h-5 w-full ${MAIN_CONTENT_COLUMN_MAX_WIDTH_CLASS} items-center gap-1.5 text-xs ${notificationTextClass[notification.kind] ?? 'text-muted-foreground'}`}
           data-testid="working-status-notification"
         >
           <span>{notification.text}</span>
@@ -57,7 +58,7 @@ export default function WorkingStatusBar({ chatStatus, agentStatuses, notificati
     return (
       <div className="px-4 pb-1" data-testid="working-status-bar">
         <div
-          className={`mx-auto flex min-h-5 w-full max-w-[750px] items-center gap-1.5 text-xs ${notificationTextClass[systemStatus.kind] ?? 'text-muted-foreground'}`}
+          className={`mx-auto flex min-h-5 w-full ${MAIN_CONTENT_COLUMN_MAX_WIDTH_CLASS} items-center gap-1.5 text-xs ${notificationTextClass[systemStatus.kind] ?? 'text-muted-foreground'}`}
           data-testid="working-status-system"
         >
           <span>{systemStatus.text}</span>
@@ -69,7 +70,7 @@ export default function WorkingStatusBar({ chatStatus, agentStatuses, notificati
   if (chatStatus === 'idle') {
     return (
       <div className="px-4 pb-1" data-testid="working-status-bar">
-        <div className="mx-auto flex min-h-5 w-full max-w-[750px] items-center text-xs text-muted-foreground" aria-hidden="true" />
+        <div className={`mx-auto flex min-h-5 w-full ${MAIN_CONTENT_COLUMN_MAX_WIDTH_CLASS} items-center text-xs text-muted-foreground`} aria-hidden="true" />
       </div>
     );
   }
@@ -77,7 +78,7 @@ export default function WorkingStatusBar({ chatStatus, agentStatuses, notificati
   if (chatStatus === 'complete') {
     return (
       <div className="px-4 pb-1" data-testid="working-status-bar">
-        <div className="mx-auto flex min-h-5 w-full max-w-[750px] items-center gap-1.5 text-xs text-muted-foreground">
+        <div className={`mx-auto flex min-h-5 w-full ${MAIN_CONTENT_COLUMN_MAX_WIDTH_CLASS} items-center gap-1.5 text-xs text-muted-foreground`}>
           <span className="text-green-500">✓</span>
           <span>Done</span>
         </div>
@@ -90,7 +91,7 @@ export default function WorkingStatusBar({ chatStatus, agentStatuses, notificati
 
   return (
     <div className="px-4 pb-1" data-testid="working-status-bar">
-      <div className="mx-auto flex min-h-5 w-full max-w-[750px] items-center gap-2">
+      <div className={`mx-auto flex min-h-5 w-full ${MAIN_CONTENT_COLUMN_MAX_WIDTH_CLASS} items-center gap-2`}>
         <ActivityPulse isActive={true} />
         {workingAgents.length > 0 ? (
           <div className="flex items-center gap-2 flex-wrap">

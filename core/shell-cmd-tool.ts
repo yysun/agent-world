@@ -27,6 +27,7 @@
  * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - 2026-03-23: Reject catastrophic blocked shell commands before cwd/path-scope validation so they never degrade into less-specific working-directory mismatch errors.
  * - 2026-03-22: Increased the bounded LLM continuation preview cap from 1200 to 4096 characters so structured shell outputs keep more complete result sets before truncation.
  * - 2026-03-22: Resolved skill-relative executable paths like `./scripts/foo.sh` against the active skill root before shell execution, so skill scripts no longer depend on the repo working directory.
  * - 2026-03-12: Shared tool approval flow now persists durable approval prompt/resolution messages for replay-safe shell approval history.
@@ -2498,6 +2499,13 @@ export function createShellCmdToolDefinition() {
         skillResolutionOptions,
       );
       const skillRoots = [...new Set([...commandSkillRoots, ...parameterSkillRoots])];
+      const riskAssessment = classifyShellCommandRisk(validCommand, validParameters);
+
+      if (riskAssessment.tier === 'block') {
+        throw new Error(
+          `Blocked dangerous operation: ${riskAssessment.reason}. This shell command cannot be executed.`
+        );
+      }
 
       // Extract world and messageId from context for streaming
       const world = context?.world;
@@ -2539,13 +2547,6 @@ export function createShellCmdToolDefinition() {
       );
       if (!scopeValidation.valid) {
         throw new Error(scopeValidation.error);
-      }
-
-      const riskAssessment = classifyShellCommandRisk(validCommand, validParameters);
-      if (riskAssessment.tier === 'block') {
-        throw new Error(
-          `Blocked dangerous operation: ${riskAssessment.reason}. This shell command cannot be executed.`
-        );
       }
 
       // Check world-level tool permission

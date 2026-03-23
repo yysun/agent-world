@@ -42,7 +42,7 @@ vi.mock('react/jsx-dev-runtime', () => ({
   jsxDEV: jsxFactory,
 }), { virtual: true });
 
-import SkillFolderPane from '../../../electron/renderer/src/components/SkillFolderPane';
+import { SkillFolderPane } from '../../../electron/renderer/src/features/skills';
 
 function allDescendants(node: any): any[] {
   if (!node || typeof node !== 'object') return [];

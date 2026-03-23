@@ -19,10 +19,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DEFAULT_SYSTEM_SETTINGS } from '../constants/app-defaults';
 import {
-  DEFAULT_SYSTEM_SETTINGS,
   THEME_STORAGE_KEY,
-} from '../constants/app-constants';
+} from '../constants/ui-constants';
 import {
   normalizeStringList,
   normalizeSystemSettings,

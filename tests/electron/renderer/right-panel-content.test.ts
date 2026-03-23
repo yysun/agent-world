@@ -2,6 +2,8 @@
  * RightPanelContent Settings Tests
  * Purpose:
  * - Verify the settings panel exposes the Project Skills install entry point.
+ * - Verify world-form field interactions continue to update parent state.
+ * - Verify selection-control primitives still drive parent state updates.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -35,15 +37,13 @@ vi.mock('../../../electron/renderer/src/components/AgentFormFields', () => ({
   default: Symbol('AgentFormFields'),
 }));
 
-vi.mock('../../../electron/renderer/src/components/SettingsSwitch', () => ({
-  default: Symbol('SettingsSwitch'),
-}));
-
-vi.mock('../../../electron/renderer/src/components/SettingsSkillSwitch', () => ({
-  default: Symbol('SettingsSkillSwitch'),
+vi.mock('../../../electron/renderer/src/features/settings', () => ({
+  SettingsSwitch: Symbol('SettingsSwitch'),
+  SettingsSkillSwitch: Symbol('SettingsSkillSwitch'),
 }));
 
 import RightPanelContent from '../../../electron/renderer/src/components/RightPanelContent';
+import Checkbox from '../../../electron/renderer/src/design-system/primitives/Checkbox';
 
 function allDescendants(node: any): any[] {
   if (!node || typeof node !== 'object') return [];
@@ -121,5 +121,162 @@ describe('RightPanelContent', () => {
 
     installButton.props.onClick();
     expect(onInstallSkill).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes create-world field updates through the provided setter callbacks', () => {
+    const setCreatingWorld = vi.fn();
+
+    const result: any = RightPanelContent({
+      panelMode: 'create-world',
+      loadedWorld: null,
+      selectedAgentForPanel: null,
+      themePreference: 'system',
+      setThemePreference: () => { },
+      systemSettings: { enableGlobalSkills: true, enableProjectSkills: true, storageType: 'sqlite', sqliteDatabase: '', dataPath: '' },
+      setSystemSettings: () => { },
+      workspace: { workspacePath: null },
+      api: { pickFile: async () => ({ canceled: true }), pickDirectory: async () => ({ canceled: true }) },
+      globalSkillEntries: [],
+      disabledGlobalSkillIdSet: new Set(),
+      setGlobalSkillsEnabled: () => { },
+      toggleSkillEnabled: () => { },
+      projectSkillEntries: [],
+      disabledProjectSkillIdSet: new Set(),
+      setProjectSkillsEnabled: () => { },
+      onCancelSettings: () => { },
+      savingSystemSettings: false,
+      onSaveSettings: () => { },
+      settingsNeedRestart: false,
+      onUpdateWorld: () => { },
+      editingWorld: {},
+      setEditingWorld: () => { },
+      updatingWorld: false,
+      deletingWorld: false,
+      setWorldConfigEditorField: () => { },
+      setWorldConfigEditorValue: () => { },
+      setWorldConfigEditorTarget: () => { },
+      setWorldConfigEditorOpen: () => { },
+      onDeleteWorld: () => { },
+      closePanel: () => { },
+      onCreateAgent: () => { },
+      creatingAgent: {},
+      setCreatingAgent: () => { },
+      setPromptEditorValue: () => { },
+      setPromptEditorTarget: () => { },
+      setPromptEditorOpen: () => { },
+      savingAgent: false,
+      onUpdateAgent: () => { },
+      editingAgent: {},
+      setEditingAgent: () => { },
+      deletingAgent: false,
+      onDeleteAgent: () => { },
+      onCreateWorld: () => { },
+      creatingWorld: {
+        name: 'World One',
+        description: '',
+        chatLLMProvider: '',
+        chatLLMModel: '',
+        turnLimit: 10,
+        mainAgent: '',
+      },
+      setCreatingWorld,
+      panelLogs: [],
+      onClearPanelLogs: () => { },
+      onEditSkill: () => { },
+      onInstallSkill: () => { },
+    });
+
+    const nodes = allDescendants(result);
+    const worldNameField = nodes.find((node: any) => node?.props?.placeholder === 'World name');
+    const descriptionField = nodes.find((node: any) => node?.props?.placeholder === 'Description (optional)');
+
+    expect(worldNameField).toBeDefined();
+    expect(descriptionField).toBeDefined();
+
+    worldNameField.props.onChange({ target: { value: 'Updated World' } });
+    descriptionField.props.onChange({ target: { value: 'New description' } });
+
+    expect(setCreatingWorld).toHaveBeenCalledTimes(2);
+
+    const updateName = setCreatingWorld.mock.calls[0][0];
+    const updateDescription = setCreatingWorld.mock.calls[1][0];
+
+    expect(updateName({ name: 'World One' })).toEqual({ name: 'Updated World' });
+    expect(updateDescription({ description: '' })).toEqual({ description: 'New description' });
+  });
+
+  it('routes the heartbeat checkbox through the provided world setter callback', () => {
+    const setEditingWorld = vi.fn();
+
+    const result: any = RightPanelContent({
+      panelMode: 'edit-world',
+      loadedWorld: { id: 'world-1', name: 'World 1' },
+      selectedAgentForPanel: null,
+      themePreference: 'system',
+      setThemePreference: () => { },
+      systemSettings: { enableGlobalSkills: true, enableProjectSkills: true, storageType: 'sqlite', sqliteDatabase: '', dataPath: '' },
+      setSystemSettings: () => { },
+      workspace: { workspacePath: null },
+      api: { pickFile: async () => ({ canceled: true }), pickDirectory: async () => ({ canceled: true }) },
+      globalSkillEntries: [],
+      disabledGlobalSkillIdSet: new Set(),
+      setGlobalSkillsEnabled: () => { },
+      toggleSkillEnabled: () => { },
+      projectSkillEntries: [],
+      disabledProjectSkillIdSet: new Set(),
+      setProjectSkillsEnabled: () => { },
+      onCancelSettings: () => { },
+      savingSystemSettings: false,
+      onSaveSettings: () => { },
+      settingsNeedRestart: false,
+      onUpdateWorld: () => { },
+      editingWorld: {
+        name: 'World 1',
+        description: '',
+        chatLLMProvider: '',
+        chatLLMModel: '',
+        turnLimit: 10,
+        mainAgent: '',
+        heartbeatEnabled: false,
+      },
+      setEditingWorld,
+      updatingWorld: false,
+      deletingWorld: false,
+      setWorldConfigEditorField: () => { },
+      setWorldConfigEditorValue: () => { },
+      setWorldConfigEditorTarget: () => { },
+      setWorldConfigEditorOpen: () => { },
+      onDeleteWorld: () => { },
+      closePanel: () => { },
+      onCreateAgent: () => { },
+      creatingAgent: {},
+      setCreatingAgent: () => { },
+      setPromptEditorValue: () => { },
+      setPromptEditorTarget: () => { },
+      setPromptEditorOpen: () => { },
+      savingAgent: false,
+      onUpdateAgent: () => { },
+      editingAgent: {},
+      setEditingAgent: () => { },
+      deletingAgent: false,
+      onDeleteAgent: () => { },
+      onCreateWorld: () => { },
+      creatingWorld: {},
+      setCreatingWorld: () => { },
+      panelLogs: [],
+      onClearPanelLogs: () => { },
+      onEditSkill: () => { },
+      onInstallSkill: () => { },
+    });
+
+    const nodes = allDescendants(result);
+    const heartbeatCheckbox = nodes.find((node: any) => node?.type === Checkbox);
+
+    expect(heartbeatCheckbox).toBeDefined();
+    heartbeatCheckbox.props.onChange({ target: { checked: true } });
+
+    expect(setEditingWorld).toHaveBeenCalledTimes(1);
+    const updater = setEditingWorld.mock.calls[0][0];
+    expect(updater({ heartbeatEnabled: false })).toEqual({ heartbeatEnabled: true });
   });
 });

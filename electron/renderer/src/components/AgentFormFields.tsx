@@ -16,6 +16,8 @@
  */
 
 import React, { useId } from 'react';
+import { LabeledField } from '../design-system/patterns';
+import { Input, Select, Switch, Textarea } from '../design-system/primitives';
 
 export default function AgentFormFields({
   agent,
@@ -28,41 +30,32 @@ export default function AgentFormFields({
 
   return (
     <>
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-bold text-sidebar-foreground/90">Agent Name</label>
-        <input
+      <LabeledField label="Agent Name">
+        <Input
           value={agent.name}
           onChange={(event) => setAgent((value) => ({ ...value, name: event.target.value }))}
           placeholder="Agent name"
-          className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+          tone="sidebar"
+          disabled={disabled}
+        />
+      </LabeledField>
+
+      <div className="flex items-center justify-between rounded-md pr-1 py-1">
+        <label id={autoReplyLabelId} className="text-xs font-bold text-sidebar-foreground/90">Auto Reply</label>
+        <Switch
+          aria-labelledby={autoReplyLabelId}
+          onClick={() => setAgent((value) => ({ ...value, autoReply: value.autoReply === false }))}
+          checked={agent.autoReply !== false}
           disabled={disabled}
         />
       </div>
 
-      <div className="flex items-center justify-between rounded-md pr-1 py-1">
-        <label id={autoReplyLabelId} className="text-xs font-bold text-sidebar-foreground/90">Auto Reply</label>
-        <button
-          type="button"
-          role="switch"
-          aria-labelledby={autoReplyLabelId}
-          aria-checked={agent.autoReply !== false}
-          onClick={() => setAgent((value) => ({ ...value, autoReply: value.autoReply === false }))}
-          disabled={disabled}
-          className="rounded-full disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${agent.autoReply !== false ? 'bg-sidebar-primary/62' : 'bg-sidebar-foreground/24'}`}>
-            <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${agent.autoReply !== false ? 'translate-x-4' : 'translate-x-1'}`} />
-          </span>
-        </button>
-      </div>
-
       <div className="grid grid-cols-2 gap-2">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-bold text-sidebar-foreground/90">LLM Provider</label>
-          <select
+        <LabeledField label="LLM Provider">
+          <Select
             value={agent.provider}
             onChange={(event) => setAgent((value) => ({ ...value, provider: event.target.value }))}
-            className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none focus:border-sidebar-ring"
+            tone="sidebar"
             disabled={disabled}
           >
             {providerOptions.map((provider) => (
@@ -70,55 +63,52 @@ export default function AgentFormFields({
                 {provider}
               </option>
             ))}
-          </select>
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-bold text-sidebar-foreground/90">LLM model</label>
-          <input
+          </Select>
+        </LabeledField>
+        <LabeledField label="LLM model">
+          <Input
             value={agent.model}
             onChange={(event) => setAgent((value) => ({ ...value, model: event.target.value }))}
             placeholder="Model (for example: gpt-4o-mini)"
-            className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+            tone="sidebar"
             disabled={disabled}
           />
-        </div>
+        </LabeledField>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-bold text-sidebar-foreground/90">Temperature</label>
-          <input
+        <LabeledField label="Temperature">
+          <Input
             type="number"
             step="0.1"
             value={agent.temperature}
             onChange={(event) => setAgent((value) => ({ ...value, temperature: event.target.value }))}
             placeholder="Temperature"
-            className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+            tone="sidebar"
             disabled={disabled}
           />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-bold text-sidebar-foreground/90">Max Tokens</label>
-          <input
+        </LabeledField>
+        <LabeledField label="Max Tokens">
+          <Input
             type="number"
             min="1"
             value={agent.maxTokens}
             onChange={(event) => setAgent((value) => ({ ...value, maxTokens: event.target.value }))}
             placeholder="Max tokens"
-            className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+            tone="sidebar"
             disabled={disabled}
           />
-        </div>
+        </LabeledField>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-1">
-        <label className="text-xs font-bold text-sidebar-foreground/90">System Prompt</label>
+      <LabeledField label="System Prompt" className="flex min-h-0 flex-1 flex-col gap-1">
         <div className="relative min-h-0 flex-1">
-          <textarea
+          <Textarea
             value={agent.systemPrompt}
             onChange={(event) => setAgent((value) => ({ ...value, systemPrompt: event.target.value }))}
             placeholder="System prompt (optional)"
-            className="h-full min-h-24 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+            tone="sidebar"
+            className="h-full min-h-24"
             disabled={disabled}
           />
           <button
@@ -132,7 +122,7 @@ export default function AgentFormFields({
             </svg>
           </button>
         </div>
-      </div>
+      </LabeledField>
     </>
   );
 }

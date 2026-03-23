@@ -24,12 +24,12 @@
  */
 
 import type React from 'react';
-import ComposerBar from './ComposerBar';
-import MessageListPanel from './MessageListPanel';
+import { DEFAULT_FLOATING_COMPOSER_HEIGHT } from '../constants/ui-constants';
+import { ComposerBar, MessageListPanel } from '../features/chat';
 import RightPanelContent from './RightPanelContent';
 import RightPanelShell from './RightPanelShell';
 
-export const DEFAULT_FLOATING_COMPOSER_HEIGHT = '8.5rem';
+export { DEFAULT_FLOATING_COMPOSER_HEIGHT };
 
 export default function MainContentArea({
   messageListProps,

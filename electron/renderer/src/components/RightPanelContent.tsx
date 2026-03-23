@@ -26,14 +26,15 @@
  */
 
 import { useEffect, useRef } from 'react';
-import AgentFormFields from './AgentFormFields';
-import SettingsSwitch from './SettingsSwitch';
-import SettingsSkillSwitch from './SettingsSkillSwitch';
 import {
   AGENT_PROVIDER_OPTIONS,
   MIN_TURN_LIMIT,
   WORLD_PROVIDER_OPTIONS,
-} from '../constants/app-constants';
+} from '../constants/app-defaults';
+import { LabeledField, PanelActionBar } from '../design-system/patterns';
+import { Checkbox, Input, Radio, Select, Textarea } from '../design-system/primitives';
+import { SettingsSkillSwitch, SettingsSwitch } from '../features/settings';
+import AgentFormFields from './AgentFormFields';
 
 function formatLogTimestamp(value: unknown): string {
   const rawValue = String(value || '').trim();
@@ -281,13 +282,11 @@ export default function RightPanelContent({
                   <div className="flex gap-3">
                     {['file', 'sqlite'].map((type) => (
                       <label key={type} className="flex items-center gap-1.5 cursor-pointer">
-                        <input
-                          type="radio"
+                        <Radio
                           name="storageType"
                           value={type}
                           checked={(systemSettings.storageType || 'sqlite') === type}
                           onChange={() => setSystemSettings((settings) => ({ ...settings, storageType: type }))}
-                          className="accent-primary"
                         />
                         <span className="text-xs text-sidebar-foreground">{type === 'file' ? 'File' : 'SQLite'}</span>
                       </label>
@@ -299,11 +298,12 @@ export default function RightPanelContent({
                   <div className="mt-4 flex flex-col gap-1">
                     <label className="text-xs font-bold text-sidebar-foreground/90">Data File Path</label>
                     <div className="flex gap-1">
-                      <input
+                      <Input
                         value={systemSettings.dataPath}
                         onChange={(event) => setSystemSettings((settings) => ({ ...settings, dataPath: event.target.value }))}
                         placeholder={workspace.workspacePath || 'Select folder...'}
-                        className="min-w-0 flex-1 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/40 focus:border-sidebar-ring"
+                        tone="sidebar"
+                        className="min-w-0 flex-1 placeholder:text-sidebar-foreground/40"
                       />
                       <button
                         type="button"
@@ -330,11 +330,12 @@ export default function RightPanelContent({
                   <div className="mt-4 flex flex-col gap-1">
                     <label className="text-xs font-bold text-sidebar-foreground/90">Database File</label>
                     <div className="flex gap-1">
-                      <input
+                      <Input
                         value={systemSettings.sqliteDatabase}
                         onChange={(event) => setSystemSettings((settings) => ({ ...settings, sqliteDatabase: event.target.value }))}
                         placeholder={workspace.workspacePath ? `${workspace.workspacePath}/database.db` : 'Select file...'}
-                        className="min-w-0 flex-1 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/40 focus:border-sidebar-ring"
+                        tone="sidebar"
+                        className="min-w-0 flex-1 placeholder:text-sidebar-foreground/40"
                       />
                       <button
                         type="button"
@@ -462,7 +463,7 @@ export default function RightPanelContent({
             </div>
           </div>
 
-          <div className="mt-auto flex justify-end gap-2 border-t border-sidebar-border bg-sidebar pt-2">
+          <PanelActionBar>
             <button
               type="button"
               onClick={onCancelSettings}
@@ -479,35 +480,33 @@ export default function RightPanelContent({
             >
               {savingSystemSettings ? 'Saving...' : (settingsNeedRestart ? 'Save & Restart' : 'Save')}
             </button>
-          </div>
+          </PanelActionBar>
         </div>
       ) : panelMode === 'edit-world' && loadedWorld ? (
         <>
           <form onSubmit={onUpdateWorld} className="flex min-h-0 flex-1 flex-col">
             <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-sidebar-foreground/90">World Name</label>
+              <LabeledField label="World Name">
                 <div className="rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-xs text-sidebar-foreground/80">
                   {editingWorld.name}
                 </div>
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-sidebar-foreground/90">Description</label>
-                <textarea
+              </LabeledField>
+              <LabeledField label="Description">
+                <Textarea
                   value={editingWorld.description}
                   onChange={(event) => setEditingWorld((value) => ({ ...value, description: event.target.value }))}
                   placeholder="Description (optional)"
-                  className="h-20 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                  tone="sidebar"
+                  className="h-20"
                   disabled={updatingWorld || deletingWorld}
                 />
-              </div>
+              </LabeledField>
               <div className="grid grid-cols-2 gap-2">
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs font-bold text-sidebar-foreground/90">LLM Provider</label>
-                  <select
+                <LabeledField label="LLM Provider">
+                  <Select
                     value={editingWorld.chatLLMProvider}
                     onChange={(event) => setEditingWorld((value) => ({ ...value, chatLLMProvider: event.target.value }))}
-                    className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none focus:border-sidebar-ring"
+                    tone="sidebar"
                     disabled={updatingWorld || deletingWorld}
                   >
                     <option value="">Select provider</option>
@@ -516,46 +515,42 @@ export default function RightPanelContent({
                         {provider.label}
                       </option>
                     ))}
-                  </select>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs font-bold text-sidebar-foreground/90">LLM model</label>
-                  <input
+                  </Select>
+                </LabeledField>
+                <LabeledField label="LLM model">
+                  <Input
                     value={editingWorld.chatLLMModel}
                     onChange={(event) => setEditingWorld((value) => ({ ...value, chatLLMModel: event.target.value }))}
                     placeholder="Chat LLM model"
-                    className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                    tone="sidebar"
                     disabled={updatingWorld || deletingWorld}
                   />
-                </div>
+                </LabeledField>
               </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-sidebar-foreground/90">Turn Limit</label>
-                <input
+              <LabeledField label="Turn Limit">
+                <Input
                   type="number"
                   min={MIN_TURN_LIMIT}
                   max="50"
                   value={editingWorld.turnLimit}
                   onChange={(event) => setEditingWorld((value) => ({ ...value, turnLimit: Number(event.target.value) || MIN_TURN_LIMIT }))}
-                  className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                  tone="sidebar"
                   disabled={updatingWorld || deletingWorld}
                 />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-sidebar-foreground/90">Main Agent</label>
-                <input
+              </LabeledField>
+              <LabeledField label="Main Agent">
+                <Input
                   value={editingWorld.mainAgent}
                   onChange={(event) => setEditingWorld((value) => ({ ...value, mainAgent: event.target.value }))}
                   placeholder="Main agent (optional)"
-                  className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                  tone="sidebar"
                   disabled={updatingWorld || deletingWorld}
                 />
-              </div>
+              </LabeledField>
               <div className="rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-sidebar-foreground/90">Heartbeat</label>
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={editingWorld.heartbeatEnabled === true}
                     onChange={(event) => setEditingWorld((value) => ({ ...value, heartbeatEnabled: event.target.checked }))}
                     disabled={updatingWorld || deletingWorld}
@@ -563,27 +558,27 @@ export default function RightPanelContent({
                 </div>
                 {editingWorld.heartbeatEnabled === true ? (
                   <div className="mt-2 flex flex-col gap-2">
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-bold text-sidebar-foreground/90">Interval</label>
-                      <input
+                    <LabeledField label="Interval">
+                      <Input
                         value={editingWorld.heartbeatInterval || ''}
                         onChange={(event) => setEditingWorld((value) => ({ ...value, heartbeatInterval: event.target.value }))}
                         placeholder="*/5 * * * *"
-                        className="w-full rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                        tone="sidebar"
+                        className="bg-sidebar"
                         disabled={updatingWorld || deletingWorld}
                       />
                       <span className="text-[11px] text-sidebar-foreground/70">Standard 5-field cron format</span>
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-bold text-sidebar-foreground/90">Prompt</label>
-                      <textarea
+                    </LabeledField>
+                    <LabeledField label="Prompt">
+                      <Textarea
                         value={editingWorld.heartbeatPrompt || ''}
                         onChange={(event) => setEditingWorld((value) => ({ ...value, heartbeatPrompt: event.target.value }))}
                         placeholder="Message to send on each heartbeat"
-                        className="h-20 w-full rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                        tone="sidebar"
+                        className="h-20 bg-sidebar"
                         disabled={updatingWorld || deletingWorld}
                       />
-                    </div>
+                    </LabeledField>
                   </div>
                 ) : null}
               </div>
@@ -626,33 +621,34 @@ export default function RightPanelContent({
                 </button>
               </div>
             </div>
-            <div className="mt-auto flex justify-between gap-2 border-t border-sidebar-border bg-sidebar pt-2">
-              <button
-                type="button"
-                onClick={onDeleteWorld}
-                disabled={deletingWorld || updatingWorld}
-                className="rounded-xl border border-destructive/40 px-3 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Delete
-              </button>
-              <div className="flex gap-2">
+            <PanelActionBar
+              leading={(
                 <button
                   type="button"
-                  onClick={closePanel}
-                  disabled={updatingWorld || deletingWorld}
-                  className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={onDeleteWorld}
+                  disabled={deletingWorld || updatingWorld}
+                  className="rounded-xl border border-destructive/40 px-3 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Cancel
+                  Delete
                 </button>
-                <button
-                  type="submit"
-                  disabled={updatingWorld || deletingWorld}
-                  className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Save
-                </button>
-              </div>
-            </div>
+              )}
+            >
+              <button
+                type="button"
+                onClick={closePanel}
+                disabled={updatingWorld || deletingWorld}
+                className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={updatingWorld || deletingWorld}
+                className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Save
+              </button>
+            </PanelActionBar>
           </form>
         </>
       ) : panelMode === 'create-agent' && loadedWorld ? (
@@ -671,26 +667,23 @@ export default function RightPanelContent({
                 }}
               />
             </div>
-            <div className="mt-auto flex justify-between gap-2 border-t border-sidebar-border bg-sidebar pt-2">
-              <div></div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={closePanel}
-                  disabled={savingAgent}
-                  className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingAgent}
-                  className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {savingAgent ? 'Creating...' : 'Create'}
-                </button>
-              </div>
-            </div>
+            <PanelActionBar>
+              <button
+                type="button"
+                onClick={closePanel}
+                disabled={savingAgent}
+                className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingAgent}
+                className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {savingAgent ? 'Creating...' : 'Create'}
+              </button>
+            </PanelActionBar>
           </form>
         </>
       ) : panelMode === 'edit-agent' && loadedWorld && selectedAgentForPanel ? (
@@ -709,64 +702,63 @@ export default function RightPanelContent({
                 }}
               />
             </div>
-            <div className="mt-auto flex justify-between gap-2 border-t border-sidebar-border bg-sidebar pt-2">
-              <button
-                type="button"
-                onClick={onDeleteAgent}
-                disabled={savingAgent || deletingAgent}
-                className="rounded-xl border border-destructive/40 px-3 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Delete
-              </button>
-              <div className="flex gap-2">
+            <PanelActionBar
+              leading={(
                 <button
                   type="button"
-                  onClick={closePanel}
+                  onClick={onDeleteAgent}
                   disabled={savingAgent || deletingAgent}
-                  className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-xl border border-destructive/40 px-3 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Cancel
+                  Delete
                 </button>
-                <button
-                  type="submit"
-                  disabled={savingAgent || deletingAgent}
-                  className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {savingAgent ? 'Saving...' : deletingAgent ? 'Deleting...' : 'Save'}
-                </button>
-              </div>
-            </div>
+              )}
+            >
+              <button
+                type="button"
+                onClick={closePanel}
+                disabled={savingAgent || deletingAgent}
+                className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingAgent || deletingAgent}
+                className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {savingAgent ? 'Saving...' : deletingAgent ? 'Deleting...' : 'Save'}
+              </button>
+            </PanelActionBar>
           </form>
         </>
       ) : (
         <>
           <form onSubmit={onCreateWorld} className="flex min-h-0 flex-1 flex-col">
             <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-sidebar-foreground/90">World Name</label>
-                <input
+              <LabeledField label="World Name">
+                <Input
                   value={creatingWorld.name}
                   onChange={(event) => setCreatingWorld((value) => ({ ...value, name: event.target.value }))}
                   placeholder="World name"
-                  className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                  tone="sidebar"
                 />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-sidebar-foreground/90">Description</label>
-                <textarea
+              </LabeledField>
+              <LabeledField label="Description">
+                <Textarea
                   value={creatingWorld.description}
                   onChange={(event) => setCreatingWorld((value) => ({ ...value, description: event.target.value }))}
                   placeholder="Description (optional)"
-                  className="h-20 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                  tone="sidebar"
+                  className="h-20"
                 />
-              </div>
+              </LabeledField>
               <div className="grid grid-cols-2 gap-2">
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs font-bold text-sidebar-foreground/90">LLM Provider</label>
-                  <select
+                <LabeledField label="LLM Provider">
+                  <Select
                     value={creatingWorld.chatLLMProvider}
                     onChange={(event) => setCreatingWorld((value) => ({ ...value, chatLLMProvider: event.target.value }))}
-                    className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none focus:border-sidebar-ring"
+                    tone="sidebar"
                   >
                     <option value="">Select provider</option>
                     {WORLD_PROVIDER_OPTIONS.map((provider) => (
@@ -774,57 +766,51 @@ export default function RightPanelContent({
                         {provider.label}
                       </option>
                     ))}
-                  </select>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs font-bold text-sidebar-foreground/90">LLM model</label>
-                  <input
+                  </Select>
+                </LabeledField>
+                <LabeledField label="LLM model">
+                  <Input
                     value={creatingWorld.chatLLMModel}
                     onChange={(event) => setCreatingWorld((value) => ({ ...value, chatLLMModel: event.target.value }))}
                     placeholder="Chat LLM model"
-                    className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                    tone="sidebar"
                   />
-                </div>
+                </LabeledField>
               </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-sidebar-foreground/90">Turn Limit</label>
-                <input
+              <LabeledField label="Turn Limit">
+                <Input
                   type="number"
                   min={MIN_TURN_LIMIT}
                   max="50"
                   value={creatingWorld.turnLimit}
                   onChange={(event) => setCreatingWorld((value) => ({ ...value, turnLimit: Number(event.target.value) || MIN_TURN_LIMIT }))}
-                  className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                  tone="sidebar"
                 />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-sidebar-foreground/90">Main Agent</label>
-                <input
+              </LabeledField>
+              <LabeledField label="Main Agent">
+                <Input
                   value={creatingWorld.mainAgent}
                   onChange={(event) => setCreatingWorld((value) => ({ ...value, mainAgent: event.target.value }))}
                   placeholder="Main agent (optional)"
-                  className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                  tone="sidebar"
                 />
-              </div>
+              </LabeledField>
             </div>
-            <div className="mt-auto flex justify-between gap-2 border-t border-sidebar-border bg-sidebar pt-2">
-              <div></div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={closePanel}
-                  className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90"
-                >
-                  Create
-                </button>
-              </div>
-            </div>
+            <PanelActionBar>
+              <button
+                type="button"
+                onClick={closePanel}
+                className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90"
+              >
+                Create
+              </button>
+            </PanelActionBar>
           </form>
         </>
       )}

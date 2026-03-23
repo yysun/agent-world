@@ -18,7 +18,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('react', () => ({
   default: { createElement: (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({ type, props: props ?? {}, key }) },
-  useState: (initial: unknown) => [initial, () => {}],
+  useState: (initial: unknown) => [initial, () => { }],
 }));
 
 vi.mock('react/jsx-runtime', () => ({
@@ -32,7 +32,7 @@ vi.mock('react/jsx-dev-runtime', () => ({
   jsxDEV: (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({ type, props: props ?? {}, key }),
 }));
 
-import QueueMessageItem from '../../../electron/renderer/src/components/QueueMessageItem';
+import { QueueMessageItem } from '../../../electron/renderer/src/features/queue';
 import type { QueuedMessageEntry } from '../../../electron/renderer/src/hooks/useMessageQueue';
 
 function findNodeByType(node: unknown, type: string): { props?: Record<string, unknown> } | null {

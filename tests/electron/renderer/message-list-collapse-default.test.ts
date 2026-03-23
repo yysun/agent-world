@@ -39,7 +39,7 @@ import {
   getInitialMessageCollapsedState,
   getMessageCollapseKey,
   getMessageCollapseToggleLabel,
-} from '../../../electron/renderer/src/components/MessageListPanel';
+} from '../../../electron/renderer/src/features/chat';
 
 describe('MessageListPanel default collapse policy', () => {
   it('returns the visible Electron collapse-toggle label from the current state', () => {

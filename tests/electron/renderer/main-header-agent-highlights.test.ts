@@ -22,7 +22,7 @@ import {
   getAgentBadgeAriaLabel,
   getAgentBadgeClassName,
   getAgentBadgeTitle,
-} from '../../../electron/renderer/src/components/MainHeaderBar';
+} from '../../../electron/renderer/src/app/shell/components/MainHeaderBar';
 
 describe('MainHeaderBar agent highlights', () => {
   it('uses a distinct editing tone and editing labels for the agent being edited', () => {

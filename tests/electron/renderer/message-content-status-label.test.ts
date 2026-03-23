@@ -63,7 +63,7 @@ vi.mock('../../../electron/renderer/src/domain/desktop-api', () => ({
 }));
 
 import {
-  default as MessageContent,
+  MessageContent,
   formatReasoningDuration,
   getExternalMessageLinkFromTarget,
   getReasoningElapsedMs,
@@ -73,7 +73,7 @@ import {
   handleMessageExternalLinkClick,
   getToolStatusLabel,
   getToolStatusTone
-} from '../../../electron/renderer/src/components/MessageContent';
+} from '../../../electron/renderer/src/features/chat';
 
 function findNode(root: any, predicate: (node: any) => boolean): any {
   if (!root || typeof root !== 'object') {

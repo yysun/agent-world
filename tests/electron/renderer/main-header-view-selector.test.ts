@@ -22,7 +22,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('react', () => ({
   default: { createElement: (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({ type, props: props ?? {}, key }) },
-  useState: (initial: unknown) => [initial, () => {}],
+  useState: (initial: unknown) => [initial, () => { }],
 }));
 
 vi.mock('react/jsx-runtime', () => ({
@@ -36,7 +36,7 @@ vi.mock('react/jsx-dev-runtime', () => ({
   jsxDEV: (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({ type, props: props ?? {}, key }),
 }));
 
-import MainHeaderBar from '../../../electron/renderer/src/components/MainHeaderBar';
+import { MainHeaderBar } from '../../../electron/renderer/src/app/shell';
 
 function collectElementIdsByType(node: any, typeName: string): string[] {
   if (!node || typeof node !== 'object') {

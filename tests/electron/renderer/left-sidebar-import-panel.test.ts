@@ -77,7 +77,8 @@ vi.mock('../../../electron/renderer/src/components/WorldInfoCard', () => ({
   default: worldInfoCardStub,
 }));
 
-import LeftSidebarPanel from '../../../electron/renderer/src/components/LeftSidebarPanel';
+import { LeftSidebarPanel } from '../../../electron/renderer/src/app/shell';
+import Radio from '../../../electron/renderer/src/design-system/primitives/Radio';
 
 function renderTree(overrides: Record<string, unknown> = {}) {
   hookState.cursor = 0;
@@ -250,7 +251,7 @@ describe('LeftSidebarPanel import mode', () => {
       onCloseImportWorldPanel,
     });
     let nodes = allDescendants(tree);
-    const githubRadio = nodes.find((node: any) => node?.type === 'input' && node?.props?.name === 'left-world-import-source-type' && node?.props?.value === 'github');
+    const githubRadio = nodes.find((node: any) => node?.type === Radio && node?.props?.name === 'left-world-import-source-type' && node?.props?.value === 'github');
     githubRadio.props.onChange();
 
     tree = renderTree({
@@ -259,8 +260,8 @@ describe('LeftSidebarPanel import mode', () => {
       onCloseImportWorldPanel,
     });
     nodes = allDescendants(tree);
-    const repoInput = nodes.find((node: any) => node?.type === 'input' && node?.props?.placeholder === 'owner/repo');
-    const nameInput = nodes.find((node: any) => node?.type === 'input' && node?.props?.placeholder === 'infinite-etude');
+    const repoInput = nodes.find((node: any) => node?.props?.placeholder === 'owner/repo');
+    const nameInput = nodes.find((node: any) => node?.props?.placeholder === 'infinite-etude');
     expect(repoInput?.props?.value).toBe('yysun/awesome-agent-world');
     repoInput.props.onChange({ target: { value: 'octo/worlds' } });
     nameInput.props.onChange({ target: { value: 'city-lab' } });
@@ -320,6 +321,24 @@ describe('LeftSidebarPanel import mode', () => {
 
     expect(onImportAgent).toHaveBeenCalledTimes(1);
     expect(onCloseImportWorldPanel).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes session search input updates through the provided setter', () => {
+    const setSessionSearch = vi.fn();
+    const tree: any = renderTree({
+      panelMode: 'sessions',
+      loadedWorld: { id: 'world-1', name: 'World 1' },
+      sessions: [{ id: 'chat-1', name: 'Chat 1', messageCount: 3 }],
+      filteredSessions: [{ id: 'chat-1', name: 'Chat 1', messageCount: 3 }],
+      setSessionSearch,
+    });
+
+    const nodes = allDescendants(tree);
+    const searchInput = nodes.find((node: any) => node?.props?.placeholder === 'Search sessions...');
+
+    expect(searchInput).toBeDefined();
+    searchInput.props.onChange({ target: { value: 'hello' } });
+    expect(setSessionSearch).toHaveBeenCalledWith('hello');
   });
 
   it('does not render the import panel when import mode is not active', () => {

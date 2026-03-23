@@ -10,6 +10,7 @@
  * - Output accumulation
  * 
  * Changes:
+ * - 2026-03-23: Added a regression test that catastrophic blocked shell commands fail before cwd/path-scope validation.
  * - 2026-03-22: Added regression coverage so top-level JSON stdout with nested markdown markers does not get classified as directly displayable shell content.
  * - 2026-03-22: Added targeted coverage for both shell executable resolution paths: direct calls stay cwd-relative, skill-originated script calls resolve to `<skill_root>`.
  * - 2026-03-22: Added regression coverage for skill-relative executable resolution (`./scripts/...`) from active load_skill contexts.
@@ -143,6 +144,24 @@ describe('shell command execution', () => {
 });
 
 describe('shell command durable approvals', () => {
+  test('blocks catastrophic commands before path scope validation', async () => {
+    const tool = createShellCmdToolDefinition();
+
+    await expect(
+      tool.execute(
+        {
+          command: 'rm',
+          parameters: ['--no-preserve-root', '-rf', './build'],
+        },
+        undefined,
+        undefined,
+        {
+          world: { id: 'world-1', variables: 'working_directory=/tmp' },
+        },
+      ),
+    ).rejects.toThrow('Blocked dangerous operation');
+  });
+
   test('persists durable approval prompt and resolution messages when risky command is denied', async () => {
     mockRequestWorldOption.mockImplementationOnce(async (_world, request) => ({
       requestId: String(request?.requestId || ''),

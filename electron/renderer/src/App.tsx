@@ -61,15 +61,11 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  LeftSidebarPanel,
-  AppFrameLayout,
-  MainWorkspaceLayout,
-  AppOverlaysHost,
-  WorkingStatusBar,
-  MessageQueuePanel,
-  SkillEditor,
-} from './components/index';
+import { AppOverlaysHost, LeftSidebarPanel, MainWorkspaceLayout } from './app/shell';
+import { AppFrameLayout } from './design-system/patterns';
+import { MessageQueuePanel } from './features/queue';
+import { SkillEditor } from './features/skills';
+import WorkingStatusBar from './components/WorkingStatusBar';
 import { useWorkingStatus } from './hooks/useWorkingStatus';
 import { readDesktopApi, safeMessage } from './domain/desktop-api';
 import { useSkillRegistry } from './hooks/useSkillRegistry';
@@ -81,16 +77,18 @@ import { useAppUpdater } from './hooks/useAppUpdater';
 import { useWorldManagement } from './hooks/useWorldManagement';
 import { useAppActionHandlers } from './hooks/useAppActionHandlers';
 import {
-  COMPOSER_MAX_ROWS,
   DEFAULT_TURN_LIMIT,
-  MIN_TURN_LIMIT,
-  MAX_HEADER_AGENT_AVATARS,
   DEFAULT_AGENT_FORM,
   DEFAULT_WORLD_CHAT_LLM_PROVIDER,
   DEFAULT_WORLD_CHAT_LLM_MODEL,
+  MIN_TURN_LIMIT,
+} from './constants/app-defaults';
+import {
+  COMPOSER_MAX_ROWS,
   DRAG_REGION_STYLE,
+  MAX_HEADER_AGENT_AVATARS,
   NO_DRAG_REGION_STYLE,
-} from './constants/app-constants';
+} from './constants/ui-constants';
 import {
   validateWorldForm,
 } from './utils/validation';
@@ -160,6 +158,12 @@ import type { DesktopApi, SkillFolderEntry } from './types/desktop-api';
 type WorkspaceState = {
   workspacePath: string | null;
   storagePath: string | null;
+};
+
+type DirectorySelectionResult = {
+  canceled?: boolean;
+  directoryPath?: string;
+  workspacePath?: string;
 };
 
 type LoadingState = {
@@ -1428,9 +1432,9 @@ function AppContent({ api }: { api: DesktopApi }) {
 
   const onBrowseInstallSkillSource = useCallback(async () => {
     try {
-      const result = typeof api.pickDirectory === 'function'
+      const result = (typeof api.pickDirectory === 'function'
         ? await api.pickDirectory(installSkillSourcePath || workspace.workspacePath || undefined)
-        : await api.openWorkspace(installSkillSourcePath || workspace.workspacePath || undefined);
+        : await api.openWorkspace(installSkillSourcePath || workspace.workspacePath || undefined)) as DirectorySelectionResult | null;
       const directoryPath = result?.directoryPath ?? result?.workspacePath;
       if (!result?.canceled && directoryPath) {
         setInstallSkillSourcePath(String(directoryPath));

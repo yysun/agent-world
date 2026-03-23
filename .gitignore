@@ -50,11 +50,11 @@ awesome-agent-world
 .agents/
 .skill/
 .skills/
-skills/
 skills-lock.json
 
 .tmp/
 test-results/
+test-data/
 
 # Electron packaging output
 electron/release/

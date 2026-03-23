@@ -45,23 +45,20 @@ const { composerBarSpy, messageListPanelSpy, rightPanelContentSpy, rightPanelShe
   rightPanelShellSpy: vi.fn(() => null),
 }));
 
-vi.mock('../../../electron/renderer/src/components/ComposerBar', () => ({
-  default: composerBarSpy,
-}));
-
-vi.mock('../../../electron/renderer/src/components/MessageListPanel', () => ({
-  default: messageListPanelSpy,
+vi.mock('../../../electron/renderer/src/features/chat', () => ({
+  ComposerBar: composerBarSpy,
+  MessageListPanel: messageListPanelSpy,
 }));
 
 vi.mock('../../../electron/renderer/src/components/RightPanelContent', () => ({
   default: rightPanelContentSpy,
 }));
 
-vi.mock('../../../electron/renderer/src/components/RightPanelShell', () => ({
+vi.mock('../../../electron/renderer/src/app/shell/components/RightPanelShell', () => ({
   default: rightPanelShellSpy,
 }));
 
-import MainContentArea, { DEFAULT_FLOATING_COMPOSER_HEIGHT } from '../../../electron/renderer/src/components/MainContentArea';
+import MainContentArea, { DEFAULT_FLOATING_COMPOSER_HEIGHT } from '../../../electron/renderer/src/app/shell/components/MainContentArea';
 
 describe('MainContentArea floating bottom stack layout', () => {
   it('renders message panel full-height and floats queue/composer/status in a bottom overlay', () => {
