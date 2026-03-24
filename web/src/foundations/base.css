@@ -1,0 +1,52 @@
+/*
+ * Purpose:
+ * - Define the shared base stylesheet layer for the AppRun web client.
+ *
+ * Key Features:
+ * - Provides reset rules, document sizing, body typography, and doodle control normalization.
+ * - Keeps low-level global CSS separate from feature styling.
+ *
+ * Notes on Implementation:
+ * - Extracted from the legacy styles entry point without changing existing behavior.
+ *
+ * Summary of Recent Changes:
+ * - 2026-03-24: Introduced as part of the layered web view architecture refactor.
+ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+
+body {
+  margin: 0;
+  font-family: 'Short Stack', cursive;
+  font-size: 2em;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+a {
+  text-decoration: none;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.doodle button,
+.doodle textarea,
+.doodle input,
+.doodle select {
+  font-size: 0.5em;
+}

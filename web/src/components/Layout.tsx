@@ -1,14 +1,16 @@
+/**
+ * Purpose:
+ * - Preserve the legacy layout import path while the web app transitions to the app-shell layer.
+ *
+ * Key Features:
+ * - Re-exports the dedicated app-shell layout component.
+ *
+ * Notes on Implementation:
+ * - Existing callers can keep this import path temporarily during the layered architecture migration.
+ *
+ * Summary of Recent Changes:
+ * - 2026-03-24: Replaced inline layout markup with an app-shell compatibility re-export.
+ */
 
-import app from 'apprun';
-
-// app.on('//', (route) => {
-//   const menus = document.querySelectorAll('.navbar-nav li');
-//   for (let i = 0; i < menus.length; ++i) {menus[i].classList.remove('active');}
-//   const item = document.querySelector(`[href='${route}']`);
-//   item && item.parentElement.classList.add('active');
-// });
-
-export default () => <div id="main" className="w-full min-h-screen">
-  <div id="pages"></div>
-</div>;
+export { AppShellLayout as default } from '../app-shell';
 

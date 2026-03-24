@@ -10,20 +10,11 @@
 
 import { app, Component } from 'apprun';
 import api from '../api';
-import WorldEdit from '../components/world-edit';
-import SwipeCarousel from '../components/swipe-carousel';
-import type { World } from '../types';
+import { HomePageView, homePageUpdateHandlers } from '../features/home';
+import type { HomeViewState } from '../features/home';
+import { WorldEdit } from '../features/world';
 
-interface HomeState {
-  worlds: World[];
-  loading: boolean;
-  error: string | null;
-  showWorldEdit: boolean;
-  worldEditMode: 'create' | 'edit' | 'delete';
-  selectedWorldForEdit: World | null;
-}
-
-export default class HomeComponent extends Component<HomeState> {
+export default class HomeComponent extends Component<HomeViewState> {
 
   is_global_event = () => true;
 
@@ -39,7 +30,7 @@ export default class HomeComponent extends Component<HomeState> {
         showWorldEdit: false,
         worldEditMode: 'create',
         selectedWorldForEdit: null,
-      } as HomeState;
+      } as HomeViewState;
     } catch (error: any) {
       return {
         worlds: [],
@@ -48,101 +39,20 @@ export default class HomeComponent extends Component<HomeState> {
         showWorldEdit: false,
         worldEditMode: 'create',
         selectedWorldForEdit: null,
-      } as HomeState;
+      } as HomeViewState;
     }
   };
 
-  view = (state: HomeState) => {
-    if (state.loading) {
-      return (
-        <div className="home-page max-w-7xl mx-auto px-8 py-4" data-testid="home-page">
-          <div className="flex flex-col items-center justify-center min-h-screen">
-            <div className="text-2xl text-text-secondary">Loading worlds...</div>
-          </div>
-        </div>
-      );
-    }
+  view = (state: HomeViewState) => <>
+    <HomePageView state={state} />
+    {state.showWorldEdit ? (
+      <WorldEdit
+        world={state.selectedWorldForEdit}
+        mode={state.worldEditMode}
+        parentComponent={this}
+      />
+    ) : null}
+  </>;
 
-    if (state.error) {
-      return (
-        <div className="home-page max-w-7xl mx-auto px-8 py-4" data-testid="home-page">
-          <div className="flex flex-col items-center justify-center min-h-screen gap-4">
-            <div className="text-center">
-              <h3 className="text-2xl font-bold text-text-primary mb-2">Error loading worlds</h3>
-              <p className="text-lg text-text-secondary mb-4">{state.error}</p>
-              <button className="btn btn-primary px-6 py-3" $onclick='/'>Retry</button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    if (state.worlds.length === 0) {
-      return (
-        <div className="home-page max-w-7xl mx-auto px-8 py-4" data-testid="home-page">
-          <div className="flex flex-col items-center justify-center min-h-screen gap-4">
-            <div className="text-center">
-              <h3 className="text-2xl font-bold text-text-primary mb-2">No worlds found</h3>
-              <p className="text-lg text-text-secondary mb-4">Create your first world to get started!</p>
-              <button className="btn btn-primary px-6 py-3" $onclick="open-world-create" data-testid="world-create-empty">Create World</button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div className="home-page max-w-7xl mx-auto px-8 py-4 min-h-screen flex flex-col justify-center" data-testid="home-page">
-        {/* Banner */}
-        <div className="flex justify-center mb-8">
-          <h1 className="banner-title text-4xl tablet:text-5xl desktop:text-6xl font-bold text-center">
-            PICK YOUR WORLD
-          </h1>
-        </div>
-
-        {/* Swipe Carousel */}
-        <SwipeCarousel worlds={state.worlds} />
-
-        {/* World Edit Modal */}
-        {state.showWorldEdit &&
-          <WorldEdit
-            world={state.selectedWorldForEdit}
-            mode={state.worldEditMode}
-            parentComponent={this}
-          />
-        }
-      </div>
-    );
-  };
-
-  update = {
-    'open-world-create': (state: HomeState): HomeState => ({
-      ...state,
-      showWorldEdit: true,
-      worldEditMode: 'create',
-      selectedWorldForEdit: null,
-    }),
-
-    'open-world-edit': (state: HomeState, world: World): HomeState => ({
-      ...state,
-      showWorldEdit: true,
-      worldEditMode: 'edit',
-      selectedWorldForEdit: world,
-    }),
-
-    'open-world-delete': (state: HomeState, world: World): HomeState => ({
-      ...state,
-      showWorldEdit: true,
-      worldEditMode: 'delete',
-      selectedWorldForEdit: world,
-    }),
-
-    'close-world-edit': (state: HomeState): HomeState => ({
-      ...state,
-      showWorldEdit: false,
-    }),
-
-    'world-saved': () => { location.reload(); },
-    'world-deleted': () => { location.reload(); },
-  };
+  update = homePageUpdateHandlers;
 }

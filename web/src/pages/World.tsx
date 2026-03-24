@@ -46,92 +46,31 @@
 import { app, Component, safeHTML } from 'apprun';
 import type { WorldComponentState, Agent, RightPanelTab, WorldViewportMode } from '../types';
 import type { WorldEventName } from '../types/events';
-import WorldChat from '../components/world-chat';
-import WorldDashboard from '../components/world-dashboard';
-import WorldChatHistory from '../components/world-chat-history';
-import AgentEdit from '../components/agent-edit';
-import WorldEdit from '../components/world-edit';
+import {
+  AgentEdit,
+  WorldChat,
+  WorldChatHistory,
+  WorldDashboard,
+  getAgentStripCssVars,
+  WorldEdit,
+  getAgentStripStyleAttribute,
+  getInitialViewportMode,
+  getViewportMode,
+  resolveRightPanelViewportMode,
+  worldRouteUiHandlers,
+  worldUpdateHandlers,
+} from '../features/world';
 import { selectHitlPromptForChat } from '../domain/hitl';
 import { getEnvValueFromText, getReasoningEffortLevel } from '../domain/world-variables';
-import { worldUpdateHandlers } from './World.update';
+import { ActionButton, CenteredStatePanel, IconActionButton, ModalShell } from '../patterns';
 
-const DESKTOP_PANEL_BREAKPOINT = 1024;
-const TABLET_PANEL_BREAKPOINT = 768;
-
-function getViewportMode(width: number): WorldViewportMode {
-  if (width >= DESKTOP_PANEL_BREAKPOINT) return 'desktop';
-  if (width >= TABLET_PANEL_BREAKPOINT) return 'tablet';
-  return 'mobile';
-}
-
-function getInitialViewportMode(): WorldViewportMode {
-  if (typeof window === 'undefined') return 'desktop';
-  return getViewportMode(window.innerWidth);
-}
-
-export function resolveRightPanelViewportMode(
-  currentViewportMode: WorldViewportMode,
-  measuredWidth?: number,
-): WorldViewportMode {
-  const width = Number(measuredWidth);
-  if (Number.isFinite(width) && width > 0) {
-    return getViewportMode(width);
-  }
-
-  if (typeof window !== 'undefined' && Number.isFinite(window.innerWidth) && window.innerWidth > 0) {
-    return getViewportMode(window.innerWidth);
-  }
-
-  return currentViewportMode;
-}
-
-export function getAgentStripCssVars(viewportMode: WorldViewportMode): Record<string, string> {
-  if (viewportMode === 'mobile') {
-    return {
-      '--world-page-padding-top': '0.2rem',
-      '--agent-strip-gap': '0.75rem',
-      '--agent-strip-side-padding': '0.35rem',
-      '--agent-strip-top-padding': '0.3rem',
-      '--agent-strip-item-padding-x': '0.5rem',
-      '--agent-strip-sprite-size': '3.25rem',
-      '--world-top-row-min-height': '4.35rem',
-      '--world-top-row-section-padding-y': '0.35rem',
-      '--world-top-action-button-size': '2.15rem',
-    };
-  }
-
-  if (viewportMode === 'tablet') {
-    return {
-      '--world-page-padding-top': '0.2rem',
-      '--agent-strip-gap': '0.85rem',
-      '--agent-strip-side-padding': '0.45rem',
-      '--agent-strip-top-padding': '0.32rem',
-      '--agent-strip-item-padding-x': '0.55rem',
-      '--agent-strip-sprite-size': '3.35rem',
-      '--world-top-row-min-height': '4.5rem',
-      '--world-top-row-section-padding-y': '0.4rem',
-      '--world-top-action-button-size': '2.2rem',
-    };
-  }
-
-  return {
-    '--world-page-padding-top': '0.2rem',
-    '--agent-strip-gap': '0.95rem',
-    '--agent-strip-side-padding': '0.55rem',
-    '--agent-strip-top-padding': '0.35rem',
-    '--agent-strip-item-padding-x': '0.6rem',
-    '--agent-strip-sprite-size': '3.5rem',
-    '--world-top-row-min-height': '4.75rem',
-    '--world-top-row-section-padding-y': '0.45rem',
-    '--world-top-action-button-size': '2.3rem',
-  };
-}
-
-export function getAgentStripStyleAttribute(viewportMode: WorldViewportMode): string {
-  return Object.entries(getAgentStripCssVars(viewportMode))
-    .map(([name, value]) => `${name}: ${value}`)
-    .join('; ');
-}
+export {
+  getAgentStripCssVars,
+  getAgentStripStyleAttribute,
+  getInitialViewportMode,
+  getViewportMode,
+  resolveRightPanelViewportMode,
+};
 
 function isWorldMainAgent(agent: Agent, worldMainAgent: string | null | undefined): boolean {
   const normalizedMainAgent = String(worldMainAgent || '').trim().toLowerCase();
@@ -218,35 +157,6 @@ export default class WorldComponent extends Component<WorldComponentState, World
     const isRightPanelOpen = isDesktopViewport ? true : state.isRightPanelOpen;
     const reasoningEffort = getReasoningEffortLevel(state.world?.variables);
 
-    // Guard clauses for loading and error states
-    // if (state.loading) {
-    //   return (
-    //     <div className="world-container">
-    //       <div className="world-columns">
-    //         <div className="chat-column">
-    //           <div className="agents-section">
-    //             <div className="agents-row">
-    //               <div className="loading-agents">Loading...</div>
-    //             </div>
-    //           </div>
-    //           <div className="loading-state">
-    //             <p>Loading world data...</p>
-    //           </div>
-    //         </div>
-    //         <div className="settings-column">
-    //           <div className="settings-section">
-    //             <div className="settings-row">
-    //               <button className="world-settings-btn" title="World Settings">
-    //                 <span className="world-gear-icon">⚙</span>
-    //               </button>
-    //             </div>
-    //           </div>
-    //         </div>
-    //       </div>
-    //     </div>
-    //   );
-    // }
-
     if (state.error) {
       return (
         <div className="world-container flex flex-col h-screen" data-testid="world-page">
@@ -258,18 +168,17 @@ export default class WorldComponent extends Component<WorldComponentState, World
                 </div>
               </div>
               <div className="error-state flex items-center justify-center flex-1 p-4" data-testid="world-error-state">
-                <div className="text-center">
-                  <p className="text-lg text-text-primary mb-4">Error: {state.error}</p>
-                  <button className="btn btn-primary px-6 py-3" $onclick={['/World', state.worldName]}>Retry</button>
-                </div>
+                <CenteredStatePanel
+                  title="Error loading world"
+                  body={`Error: ${state.error}`}
+                  actions={[{ label: 'Retry', className: 'btn btn-primary px-6 py-3', $onclick: ['/World', state.worldName] }]}
+                />
               </div>
             </div>
             <div className="settings-column w-96">
               <div className="settings-section p-4">
                 <div className="settings-row flex gap-2">
-                  <button className="world-settings-btn" title="World Settings">
-                    <span className="world-gear-icon">⚙</span>
-                  </button>
+                  <IconActionButton className="world-settings-btn" title="World Settings" label={<span className="world-gear-icon">⚙</span>} />
                 </div>
               </div>
             </div>
@@ -291,9 +200,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
               <div className="agents-row agents-row-with-back flex items-center gap-4 px-4 py-2">
                 <div className="back-button-container">
                   <a href="/">
-                    <button className="back-button flex items-center justify-center" title="Back to Worlds">
-                      <span className="world-back-icon">←</span>
-                    </button>
+                    <IconActionButton className="back-button flex items-center justify-center" title="Back to Worlds" label={<span className="world-back-icon">←</span>} />
                   </a>
                 </div>
                 <div
@@ -339,14 +246,13 @@ export default class WorldComponent extends Component<WorldComponentState, World
                 </div>
                 {!isDesktopViewport ? (
                   <div className="right-panel-toggle-container">
-                    <button
+                    <IconActionButton
                       className="world-settings-btn right-panel-toggle"
                       title="Open chats and world actions"
                       aria-label="Open chats and world actions"
                       $onclick="toggle-right-panel"
-                    >
-                      <span className="world-gear-icon">☰</span>
-                    </button>
+                      label={<span className="world-gear-icon">☰</span>}
+                    />
                   </div>
                 ) : null}
               </div>
@@ -405,79 +311,70 @@ export default class WorldComponent extends Component<WorldComponentState, World
           <div className={`settings-column world-right-panel ${isRightPanelOpen ? 'is-open' : 'is-closed'} ${state.viewportMode}-panel`}>
             <div className="right-panel-mobile-header">
               <div className="right-panel-mobile-actions">
-                <button
+                <IconActionButton
                   className="world-settings-btn"
                   title="Create New Agent"
                   $onclick="open-agent-create"
-                >
-                  <span className="world-gear-icon">+</span>
-                </button>
-                <button
+                  label={<span className="world-gear-icon">+</span>}
+                />
+                <IconActionButton
                   className="world-settings-btn"
                   title="World Settings"
                   $onclick="open-world-edit"
-                >
-                  <span className="world-gear-icon">⚙</span>
-                </button>
-                <button
+                  label={<span className="world-gear-icon">⚙</span>}
+                />
+                <IconActionButton
                   className="world-settings-btn"
                   $onclick={['export-world-markdown', { worldName: state.world?.name }]}
                   title="Export world to markdown file"
-                >
-                  <span className="world-gear-icon">↓</span>
-                </button>
-                <button
+                  label={<span className="world-gear-icon">↓</span>}
+                />
+                <IconActionButton
                   className="world-settings-btn"
                   $onclick={['view-world-markdown', { worldName: state.world?.name }]}
                   title="View world markdown in new tab"
-                >
-                  <span className="world-gear-icon">&#x1F5CE;</span>
-                </button>
+                  label={<span className="world-gear-icon">&#x1F5CE;</span>}
+                />
               </div>
-              <button
+              <IconActionButton
                 className="world-settings-btn right-panel-close"
                 title="Close panel"
                 aria-label="Close panel"
                 $onclick="close-right-panel"
-              >
-                <span className="world-gear-icon">×</span>
-              </button>
+                label={<span className="world-gear-icon">×</span>}
+              />
             </div>
 
             {isDesktopViewport ? (
               <div className="settings-section p-4 world-panel-world-actions">
                 <div className="settings-row flex gap-2">
-                  <button
+                  <IconActionButton
                     className="world-settings-btn"
                     title="Create New Agent"
                     $onclick="open-agent-create"
-                  >
-                    <span className="world-gear-icon">+</span>
-                  </button>
-                  <button
+                    label={<span className="world-gear-icon">+</span>}
+                  />
+                  <IconActionButton
                     className="world-settings-btn"
                     title="World Settings"
                     $onclick="open-world-edit"
                     style={{ marginLeft: '8px' }}
-                  >
-                    <span className="world-gear-icon">⚙</span>
-                  </button>
-                  <button
+                    label={<span className="world-gear-icon">⚙</span>}
+                  />
+                  <IconActionButton
                     className="world-settings-btn"
                     $onclick={['export-world-markdown', { worldName: state.world?.name }]}
                     title="Export world to markdown file"
                     style={{ marginLeft: '8px' }}
-                  >
-                    <span className="world-gear-icon">↓</span>
-                  </button>
-                  <button
+                    label={<span className="world-gear-icon">↓</span>}
+                  />
+                  <IconActionButton
                     className="world-settings-btn"
                     $onclick={['view-world-markdown', { worldName: state.world?.name }]}
                     title="View world markdown in new tab"
                     style={{ marginLeft: '4px' }}
-                  >
-                    <span className="world-gear-icon">&#x1F5CE;</span>
-                  </button>
+                    label={<span className="world-gear-icon">&#x1F5CE;</span>}
+                  />
                 </div>
               </div>
             ) : null}
@@ -493,7 +390,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
         </div>
 
         {!isDesktopViewport && isRightPanelOpen ? (
-          <button
+          <ActionButton
             className="world-panel-backdrop"
             aria-label="Close panel"
             $onclick="close-right-panel"
@@ -519,68 +416,68 @@ export default class WorldComponent extends Component<WorldComponentState, World
 
         {/* Chat Delete Confirmation Modal */}
         {state.chatToDelete && (
-          <div className="modal-overlay fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" $onclick="chat-history-hide-modals">
-            <div className="modal-content chat-history-modal bg-white rounded-lg p-6 max-w-md" onclick={(e: Event) => e.stopPropagation()}>
-              <button
-                className="modal-close-btn absolute top-4 right-4 text-2xl"
-                $onclick="chat-history-hide-modals"
-                title="Close"
-              >
-                ×
-              </button>
-              <h3 className="text-xl font-bold mb-4">Delete Chat</h3>
-              <p className="delete-confirmation-text mb-2">
-                Are you sure you want to delete chat <span className="delete-confirmation-name font-bold">"{state.chatToDelete.name}"</span>?
-              </p>
-              <p className="warning delete-confirmation-warning text-system mb-4">
-                ⚠️ This action cannot be undone.
-              </p>
+          <ModalShell
+            title="Delete Chat"
+            overlayClassName="modal-overlay fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+            overlayAttrs={{ $onclick: 'chat-history-hide-modals' }}
+            contentClassName="modal-content chat-history-modal bg-white rounded-lg p-6 max-w-md"
+            contentAttrs={{ onclick: (e: Event) => e.stopPropagation() }}
+            closeButtonClassName="modal-close-btn absolute top-4 right-4 text-2xl"
+            closeAttrs={{ $onclick: 'chat-history-hide-modals' }}
+            footer={(
               <div className="form-actions flex gap-2 justify-end">
-                <button
+                <ActionButton
                   className="btn-danger px-4 py-2 rounded"
                   $onclick={['delete-chat-from-history', { chatId: state.chatToDelete.id }]}
                 >
                   Delete Chat
-                </button>
-                <button className="btn-secondary px-4 py-2 rounded" $onclick="chat-history-hide-modals">
+                </ActionButton>
+                <ActionButton className="btn-secondary px-4 py-2 rounded" $onclick="chat-history-hide-modals">
                   Cancel
-                </button>
+                </ActionButton>
               </div>
-            </div>
-          </div>
+            )}
+          >
+            <p className="delete-confirmation-text mb-2">
+              Are you sure you want to delete chat <span className="delete-confirmation-name font-bold">"{state.chatToDelete.name}"</span>?
+            </p>
+            <p className="warning delete-confirmation-warning text-system mb-4">
+              ⚠️ This action cannot be undone.
+            </p>
+          </ModalShell>
         )}
 
         {/* Message Delete Confirmation Modal */}
         {state.messageToDelete && (
-          <div className="modal-overlay fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" $onclick="hide-delete-message-confirm">
-            <div className="modal-content chat-history-modal bg-white rounded-lg p-6 max-w-md" onclick={(e: Event) => e.stopPropagation()}>
-              <button
-                className="modal-close-btn absolute top-4 right-4 text-2xl"
-                $onclick="hide-delete-message-confirm"
-                title="Close"
-              >
-                ×
-              </button>
-              <h3 className="text-xl font-bold mb-4">Delete Message</h3>
-              <p className="delete-confirmation-text mb-2">
-                Are you sure you want to delete this message?
-              </p>
-              <p className="warning delete-confirmation-warning text-system mb-4">
-                ⚠️ This action will delete the message and all messages after it. This cannot be undone.
-              </p>
+          <ModalShell
+            title="Delete Message"
+            overlayClassName="modal-overlay fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+            overlayAttrs={{ $onclick: 'hide-delete-message-confirm' }}
+            contentClassName="modal-content chat-history-modal bg-white rounded-lg p-6 max-w-md"
+            contentAttrs={{ onclick: (e: Event) => e.stopPropagation() }}
+            closeButtonClassName="modal-close-btn absolute top-4 right-4 text-2xl"
+            closeAttrs={{ $onclick: 'hide-delete-message-confirm' }}
+            footer={(
               <div className="form-actions flex gap-2 justify-end">
-                <button
+                <ActionButton
                   className="btn-danger px-4 py-2 rounded"
                   $onclick="delete-message-confirmed"
                 >
                   Delete Message
-                </button>
-                <button className="btn-secondary px-4 py-2 rounded" $onclick="hide-delete-message-confirm">
+                </ActionButton>
+                <ActionButton className="btn-secondary px-4 py-2 rounded" $onclick="hide-delete-message-confirm">
                   Cancel
-                </button>
+                </ActionButton>
               </div>
-            </div>
-          </div>
+            )}
+          >
+            <p className="delete-confirmation-text mb-2">
+              Are you sure you want to delete this message?
+            </p>
+            <p className="warning delete-confirmation-warning text-system mb-4">
+              ⚠️ This action will delete the message and all messages after it. This cannot be undone.
+            </p>
+          </ModalShell>
         )}
 
       </div>
@@ -617,118 +514,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
     // Route handler and message handlers (merged)
     ...worldUpdateHandlers,
 
-    // New simplified agent edit event handlers
-    'open-agent-create': (state: WorldComponentState): WorldComponentState => ({
-      ...state,
-      showAgentEdit: true,
-      agentEditMode: 'create',
-      selectedAgentForEdit: null
-    }),
-
-    'open-agent-edit': (state: WorldComponentState, agent: Agent): WorldComponentState => ({
-      ...state,
-      showAgentEdit: true,
-      agentEditMode: 'edit',
-      selectedAgentForEdit: agent
-    }),
-
-    'open-agent-delete': (state: WorldComponentState, agent: Agent): WorldComponentState => ({
-      ...state,
-      showAgentEdit: true,
-      agentEditMode: 'delete',
-      selectedAgentForEdit: agent
-    }),
-
-    'close-agent-edit': (state: WorldComponentState): WorldComponentState => ({
-      ...state,
-      showAgentEdit: false
-    }),
-
-    // World edit event handlers (simplified)
-    'open-world-edit': (state: WorldComponentState): WorldComponentState => ({
-      ...state,
-      showWorldEdit: true,
-      worldEditMode: 'edit',
-      selectedWorldForEdit: state.world,
-      rightPanelTab: 'world',
-    }),
-
-    'close-world-edit': (state: WorldComponentState): WorldComponentState => ({
-      ...state,
-      showWorldEdit: false
-    }),
-
-    'agent-saved': (state: WorldComponentState): void => {
-      // Refresh agents list and close modal
-      location.reload(); // Reload to refresh agents list
-    },
-
-    'agent-deleted': (state: WorldComponentState): void => {
-      // Refresh agents list and close modal
-      location.reload();
-    },
-
-    // Badge toggle filter handler - toggle agent filter on/off
-    'toggle-agent-filter': (state: WorldComponentState, agentId: string, e?: Event): WorldComponentState => {
-      e?.stopPropagation(); // Prevent triggering parent agent-item click
-
-      const currentFilters = state.activeAgentFilters || [];
-      const isActive = currentFilters.includes(agentId);
-
-      return {
-        ...state,
-        activeAgentFilters: isActive
-          ? currentFilters.filter(id => id !== agentId)  // Remove if active
-          : [...currentFilters, agentId]  // Add if not active
-      };
-    },
-
-    'open-right-panel': (state: WorldComponentState, tab?: RightPanelTab): WorldComponentState => ({
-      ...state,
-      rightPanelTab: tab || state.rightPanelTab,
-      isRightPanelOpen: true,
-    }),
-
-    'close-right-panel': (state: WorldComponentState): WorldComponentState => {
-      const effectiveViewportMode = resolveRightPanelViewportMode(state.viewportMode);
-      return {
-        ...state,
-        viewportMode: effectiveViewportMode,
-        isRightPanelOpen: effectiveViewportMode === 'desktop',
-      };
-    },
-
-    'toggle-right-panel': (state: WorldComponentState, tab?: RightPanelTab): WorldComponentState => ({
-      ...state,
-      rightPanelTab: tab || state.rightPanelTab,
-      isRightPanelOpen: state.viewportMode === 'desktop' ? true : !state.isRightPanelOpen,
-    }),
-
-    'switch-right-panel-tab': (state: WorldComponentState, tab: RightPanelTab): WorldComponentState => ({
-      ...state,
-      rightPanelTab: tab,
-      isRightPanelOpen: true,
-    }),
-
-    'sync-right-panel-viewport': (state: WorldComponentState, payload?: { width: number }): WorldComponentState => {
-      const width = Number(payload?.width || 0);
-      if (!width) return state;
-
-      const nextViewportMode = getViewportMode(width);
-      if (nextViewportMode === state.viewportMode) return state;
-
-      const nextPanelOpen = nextViewportMode === 'desktop'
-        ? true
-        : state.viewportMode === 'desktop'
-          ? false
-          : state.isRightPanelOpen;
-
-      return {
-        ...state,
-        viewportMode: nextViewportMode,
-        isRightPanelOpen: nextPanelOpen,
-      };
-    },
+    ...worldRouteUiHandlers,
 
   };
 }

@@ -323,15 +323,6 @@ export interface WorldChatProps {
   viewportMode?: WorldViewportMode;
 }
 
-// World Settings Component Props
-export interface WorldSettingsProps {
-  world: World | null;
-  selectedSettingsTarget: 'world' | 'agent' | 'chat' | null;
-  selectedAgent: Agent | null;
-  loading?: boolean;
-  totalMessages: number;
-}
-
 // World Edit Component Props & State
 export interface WorldEditProps {
   mode: 'create' | 'edit' | 'delete';

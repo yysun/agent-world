@@ -1,0 +1,1618 @@
+/**
+ * World Update Handlers - Core-Centric AppRun Event System
+ *
+ * Architecture:
+ * - Core handles: Auto-restoration, auto-save, memory management
+ * - Frontend handles: Display, user input, SSE streaming, UI state
+ *
+ * Features:
+ * - World initialization with core auto-restore via getWorld()
+ * - Chat management (create, load, delete) with proper state restoration
+ * - Real-time messaging via SSE with auto-save integration
+ * - Agent/world memory management and UI controls
+ * - Settings and chat history navigation with modal management
+ * - Markdown export functionality with HTML rendering
+ * - Smooth streaming indicator management (removed after final message displayed)
+ * - Message editing with core-managed backend integration (single edit request)
+ * - Memory-only message streaming for agent→agent messages saved without response
+ *
+ * Recent Changes:
+ * - 2026-03-12: Preserved assistant finalization for same-messageId streaming rows and allowed unscoped HITL tool-progress events
+ *   to inherit the active chat before chat filtering drops them.
+ * - 2026-03-11: Added chat-history search state updates and backfilled missing HITL prompt chat scope from the active chat
+ *   when tool-progress events omit `chatId`.
+ * - 2026-03-11: Preserved pending HITL queues across chat switches and scoped outbound-send blocking to the active chat
+ *   so switched-chat approvals replay correctly without contaminating other chats.
+ * - 2026-03-11: Replaced handler-to-handler `app.run(...)` chaining in send and chat-create flows with direct
+ *   async-generator composition so intermediate web states are owned by the initiating handler.
+ * - 2026-03-06: Removed runtime fallback to backend `currentChatId` from send/stop/event filtering; active chat actions now require explicit UI session selection.
+ *
+ * Message Edit Feature (Core-Driven):
+ * - Uses backend messageId (server-generated) for message identification
+ * - Single-phase edit: PUT /worlds/:worldName/messages/:messageId with chatId + newContent
+ * - Core handles removal + resubmission + title-regeneration reset consistently across clients
+ * - LocalStorage backup retained for recovery in case backend edit flow fails
+ * - Optimistic UI updates with error rollback
+ * - Handles removal failures and resubmission-status failures from core result payload
+ * - User messages updated with backend messageId when message event received
+ *
+ * Message Deduplication (Multi-Agent):
+ * - User messages deduplicated by messageId to prevent duplicate display
+ * - Each agent receives same user message, but UI shows it only once
+ * - Displays only FIRST agent (intended recipient) via seenByAgents array
+ * - seenByAgents contains only the first agent, not all who received it (matches export.ts logic)
+ * - Subsequent duplicates in other agents' memory are ignored for display
+ * - Calculation happens in TWO places:
+ *   1. SSE streaming: handleMessageEvent() sets first agent when message arrives
+ *   2. Storage loading: deduplicateMessages() uses first agent from memory
+ * - Displays single recipient: "To: a1" showing intended target agent
+ * - Edit button disabled until messageId confirmed (prevents premature edit attempts)
+ * - Applies deduplication in TWO paths:
+ *   1. SSE streaming path: handleMessageEvent() checks for existing messageId OR temp userEntered message
+ *   2. Load from storage path: deduplicateMessages() processes loaded history
+ * - Uses combined check (messageId OR userEntered+text) to prevent race conditions
+ * - Race condition fix: Multiple agents may process same temp message simultaneously
+ *   Solution: Single findIndex with OR condition catches both messageId and temp message
+ *
+ * Changes:
+ * - 2026-03-13: Added `set-reasoning-effort` composer handler to persist world-scoped `reasoning_effort` env state.
+ * - 2026-03-12: Wired live web shell stdout cleanup through `handleToolStreamEnd` so terminal tool events remove
+ *   transient stream rows and leave the finished merged tool card.
+ * - 2026-03-11: Derived the web waiting indicator's `activeAgent` from world activity payloads so the transcript
+ *   shows the correct agent name instead of a static fallback.
+ * - 2026-03-01: Cleared pending HITL prompt UI during optimistic message-edit application so stale pre-edit prompts do not remain visible.
+ * - 2026-02-27: Enforced active-chat scoping for system-event ingestion (drop unscoped/mismatched system events when a chat is selected).
+ * - 2026-02-26: Preserved transient realtime log/system/error messages across same-chat refreshes (`chat-title-updated`, `agent-created`, HITL refresh) so SSE errors remain visible after metadata reload.
+ * - 2026-02-25: Added frontend resume/load trace logging in `initWorld` for chat switch ordering, persisted-memory hydration counts, and HITL replay source verification.
+ * - 2026-02-24: Reconstructed unresolved HITL prompts from persisted raw tool-call request/response pairs during init/chat switch (no event replay dependency).
+ * - 2026-02-21: Prevented tool output expand/collapse actions from consuming pending auto-scroll state and jumping to transcript bottom.
+ * - 2026-02-21: Switched project-folder selection to browser File API flow and preserved UI-enriched world agent fields after updates.
+ * - 2026-02-21: Added `select-project-folder` handler to persist `working_directory` from composer Project button selection.
+ * - 2026-02-21: Updated composer key handling for textarea parity with Electron (Enter sends, Shift+Enter inserts newline, composition-safe).
+ * - 2026-02-20: Blocked new outbound message sends while HITL prompt queue is non-empty.
+ * - 2026-02-20: Enforced options-only HITL handlers and removed free-text prompt events.
+ * - 2026-02-16: Added no-op edit guard to skip save when message content is unchanged.
+ * - 2026-02-15: Updated init chat selection to prioritize current selected chat ID, with backend currentChatId as fallback.
+ * - 2026-02-14: Added generic HITL option prompt queue handling and response submission event for web approval flows.
+ * - 2026-02-14: Added `stop-message-processing` event handler for chat-scoped processing cancellation from web composer.
+ * - 2026-02-13: Switched web edit flow to core-managed `api.editMessage` and updated system-event handling for structured `chat-title-updated` payloads
+ * - 2026-02-08: Removed legacy manual tool-intervention request detection and response submission flow
+ * - 2025-11-11: Fixed createMessageFromMemory to pass through tool_calls and tool_call_id for frontend formatting
+ * - 2025-11-11: Simplified spinner control to use pending operations count from world events (pending > 0 = show, pending === 0 = hide)
+ * - 2025-11-11: Enhanced handleWorldActivity to support agent IDs without "agent:" prefix (e.g., "g1" instead of "agent:g1")
+ * - 2025-11-10: Fixed tool result message display - filter out internal protocol messages with __type: tool_result
+ * - 2025-10-26: Phase 1 - Converted to AppRun native typed events with Update<State, Events> tuple pattern
+ * - 2025-10-26: Fixed createMessageFromMemory to swap sender/fromAgentId for incoming agent messages
+ * - 2025-10-26: Fixed display to show only first agent (intended recipient), not all recipients
+ * - 2025-10-26: Fixed Bug #2 - Empty seenByAgents instead of ['unknown'] for multi-agent scenarios
+ * - 2025-10-26: Aligned seenByAgents with export.ts - incremental build from actual data, not assumption
+ * - 2025-10-26: Fixed deduplicateMessages() to calculate seenByAgents with all agent IDs (CR fix)
+ * - 2025-10-25: Fixed seenByAgents to include all agent IDs instead of 'unknown' for user messages
+ * - 2025-10-25: Fixed race condition in handleMessageEvent - combined messageId and temp message check
+ * - 2025-10-25: Added deduplicateMessages() helper for loading chat history from storage
+ * - 2025-10-25: Applied deduplication to both SSE streaming AND load-from-storage paths
+ * - 2025-10-25: Added message deduplication by messageId for multi-agent scenarios
+ * - 2025-10-25: Added seenByAgents tracking and delivery status display
+ * - 2025-10-21: Refactored to frontend-driven approach (DELETE → POST) for SSE streaming reuse
+ * - 2025-10-21: Added localStorage backup and recovery mechanism
+ * - 2025-10-21: Fixed user message messageId tracking - updates temp message with backend ID
+ * - 2025-10-21: Integrated message edit with backend API (remove-and-resubmit approach)
+ * - 2025-08-09: Removed selectedSettingsTarget localStorage persistence
+ */
+
+import { app } from 'apprun';
+import type { Update } from 'apprun';
+import api from '../../../api';
+import * as InputDomain from '../../../domain/input';
+import * as EditingDomain from '../../../domain/editing';
+import * as DeletionDomain from '../../../domain/deletion';
+import * as ChatHistoryDomain from '../../../domain/chat-history';
+import * as SSEStreamingDomain from '../../../domain/sse-streaming';
+import * as AgentManagementDomain from '../../../domain/agent-management';
+import * as WorldExportDomain from '../../../domain/world-export';
+import * as MessageDisplayDomain from '../../../domain/message-display';
+import * as HitlDomain from '../../../domain/hitl';
+import { resolveZoneContent } from '../../../domain/dashboard-zones';
+import { resolveActiveChatId } from '../../../domain/chat-selection';
+import {
+  createWorldSystemStatus,
+  createWorldSystemErrorMessage,
+  isWorldSystemErrorStatus,
+  shouldPromoteSystemErrorToWorldError,
+  retainWorldSystemStatusForContext,
+  WORLD_SYSTEM_STATUS_TTL_MS,
+} from '../../../domain/system-status';
+import {
+  getEnvValueFromText,
+  getReasoningEffortLevelFromInput,
+  getToolPermissionLevelFromInput,
+  removeEnvVariable,
+  upsertEnvVariable,
+} from '../../../domain/world-variables';
+import { pickProjectFolderPath } from '../../../domain/project-folder-picker';
+import {
+  sendChatMessage,
+  editChatMessage,
+  handleStreamStart,
+  handleStreamChunk,
+  handleStreamEnd,
+  handleStreamError as handleStreamErrorBase,
+  handleLogEvent,
+  handleToolError as handleToolErrorBase,
+  handleToolStart as handleToolStartBase,
+  handleToolProgress as handleToolProgressBase,
+  handleToolResult as handleToolResultBase,
+  handleToolStream as handleToolStreamBase,
+  handleToolStreamEnd as handleToolStreamEndBase,
+} from '../../../utils/sse-client';
+import type { WorldComponentState, Agent, AgentMessage, Message } from '../../../types';
+import type { WorldEventName, WorldEventPayload } from '../../../types/events';
+import toKebabCase from '../../../utils/toKebabCase';
+import {
+  clearSystemStatusTimer,
+  createMessageFromMemory,
+  deduplicateMessages,
+  hasActivity,
+  mergeUpdatedWorldWithUiState,
+  parseLiveToolResultEnvelope,
+  parseSyntheticAssistantToolResult,
+  preserveTransientMessagesAcrossRefresh,
+  scheduleStreamFlush,
+  shouldIgnoreToolEventForActiveChat,
+  startElapsedTimer,
+  stopElapsedTimer,
+  upsertSystemMessage,
+} from './runtime-support';
+import { handleWorldActivity } from './runtime-activity';
+
+// ========================================
+// STREAM & TOOL HANDLERS (with debouncing)
+// ========================================
+
+const handleStreamError = (state: WorldComponentState, data: any): WorldComponentState => {
+  return handleStreamErrorBase(state, data);
+};
+
+/**
+ * Handle tool start - track in activeTools and start elapsed timer (Phase 2)
+ */
+const handleToolStart = (state: WorldComponentState, data: any): WorldComponentState => {
+  if (shouldIgnoreToolEventForActiveChat(state, data)) {
+    return state;
+  }
+
+  // Call base handler for message updates
+  let newState = handleToolStartBase(state, data);
+
+  // Add to activeTools array (Phase 2)
+  const toolEntry: import('../../../types').ToolEntry = {
+    toolUseId: data.messageId || `tool-${Date.now()}`,
+    toolName: data.toolExecution?.toolName || 'unknown',
+    toolInput: data.toolExecution?.input,
+    status: 'running',
+    result: null,
+    errorMessage: null,
+    progress: null,
+    startedAt: new Date().toISOString(),
+    completedAt: null
+  };
+
+  newState = {
+    ...newState,
+    activeTools: [...newState.activeTools, toolEntry],
+    isBusy: true
+  };
+
+  // Start elapsed timer if not already running
+  if (newState.elapsedIntervalId === null) {
+    newState = startElapsedTimer(newState);
+  }
+
+  return newState;
+};
+
+const handleToolProgress = (state: WorldComponentState, data: any): WorldComponentState => {
+  const parsedHitlPrompt = HitlDomain.parseHitlPromptFromToolEvent(data);
+  if (shouldIgnoreToolEventForActiveChat(state, data, { allowMissingChatId: Boolean(parsedHitlPrompt) })) {
+    return state;
+  }
+
+  const hitlPrompt = parsedHitlPrompt
+    ? {
+      ...parsedHitlPrompt,
+      chatId: parsedHitlPrompt.chatId || data?.chatId || state.currentChat?.id || null,
+    }
+    : null;
+  if (hitlPrompt) {
+    let pausedState = state;
+    if (pausedState.debounceFrameId !== null) {
+      cancelAnimationFrame(pausedState.debounceFrameId);
+    }
+    pausedState = {
+      ...pausedState,
+      isWaiting: false,
+      isBusy: false,
+      activeTools: [],
+      pendingStreamUpdates: new Map(),
+      debounceFrameId: null
+    };
+    if (pausedState.elapsedIntervalId !== null) {
+      pausedState = stopElapsedTimer(pausedState);
+    }
+
+    const currentQueue = pausedState.hitlPromptQueue || [];
+    const nextQueue = HitlDomain.enqueueHitlPrompt(currentQueue, hitlPrompt);
+    return {
+      ...pausedState,
+      hitlPromptQueue: nextQueue,
+    };
+  }
+
+  // Tool events are informational - don't control spinner
+  // Spinner is controlled by world events (pending count)
+  return handleToolProgressBase(state, data);
+};
+
+/**
+ * Handle tool result - remove from activeTools and stop timer if idle (Phase 2)
+ */
+const handleToolResult = (state: WorldComponentState, data: any): WorldComponentState => {
+  if (shouldIgnoreToolEventForActiveChat(state, data)) {
+    return state;
+  }
+
+  // Call base handler for message updates
+  let newState = handleToolResultBase(state, data);
+
+  // Remove from activeTools array (Phase 2)
+  const toolUseId = data.messageId;
+  newState = {
+    ...newState,
+    activeTools: newState.activeTools.filter(tool => tool.toolUseId !== toolUseId)
+  };
+
+  // Update busy state (safe check with optional chaining)
+  const stillBusy = hasActivity(newState);
+  newState = { ...newState, isBusy: stillBusy };
+
+  // Stop elapsed timer if no more activity
+  if (!stillBusy && newState.elapsedIntervalId !== null) {
+    newState = stopElapsedTimer(newState);
+  }
+
+  return newState;
+};
+
+const handleToolError = (state: WorldComponentState, data: any): WorldComponentState => {
+  if (shouldIgnoreToolEventForActiveChat(state, data)) {
+    return state;
+  }
+
+  // Tool events are informational - don't control spinner
+  // Spinner is controlled by world events (pending count)
+  return handleToolErrorBase(state, data);
+};
+
+/**
+ * Handle stream chunk - add to pending updates and schedule RAF flush (Phase 2)
+ */
+const handleStreamChunkDebounced = (state: WorldComponentState, data: any): WorldComponentState => {
+  const { messageId, content } = data;
+
+  // Add to pending updates map
+  const pending = new Map(state.pendingStreamUpdates);
+  pending.set(messageId, content || '');
+
+  let newState = {
+    ...state,
+    pendingStreamUpdates: pending
+  };
+
+  // Schedule RAF flush if not already scheduled
+  newState = scheduleStreamFlush(newState);
+
+  // Also call base handler to ensure message exists in array
+  newState = handleStreamChunk(newState, data);
+
+  return newState;
+};
+
+const handleToolStream = (state: WorldComponentState, data: any): WorldComponentState => {
+  if (shouldIgnoreToolEventForActiveChat(state, data)) {
+    return state;
+  }
+
+  // Tool stream events for real-time shell command output
+  // Spinner is controlled by world events (pending count)
+  return handleToolStreamBase(state, data);
+};
+
+const handleToolStreamEnd = (state: WorldComponentState, data: any): WorldComponentState => {
+  if (shouldIgnoreToolEventForActiveChat(state, data)) {
+    return state;
+  }
+
+  return handleToolStreamEndBase(state, data);
+};
+
+// World initialization with core auto-restore
+async function* initWorld(state: WorldComponentState, name: string, chatId?: string): AsyncGenerator<WorldComponentState> {
+  if (!name) {
+    location.href = '/';
+    return;
+  }
+  try {
+    const initStartedAt = Date.now();
+    const worldName = decodeURIComponent(name);
+    console.log(`[web:initWorld] start world=${worldName} requestedChat=${chatId || 'n/a'}`);
+
+    // Default selectedSettingsTarget to 'world' on init (no persistence)
+    state.selectedSettingsTarget = 'world';
+    state.worldName = worldName;
+    state.loading = true;
+
+    let world = await api.getWorld(worldName);
+    console.log(`[web:initWorld] getWorld loaded world=${worldName} backendCurrentChat=${world.currentChatId || 'n/a'} chats=${Array.isArray(world.chats) ? world.chats.length : 0}`);
+    if (!world) {
+      throw new Error('World not found: ' + worldName);
+    }
+
+    chatId = resolveActiveChatId(world, chatId) || undefined;
+
+    let replayedHitlQueue = state.hitlPromptQueue || [];
+    if (world.currentChatId !== chatId && chatId) {
+      console.log(`[web:initWorld] setChat begin world=${worldName} from=${world.currentChatId || 'n/a'} to=${chatId}`);
+      const setChatResult = await api.setChat(worldName, chatId);
+      if (setChatResult?.world) {
+        world = setChatResult.world;
+        console.log(`[web:initWorld] setChat world-updated world=${worldName} backendCurrentChat=${world.currentChatId || 'n/a'}`);
+      }
+
+      const replayedFromBackend = Array.isArray(setChatResult?.hitlPrompts)
+        ? setChatResult.hitlPrompts
+          .map((entry) => {
+            const envelope = entry && typeof entry === 'object'
+              ? { chatId: entry.chatId ?? chatId ?? null, prompt: entry.prompt }
+              : null;
+            return envelope ? HitlDomain.parseHitlPromptRequest(envelope) : null;
+          })
+          .filter((prompt): prompt is NonNullable<typeof prompt> => Boolean(prompt))
+        : [];
+
+      if (replayedFromBackend.length > 0) {
+        replayedHitlQueue = replayedFromBackend;
+        console.log(`[web:initWorld] setChat hitl-prompts-from-backend count=${replayedFromBackend.length}`);
+      }
+    }
+
+    let rawMessages: any[] = [];
+
+    const agents: Agent[] = Array.from(world.agents.values());
+    for (const agent of agents) {
+      agent.spriteIndex = agents.indexOf(agent) % 9;
+      agent.messageCount = 0;
+      for (const memoryItem of agent.memory || []) {
+        if (memoryItem.chatId === chatId) {
+          agent.messageCount++;
+          const message = createMessageFromMemory(memoryItem, agent.name);
+          rawMessages.push(message);
+        }
+      }
+    }
+
+    // Apply deduplication to loaded messages (same as SSE streaming path)
+    // Pass agents array so user messages get correct seenByAgents
+    const messages = deduplicateMessages([...rawMessages], agents);
+    if (!Array.isArray(replayedHitlQueue) || replayedHitlQueue.length === 0) {
+      replayedHitlQueue = HitlDomain.reconstructPendingHitlPromptsFromMessages(messages as unknown as Array<Record<string, unknown>>, chatId || null);
+      console.log(`[web:initWorld] hitl-prompts-reconstructed-from-messages count=${replayedHitlQueue.length}`);
+    }
+    console.log(`[web:initWorld] memory-hydrated world=${worldName} chat=${chatId || world.currentChatId || 'n/a'} rawMessages=${rawMessages.length} dedupMessages=${messages.length} elapsedMs=${Date.now() - initStartedAt}`);
+    const selectedProjectPath = getEnvValueFromText(world.variables, 'working_directory');
+
+    // Resolve dashboard zone content from loaded messages
+    const dashboardZoneContent = world.dashboardZones?.length
+      ? resolveZoneContent(world.dashboardZones, messages)
+      : new Map();
+    const retainedSystemStatus = retainWorldSystemStatusForContext(state.systemStatus, worldName, chatId || null);
+    if (!retainedSystemStatus) {
+      clearSystemStatusTimer(state.systemStatusTimerId);
+    }
+
+    yield {
+      ...state,
+      world,
+      currentChat: world.chats.find(c => c.id === chatId) || null,
+      selectedProjectPath,
+      systemStatus: retainedSystemStatus,
+      systemStatusTimerId: retainedSystemStatus ? state.systemStatusTimerId : null,
+      messages,
+      rawMessages,
+      hitlPromptQueue: replayedHitlQueue,
+      dashboardZoneContent,
+      dashboardShowHistory: false,
+      loading: false,
+      needScroll: true,
+      lastUserMessageText: null,
+    };
+
+  } catch (error: any) {
+    console.log(`[web:initWorld] error message=${error?.message || String(error)} requestedChat=${chatId || 'n/a'}`);
+    const retainedSystemStatus = retainWorldSystemStatusForContext(state.systemStatus, state.worldName, chatId || null);
+    if (!retainedSystemStatus) {
+      clearSystemStatusTimer(state.systemStatusTimerId);
+    }
+    yield {
+      ...state,
+      error: error.message || 'Failed to load world data',
+      loading: false,
+      systemStatus: retainedSystemStatus,
+      systemStatusTimerId: retainedSystemStatus ? state.systemStatusTimerId : null,
+      needScroll: false,
+      lastUserMessageText: state.lastUserMessageText ?? null,
+    };
+  }
+}
+
+async function* refreshWorldState(
+  state: WorldComponentState,
+  activeChatId?: string
+): AsyncGenerator<WorldComponentState> {
+  const updates = initWorld({ ...state }, state.worldName, activeChatId);
+  for await (const update of updates) {
+    const mergedMessages = preserveTransientMessagesAcrossRefresh(
+      state.messages || [],
+      (update as any).messages || [],
+      activeChatId || null
+    );
+    yield {
+      ...state,
+      ...update,
+      messages: mergedMessages
+    };
+    return;
+  }
+}
+
+async function* sendMessageFlow(state: WorldComponentState): AsyncGenerator<WorldComponentState> {
+  if (HitlDomain.hasHitlPromptForChat(state.hitlPromptQueue || [], state.currentChat?.id || null)) {
+    yield {
+      ...state,
+      error: 'Resolve the pending HITL prompt before sending a new message.'
+    };
+    return;
+  }
+
+  const prepared = InputDomain.validateAndPrepareMessage(state.userInput, state.worldName);
+  if (!prepared) {
+    return;
+  }
+
+  const activeChatId = state.currentChat?.id || null;
+  if (!activeChatId) {
+    yield {
+      ...state,
+      error: 'Select a chat session before sending a message.'
+    };
+    return;
+  }
+
+  const sendingState = InputDomain.createSendingState(state, prepared.message);
+  const optimisticState: WorldComponentState = {
+    ...sendingState,
+    lastUserMessageText: prepared.text
+  };
+  yield optimisticState;
+
+  try {
+    await sendChatMessage(state.worldName, prepared.text, {
+      sender: 'HUMAN',
+      chatId: activeChatId
+    });
+
+    yield InputDomain.createSentState(optimisticState);
+  } catch (error: any) {
+    yield InputDomain.createSendErrorState(optimisticState, error.message || 'Failed to send message');
+  }
+}
+
+
+// Event handlers for SSE and system events
+const handleSystemEvent = async function* (
+  state: WorldComponentState,
+  data: any
+): AsyncGenerator<WorldComponentState> {
+  const envelope = (data && typeof data === 'object') ? (data as Record<string, any>) : null;
+  const contentPayload = envelope && 'content' in envelope ? envelope.content : data;
+  const structuredPayload =
+    contentPayload && typeof contentPayload === 'object' ? contentPayload : null;
+  const activeChatId = state.currentChat?.id || null;
+  const scopedSystemChatIdRaw =
+    structuredPayload && 'chatId' in structuredPayload
+      ? (structuredPayload as Record<string, unknown>).chatId
+      : envelope && 'chatId' in envelope
+        ? envelope.chatId
+        : undefined;
+  const scopedSystemChatId =
+    typeof scopedSystemChatIdRaw === 'string'
+      ? scopedSystemChatIdRaw.trim() || null
+      : scopedSystemChatIdRaw === null
+        ? null
+        : undefined;
+  if (activeChatId && (!scopedSystemChatId || scopedSystemChatId !== activeChatId)) {
+    return;
+  }
+
+  const eventType =
+    (structuredPayload && typeof structuredPayload.eventType === 'string' && structuredPayload.eventType) ||
+    (typeof contentPayload === 'string' ? contentPayload : null) ||
+    (typeof data === 'string' ? data : null);
+  const nextSystemStatus = createWorldSystemStatus(state.worldName, envelope || data, activeChatId);
+  clearSystemStatusTimer(state.systemStatusTimerId);
+
+  if (isWorldSystemErrorStatus(nextSystemStatus)) {
+    const systemErrorMessage = createWorldSystemErrorMessage(envelope || data, state.worldName, activeChatId) as Message | null;
+    const nextMessages = systemErrorMessage
+      ? upsertSystemMessage(state.messages || [], systemErrorMessage)
+      : state.messages || [];
+    yield {
+      ...state,
+      systemStatus: null,
+      systemStatusTimerId: null,
+      messages: nextMessages,
+      needScroll: true,
+      error: shouldPromoteSystemErrorToWorldError(envelope || data) ? nextSystemStatus.text : state.error,
+    };
+    return;
+  }
+
+  let nextTimerId: number | null = null;
+  if (nextSystemStatus?.messageId) {
+    const statusMessageId = nextSystemStatus.messageId;
+    nextTimerId = setTimeout(() => {
+      app.run('clear-system-status', {
+        messageId: statusMessageId,
+        chatId: nextSystemStatus.chatId,
+        text: nextSystemStatus.text,
+      });
+    }, WORLD_SYSTEM_STATUS_TTL_MS);
+  } else if (nextSystemStatus) {
+    nextTimerId = setTimeout(() => {
+      app.run('clear-system-status', {
+        chatId: nextSystemStatus.chatId,
+        text: nextSystemStatus.text,
+      });
+    }, WORLD_SYSTEM_STATUS_TTL_MS);
+  }
+
+  const newState = {
+    ...state,
+    systemStatus: nextSystemStatus,
+    systemStatusTimerId: nextTimerId,
+    needScroll: true
+  };
+
+  // Handle specific system events
+  if (eventType === 'chat-title-updated') {
+    // Lightweight in-place update using the title already present in the event payload.
+    // Avoids calling initWorld (which rebuilds messages from agent memory): if agents are
+    // deleted concurrently, that reload would return empty messages and wipe the chat history.
+    const newTitle =
+      typeof structuredPayload?.title === 'string' && structuredPayload.title.trim()
+        ? structuredPayload.title.trim()
+        : null;
+    if (newTitle) {
+      const eventChatId = scopedSystemChatId || null;
+      const updatedCurrentChat =
+        eventChatId && newState.currentChat?.id === eventChatId
+          ? { ...newState.currentChat, name: newTitle }
+          : newState.currentChat;
+      const updatedWorld = newState.world
+        ? {
+          ...newState.world,
+          chats: (newState.world.chats || []).map((c) =>
+            c.id === eventChatId ? { ...c, name: newTitle } : c
+          ),
+        }
+        : newState.world;
+      yield { ...newState, currentChat: updatedCurrentChat, world: updatedWorld };
+      return;
+    }
+    // Fallback: full world refresh when title is absent from payload.
+    yield* refreshWorldState(newState, newState.currentChat?.id || undefined);
+    return;
+  }
+
+  if (eventType === 'agent-created') {
+    // Re-fetch world to pick up the new agent in the agents list.
+    yield* refreshWorldState(newState, newState.currentChat?.id || undefined);
+    return;
+  }
+
+  yield newState;
+};
+
+async function* handleComposerKeyPress(
+  state: WorldComponentState,
+  payload: WorldEventPayload<'key-press'>
+): AsyncGenerator<WorldComponentState> {
+  if (payload.nativeEvent?.isComposing || payload.keyCode === 229) {
+    return;
+  }
+  if (HitlDomain.hasHitlPromptForChat(state.hitlPromptQueue || [], state.currentChat?.id || null)) {
+    return;
+  }
+  if (InputDomain.shouldSendOnEnter(payload.key, payload.shiftKey, state.userInput)) {
+    payload.preventDefault?.();
+    yield* sendMessageFlow(state);
+  }
+}
+
+const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any): T => {
+
+  const messageData = data || {};
+  const activeChatId = state.currentChat?.id || null;
+  const incomingChatId = messageData.chatId ?? null;
+
+  if (activeChatId && (!incomingChatId || incomingChatId !== activeChatId)) {
+    return state;
+  }
+
+  const senderName = messageData.sender;
+  const liveToolResult = parseLiveToolResultEnvelope(messageData.content);
+  const syntheticToolResult = parseSyntheticAssistantToolResult(messageData.content);
+
+  // Find and update agent message count
+  let fromAgentId: string | undefined;
+  if (state.world?.agents) {
+    const agent = state.world.agents.find((a: any) => a.name.toLowerCase() === senderName.toLowerCase());
+    if (agent) {
+      if (!agent.messageCount) {
+        agent.messageCount = 0;
+      }
+      agent.messageCount++;
+      fromAgentId = agent.id;
+    }
+  }
+
+  const messageText = syntheticToolResult?.content ?? liveToolResult?.content ?? messageData.content ?? messageData.message ?? '';
+
+  // Determine message type based on role field
+  const effectiveRole = syntheticToolResult?.role ?? liveToolResult?.role ?? messageData.role;
+  let messageType: string;
+  if (effectiveRole === 'tool') {
+    messageType = 'tool';
+  } else if (effectiveRole === 'user' || senderName === 'human' || senderName === 'user') {
+    messageType = 'user';
+  } else if (effectiveRole === 'assistant') {
+    messageType = 'agent';
+  } else {
+    messageType = messageData.type || 'message';
+  }
+
+  const newMessage = {
+    id: messageData.id || `msg-${Date.now() + Math.random()}`,
+    type: messageType,
+    sender: senderName,
+    text: messageText,
+    createdAt: messageData.createdAt || new Date().toISOString(),
+    fromAgentId,
+    messageId: messageData.messageId,
+    chatId: messageData.chatId,
+    replyToMessageId: messageData.replyToMessageId,
+    role: effectiveRole, // Preserve role for filtering
+    tool_calls: messageData.tool_calls,
+    tool_call_id: liveToolResult?.toolCallId ?? messageData.tool_call_id,
+    syntheticDisplayOnly: Boolean(syntheticToolResult) || messageData.syntheticDisplayOnly === true,
+    syntheticToolResult: syntheticToolResult || messageData.syntheticToolResult,
+  };
+
+  const existingMessages = state.messages || [];
+  const normalizedSender = (senderName || '').toLowerCase();
+  const normalizedToolCallId = String(newMessage.tool_call_id || '').trim();
+
+  // Check if this is a user message that we need to deduplicate or update
+  const isUserMessage = normalizedSender === 'human' || normalizedSender === 'user';
+  if (isUserMessage && messageData.messageId) {
+    // Check for existing message (either by messageId or temp message with matching text)
+    // This prevents race conditions where multiple agents process the same temp message
+    const existingMessageIndex = existingMessages.findIndex(
+      msg => msg.messageId === messageData.messageId ||
+        (msg.userEntered && msg.text === newMessage.text)
+    );
+
+    if (existingMessageIndex !== -1) {
+      const existingMessage = existingMessages[existingMessageIndex];
+
+      // Check if this message already has the messageId
+      if (existingMessage.messageId === messageData.messageId) {
+        // Message already has messageId - this is a duplicate from another agent
+        // Don't merge - keep only the FIRST agent (intended recipient)
+        // Duplicates in other agents' memory are just copies
+        return state;
+      }
+
+      // Message is temp (userEntered=true) and needs messageId
+      const updatedMessages = existingMessages.map((msg, index) => {
+        if (index === existingMessageIndex) {
+          return {
+            ...msg,
+            messageId: messageData.messageId,
+            chatId: messageData.chatId ?? msg.chatId,
+            createdAt: messageData.createdAt || msg.createdAt,
+            userEntered: false, // No longer temporary
+            seenByAgents: fromAgentId ? [fromAgentId] : [] // Initialize with first agent or empty
+          };
+        }
+        return msg;
+      });
+
+      return {
+        ...state,
+        messages: updatedMessages
+      };
+    }
+  }
+
+  if (newMessage.role === 'tool') {
+    const existingToolMessageIndex = existingMessages.findIndex((message) => {
+      const existingToolCallId = String((message as any)?.tool_call_id || (message as any)?.toolCallId || '').trim();
+      if (normalizedToolCallId && existingToolCallId === normalizedToolCallId) {
+        return true;
+      }
+      return Boolean(newMessage.messageId) && message.messageId === newMessage.messageId;
+    });
+
+    if (existingToolMessageIndex !== -1) {
+      const updatedMessages = existingMessages.map((message, index) => {
+        if (index !== existingToolMessageIndex) {
+          return message;
+        }
+
+        return {
+          ...message,
+          ...newMessage,
+          id: message.id || newMessage.id,
+          messageId: newMessage.messageId ?? message.messageId,
+          tool_call_id: normalizedToolCallId || (message as any).tool_call_id,
+        };
+      });
+
+      return {
+        ...state,
+        messages: updatedMessages,
+      };
+    }
+  }
+
+  if (!isUserMessage && newMessage.role !== 'tool' && newMessage.messageId) {
+    const existingMessageIndex = existingMessages.findIndex((message) => message.messageId === newMessage.messageId);
+    if (existingMessageIndex !== -1) {
+      const updatedMessages = existingMessages.map((message, index) => {
+        if (index !== existingMessageIndex) {
+          return message;
+        }
+
+        return {
+          ...message,
+          ...newMessage,
+          id: message.id || newMessage.id,
+          isStreaming: message.isStreaming ? false : message.isStreaming,
+        };
+      });
+
+      return {
+        ...state,
+        messages: updatedMessages,
+      };
+    }
+  }
+
+  // If a streaming placeholder exists for this sender, convert it to the final message
+  const streamingIndex = existingMessages.findIndex(
+    msg => msg?.isStreaming && (msg.sender || '').toLowerCase() === normalizedSender
+  );
+
+  if (streamingIndex !== -1) {
+    const updatedMessages = existingMessages
+      .map((msg, index) => {
+        if (index !== streamingIndex) {
+          return msg;
+        }
+
+        return {
+          ...msg,
+          ...newMessage,
+          id: newMessage.id,
+          isStreaming: false,
+          messageId: newMessage.messageId ?? msg.messageId
+        };
+      })
+      .filter(msg => !!msg);
+
+    return {
+      ...state,
+      messages: updatedMessages
+    };
+  }
+
+  // Filter out temporary placeholders and user-entered messages before adding the new one
+  state.messages = existingMessages.filter(msg =>
+    !(msg.isStreaming && (msg.sender || '').toLowerCase() === normalizedSender)
+  );
+  state.messages.push(newMessage);
+
+  // Update dashboard zone content from the full message list for the current chat
+  const updatedState = { ...state };
+  if (state.world?.uiMode === 'dashboard' && state.world.dashboardZones?.length) {
+    updatedState.dashboardZoneContent = resolveZoneContent(state.world.dashboardZones, state.messages);
+  }
+
+  return updatedState as T;
+};
+
+const handleError = <T extends WorldComponentState>(state: T, error: any): T => {
+  const errorMessage = error.message || 'SSE error';
+
+  const errorMsg = {
+    id: Date.now() + Math.random(),
+    type: 'error',
+    sender: 'System',
+    text: errorMessage,
+    createdAt: new Date().toISOString(),
+    worldName: state.worldName,
+    hasError: true
+  };
+
+  return {
+    ...state,
+    error: errorMessage,
+    messages: [...(state.messages || []), errorMsg],
+    needScroll: true
+  } as T;
+};
+
+
+/**
+ * World Update Handlers - AppRun Native Typed Events
+ * 
+ * Converted from object to tuple array for compile-time type safety.
+ * Uses Update<State, Events> pattern with discriminated unions.
+ * 
+ * TypeScript now validates:
+ * - Event names (catches typos at compile time)
+ * - Payload structures (ensures correct parameters)
+ * - Handler return types (state consistency)
+ */
+
+
+
+export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = {
+
+  // ========================================
+  // ROUTE & INITIALIZATION
+  // ========================================
+
+  'initWorld': initWorld,
+  '/World': initWorld,
+
+  // ========================================
+  // USER INPUT & MESSAGING
+  // ========================================
+
+  'update-input': (state: WorldComponentState, payload: WorldEventPayload<'update-input'>): WorldComponentState =>
+    InputDomain.updateInput(state, payload.target.value),
+
+  'update-chat-search': (state: WorldComponentState, payload: WorldEventPayload<'update-chat-search'>): WorldComponentState => ({
+    ...state,
+    chatSearchQuery: payload.target.value,
+  }),
+
+  'key-press': handleComposerKeyPress,
+
+  'send-message': sendMessageFlow,
+
+  'select-project-folder': async (state: WorldComponentState): Promise<WorldComponentState> => {
+    if (!state.world?.name) {
+      return {
+        ...state,
+        error: 'Load a world before selecting a project folder.'
+      };
+    }
+
+    try {
+      const pickerResult = await pickProjectFolderPath(state.selectedProjectPath || null);
+      if (pickerResult?.canceled || !pickerResult?.directoryPath) {
+        return state;
+      }
+
+      const selectedPath = String(pickerResult.directoryPath || '').trim();
+      if (!selectedPath) {
+        return state;
+      }
+
+      const nextVariables = upsertEnvVariable(
+        state.world.variables || '',
+        'working_directory',
+        selectedPath
+      );
+
+      const updatedWorld = await api.updateWorld(state.worldName, { variables: nextVariables });
+      const mergedWorld = mergeUpdatedWorldWithUiState(state.world, updatedWorld);
+      return {
+        ...state,
+        world: mergedWorld,
+        selectedProjectPath: selectedPath,
+        error: null
+      };
+    } catch (error: any) {
+      return {
+        ...state,
+        error: error?.message || 'Failed to select project folder.'
+      };
+    }
+  },
+
+  'set-tool-permission': async (state: WorldComponentState, payload: unknown): Promise<WorldComponentState> => {
+    if (!state.world?.name) return state;
+    const toolPermission = getToolPermissionLevelFromInput(payload);
+    if (!toolPermission) return state;
+    const nextVariables = upsertEnvVariable(
+      state.world.variables || '',
+      'tool_permission',
+      toolPermission
+    );
+    try {
+      const updatedWorld = await api.updateWorld(state.worldName, { variables: nextVariables });
+      const mergedWorld = mergeUpdatedWorldWithUiState(state.world, updatedWorld);
+      return { ...state, world: mergedWorld, error: null };
+    } catch (error: any) {
+      return { ...state, error: error?.message || 'Failed to update tool permission.' };
+    }
+  },
+
+  'set-reasoning-effort': async (state: WorldComponentState, payload: unknown): Promise<WorldComponentState> => {
+    if (!state.world?.name) return state;
+    const reasoningEffort = getReasoningEffortLevelFromInput(payload);
+    if (!reasoningEffort) return state;
+    const nextVariables = reasoningEffort === 'default'
+      ? removeEnvVariable(state.world.variables || '', 'reasoning_effort')
+      : upsertEnvVariable(
+        state.world.variables || '',
+        'reasoning_effort',
+        reasoningEffort
+      );
+    try {
+      const updatedWorld = await api.updateWorld(state.worldName, { variables: nextVariables });
+      const mergedWorld = mergeUpdatedWorldWithUiState(state.world, updatedWorld);
+      return { ...state, world: mergedWorld, error: null };
+    } catch (error: any) {
+      return { ...state, error: error?.message || 'Failed to update reasoning effort.' };
+    }
+  },
+
+  'stop-message-processing': async function* (state: WorldComponentState): AsyncGenerator<WorldComponentState> {
+    const chatId = state.currentChat?.id || null;
+    if (!chatId) {
+      yield {
+        ...state,
+        error: 'No active chat session to stop.'
+      };
+      return;
+    }
+
+    if (state.isStopping) {
+      return;
+    }
+
+    const stoppingState: WorldComponentState = {
+      ...state,
+      isStopping: true,
+      error: null
+    };
+    yield stoppingState;
+
+    try {
+      const result = await api.stopMessageProcessing(state.worldName, chatId);
+      const shouldResetProcessingState = Boolean(result?.stopped) || result?.reason === 'no-active-process';
+
+      if (shouldResetProcessingState) {
+        if (stoppingState.debounceFrameId !== null) {
+          cancelAnimationFrame(stoppingState.debounceFrameId);
+        }
+        if (stoppingState.elapsedIntervalId !== null) {
+          clearInterval(stoppingState.elapsedIntervalId);
+        }
+      }
+
+      yield {
+        ...stoppingState,
+        isStopping: false,
+        isWaiting: shouldResetProcessingState ? false : stoppingState.isWaiting,
+        isBusy: shouldResetProcessingState ? false : stoppingState.isBusy,
+        activeTools: shouldResetProcessingState ? [] : stoppingState.activeTools,
+        pendingStreamUpdates: shouldResetProcessingState ? new Map() : stoppingState.pendingStreamUpdates,
+        debounceFrameId: shouldResetProcessingState ? null : stoppingState.debounceFrameId,
+        elapsedIntervalId: shouldResetProcessingState ? null : stoppingState.elapsedIntervalId,
+        activityStartTime: shouldResetProcessingState ? null : stoppingState.activityStartTime,
+        elapsedMs: shouldResetProcessingState ? 0 : stoppingState.elapsedMs,
+        needScroll: shouldResetProcessingState ? true : stoppingState.needScroll,
+        error: null
+      };
+    } catch (error: any) {
+      yield {
+        ...stoppingState,
+        isStopping: false,
+        error: error?.message || 'Failed to stop message processing.'
+      };
+    }
+  },
+
+  // ========================================
+  // SSE STREAMING EVENTS
+  // ========================================
+  // SSE STREAMING HANDLERS
+  // ========================================
+
+  'handleStreamStart': handleStreamStart,
+  'handleStreamChunk': handleStreamChunkDebounced, // Phase 2: Debounced version
+  'handleStreamEnd': handleStreamEnd,
+  'handleStreamError': handleStreamError,
+  'handleLogEvent': handleLogEvent,
+  'handleMessageEvent': handleMessageEvent,
+  'handleSystemEvent': handleSystemEvent,
+  'clear-system-status': (
+    state: WorldComponentState,
+    payload: WorldEventPayload<'clear-system-status'>
+  ): WorldComponentState => {
+    const currentStatus = state.systemStatus;
+    if (!currentStatus) {
+      return state;
+    }
+
+    const targetMessageId = String(payload?.messageId || '').trim() || null;
+    const targetChatId = String(payload?.chatId || '').trim() || null;
+    const targetText = String(payload?.text || '').trim() || null;
+    if (targetMessageId && currentStatus.messageId && currentStatus.messageId !== targetMessageId) {
+      return state;
+    }
+    if (!targetMessageId && targetText && currentStatus.text !== targetText) {
+      return state;
+    }
+    if (targetChatId && currentStatus.chatId !== targetChatId) {
+      return state;
+    }
+
+    clearSystemStatusTimer(state.systemStatusTimerId);
+    return {
+      ...state,
+      systemStatus: null,
+      systemStatusTimerId: null,
+    };
+  },
+  'respond-hitl-option': async function* (
+    state: WorldComponentState,
+    payload: WorldEventPayload<'respond-hitl-option'>
+  ): AsyncGenerator<WorldComponentState> {
+    const requestId = String(payload?.requestId || '').trim();
+    const optionId = String(payload?.optionId || '').trim();
+    if (!requestId || !optionId) {
+      yield {
+        ...state,
+        error: 'Invalid HITL response payload.'
+      };
+      return;
+    }
+
+    const prompt = (state.hitlPromptQueue || []).find((entry) => entry.requestId === requestId);
+    if (!prompt) {
+      yield {
+        ...state,
+        error: `HITL request '${requestId}' not found.`
+      };
+      return;
+    }
+
+    yield {
+      ...state,
+      submittingHitlRequestId: requestId,
+      error: null
+    };
+
+    try {
+      const result = await api.respondHitlOption(
+        state.worldName,
+        requestId,
+        optionId,
+        payload?.chatId ?? prompt.chatId ?? null
+      );
+      if (!result?.accepted) {
+        yield {
+          ...state,
+          submittingHitlRequestId: null,
+          error: result?.reason || 'HITL response was not accepted.'
+        };
+        return;
+      }
+      yield {
+        ...state,
+        submittingHitlRequestId: null,
+        hitlPromptQueue: HitlDomain.removeHitlPromptByRequestId(state.hitlPromptQueue || [], requestId)
+      };
+
+      if (prompt?.metadata?.refreshAfterDismiss) {
+        const activeChatId = state.currentChat?.id || undefined;
+        const updates = initWorld(state, state.worldName, activeChatId);
+        for await (const update of updates) {
+          const mergedMessages = preserveTransientMessagesAcrossRefresh(
+            state.messages || [],
+            (update as any).messages || [],
+            activeChatId || null
+          );
+          yield {
+            ...state,
+            ...update,
+            messages: mergedMessages,
+            submittingHitlRequestId: null,
+            hitlPromptQueue: HitlDomain.removeHitlPromptByRequestId((update.hitlPromptQueue || state.hitlPromptQueue || []), requestId)
+          };
+        }
+      }
+    } catch (error: any) {
+      yield {
+        ...state,
+        submittingHitlRequestId: null,
+        error: error?.message || 'Failed to submit HITL response.'
+      };
+    }
+  },
+  'handleError': handleError,
+  'handleToolError': handleToolError,
+  'handleToolStart': handleToolStart,
+  'handleToolProgress': handleToolProgress,
+  'handleToolResult': handleToolResult,
+  'handleToolStream': handleToolStream,
+  'handleToolStreamEnd': handleToolStreamEnd,
+  'handleWorldActivity': (state: WorldComponentState, activity: any): WorldComponentState | void => {
+    return handleWorldActivity(state, activity);
+  },
+  // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
+
+  // ========================================
+  // PHASE 2: STREAMING STATE UPDATES
+  // ========================================
+
+  /**
+   * Flush pending stream updates (called by RAF)
+   */
+  'flush-stream-updates': (state: WorldComponentState): WorldComponentState => {
+    if (state.pendingStreamUpdates.size === 0) {
+      return { ...state, debounceFrameId: null };
+    }
+
+    // Apply all pending updates to messages immutably
+    const messages = state.messages.map(msg => {
+      const pending = state.pendingStreamUpdates.get(msg.messageId);
+      return pending ? { ...msg, text: pending } : msg;
+    });
+
+    // Re-resolve dashboard zone content from the full (now-updated) message list.
+    // This ensures zones always reflect the current chat's messages, even if
+    // streaming events from a previous chat arrive after a chat switch.
+    const dashboardZoneContent = state.world?.uiMode === 'dashboard' && state.world.dashboardZones?.length
+      ? resolveZoneContent(state.world.dashboardZones, messages)
+      : state.dashboardZoneContent;
+
+    return {
+      ...state,
+      messages,
+      dashboardZoneContent,
+      pendingStreamUpdates: new Map(),
+      debounceFrameId: null,
+      needScroll: true
+    };
+  },
+
+  /**
+   * Update elapsed time (called by interval timer)
+   */
+  'update-elapsed-time': (state: WorldComponentState): WorldComponentState => {
+    if (state.activityStartTime === null) {
+      return state;
+    }
+
+    const elapsed = Date.now() - state.activityStartTime;
+    return { ...state, elapsedMs: elapsed };
+  },
+
+  // ========================================
+  // MESSAGE DISPLAY
+  // ========================================
+
+  'toggle-log-details': (state: WorldComponentState, messageId: WorldEventPayload<'toggle-log-details'>): WorldComponentState =>
+    MessageDisplayDomain.toggleLogDetails(state, messageId),
+
+  'toggle-reasoning-output': (state: WorldComponentState, messageId: string): WorldComponentState => ({
+    ...state,
+    messages: state.messages.map((message) => {
+      if (message.id !== messageId) {
+        return message;
+      }
+
+      const currentlyExpanded = typeof (message as any).isReasoningExpanded === 'boolean'
+        ? Boolean((message as any).isReasoningExpanded)
+        : Boolean(message.isStreaming);
+
+      return {
+        ...message,
+        isReasoningExpanded: !currentlyExpanded,
+      };
+    }),
+    needScroll: false,
+  }),
+
+  // ========================================
+  // DASHBOARD
+  // ========================================
+
+  'toggle-dashboard-history': (state: WorldComponentState): WorldComponentState => {
+    const showHistory = !state.dashboardShowHistory;
+    // When switching back to dashboard, re-resolve zone content from current messages
+    let dashboardZoneContent = state.dashboardZoneContent;
+    if (!showHistory && state.world?.dashboardZones?.length) {
+      dashboardZoneContent = resolveZoneContent(state.world.dashboardZones, state.messages || []);
+    }
+    return {
+      ...state,
+      dashboardShowHistory: showHistory,
+      dashboardZoneContent,
+      needScroll: showHistory, // Scroll to bottom when switching to history
+    };
+  },
+
+  // ========================================
+  // MESSAGE EDITING
+  // ========================================
+
+  'start-edit-message': (state: WorldComponentState, payload: WorldEventPayload<'start-edit-message'>): WorldComponentState => ({
+    ...EditingDomain.startEditMessage(state, payload.messageId, payload.text),
+    needScroll: false  // Don't scroll when starting edit
+  }),
+
+  'cancel-edit-message': (state: WorldComponentState): WorldComponentState =>
+    EditingDomain.cancelEditMessage(state),
+
+  'update-edit-text': (state: WorldComponentState, payload: WorldEventPayload<'update-edit-text'>): WorldComponentState =>
+    EditingDomain.updateEditText(state, payload.target.value),
+
+  // Phase 5: Toggle tool output expansion
+  'toggle-tool-output': (state: WorldComponentState, messageId: string): WorldComponentState => {
+    const messages = state.messages.map(msg => {
+      if (msg.id === messageId) {
+        return {
+          ...msg,
+          isToolOutputExpanded: !msg.isToolOutputExpanded
+        };
+      }
+      return msg;
+    });
+
+    return {
+      ...state,
+      messages,
+      needScroll: false
+    };
+  },
+
+  // ========================================
+  // MESSAGE DELETION
+  // ========================================
+
+  'show-delete-message-confirm': (state: WorldComponentState, payload: WorldEventPayload<'show-delete-message-confirm'>): WorldComponentState =>
+    DeletionDomain.showDeleteConfirmation(
+      state,
+      payload.messageId,
+      payload.backendMessageId,
+      payload.messageText,
+      payload.userEntered
+    ),
+
+  'hide-delete-message-confirm': (state: WorldComponentState): WorldComponentState =>
+    DeletionDomain.hideDeleteConfirmation(state),
+
+  'delete-message-confirmed': async (state: WorldComponentState): Promise<WorldComponentState> => {
+    if (!state.messageToDelete) return state;
+
+    const { id, messageId, chatId } = state.messageToDelete;
+
+    try {
+      // Call DELETE to remove message and all subsequent messages
+      const deleteResult = await api.deleteMessage(
+        state.worldName,
+        messageId,
+        chatId
+      );
+
+      // Check DELETE result
+      if (!deleteResult.success) {
+        return {
+          ...state,
+          error: `Failed to delete message: ${deleteResult.failedAgents?.map((a: any) => a.error).join(', ') || 'Unknown error'}`,
+          messageToDelete: null
+        };
+      }
+
+      // Reload the world to get updated messages from backend
+      const world = await api.getWorld(state.worldName);
+
+      // Rebuild messages from agent memory (same logic as initWorld)
+      let messages: any[] = [];
+      // Handle agents as either array, Map-like (with values()), or plain object
+      const agents: Agent[] = Array.isArray(world.agents)
+        ? world.agents
+        : world.agents && typeof (world.agents as any).values === 'function'
+          ? Array.from((world.agents as any).values())
+          : Object.values(world.agents || {}) as Agent[];
+
+      for (const agent of agents) {
+        agent.spriteIndex = agents.indexOf(agent) % 9;
+        agent.messageCount = 0;
+        for (const memoryItem of agent.memory || []) {
+          if (memoryItem.chatId === chatId) {
+            agent.messageCount++;
+            const message = createMessageFromMemory(memoryItem, agent.name);
+            messages.push(message);
+          }
+        }
+      }
+
+      // Apply deduplication to loaded messages
+      messages = deduplicateMessages(messages, agents);
+
+      return {
+        ...state,
+        world,
+        messages,
+        messageToDelete: null,
+        needScroll: true
+      };
+    } catch (error: any) {
+      return {
+        ...state,
+        error: error.message || 'Failed to delete message',
+        messageToDelete: null
+      };
+    }
+  },
+
+  'save-edit-message': async function* (state: WorldComponentState, messageId: WorldEventPayload<'save-edit-message'>): AsyncGenerator<WorldComponentState> {
+    const editedText = state.editingText?.trim();
+    if (!editedText) return;
+
+    // Find the message by frontend ID
+    const message = state.messages.find(msg => msg.id === messageId);
+    if (!message) {
+      yield {
+        ...state,
+        error: 'Message not found',
+        editingMessageId: null,
+        editingText: ''
+      };
+      return;
+    }
+
+    const currentText = String(message.text || '').trim();
+    if (editedText === currentText) {
+      return;
+    }
+
+    // Check if message has backend messageId
+    if (!message.messageId) {
+      yield {
+        ...state,
+        error: 'Cannot edit message: missing message ID. Message may not be saved yet.',
+        editingMessageId: null,
+        editingText: ''
+      };
+      return;
+    }
+
+    const targetChatId = message.chatId || state.currentChat?.id;
+
+    // Check if we have a target chat
+    if (!targetChatId) {
+      yield {
+        ...state,
+        error: 'Cannot edit message: no active chat session',
+        editingMessageId: null,
+        editingText: ''
+      };
+      return;
+    }
+
+    // Store edit backup before backend mutation for local recovery.
+    const editBackup = {
+      messageId: message.messageId,
+      chatId: targetChatId,
+      newContent: editedText,
+      timestamp: Date.now(),
+      worldName: state.worldName
+    };
+    try {
+      localStorage.setItem('agent-world-edit-backup', JSON.stringify(editBackup));
+    } catch (e) {
+      console.warn('Failed to save edit backup to localStorage:', e);
+    }
+
+    // Optimistically update UI: remove messages from edited message onwards
+    const editedIndex = state.messages.findIndex(msg => msg.id === messageId);
+    const updatedMessages = editedIndex >= 0 ? state.messages.slice(0, editedIndex) : state.messages;
+
+    const optimisticState = {
+      ...state,
+      messages: updatedMessages,
+      editingMessageId: null,
+      editingText: '',
+      hitlPromptQueue: [],
+      submittingHitlRequestId: null,
+      isSending: true,
+      needScroll: false, // Don't scroll when editing - user is likely viewing that area
+      lastUserMessageText: editedText
+    };
+
+    // Yield optimistic state immediately so the editing UI closes right away
+    yield optimisticState;
+
+    try {
+      // Use edit streaming endpoint so post-edit responses stream back into the web UI.
+      await editChatMessage(
+        state.worldName,
+        message.messageId,
+        editedText,
+        targetChatId,
+        { awaitCompletion: false }
+      );
+
+      try {
+        localStorage.removeItem('agent-world-edit-backup');
+      } catch (e) {
+        console.warn('Failed to clear edit backup from localStorage:', e);
+      }
+
+      // SSE events will stream edited message + responses.
+      yield {
+        ...optimisticState,
+        isSending: false,
+        error: null
+      };
+    } catch (error: any) {
+      // Handle backend edit request errors.
+      let errorMessage = error.message || 'Failed to edit message';
+      const isWorldLockedError = error.message?.includes('423') || error.message?.includes('WORLD_LOCKED');
+
+      if (isWorldLockedError) {
+        errorMessage = 'Cannot edit message: world is currently processing. Please try again in a moment.';
+      } else if (error.message?.includes('404')) {
+        errorMessage = 'Message not found in agent memories. It may have been already deleted.';
+      } else if (error.message?.includes('400')) {
+        errorMessage = 'Invalid message: only user messages can be edited.';
+      }
+
+      // Restore original messages when edit request fails.
+      yield {
+        ...state,
+        isSending: false,
+        editingMessageId: null,
+        editingText: '',
+        error: errorMessage
+      };
+    }
+  },
+
+  // ========================================
+  // CHAT HISTORY & MODALS
+  // ========================================
+
+  'chat-history-show-delete-confirm': (state: WorldComponentState, chat: WorldEventPayload<'chat-history-show-delete-confirm'>): WorldComponentState =>
+    ChatHistoryDomain.showChatDeletionConfirm(state, chat),
+
+  'chat-history-hide-modals': (state: WorldComponentState): WorldComponentState =>
+    ChatHistoryDomain.hideChatDeletionModals(state),
+
+  // ========================================
+  // AGENT MANAGEMENT
+  // ========================================
+
+  'delete-agent': async (state: WorldComponentState, payload: WorldEventPayload<'delete-agent'>): Promise<WorldComponentState> =>
+    AgentManagementDomain.deleteAgent(state, payload.agent, state.worldName),
+
+  // ========================================
+  // WORLD MANAGEMENT
+  // ========================================
+
+  'export-world-markdown': async (state: WorldComponentState, payload: WorldEventPayload<'export-world-markdown'>): Promise<WorldComponentState> =>
+    WorldExportDomain.exportWorldMarkdown(state, payload.worldName),
+
+  'view-world-markdown': async (state: WorldComponentState, payload: WorldEventPayload<'view-world-markdown'>): Promise<WorldComponentState> =>
+    WorldExportDomain.viewWorldMarkdown(state, payload.worldName),
+
+  // ========================================
+  // CHAT SESSION MANAGEMENT
+  // ========================================
+
+  'create-new-chat': async function* (state: WorldComponentState): AsyncGenerator<WorldComponentState> {
+    try {
+      const loadingState = ChatHistoryDomain.createChatLoadingState(state);
+      yield loadingState;
+
+      const result = await api.newChat(state.worldName);
+      if (!result.success) {
+        yield ChatHistoryDomain.createChatErrorState(loadingState, 'Failed to create new chat');
+        return;
+      }
+
+      yield* initWorld(
+        { ...loadingState },
+        state.worldName,
+        typeof result.chatId === 'string' ? result.chatId : undefined
+      );
+    } catch (error: any) {
+      yield ChatHistoryDomain.createChatErrorState(state, error.message || 'Failed to create new chat');
+    }
+  },
+
+  'load-chat-from-history': async function* (state: WorldComponentState, chatId: WorldEventPayload<'load-chat-from-history'>): AsyncGenerator<WorldComponentState> {
+    try {
+      // Phase 2: Cleanup streaming state before loading new chat
+      if (state.debounceFrameId !== null) {
+        cancelAnimationFrame(state.debounceFrameId);
+      }
+      if (state.elapsedIntervalId !== null) {
+        clearInterval(state.elapsedIntervalId);
+      }
+
+      const cleanState = {
+        ...state,
+        pendingStreamUpdates: new Map(),
+        debounceFrameId: null,
+        activeTools: [],
+        isBusy: false,
+        elapsedMs: 0,
+        activityStartTime: null,
+        elapsedIntervalId: null,
+        hitlPromptQueue: state.hitlPromptQueue || [],
+        submittingHitlRequestId: null,
+      };
+
+      yield ChatHistoryDomain.createChatLoadingState(cleanState);
+
+      const path = ChatHistoryDomain.buildChatRoutePath(state.worldName, chatId);
+      app.route(path);
+      history.pushState(null, '', path);
+    } catch (error: any) {
+      yield ChatHistoryDomain.createChatErrorState(state, error.message || 'Failed to load chat from history');
+    }
+  },
+
+  'delete-chat-from-history': async function* (state: WorldComponentState, payload: WorldEventPayload<'delete-chat-from-history'>): AsyncGenerator<WorldComponentState> {
+    try {
+      yield ChatHistoryDomain.createChatLoadingStateWithClearedModal(state);
+      await api.deleteChat(state.worldName, payload.chatId);
+      const path = ChatHistoryDomain.buildChatRoutePath(state.worldName);
+      app.route(path);
+      history.pushState(null, '', path);
+    } catch (error: any) {
+      yield ChatHistoryDomain.createChatErrorState(state, error.message || 'Failed to delete chat', true);
+    }
+  },
+
+  // ========================================
+  // MEMORY MANAGEMENT
+  // ========================================
+
+  'clear-agent-messages': async (state: WorldComponentState, payload: WorldEventPayload<'clear-agent-messages'>): Promise<WorldComponentState> =>
+    AgentManagementDomain.clearAgentMessages(state, payload.agent, state.worldName),
+
+  'clear-world-messages': async (state: WorldComponentState): Promise<WorldComponentState> =>
+    AgentManagementDomain.clearWorldMessages(state, state.worldName),
+};

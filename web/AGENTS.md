@@ -4,10 +4,62 @@ Rules for anyone writing or modifying the AppRun-based web frontend.
 
 These rules apply to:
 
+- App shell code in `web/src/app-shell/*`
+- Foundations in `web/src/foundations/*`
+- Primitives in `web/src/primitives/*`
+- Patterns in `web/src/patterns/*`
+- Feature-owned UI in `web/src/features/*`
 - CSS in `web/src/styles.css`
-- UI controls in `web/src/components/*`
+- Transitional UI compatibility modules in `web/src/components/*`
 - AppRun event/update flows in `web/src/pages/World.update.ts`
 - Routed page state in `web/src/pages/*`
+
+---
+
+## Layered UI Architecture
+
+The web app follows a layered UI architecture adapted for AppRun:
+
+```text
+Foundations <- Primitives <- Patterns <- Feature views <- Pages / App shell
+```
+
+Use these ownership rules when adding or moving UI code:
+
+1. Foundations hold shared visual tokens and base styles only. No JSX belongs here.
+2. Primitives hold generic single-purpose controls such as buttons, inputs, selects, and textareas.
+3. Patterns hold reusable UI compositions built from primitives, such as labeled fields, modal shells, empty states, and shared action rows.
+4. Features hold business-specific views, route-local UI, and AppRun flow helpers for one domain area.
+5. Pages remain AppRun route entry points. They may assemble feature views and patterns, but they should not own generic control implementations.
+6. App shell code owns top-level layout and route composition.
+7. `web/src/components/*` is transitional compatibility surface only. Do not add new feature UI there unless it is a temporary shim preserving an existing import path.
+
+### UI dependency rules
+
+Treat the UI layers as an adjacent-only chain:
+
+- Foundations must not import from Primitives, Patterns, Features, Pages, App shell, or transitional Components.
+- Primitives may depend on Foundations, but not on Patterns, Features, Pages, App shell, or transitional Components.
+- Patterns may depend on Foundations and Primitives, but not on Features, Pages, App shell, or transitional Components.
+- Feature-owned UI may depend on Patterns, plus non-UI modules such as `api`, `types`, `domain`, and `utils`.
+- Pages and App shell may assemble Features and Patterns, but must not import Primitives or Foundations directly.
+- Feature-owned UI must not import sibling feature UI directly. Cross-feature assembly belongs in Pages or App shell.
+- Feature-owned UI must not import from the transitional `components/` folder except when preserving an existing public surface during migration.
+
+### Placement guidance
+
+- If a control is generic and reusable, place it in Primitives.
+- If a UI structure composes primitives and is reusable across domains, place it in Patterns.
+- If a component is specific to one route, workflow, or domain concept, keep it in the owning Feature.
+- If a module wires multiple features together, keep that composition in a Page or the App shell.
+- If you need to preserve an old import path while moving ownership, leave a thin compatibility re-export in `web/src/components/*` and move the real implementation into the correct feature or layer.
+
+### Layering review checklist
+
+- Prefer importing shared UI from the nearest allowed layer instead of reaching past it.
+- Do not add new raw button/input/select/textarea implementations directly in Features or Pages when an existing Primitive or Pattern already covers the need.
+- Keep AppRun route classes and update handlers as route/feature owners, not as generic design-system modules.
+- When changing layer boundaries, update the corresponding architectural tests in `tests/web-domain/*layer*` or other targeted boundary coverage.
 
 ---
 

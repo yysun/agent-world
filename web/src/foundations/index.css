@@ -1,0 +1,16 @@
+/*
+ * Purpose:
+ * - Aggregate the foundation CSS layers for the AppRun web client.
+ *
+ * Key Features:
+ * - Imports design tokens and base document rules in one stable entry point.
+ *
+ * Notes on Implementation:
+ * - Consumed by the legacy `styles.css` entry during the incremental migration.
+ *
+ * Summary of Recent Changes:
+ * - 2026-03-24: Added foundation CSS aggregation for the layered architecture rollout.
+ */
+
+@import './tokens.css';
+@import './base.css';

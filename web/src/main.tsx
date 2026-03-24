@@ -15,19 +15,10 @@
  * - 2026-02-19: Enabled `/Settings` route for MVP parity requirements.
  */
 
-import app from 'apprun';
-import Layout from './components/Layout';
-import Home from './pages/Home';
-import World from './pages/World';
-import Settings from './pages/Settings';
+import { renderWebApp } from './app-shell';
 
 import './tailwind.css';
 import 'doodle.css/doodle.css';
 import './styles.css';
 
-app.render('#root', <Layout />);
-app.addComponents('#pages', {
-  '/': Home,
-  '/World': World,
-  '/Settings': Settings,
-});
+renderWebApp();

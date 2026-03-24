@@ -1,3 +1,6 @@
+@import './foundations/index.css';
+@import './features/world/views/index.css';
+
 /*
  * Purpose:
  * - Define shared visual styles for the web world screens, including world selection, chat layout, and composer UI.
@@ -39,66 +42,6 @@
  * - 2026-02-21: Updated world chat composer styling to mirror Electron's textarea-based composer shell and icon send/stop button.
  * - 2026-02-20: Added top-row main-agent highlight treatment and badge.
  */
-
-/* Reset and base styles */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-html {
-  height: 100%;
-}
-
-#root {
-  width: 100%;
-  min-height: 100vh;
-}
-
-:root {
-  /* Light theme colors */
-  --bg-primary: #ffffff;
-  --bg-secondary: #f8f9fa;
-  --bg-tertiary: #f7fafc;
-  --bg-accent: #f1f5f9;
-  --border-primary: #e2e8f0;
-  --border-secondary: #cbd5e0;
-  --border-accent: #475569;
-  --text-primary: #2d3748;
-  --text-secondary: #4a5568;
-  --text-tertiary: #718096;
-  --text-quaternary: #a0aec0;
-  --accent-primary: #475569;
-  --accent-secondary: #334155;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.05);
-  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.1);
-  --shadow-xl: 0 4px 20px rgba(71, 85, 105, 0.2);
-}
-
-body {
-  margin: 0;
-  font-family: 'Short Stack', cursive;
-  font-size: 2em;
-  line-height: 1.5;
-  min-height: 100vh;
-}
-
-a {
-  text-decoration: none;
-}
-
-.hidden {
-  display: none !important;
-}
-
-.doodle button,
-.doodle textarea,
-.doodle input,
-.doodle select {
-  font-size: 0.5em;
-}
 
 .home-page {
   width: 100%;
@@ -1084,36 +1027,6 @@ h2 {
   text-align: center;
 }
 
-.world-settings-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  width: var(--world-top-action-button-size, 40px);
-  height: var(--world-top-action-button-size, 40px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.3s ease;
-  flex-shrink: 0;
-}
-
-.world-settings-btn:hover {
-  transform: scale(1.1);
-}
-
-.world-gear-icon {
-  color: var(--accent-primary);
-  font-size: 1.5rem;
-  font-weight: bold;
-  line-height: 1;
-  transition: all 0.3s ease;
-}
-
-.world-settings-btn:hover .world-gear-icon {
-  color: var(--accent-secondary);
-}
-
 .box {
   border-style: solid;
   border-width: 10px 10px 10px 10px;
@@ -1132,51 +1045,6 @@ legend {
 
 .settings-fieldset legend {
   font-size: var(--history-legend-font-size, 1.5rem);
-}
-
-.agent-queue-display {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-left: 0.6rem;
-  vertical-align: middle;
-}
-
-.agent-queue-active {
-  position: relative;
-  display: inline-flex;
-}
-
-.agent-queue-active .message-avatar,
-.agent-queue-item .message-avatar {
-  width: 1.2rem;
-  height: 1.2rem;
-}
-
-.agent-queue-active-dot {
-  position: absolute;
-  right: -2px;
-  bottom: -2px;
-  width: 0.38rem;
-  height: 0.38rem;
-  border-radius: 9999px;
-  background: #22c55e;
-  border: 1px solid #0f172a;
-}
-
-.agent-queue-list {
-  display: inline-flex;
-  align-items: center;
-}
-
-.agent-queue-item {
-  margin-left: -0.25rem;
-}
-
-.agent-queue-overflow {
-  font-size: 0.7rem;
-  opacity: 0.85;
-  margin-left: 0.15rem;
 }
 
 .chat-container {
@@ -2238,15 +2106,6 @@ legend {
     background: var(--bg-primary);
   }
 
-  .right-panel-mobile-header .world-settings-btn {
-    width: 34px;
-    height: 34px;
-  }
-
-  .right-panel-mobile-header .world-gear-icon {
-    font-size: 1.25rem;
-  }
-
   .right-panel-mobile-header .right-panel-close {
     margin-left: auto;
   }
@@ -2299,15 +2158,6 @@ legend {
   .chat-column {
     flex: none;
     order: 1;
-  }
-
-  .world-settings-btn {
-    width: 35px;
-    height: 35px;
-  }
-
-  .world-gear-icon {
-    font-size: 1.3rem;
   }
 
   .agent-sprite {
@@ -2446,15 +2296,6 @@ legend {
   .world-columns {
     gap: 0.5rem;
     height: calc(100dvh - 1.25rem);
-  }
-
-  .world-settings-btn {
-    width: 30px;
-    height: 30px;
-  }
-
-  .world-gear-icon {
-    font-size: 1.2rem;
   }
 
   .agents-section {
@@ -2600,84 +2441,6 @@ legend {
   min-width: 0;
   word-wrap: break-word;
   font-size: 1.4rem;
-}
-
-.action-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.3s ease;
-  flex-shrink: 0;
-  margin-left: 0.5rem;
-}
-
-.action-btn:hover {
-  transform: scale(1.1);
-}
-
-.action-btn:active {
-  transform: scale(0.95);
-}
-
-.action-btn:hover .btn-icon {
-  color: var(--accent-secondary);
-}
-
-.edit-prompt-btn {
-  align-self: flex-start;
-  margin-top: -0.25rem;
-}
-
-.setting-label-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-}
-
-.setting-label-row .action-btn {
-  margin-left: 0;
-  margin-top: 0;
-}
-
-.btn-icon {
-  color: var(--accent-primary);
-  font-size: 1.25rem;
-  font-weight: bold;
-  line-height: 1;
-  transition: all 0.3s ease;
-}
-
-.system-prompt-preview {
-  max-width: 200px;
-  font-family: monospace;
-  font-size: 0.8rem;
-  line-height: 1.3;
-  word-break: break-word;
-  white-space: pre-wrap;
-  flex: 1;
-  min-width: 0;
-}
-
-.world-settings,
-.agent-settings,
-.default-settings {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.default-settings p {
-  text-align: center;
-  color: var(--text-tertiary);
-  font-style: italic;
-  margin: 2rem 0;
 }
 
 /* Waiting dots animation */
@@ -3846,74 +3609,6 @@ legend {
 
 .elapsed-time {
   font-weight: 500;
-}
-
-/* ========================================
-   PHASE 4: Tool Execution Status
-   ======================================== */
-
-/* Tool Execution Status Container */
-.tool-execution-status {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 8px 12px;
-  background-color: var(--bg-secondary);
-  border-top: 1px solid var(--border-subtle);
-  border-bottom: 1px solid var(--border-subtle);
-  margin-bottom: 12px;
-}
-
-/* Individual Tool Entry */
-.tool-entry {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.875rem;
-  color: var(--text-primary);
-  padding: 4px 8px;
-  background-color: var(--bg-primary);
-  border-radius: 6px;
-  border: 1px solid var(--border-subtle);
-}
-
-/* Tool Icon */
-.tool-icon {
-  font-size: 1.2em;
-  flex-shrink: 0;
-}
-
-/* Tool Spinner */
-.tool-spinner {
-  font-size: 1em;
-  animation: spin 2s linear infinite;
-  flex-shrink: 0;
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* Tool Name */
-.tool-name {
-  font-weight: 500;
-  color: var(--text-primary);
-  flex-grow: 1;
-}
-
-/* Tool Progress Text */
-.tool-progress {
-  font-size: 0.8125rem;
-  color: var(--text-secondary);
-  font-style: italic;
-  margin-left: auto;
-  padding-left: 8px;
 }
 
 /* ========================================
