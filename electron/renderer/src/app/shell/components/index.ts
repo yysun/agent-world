@@ -22,3 +22,4 @@ export { default as MainHeaderBar } from './MainHeaderBar';
 export { default as MainWorkspaceLayout } from './MainWorkspaceLayout';
 export { default as RightPanelShell } from './RightPanelShell';
 export { default as SidebarToggleButton } from './SidebarToggleButton';
+export { WorkingStatusBar } from './transitional';

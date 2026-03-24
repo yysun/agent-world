@@ -15,7 +15,7 @@
  * - 2026-02-17: Added for Phase 5 final integration cleanup.
  */
 
-import EditorModalsHost from '../../../components/EditorModalsHost';
+import { EditorModalsHost } from './transitional';
 
 export default function AppOverlaysHost({ editorModalsProps }) {
   return (

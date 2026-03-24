@@ -1,3 +1,55 @@
+## Electron Renderer UI Layer Rules (Strict)
+
+These rules apply to renderer UI code under `electron/renderer/src/`. They keep the
+current design-system split truthful, limit the shrinking transitional `components/`
+surface, and avoid copying the web app's stricter adjacent-only rule before the
+renderer is ready for it.
+
+### Layer ownership
+
+- `design-system/foundations`
+  - Internal tokens/shared styling helpers for the renderer design-system only.
+  - Do not import this layer from `app/shell`, `features`, or transitional `components`.
+- `design-system/primitives`
+  - Atomic generic controls only: buttons, cards, inputs, menu/select/switch shells.
+  - No feature labels, no shell-specific behavior, no settings/chat-specific widgets.
+- `design-system/patterns`
+  - Generic multi-control compositions built from primitives.
+  - Own layout, repeated structure, and generic chrome only.
+- `features/<domain>`
+  - Domain-owned UI and behavior for chat, settings, queue, skills, and similar flows.
+  - Feature-specific wrappers like settings toggles stay here unless first split into neutral generic pieces.
+- `app/shell`
+  - Top-level desktop layout/orchestration only.
+  - May compose feature entry points, shell-only layout, and the temporary transitional seam.
+- `components`
+  - Transitional compatibility layer only.
+  - Do not add new first-choice UI here; migrate ownership into `app/shell` or a feature instead.
+
+### Import rules
+
+- Only `design-system/**` may import `design-system/foundations`.
+- `design-system/primitives` must not import from `patterns`, `features`, `app`, or `components`.
+- `design-system/patterns` must not import from `features`, `app`, or `components`.
+- `features` and `app/shell` may import `design-system/primitives` and `design-system/patterns` directly.
+- `features` must not import from the transitional `components/` layer.
+- `app/shell` must route any remaining `components/` usage through a local seam file in `app/shell/components` so the last migrations stay auditable.
+
+### Placement guidance
+
+- If the UI is a neutral single control, prefer `design-system/primitives`.
+- If the UI is a neutral repeated composition, prefer `design-system/patterns`.
+- If the UI encodes chat/settings/shell semantics, keep it in the owning feature or shell layer.
+- When moving code out of `components/`, move it directly to its owner instead of creating a second transitional bucket.
+
+### Review checklist
+
+- Does this change add a new renderer UI file to `components/` when it should live in `app/shell` or `features`?
+- Does any non-design-system file import `design-system/foundations`?
+- Does a primitive or pattern depend on feature/shell/transitional UI?
+- If `app/shell` still consumes a transitional component, is that usage routed through the shell seam?
+- Did you update `tests/electron/renderer/design-system-layer-boundaries.test.ts` if the contract changed?
+
 ## Electron Renderer Hook & Event Rules (Strict)
 
 These rules apply to all changes inside `electron/renderer/src/`. They encode lessons

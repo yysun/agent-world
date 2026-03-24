@@ -68,13 +68,17 @@ If the repo already has a `components/` folder, treat it as transitional unless 
 Foundations  ←  Primitives  ←  Patterns  ←  Feature code
 ```
 
-Arrows point toward what each layer may import:
+Arrows point toward the UI layer a file may depend on. Treat this as an adjacent-only UI chain and do not skip layers:
 
 - **Foundations** import nothing from the UI layers — they are the leaf.
 - **Primitives** import only from Foundations. Never from Patterns or feature code.
 - **Patterns** import from Foundations and Primitives. Never from feature code.
-- **Feature/app code** may import from any design-system layer.
+- **Feature view code** may import from the Patterns layer only.
+- **App/page shell code** may assemble features and patterns, but must not import Primitives or Foundations directly.
+- **No skipped UI-layer imports**: features do not reach down to Primitives or Foundations; Patterns do not reach into features.
 - **No lateral imports** within the same layer (exception: re-exports in `index.ts`).
+
+This restriction is for UI-layer imports. Non-UI imports such as `types`, `domain`, `api`, and `utils` remain allowed where they belong.
 
 Violating this direction creates circular dependencies and makes components impossible to reuse. When you notice an upward import, refactor it out — push shared logic down to the correct layer.
 
@@ -142,7 +146,7 @@ design-system/
 └── patterns/index.ts
 ```
 
-When you add a new Primitive or Pattern, also add its export to the layer's `index.ts`. Feature code imports from these barrel files, not from individual component files — this keeps import paths stable when internals are reorganized.
+When you add a new Primitive or Pattern, also add its export to the layer's `index.ts`. Feature code imports shared UI from the Patterns barrel, not from individual Primitive files — this keeps import paths stable and preserves the layer boundary.
 
 ## Generation Order
 
@@ -163,6 +167,7 @@ Before finishing any UI change, verify:
 - [ ] No duplicated base controls — extracted to Primitives
 - [ ] No duplicated composed structures — extracted to Patterns
 - [ ] Business-specific code is in `features/<domain>/` or `app/`, not in `design-system/`
-- [ ] Dependency direction is correct (no upward imports)
+- [ ] Dependency direction is correct (no upward or skipped-layer UI imports)
+- [ ] Feature/app UI does not import Primitives or Foundations directly
 - [ ] New shared items are exported from their layer's `index.ts`
 - [ ] Accessible: semantic HTML, keyboard support, visible focus, proper labels

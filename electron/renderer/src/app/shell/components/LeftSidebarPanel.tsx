@@ -27,7 +27,7 @@
 import { Input, MenuItem, Radio } from '../../../design-system/primitives';
 import { useEffect, useRef, useState } from 'react';
 import SidebarToggleButton from './SidebarToggleButton';
-import WorldInfoCard from '../../../components/WorldInfoCard';
+import { WorldInfoCard } from './transitional';
 
 const IMPORT_TARGETS = [
   {

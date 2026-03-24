@@ -61,11 +61,10 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppOverlaysHost, LeftSidebarPanel, MainWorkspaceLayout } from './app/shell';
+import { AppOverlaysHost, LeftSidebarPanel, MainWorkspaceLayout, WorkingStatusBar } from './app/shell';
 import { AppFrameLayout } from './design-system/patterns';
 import { MessageQueuePanel } from './features/queue';
 import { SkillEditor } from './features/skills';
-import WorkingStatusBar from './components/WorkingStatusBar';
 import { useWorkingStatus } from './hooks/useWorkingStatus';
 import { readDesktopApi, safeMessage } from './domain/desktop-api';
 import { useSkillRegistry } from './hooks/useSkillRegistry';
