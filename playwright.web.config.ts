@@ -14,6 +14,7 @@
  * - The web server process stays alive across tests; world reset happens per test via HTTP bootstrap.
  *
  * Recent Changes:
+ * - 2026-03-24: Load `.env` into the Playwright runner process so VS Code Test Explorer runs inherit `GOOGLE_API_KEY`.
  * - 2026-03-11: Reduced the web Playwright per-test and expect timeout budget to 5 seconds.
  * - 2026-03-10: Added initial Playwright web harness config for real browser E2E coverage.
  * - 2026-03-10: Forced the full Chromium channel for web E2E to avoid bundled headless-shell launch hangs on this workstation.
@@ -21,10 +22,26 @@
  */
 
 import * as path from 'node:path';
+import dotenv from 'dotenv';
 import { defineConfig } from '@playwright/test';
 
 const WEB_WORKSPACE_PATH = path.resolve(process.cwd(), '.tmp', 'web-playwright-workspace');
 export const WEB_E2E_TIMEOUT_MS = 5_000;
+
+export function hydratePlaywrightWebEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
+  loadEnv: typeof dotenv.config = dotenv.config,
+): NodeJS.ProcessEnv {
+  loadEnv({
+    path: path.resolve(cwd, '.env'),
+    processEnv: env,
+    quiet: true,
+  });
+  return env;
+}
+
+const PLAYWRIGHT_WEB_ENV = hydratePlaywrightWebEnv();
 
 export default defineConfig({
   testDir: './tests/web-e2e',
@@ -49,11 +66,11 @@ export default defineConfig({
   webServer: {
     command: 'npm run web:e2e:serve',
     url: 'http://127.0.0.1:8080',
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: !PLAYWRIGHT_WEB_ENV.CI,
     stdout: 'pipe',
     stderr: 'pipe',
     env: {
-      ...process.env,
+      ...PLAYWRIGHT_WEB_ENV,
       HOST: '127.0.0.1',
       PORT: '3000',
       AGENT_WORLD_AUTO_OPEN: 'false',
@@ -61,7 +78,7 @@ export default defineConfig({
       AGENT_WORLD_DATA_PATH: WEB_WORKSPACE_PATH,
       AGENT_WORLD_PROJECT_PATH: WEB_WORKSPACE_PATH,
       AGENT_WORLD_WORKSPACE_PATH: WEB_WORKSPACE_PATH,
-      AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS: process.env.AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS || '250',
+      AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS: PLAYWRIGHT_WEB_ENV.AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS || '250',
     },
   },
 });

@@ -10,10 +10,12 @@
  * - Checkbox layout remains explicit because its label row differs from stacked field controls.
  *
  * Summary of Recent Changes:
+ * - 2026-03-24: Normalized AppRun child forwarding so field wrappers preserve nested controls and options.
  * - 2026-03-24: Added shared field patterns for the layered web UI contract.
  */
 
 import { PrimitiveInput, PrimitiveSelect, PrimitiveTextarea } from '../primitives';
+import { resolveAppRunChildren } from '../utils/apprun-children';
 
 type LabeledFieldProps = {
   children: any;
@@ -77,10 +79,12 @@ export function LabeledField({
   htmlFor,
   label,
   labelClassName = '',
-}: LabeledFieldProps) {
+}: LabeledFieldProps, runtimeChildren?: any) {
+  const resolvedChildren = resolveAppRunChildren(children, runtimeChildren);
+
   return <div className={className}>
     <label htmlFor={htmlFor} className={labelClassName}>{label}</label>
-    {children}
+    {resolvedChildren}
     {help ? <small className={helpClassName}>{help}</small> : null}
   </div>;
 }
@@ -139,7 +143,7 @@ export function SelectField({
   label,
   labelClassName = '',
   ...attrs
-}: SelectFieldProps) {
+}: SelectFieldProps, runtimeChildren?: any) {
   return <LabeledField
     className={className}
     help={help}
@@ -148,7 +152,9 @@ export function SelectField({
     label={label}
     labelClassName={labelClassName}
   >
-    <PrimitiveSelect id={htmlFor} className={fieldClassName} {...attrs}>{children}</PrimitiveSelect>
+    <PrimitiveSelect id={htmlFor} className={fieldClassName} {...attrs}>
+      {resolveAppRunChildren(children, runtimeChildren)}
+    </PrimitiveSelect>
   </LabeledField>;
 }
 

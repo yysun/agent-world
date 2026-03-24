@@ -10,8 +10,11 @@
  * - Accepts an open-ended attribute bag so AppRun `$onclick` and test selectors can pass through.
  *
  * Summary of Recent Changes:
+ * - 2026-03-24: Normalized AppRun child forwarding so button labels render when used through JSX wrappers.
  * - 2026-03-24: Added the shared button primitive for the layered web view architecture.
  */
+
+import { resolveAppRunChildren } from '../utils/apprun-children';
 
 type PrimitiveButtonProps = {
   children: any;
@@ -28,7 +31,9 @@ export function PrimitiveButton({
   disabled,
   type = 'button',
   ...attrs
-}: PrimitiveButtonProps) {
+}: PrimitiveButtonProps, runtimeChildren?: any) {
+  const resolvedChildren = resolveAppRunChildren(children, runtimeChildren);
+
   return <button
     type={type}
     className={className}
@@ -36,7 +41,7 @@ export function PrimitiveButton({
     disabled={disabled}
     {...attrs}
   >
-    {children}
+    {resolvedChildren}
   </button>;
 }
 

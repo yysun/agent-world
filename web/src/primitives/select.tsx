@@ -10,8 +10,11 @@
  * - Children are passed through unchanged so feature-level option sets remain declarative.
  *
  * Summary of Recent Changes:
+ * - 2026-03-24: Normalized AppRun child forwarding so JSX option trees render correctly.
  * - 2026-03-24: Added the shared select primitive for layered web control extraction.
  */
+
+import { resolveAppRunChildren } from '../utils/apprun-children';
 
 type PrimitiveSelectProps = {
   children?: any;
@@ -22,8 +25,8 @@ export function PrimitiveSelect({
   children,
   className = '',
   ...attrs
-}: PrimitiveSelectProps) {
-  return <select className={className} {...attrs}>{children}</select>;
+}: PrimitiveSelectProps, runtimeChildren?: any) {
+  return <select className={className} {...attrs}>{resolveAppRunChildren(children, runtimeChildren)}</select>;
 }
 
 export default PrimitiveSelect;

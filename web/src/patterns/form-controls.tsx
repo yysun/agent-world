@@ -10,10 +10,12 @@
  * - Option markup stays with callers so domain-specific choices remain explicit.
  *
  * Summary of Recent Changes:
+ * - 2026-03-24: Normalized AppRun child forwarding so select option labels render through pattern wrappers.
  * - 2026-03-24: Added shared control patterns for the layered web UI contract.
  */
 
 import { PrimitiveInput, PrimitiveSelect, PrimitiveTextarea } from '../primitives';
+import { resolveAppRunChildren } from '../utils/apprun-children';
 
 type TextInputControlProps = {
   className?: string;
@@ -46,8 +48,8 @@ export function SelectControl({
   children,
   className = '',
   ...attrs
-}: SelectControlProps) {
-  return <PrimitiveSelect className={className} {...attrs}>{children}</PrimitiveSelect>;
+}: SelectControlProps, runtimeChildren?: any) {
+  return <PrimitiveSelect className={className} {...attrs}>{resolveAppRunChildren(children, runtimeChildren)}</PrimitiveSelect>;
 }
 
 export default TextInputControl;

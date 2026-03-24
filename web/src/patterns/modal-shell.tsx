@@ -10,10 +10,12 @@
  * - The shell owns only layout; feature code still supplies dialog copy and actions.
  *
  * Summary of Recent Changes:
+ * - 2026-03-24: Normalized AppRun child forwarding so modal body content renders inside shared dialogs.
  * - 2026-03-24: Added the shared modal shell pattern for layered web dialogs.
  */
 
 import { PrimitiveButton } from '../primitives';
+import { resolveAppRunChildren } from '../utils/apprun-children';
 
 type ModalShellProps = {
   children: any;
@@ -49,7 +51,9 @@ export function ModalShell({
   overlayClassName = 'modal-backdrop',
   title,
   titleClassName = 'modal-title',
-}: ModalShellProps) {
+}: ModalShellProps, runtimeChildren?: any) {
+  const resolvedChildren = resolveAppRunChildren(children, runtimeChildren);
+
   return <div className={`${overlayClassName} ${className}`.trim()} {...overlayAttrs}>
     <div className={contentClassName} {...contentAttrs}>
       <div className="modal-header">
@@ -65,7 +69,7 @@ export function ModalShell({
           </PrimitiveButton>
         </div>
       </div>
-      <div className="modal-body">{children}</div>
+      <div className="modal-body">{resolvedChildren}</div>
       {footer ? <div className={footerClassName}>{footer}</div> : null}
     </div>
   </div>;

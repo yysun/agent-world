@@ -39,7 +39,7 @@ test.describe('World management affordances', () => {
     await gotoHome(page);
     await expect(page.getByTestId('world-carousel')).toBeVisible();
     await searchHomeWorld(page, bootstrapState.worldName);
-    await expect(page.locator('.world-card-btn.center').filter({ hasText: bootstrapState.worldName })).toBeVisible();
+    await expect(page.getByTestId(`world-card-${bootstrapState.worldName}`)).toBeVisible();
     await expect(page.getByTestId('world-open-hint')).toContainText('Swipe to browse');
     await expect(page.getByTestId('world-open-hint')).toContainText('centered card');
   });
@@ -47,7 +47,7 @@ test.describe('World management affordances', () => {
   test('world search filters the carousel to matching worlds', async ({ page, bootstrapState }) => {
     await gotoHome(page);
     await page.getByTestId('world-search').fill(bootstrapState.worldName);
-    await expect(page.locator('.world-card-btn.center').filter({ hasText: bootstrapState.worldName })).toBeVisible();
+    await expect(page.getByTestId(`world-card-${bootstrapState.worldName}`)).toBeVisible();
     await expect(page.getByTestId('world-search-empty')).toHaveCount(0);
     await expect(page.locator('.description-title')).toContainText(bootstrapState.worldName);
 

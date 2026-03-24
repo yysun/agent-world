@@ -10,8 +10,11 @@
  * - Used by pattern controls and field wrappers rather than directly by feature code.
  *
  * Summary of Recent Changes:
+ * - 2026-03-24: Normalized AppRun child forwarding so nested textarea content remains available.
  * - 2026-03-24: Added the shared textarea primitive for layered web control extraction.
  */
+
+import { resolveAppRunChildren } from '../utils/apprun-children';
 
 type PrimitiveTextareaProps = {
   children?: any;
@@ -22,8 +25,8 @@ export function PrimitiveTextarea({
   children,
   className = '',
   ...attrs
-}: PrimitiveTextareaProps) {
-  return <textarea className={className} {...attrs}>{children}</textarea>;
+}: PrimitiveTextareaProps, runtimeChildren?: any) {
+  return <textarea className={className} {...attrs}>{resolveAppRunChildren(children, runtimeChildren)}</textarea>;
 }
 
 export default PrimitiveTextarea;

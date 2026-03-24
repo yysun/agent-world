@@ -13,6 +13,7 @@
  * - Focuses on measurable layout outcomes (visibility, font size, touch target size, no horizontal overflow).
  *
  * Recent Changes:
+ * - 2026-03-24: Wait for the API health endpoint before resetting the responsive world to avoid startup races in Test Explorer.
  * - 2026-03-11: Added a mobile chat-history width check so Doodle fieldset rules cannot leave a wide empty strip on the right.
  * - 2026-03-11: Added a mobile right-panel close-button regression so the overlay can be dismissed after opening.
  * - 2026-03-11: Added mobile right-panel checks so duplicate world-action rows stay hidden and chat-history fieldsets keep zero inset padding.
@@ -23,6 +24,7 @@
  */
 
 import { expect, test } from '@playwright/test';
+import { waitForApiReady } from './support/api-ready.js';
 
 const API_BASE_URL = 'http://127.0.0.1:3000/api';
 const RESPONSIVE_WORLD_NAME = 'e2e-responsive-web';
@@ -48,6 +50,8 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function resetResponsiveWorld(): Promise<void> {
+  await waitForApiReady();
+
   const worlds = await apiRequest<Array<{ name?: string }>>('/worlds');
   const hasWorld = worlds.some((world) => String(world?.name || '').trim() === RESPONSIVE_WORLD_NAME);
 

@@ -10,10 +10,12 @@
  * - Patterns import primitives directly to preserve the no-lateral-import rule within the pattern layer.
  *
  * Summary of Recent Changes:
+ * - 2026-03-24: Normalized AppRun child forwarding so JSX action labels survive wrapper composition.
  * - 2026-03-24: Added shared action button patterns for the layered web UI contract.
  */
 
 import { PrimitiveButton } from '../primitives';
+import { resolveAppRunChildren } from '../utils/apprun-children';
 
 type ActionButtonProps = {
   children?: any;
@@ -33,8 +35,8 @@ export function ActionButton({
   children,
   className = '',
   ...attrs
-}: ActionButtonProps) {
-  return <PrimitiveButton className={className} {...attrs}>{children}</PrimitiveButton>;
+}: ActionButtonProps, runtimeChildren?: any) {
+  return <PrimitiveButton className={className} {...attrs}>{resolveAppRunChildren(children, runtimeChildren)}</PrimitiveButton>;
 }
 
 export function IconActionButton({
@@ -45,11 +47,13 @@ export function IconActionButton({
   iconClassName = '',
   labelClassName = '',
   ...attrs
-}: IconActionButtonProps) {
+}: IconActionButtonProps, runtimeChildren?: any) {
+  const resolvedChildren = resolveAppRunChildren(children, runtimeChildren);
+
   return (
     <PrimitiveButton className={className} {...attrs}>
       {icon ? <span className={iconClassName}>{icon}</span> : null}
-      {label !== undefined && label !== null ? <span className={labelClassName}>{label}</span> : children}
+      {label !== undefined && label !== null ? <span className={labelClassName}>{label}</span> : resolvedChildren}
     </PrimitiveButton>
   );
 }

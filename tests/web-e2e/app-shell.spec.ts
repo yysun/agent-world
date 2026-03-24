@@ -12,11 +12,13 @@
  * - Seeds a lightweight world over the live API so this smoke test avoids the slower real-LLM fixture path.
  *
  * Recent Changes:
+ * - 2026-03-24: Wait for the API health endpoint before resetting the seeded smoke world to avoid startup races in Test Explorer.
  * - 2026-03-11: Switched home entry coverage to the search + centered-card open flow and removed the dot/card selector ambiguity.
  * - 2026-03-10: Added initial app-shell smoke coverage for Playwright web E2E.
  */
 
 import { test, expect } from '@playwright/test';
+import { waitForApiReady } from './support/api-ready.js';
 import { gotoHome, openWorldFromHome } from './support/web-harness.js';
 
 const API_BASE_URL = 'http://127.0.0.1:3000/api';
@@ -43,6 +45,8 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function resetAppShellWorld(): Promise<void> {
+  await waitForApiReady();
+
   const worlds = await apiRequest<Array<{ name?: string }>>('/worlds');
   const hasWorld = worlds.some((world) => String(world?.name || '').trim() === APP_SHELL_WORLD_NAME);
 

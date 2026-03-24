@@ -51,6 +51,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 
+import { waitForApiReady } from './api-ready.js';
 import { renderableSystemErrorTextPatterns } from './error-state.js';
 import { buildHitlOptionIdCandidates } from './hitl-option-id.js';
 import { TOOL_PERMISSION_FETCH_URL } from '../../support/tool-permission-fetch-target.js';
@@ -208,25 +209,6 @@ async function fetchWithTimeout(input: string, init?: RequestInit, timeoutMs: nu
   } finally {
     clearTimeout(timeoutId);
   }
-}
-
-async function waitForApiReady(retries: number = 20): Promise<void> {
-  let lastError: unknown = null;
-
-  for (let attempt = 0; attempt < retries; attempt += 1) {
-    try {
-      const response = await fetchWithTimeout('http://127.0.0.1:3000/health', undefined, 2_000);
-      if (response.ok) {
-        return;
-      }
-      lastError = new Error(`Health check returned ${response.status}`);
-    } catch (error) {
-      lastError = error;
-    }
-    await wait(500);
-  }
-
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 async function apiRequest<T>(requestPath: string, init?: RequestInit, retries: number = 3): Promise<T> {
@@ -480,13 +462,13 @@ export async function gotoHome(page: Page): Promise<void> {
 
 export async function searchHomeWorld(page: Page, worldName: string): Promise<void> {
   await page.getByTestId('world-search').fill(worldName);
-  await expect(page.locator('.world-card-btn.center').filter({ hasText: worldName })).toBeVisible();
+  await expect(page.getByTestId(`world-card-${worldName}`)).toBeVisible();
 }
 
 export async function openWorldFromHome(page: Page, worldName: string): Promise<void> {
   await gotoHome(page);
   await searchHomeWorld(page, worldName);
-  await page.locator('.world-card-btn.center').filter({ hasText: worldName }).click();
+  await page.getByTestId(`world-card-${worldName}`).click();
   await page.getByTestId('world-page').waitFor({ state: 'visible' });
 }
 
