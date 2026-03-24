@@ -26,8 +26,8 @@ describe('shouldShowQueuePanel', () => {
     expect(shouldShowQueuePanel(2, false)).toBe(true);
   });
 
-  it('hides the queue when only one queued item remains', () => {
-    expect(shouldShowQueuePanel(1, false)).toBe(false);
+  it('shows the queue when one queued item remains', () => {
+    expect(shouldShowQueuePanel(1, false)).toBe(true);
   });
 
   it('hides the queue when an inline HITL prompt is active', () => {

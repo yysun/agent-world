@@ -14,13 +14,14 @@
  * - Each test starts from a fresh `e2e-test` world reset to avoid state bleed.
  *
  * Recent Changes:
+ * - 2026-03-24: Switched teardown to the shared bounded close helper so stuck Electron exits are force-killed instead of timing out the whole test.
  * - 2026-03-12: Increased Electron first-window wait to 60s so late-suite launches do not
  *   fail before the real desktop shell opens.
  * - 2026-03-10: Added initial fixture layer for Electron Playwright E2E tests.
  */
 
 import { test as base, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
-import { bootstrapWorkspace, getElectronLaunchOptions, waitForAppShell } from './electron-harness.js';
+import { bootstrapWorkspace, closeElectronApp, getElectronLaunchOptions, waitForAppShell } from './electron-harness.js';
 
 type ElectronFixtures = {
   electronApp: ElectronApplication;
@@ -34,7 +35,7 @@ export const test = base.extend<ElectronFixtures>({
     try {
       await use(app);
     } finally {
-      await app.close();
+      await closeElectronApp(app);
     }
   },
   page: async ({ electronApp }, use) => {

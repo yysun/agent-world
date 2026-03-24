@@ -48,6 +48,7 @@ const HITL_SHELL_SUCCESS_TOKEN = `E2E_SHELL_OK: ${HITL_DELETE_TARGET}`;
 function buildShellHitlPrompt(label: string): string {
   return [
     `Use shell_cmd to remove ${HITL_DELETE_TARGET} from the current working directory.`,
+    'Call shell_cmd directly and do not use human_intervention_request; the shell_cmd tool itself will request approval if needed.',
     'Do not ask me for confirmation in plain text.',
     `After approval, confirm completion for ${label}.`,
   ].join(' ');
@@ -71,8 +72,7 @@ test.describe('Loaded Current Chat', () => {
     await launchAndPrepare(page);
     await deleteAllAgents(page);
     await sendComposerMessage(page, 'Current chat error');
-    await waitForQueuePanel(page);
-    await waitForQueueStatus(page, 'Error');
+    await expect(page.getByText('this world has no agents available')).toBeVisible();
   });
 
   test('edit success', async ({ page }) => {
@@ -101,21 +101,15 @@ test.describe('Loaded Current Chat', () => {
     await waitForAssistantToken(page, 'current-edit-error-setup');
     await deleteAllAgents(page);
     await editLatestUserMessage(page, 'Edited current chat error token current-edit-error');
-    // The edit resubmission queues the message, but no agents → queue error.
     await expectNotificationText(page, 'edited');
-    // The queue error is written asynchronously. Force the queue hook to reload
-    // by switching sessions so the selectedSessionId change triggers loadQueue.
-    await selectSessionByName(page, CHAT_NAMES.switched);
-    await page.waitForTimeout(500);
-    await selectSessionByName(page, CHAT_NAMES.current);
-    await waitForQueuePanel(page);
-    await waitForQueueStatus(page, 'Error');
+    await expect(page.getByText('this world has no agents available')).toBeVisible();
   });
 
   test('queue clear works for the loaded current chat', async ({ page }) => {
     await launchAndPrepare(page);
+    await selectSessionByName(page, CHAT_NAMES.current);
     await deleteAllAgents(page);
-    await sendComposerMessage(page, 'Current chat error for queue clear');
+    await addQueueMessageToCurrentChat(page, 'Current chat queued error for queue clear');
     const queuePanel = await waitForQueuePanel(page);
     await waitForQueueStatus(page, 'Error');
     await queuePanel.getByLabel('Clear queue').click();
@@ -193,8 +187,7 @@ test.describe('Switched Chat', () => {
     await selectSessionByName(page, CHAT_NAMES.switched);
     await deleteAllAgents(page);
     await sendComposerMessage(page, 'Switched chat error');
-    await waitForQueuePanel(page);
-    await waitForQueueStatus(page, 'Error');
+    await expect(page.getByText('this world has no agents available')).toBeVisible();
   });
 
   test('edit success after switching chats', async ({ page }) => {
@@ -227,14 +220,8 @@ test.describe('Switched Chat', () => {
     await waitForAssistantToken(page, 'switched-edit-error-setup');
     await deleteAllAgents(page);
     await editLatestUserMessage(page, 'Edited switched chat error token switched-edit-error');
-    // The edit resubmission queues the message, but no agents → queue error.
     await expectNotificationText(page, 'edited');
-    // Force the queue hook to reload by switching sessions.
-    await selectSessionByName(page, CHAT_NAMES.current);
-    await page.waitForTimeout(500);
-    await selectSessionByName(page, CHAT_NAMES.switched);
-    await waitForQueuePanel(page);
-    await waitForQueueStatus(page, 'Error');
+    await expect(page.getByText('this world has no agents available')).toBeVisible();
   });
 
   test('edit HITL and resume after switching chats', async ({ page }) => {
@@ -251,7 +238,7 @@ test.describe('Switched Chat', () => {
     await launchAndPrepare(page);
     await selectSessionByName(page, CHAT_NAMES.switched);
     await deleteAllAgents(page);
-    await sendComposerMessage(page, 'Switched chat error for queue clear');
+    await addQueueMessageToCurrentChat(page, 'Switched chat queued error for queue clear');
     const queuePanel = await waitForQueuePanel(page);
     await waitForQueueStatus(page, 'Error');
     await queuePanel.getByLabel('Clear queue').click();
@@ -290,8 +277,7 @@ test.describe('New Chat', () => {
     await createNewSession(page);
     await deleteAllAgents(page);
     await sendComposerMessage(page, 'New chat error');
-    await waitForQueuePanel(page);
-    await waitForQueueStatus(page, 'Error');
+    await expect(page.getByText('this world has no agents available')).toBeVisible();
   });
 
   test('create new chat and edit success', async ({ page }) => {
@@ -306,27 +292,20 @@ test.describe('New Chat', () => {
 
   test('create new chat and edit error when responders are unavailable', async ({ page }) => {
     await launchAndPrepare(page);
-    const newChatId = await createNewSession(page);
+    await createNewSession(page);
     await sendComposerMessage(page, 'New chat edit error setup token new-edit-error-setup');
     await waitForAssistantToken(page, 'new-edit-error-setup');
     await deleteAllAgents(page);
     await editLatestUserMessage(page, 'Edited new chat error token new-edit-error');
-    // The edit resubmission queues the message, but no agents → queue error.
     await expectNotificationText(page, 'edited');
-    // The queue error is written asynchronously. Force the queue hook to reload
-    // by switching sessions so the selectedSessionId change triggers loadQueue.
-    await selectSessionByName(page, CHAT_NAMES.current);
-    await page.waitForTimeout(500);
-    await page.getByTestId(`session-item-${newChatId}`).click();
-    await waitForQueuePanel(page);
-    await waitForQueueStatus(page, 'Error');
+    await expect(page.getByText('this world has no agents available')).toBeVisible();
   });
 
   test('create new chat and clear an errored queue item', async ({ page }) => {
     await launchAndPrepare(page);
     await createNewSession(page);
     await deleteAllAgents(page);
-    await sendComposerMessage(page, 'New chat error for queue clear');
+    await addQueueMessageToCurrentChat(page, 'New chat queued error for queue clear');
     const queuePanel = await waitForQueuePanel(page);
     await waitForQueueStatus(page, 'Error');
     await queuePanel.getByLabel('Clear queue').click();

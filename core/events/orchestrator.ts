@@ -37,6 +37,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-03-24: Retried one empty initial LLM text response with an explicit non-empty/tool-call reminder and now emits a durable chat-scoped error instead of silently ending the turn.
  * - 2026-03-10: Publish one persisted chat-scoped `system` error event on terminal agent-turn failure so the transcript can retain a durable failure message across reloads.
  * - 2026-03-06: Required explicit `messageEvent.chatId` for agent-turn processing; removed `world.currentChatId` fallback from agent activity and turn-limit routing.
  * - 2026-03-06: Updated shell execution persistence to use explicit canonical failure reasons for shell validation/policy failures while keeping bounded-preview continuation output.
@@ -132,6 +133,103 @@ type DisplayToolCall = {
     arguments: string;
   };
 };
+
+const EMPTY_INITIAL_RESPONSE_RETRY_LIMIT = 1;
+const EMPTY_INITIAL_RESPONSE_RETRY_NOTICE =
+  'System notice: Your previous reply was empty. Continue this turn with either non-empty assistant text or a tool call. Do not return an empty response.';
+
+function parsePlainTextToolIntentValue(rawValue: string): unknown {
+  const trimmed = String(rawValue || '').trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed === 'string') {
+      const nested = parsed.trim();
+      if (
+        (nested.startsWith('[') && nested.endsWith(']'))
+        || (nested.startsWith('{') && nested.endsWith('}'))
+      ) {
+        try {
+          return JSON.parse(nested);
+        } catch {
+          return parsed;
+        }
+      }
+    }
+    return parsed;
+  } catch {
+    if (trimmed === 'true') return true;
+    if (trimmed === 'false') return false;
+    if (trimmed === 'null') return null;
+    const numeric = Number(trimmed);
+    if (Number.isFinite(numeric) && `${numeric}` === trimmed) {
+      return numeric;
+    }
+    return trimmed;
+  }
+}
+
+function parseParentheticalToolIntentArgs(rawArgs: string): Record<string, unknown> {
+  const args: Record<string, unknown> = {};
+  const pattern = /([a-zA-Z0-9_]+):\s*("(?:\\.|[^"])*"|\[[^\]]*\]|\{[^}]*\}|[^,]+)(?:,|$)/g;
+  let match: RegExpExecArray | null = null;
+
+  while ((match = pattern.exec(rawArgs)) !== null) {
+    const key = String(match[1] || '').trim();
+    const value = String(match[2] || '').trim();
+    if (!key) {
+      continue;
+    }
+    args[key] = parsePlainTextToolIntentValue(value);
+  }
+
+  return args;
+}
+
+function parsePlainTextToolIntent(content: string): {
+  toolName: string;
+  toolArgs: Record<string, unknown>;
+} | null {
+  const normalized = String(content || '').trim();
+  if (!normalized) return null;
+
+  const match = normalized.match(
+    /^calling\s+tool\s*:\s*([a-zA-Z0-9_\-]+)\s*(?:\(([\s\S]*)\)|(\{[\s\S]*\}))?\s*$/i,
+  );
+  if (!match) {
+    return null;
+  }
+
+  const toolName = String(match[1] || '').trim();
+  if (!toolName) {
+    return null;
+  }
+
+  const rawParentheticalArgs = String(match[2] || '').trim();
+  if (rawParentheticalArgs) {
+    return {
+      toolName,
+      toolArgs: parseParentheticalToolIntentArgs(rawParentheticalArgs),
+    };
+  }
+
+  const rawObjectArgs = String(match[3] || '').trim();
+  if (!rawObjectArgs) {
+    return { toolName, toolArgs: {} };
+  }
+
+  try {
+    return {
+      toolName,
+      toolArgs: JSON.parse(rawObjectArgs),
+    };
+  } catch {
+    return { toolName, toolArgs: {} };
+  }
+}
 
 // Storage wrapper instance - initialized lazily
 let storageWrappers: StorageAPI | null = null;
@@ -570,31 +668,62 @@ export async function processAgentMessage(
       publishSSE(w, { ...data, chatId: targetChatId });
     };
 
-    if (isStreamingEnabled()) {
-      const { streamAgentResponse } = await import('../llm-manager.js');
-      const result = await streamAgentResponse(
-        world,
-        agent,
-        filteredMessages,
-        publishSSEWithChatId,
-        targetChatId ?? null,
-        processingHandle?.signal
-      );
-      llmResponse = result.response;
-      messageId = result.messageId;
-    } else {
-      const { generateAgentResponse } = await import('../llm-manager.js');
-      const result = await generateAgentResponse(
-        world,
-        agent,
-        filteredMessages,
-        undefined,
-        false,
-        targetChatId ?? null,
-        processingHandle?.signal
-      );
-      llmResponse = result.response;
-      messageId = result.messageId;
+    let llmMessages = filteredMessages;
+    let emptyInitialResponseRetryCount = 0;
+
+    while (true) {
+      if (isStreamingEnabled()) {
+        const { streamAgentResponse } = await import('../llm-manager.js');
+        const result = await streamAgentResponse(
+          world,
+          agent,
+          llmMessages,
+          publishSSEWithChatId,
+          targetChatId ?? null,
+          processingHandle?.signal
+        );
+        llmResponse = result.response;
+        messageId = result.messageId;
+      } else {
+        const { generateAgentResponse } = await import('../llm-manager.js');
+        const result = await generateAgentResponse(
+          world,
+          agent,
+          llmMessages,
+          undefined,
+          false,
+          targetChatId ?? null,
+          processingHandle?.signal
+        );
+        llmResponse = result.response;
+        messageId = result.messageId;
+      }
+
+      if (llmResponse.type !== 'text' || String(llmResponse.content || '').trim()) {
+        break;
+      }
+
+      loggerAgent.warn('LLM returned empty initial text response', {
+        agentId: agent.id,
+        worldId: world.id,
+        chatId: targetChatId,
+        messageId,
+        emptyInitialResponseRetryCount,
+        retryLimit: EMPTY_INITIAL_RESPONSE_RETRY_LIMIT,
+      });
+
+      if (emptyInitialResponseRetryCount >= EMPTY_INITIAL_RESPONSE_RETRY_LIMIT) {
+        break;
+      }
+
+      emptyInitialResponseRetryCount += 1;
+      llmMessages = [
+        ...filteredMessages,
+        {
+          role: 'system',
+          content: EMPTY_INITIAL_RESPONSE_RETRY_NOTICE,
+        } as any,
+      ];
     }
     throwIfMessageProcessingStopped(processingHandle?.signal);
 
@@ -606,11 +735,55 @@ export async function processAgentMessage(
       toolCallCount: llmResponse.tool_calls?.length || 0
     });
 
+    if (llmResponse.type === 'text' && typeof llmResponse.content === 'string' && llmResponse.content.trim()) {
+      const parsedPlainTextToolIntent = parsePlainTextToolIntent(llmResponse.content);
+      if (parsedPlainTextToolIntent) {
+        const syntheticToolCallId = generateId();
+        loggerAgent.warn('Initial turn received plain-text tool intent; synthesizing tool_call fallback', {
+          agentId: agent.id,
+          chatId: targetChatId,
+          toolName: parsedPlainTextToolIntent.toolName,
+          syntheticToolCallId,
+        });
+
+        llmResponse = {
+          type: 'tool_calls',
+          content: llmResponse.content,
+          tool_calls: [{
+            id: syntheticToolCallId,
+            type: 'function',
+            function: {
+              name: parsedPlainTextToolIntent.toolName,
+              arguments: JSON.stringify(parsedPlainTextToolIntent.toolArgs || {}),
+            },
+          }],
+          assistantMessage: {
+            role: 'assistant',
+            content: llmResponse.content,
+            tool_calls: [{
+              id: syntheticToolCallId,
+              type: 'function',
+              function: {
+                name: parsedPlainTextToolIntent.toolName,
+                arguments: JSON.stringify(parsedPlainTextToolIntent.toolArgs || {}),
+              },
+            }],
+          },
+        } as any;
+      }
+    }
+
     // Handle text responses
     if (llmResponse.type === 'text') {
       let responseText = llmResponse.content || '';
-      if (!responseText) {
-        loggerAgent.debug('LLM text response is empty', { agentId: agent.id });
+      if (!responseText.trim()) {
+        const emptyResponseMessage = '[Error] Agent returned an empty response. Please retry the request.';
+        publishEvent(world, 'system', {
+          message: emptyResponseMessage,
+          type: 'error',
+          eventType: 'error',
+          agentName: agent.id,
+        }, targetChatId);
         return;
       }
 

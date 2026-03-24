@@ -14,6 +14,12 @@
  * - Assertions still target visible desktop behavior in the actual Electron window.
  *
  * Recent Changes:
+ * - 2026-03-24: Added `waitForAssistantTokenOrHitlPrompt` so Electron E2E flows can
+ *   wait for either a resumed assistant reply or a chained follow-up approval prompt.
+ * - 2026-03-24: Made `waitForAssistantToken` require a persisted non-user message in the active chat so tests do not mistake the user's own text for an assistant reply.
+ * - 2026-03-24: Added a bounded Electron close helper with process-kill fallback so E2E teardown cannot hang indefinitely after the app finishes a turn.
+ * - 2026-03-24: Added `setSeededAgentSystemPrompt` so Electron permission-matrix tests can
+ *   swap the seeded agent prompt per tool family without recreating the app.
  * - 2026-03-13: Prunes stale `run-*` workspace directories before bootstrapping new Electron
  *   E2E runs so late-suite launches do not degrade under temp-directory buildup.
  * - 2026-03-12: Hardened seeded-world selection against dropdown re-render detaches and made launch preparation wait for the seeded agent before continuing.
@@ -42,6 +48,7 @@ const electronWorkspaceRequire = createRequire(path.resolve(process.cwd(), 'elec
 const ELECTRON_E2E_QUEUE_NO_RESPONSE_FALLBACK_MS = process.env.AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS || '5000';
 const WORLD_SELECTION_TIMEOUT_MS = 15_000;
 const WORLD_SELECTION_MAX_ATTEMPTS = 4;
+const ELECTRON_CLOSE_TIMEOUT_MS = 10_000;
 export const TEST_WORLD_ID = 'e2e-test';
 export const TEST_WORLD_NAME = 'e2e-test';
 export const TEST_WORKSPACE_ROOT = path.resolve(process.cwd(), '.tmp', 'electron-playwright-workspace');
@@ -65,6 +72,34 @@ type DesktopState = {
   agentIds: string[];
   agentNames: string[];
 };
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildHitlButtonLabelCandidates(optionLabel: string): string[] {
+  const trimmed = String(optionLabel || '').trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  const lower = trimmed.toLowerCase();
+  const candidates = new Set<string>([trimmed, lower]);
+
+  if (lower === 'approve') {
+    candidates.add('approve');
+    candidates.add('yes');
+  }
+
+  if (lower === 'deny' || lower === 'decline' || lower === 'dismiss') {
+    candidates.add('deny');
+    candidates.add('decline');
+    candidates.add('dismiss');
+    candidates.add('no');
+  }
+
+  return [...candidates];
+}
 
 function requireGoogleApiKey(): void {
   if (String(process.env.GOOGLE_API_KEY || '').trim()) {
@@ -403,11 +438,85 @@ export async function sendComposerMessage(page: Page, content: string): Promise<
   await page.getByLabel('Send message').click();
 }
 
+async function hasPersistedAssistantToken(page: Page, token: string): Promise<boolean> {
+  const state = await getDesktopState(page);
+  if (!state.worldId || !state.currentChatId) {
+    return false;
+  }
+
+  return await page.evaluate(
+    async ({ worldId, chatId, token }) => {
+      const api = (window as any).agentWorldDesktop;
+      const messages = await api.getMessages(worldId, chatId);
+      if (!Array.isArray(messages)) {
+        return false;
+      }
+
+      return messages.some((message: any) => {
+        const content = String(message?.content || '');
+        if (!content.includes(token)) {
+          return false;
+        }
+
+        const role = String(message?.role || '').trim().toLowerCase();
+        const sender = String(message?.sender || '').trim().toLowerCase();
+        if (role === 'user') {
+          return false;
+        }
+        if (!role && (sender === 'human' || sender === 'user')) {
+          return false;
+        }
+        return true;
+      });
+    },
+    { worldId: state.worldId, chatId: state.currentChatId, token },
+  );
+}
+
 export async function waitForAssistantToken(page: Page, token: string, timeoutMs?: number): Promise<void> {
-  const opts: { state: 'visible'; timeout?: number } = { state: 'visible' };
-  if (timeoutMs) opts.timeout = timeoutMs;
-  await page.getByText(token, { exact: false }).last().waitFor(opts);
-  await page.getByLabel('Send message').waitFor(opts);
+  const resolvedTimeoutMs = timeoutMs ?? 15_000;
+  await expect.poll(
+    async () => await hasPersistedAssistantToken(page, token),
+    {
+      timeout: resolvedTimeoutMs,
+      message: `Expected a persisted non-user message containing "${token}" in the active Electron chat.`,
+    },
+  ).toBe(true);
+
+  await page.getByLabel('Send message').waitFor({ state: 'visible', timeout: resolvedTimeoutMs });
+}
+
+export async function waitForAssistantTokenOrHitlPrompt(
+  page: Page,
+  token: string,
+  timeoutMs?: number,
+): Promise<'assistant' | 'hitl'> {
+  const resolvedTimeoutMs = timeoutMs ?? 15_000;
+  let observedState: 'waiting' | 'assistant' | 'hitl' = 'waiting';
+
+  await expect.poll(
+    async () => {
+      if (await hasPersistedAssistantToken(page, token)) {
+        observedState = 'assistant';
+        return observedState;
+      }
+
+      const promptVisible = await page.getByTestId('hitl-prompt').isVisible().catch(() => false);
+      if (promptVisible) {
+        observedState = 'hitl';
+        return observedState;
+      }
+
+      observedState = 'waiting';
+      return observedState;
+    },
+    {
+      timeout: resolvedTimeoutMs,
+      message: `Expected either a persisted assistant message containing "${token}" or a HITL prompt in the active Electron chat.`,
+    },
+  ).not.toBe('waiting');
+
+  return observedState === 'assistant' ? 'assistant' : 'hitl';
 }
 
 export async function expectNotificationText(page: Page, text: string): Promise<void> {
@@ -453,7 +562,15 @@ export async function waitForHitlPrompt(page: Page, timeoutMs?: number): Promise
 
 export async function respondToHitlPrompt(page: Page, optionLabel: string = 'Approve', timeoutMs?: number): Promise<void> {
   const prompt = await waitForHitlPrompt(page, timeoutMs);
-  await prompt.getByRole('button', { name: optionLabel }).click();
+  for (const candidate of buildHitlButtonLabelCandidates(optionLabel)) {
+    const button = prompt.getByRole('button', { name: new RegExp(`^${escapeRegExp(candidate)}$`, 'i') }).first();
+    if (await button.count()) {
+      await button.click();
+      return;
+    }
+  }
+
+  throw new Error(`Unable to find HITL option button for "${optionLabel}".`);
 }
 
 export async function addQueueMessageToCurrentChat(page: Page, content: string): Promise<void> {
@@ -545,7 +662,37 @@ export async function launchAndPrepare(page: Page): Promise<void> {
 }
 
 export async function closeElectronApp(app: ElectronApplication): Promise<void> {
-  await app.close();
+  let closeError: unknown = null;
+  const closeResult = await Promise.race([
+    app.close()
+      .then(() => 'closed' as const)
+      .catch((error) => {
+        closeError = error;
+        return 'error' as const;
+      }),
+    new Promise<'timeout'>((resolve) => {
+      setTimeout(() => resolve('timeout'), ELECTRON_CLOSE_TIMEOUT_MS);
+    }),
+  ]);
+
+  if (closeResult === 'closed') {
+    return;
+  }
+
+  if (closeResult === 'error') {
+    throw closeError instanceof Error ? closeError : new Error(String(closeError));
+  }
+
+  const childProcess = app.process();
+  if (typeof childProcess?.kill === 'function' && !childProcess.killed) {
+    try {
+      childProcess.kill('SIGKILL');
+    } catch {
+      // Fall through and rely on Playwright close-event wait below.
+    }
+  }
+
+  await app.waitForEvent('close', { timeout: 5_000 }).catch(() => undefined);
 }
 
 export async function setDesktopToolPermission(
@@ -571,5 +718,21 @@ export async function setDesktopToolPermission(
       await api.updateWorld(worldId, { variables: nextVariables });
     },
     { worldId: state.worldId, permissionLevel: level },
+  );
+}
+
+export async function setSeededAgentSystemPrompt(page: Page, systemPrompt: string): Promise<void> {
+  const state = await getDesktopState(page);
+  const agentId = String(state.agentIds[0] || '').trim();
+  if (!state.worldId || !agentId) {
+    throw new Error('Unable to resolve the seeded agent for system prompt update.');
+  }
+
+  await page.evaluate(
+    async ({ worldId, agentId, systemPrompt }) => {
+      const api = (window as any).agentWorldDesktop;
+      await api.updateAgent(worldId, agentId, { systemPrompt });
+    },
+    { worldId: state.worldId, agentId, systemPrompt },
   );
 }

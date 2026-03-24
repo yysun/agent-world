@@ -13,6 +13,8 @@
  * - Keeps execution in-memory and deterministic.
  *
  * Recent Changes:
+ * - 2026-03-24: Added coverage that plain-text initial tool intents are synthesized into executable tool calls.
+ * - 2026-03-24: Added coverage that empty initial LLM text responses retry once and then fail with a chat-scoped durable error instead of ending silently.
  * - 2026-03-10: Added coverage that terminal agent-turn failures publish one chat-scoped persisted `system` error event.
  * - 2026-02-27: Added coverage for explicit `chatId` routing on `tool-execution` publish events.
  */
@@ -181,6 +183,46 @@ describe('processAgentMessage chat isolation', () => {
     );
   });
 
+  it('synthesizes plain-text initial tool intents into executable tool calls', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    mocks.generateAgentResponse.mockResolvedValueOnce({
+      response: {
+        type: 'text',
+        content: 'Calling tool: web_fetch (url: "https://example.com/")',
+      },
+      messageId: 'assistant-plaintext-tool-1',
+    });
+
+    mocks.getMCPToolsForWorld.mockResolvedValue({
+      web_fetch: {
+        execute: vi.fn(async () => 'ok'),
+      },
+    });
+
+    const { processAgentMessage } = await import('../../../core/events/orchestrator.js');
+    await processAgentMessage(world, agent, createMessageEvent('chat-1'));
+
+    expect(mocks.publishEvent).toHaveBeenCalledWith(
+      world,
+      'tool-execution',
+      expect.objectContaining({
+        chatId: 'chat-1',
+        toolName: 'web_fetch',
+      }),
+      'chat-1',
+    );
+    expect(mocks.handleTextResponse).not.toHaveBeenCalledWith(
+      world,
+      agent,
+      'Calling tool: web_fetch (url: "https://example.com/")',
+      'assistant-plaintext-tool-1',
+      expect.anything(),
+      'chat-1',
+    );
+  });
+
   it('logs tool execution failures with world/chat scope', async () => {
     const world = createWorld();
     const agent = createAgent();
@@ -245,6 +287,86 @@ describe('processAgentMessage chat isolation', () => {
         eventType: 'error',
         agentName: 'agent-a',
         message: expect.stringContaining('provider missing'),
+      }),
+      'chat-1',
+    );
+  });
+
+  it('retries one empty initial text response before handling the recovered reply', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    mocks.generateAgentResponse
+      .mockResolvedValueOnce({
+        response: {
+          type: 'text',
+          content: '',
+        },
+        messageId: 'assistant-empty-1',
+      })
+      .mockResolvedValueOnce({
+        response: {
+          type: 'text',
+          content: 'Recovered reply',
+        },
+        messageId: 'assistant-recovered-1',
+      });
+
+    const { processAgentMessage } = await import('../../../core/events/orchestrator.js');
+    await processAgentMessage(world, agent, createMessageEvent('chat-1'));
+
+    expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(2);
+    expect(mocks.handleTextResponse).toHaveBeenCalledWith(
+      world,
+      agent,
+      'Recovered reply',
+      'assistant-recovered-1',
+      expect.objectContaining({ chatId: 'chat-1' }),
+      'chat-1',
+    );
+    expect(mocks.publishEvent).not.toHaveBeenCalledWith(
+      world,
+      'system',
+      expect.objectContaining({
+        message: expect.stringContaining('empty response'),
+      }),
+      'chat-1',
+    );
+  });
+
+  it('publishes a chat-scoped durable error when empty initial text responses persist', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    mocks.generateAgentResponse
+      .mockResolvedValueOnce({
+        response: {
+          type: 'text',
+          content: '',
+        },
+        messageId: 'assistant-empty-1',
+      })
+      .mockResolvedValueOnce({
+        response: {
+          type: 'text',
+          content: '   ',
+        },
+        messageId: 'assistant-empty-2',
+      });
+
+    const { processAgentMessage } = await import('../../../core/events/orchestrator.js');
+    await processAgentMessage(world, agent, createMessageEvent('chat-1'));
+
+    expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(2);
+    expect(mocks.handleTextResponse).not.toHaveBeenCalled();
+    expect(mocks.publishEvent).toHaveBeenCalledWith(
+      world,
+      'system',
+      expect.objectContaining({
+        type: 'error',
+        eventType: 'error',
+        agentName: 'agent-a',
+        message: '[Error] Agent returned an empty response. Please retry the request.',
       }),
       'chat-1',
     );

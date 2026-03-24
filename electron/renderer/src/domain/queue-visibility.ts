@@ -16,5 +16,5 @@
  */
 
 export function shouldShowQueuePanel(queueCount: number, hasActiveHitlPrompt: boolean): boolean {
-  return queueCount > 1 && !hasActiveHitlPrompt;
+  return queueCount > 0 && !hasActiveHitlPrompt;
 }

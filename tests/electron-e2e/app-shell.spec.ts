@@ -67,7 +67,7 @@ test.describe('World management affordances', () => {
 
   test('world import button is reachable in the sidebar', async ({ page }) => {
     await launchAndPrepare(page);
-    await expect(page.getByTitle('Import world')).toBeVisible();
+    await expect(page.getByTitle('Import')).toBeVisible();
   });
 });
 

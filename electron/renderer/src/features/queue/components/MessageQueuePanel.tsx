@@ -39,7 +39,7 @@ export default function MessageQueuePanel({
   onClear: () => void;
   isPaused?: boolean;
 }) {
-  if (queuedMessages.length <= 1) return null;
+  if (queuedMessages.length === 0) return null;
 
   const hasSending = queuedMessages.some((m) => m.status === 'sending');
 

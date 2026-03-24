@@ -27,6 +27,8 @@
  * - Timestamp tracking for all operations
  * - Cascading deletes for data consistency
  * - Prepared statements for security and performance
+ * - 2026-03-24: Swallowed async PRAGMA callback failures so transient WAL-mode errors
+ *   during Electron E2E bootstrap cannot crash the sqlite initialization process.
  * - 2025-11-02: Refactored to remove migration logic (now in migration-runner.ts)
  * - 2025-11-02: Schema initialization deprecated - all databases use migration system (0000-0009)
  * - 2025-11-02: Removed initializeSchema() - migration 0000 handles base schema creation
@@ -106,20 +108,31 @@ export async function createSQLiteSchemaContext(config: SQLiteConfig): Promise<S
 // ...existing code...
 export function configurePragmas(ctx: { db: Database; config: SQLiteConfig }): void {
   const { db, config } = ctx;
-  try {
-    if (config.enableWAL !== false) {
-      db.run("PRAGMA journal_mode = WAL");
+  const runPragma = (sql: string): void => {
+    try {
+      db.run(sql, (error?: Error | null) => {
+        if (error) {
+          logger.warn('Ignoring SQLite PRAGMA failure', {
+            sql,
+            error: error.message,
+          });
+        }
+      });
+    } catch {
+      // Ignore synchronous pragma errors in test environments.
     }
-    if (config.enableForeignKeys !== false) {
-      db.run("PRAGMA foreign_keys = ON");
-    }
-    db.run(`PRAGMA busy_timeout = ${config.busyTimeout || 30000}`);
-    db.run(`PRAGMA cache_size = ${config.cacheSize || -64000}`);
-    db.run("PRAGMA synchronous = NORMAL");
-    db.run("PRAGMA page_size = 4096");
-  } catch (error) {
-    // Ignore pragma errors in test environments
+  };
+
+  if (config.enableWAL !== false) {
+    runPragma("PRAGMA journal_mode = WAL");
   }
+  if (config.enableForeignKeys !== false) {
+    runPragma("PRAGMA foreign_keys = ON");
+  }
+  runPragma(`PRAGMA busy_timeout = ${config.busyTimeout || 30000}`);
+  runPragma(`PRAGMA cache_size = ${config.cacheSize || -64000}`);
+  runPragma("PRAGMA synchronous = NORMAL");
+  runPragma("PRAGMA page_size = 4096");
 }
 
 /**

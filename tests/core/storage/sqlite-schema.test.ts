@@ -14,6 +14,8 @@
  * - Mocks sqlite3 dynamic import path when testing context creation.
  *
  * Recent changes:
+ * - 2026-03-24: Added regression coverage that async PRAGMA callback failures are ignored
+ *   instead of crashing sqlite initialization.
  * - 2026-02-27: Added targeted production-path tests for core/storage/sqlite-schema.
  */
 
@@ -79,10 +81,10 @@ describe('sqlite-schema utilities', () => {
       },
     });
 
-    expect(db.run).toHaveBeenCalledWith('PRAGMA journal_mode = WAL');
-    expect(db.run).toHaveBeenCalledWith('PRAGMA foreign_keys = ON');
-    expect(db.run).toHaveBeenCalledWith('PRAGMA busy_timeout = 5000');
-    expect(db.run).toHaveBeenCalledWith('PRAGMA cache_size = -4096');
+    expect(db.run).toHaveBeenCalledWith('PRAGMA journal_mode = WAL', expect.any(Function));
+    expect(db.run).toHaveBeenCalledWith('PRAGMA foreign_keys = ON', expect.any(Function));
+    expect(db.run).toHaveBeenCalledWith('PRAGMA busy_timeout = 5000', expect.any(Function));
+    expect(db.run).toHaveBeenCalledWith('PRAGMA cache_size = -4096', expect.any(Function));
 
     db.run.mockClear();
     configurePragmas({
@@ -93,8 +95,22 @@ describe('sqlite-schema utilities', () => {
         enableForeignKeys: false,
       },
     });
-    expect(db.run).not.toHaveBeenCalledWith('PRAGMA journal_mode = WAL');
-    expect(db.run).not.toHaveBeenCalledWith('PRAGMA foreign_keys = ON');
+    expect(db.run).not.toHaveBeenCalledWith('PRAGMA journal_mode = WAL', expect.any(Function));
+    expect(db.run).not.toHaveBeenCalledWith('PRAGMA foreign_keys = ON', expect.any(Function));
+  });
+
+  it('ignores asynchronous pragma callback failures', () => {
+    const db = createDbMock();
+    db.run.mockImplementation((sql: string, cb?: (err?: Error | null) => void) => {
+      cb?.(new Error(`pragma failed: ${sql}`));
+    });
+
+    expect(() =>
+      configurePragmas({
+        db: db as any,
+        config: { database: '/tmp/file.db' },
+      }),
+    ).not.toThrow();
   });
 
   it('returns schema version and supports schema version updates', async () => {
@@ -206,9 +222,9 @@ describe('sqlite-schema utilities', () => {
 
     expect(mkdirSpy).toHaveBeenCalledWith('/tmp/agent-world', { recursive: true });
     expect((ctx.db as any).dbPath).toBe('/tmp/agent-world/schema-test.db');
-    expect(runSpy).toHaveBeenCalledWith('PRAGMA journal_mode = WAL');
-    expect(runSpy).toHaveBeenCalledWith('PRAGMA foreign_keys = ON');
-    expect(runSpy).toHaveBeenCalledWith('PRAGMA busy_timeout = 1234');
-    expect(runSpy).toHaveBeenCalledWith('PRAGMA cache_size = -2048');
+    expect(runSpy).toHaveBeenCalledWith('PRAGMA journal_mode = WAL', expect.any(Function));
+    expect(runSpy).toHaveBeenCalledWith('PRAGMA foreign_keys = ON', expect.any(Function));
+    expect(runSpy).toHaveBeenCalledWith('PRAGMA busy_timeout = 1234', expect.any(Function));
+    expect(runSpy).toHaveBeenCalledWith('PRAGMA cache_size = -2048', expect.any(Function));
   });
 });
