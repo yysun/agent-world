@@ -16,6 +16,8 @@
  * - Keeps runtime contract canonical (`autoReply`, `nextAgent`) while aliases are handled upstream.
  *
  * Recent Changes:
+ * - 2026-03-24: Delayed the `agent-created` refresh signal until after the post-create info prompt resolves so
+ *   the live web HITL confirmation is not lost behind an immediate world refresh.
  * - 2026-03-12: Shared tool approval flow now persists durable approval prompt/resolution messages for replay-safe denial history.
  * - 2026-03-12: Added `read` permission level guard — returns a blocked-tool error when world toolPermission is 'read'.
  * - 2026-02-20: Added post-create HITL informational confirmation (`Agent <name> has been created`) with `refreshAfterDismiss` metadata set to true.
@@ -348,17 +350,6 @@ export function createCreateAgentToolDefinition() {
         });
 
         if (chatId) {
-          // Notify UI to refresh the agent list
-          publishEvent(world, EventType.SYSTEM, {
-            eventType: 'agent-created',
-            agent: {
-              id: createdAgent.id,
-              name: createdAgent.name,
-              type: createdAgent.type,
-              autoReply: createdAgent.autoReply ?? false,
-            },
-          }, chatId);
-
           try {
             await requestCreateAgentCreatedInfo({
               world,
@@ -374,6 +365,18 @@ export function createCreateAgentToolDefinition() {
             // Agent creation already succeeded. Failure to show a follow-up info
             // prompt must not turn a successful create into an error result.
           }
+
+          // Refresh the agent list after the confirmation prompt resolves so the
+          // live HITL card is not dropped by an eager world reload.
+          publishEvent(world, EventType.SYSTEM, {
+            eventType: 'agent-created',
+            agent: {
+              id: createdAgent.id,
+              name: createdAgent.name,
+              type: createdAgent.type,
+              autoReply: createdAgent.autoReply ?? false,
+            },
+          }, chatId);
         }
 
         return stringifyResult({

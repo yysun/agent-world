@@ -16,6 +16,14 @@
  * - Assertions still target visible browser behavior in the actual web app.
  *
  * Recent Changes:
+ * - 2026-03-24: Added narrow shell-cmd and create-agent prompt builders so the remaining
+ *   permission-matrix branches can run in fresh chats without drifting across tool families.
+ * - 2026-03-24: Hardened write-file, web-fetch, and load-skill ASK/AUTO branches to call the tool
+ *   immediately without plain-text hesitation, matching the create-agent stabilization.
+ * - 2026-03-24: Made create-agent ASK/AUTO branches explicitly call the tool immediately and avoid
+ *   plain-text approval hesitation so the real-model E2E path stays deterministic.
+ * - 2026-03-23: Tightened create-agent branch instructions so the live E2E model keeps the ASK/AUTO
+ *   scenarios distinct instead of drifting to the wrong agent name after approval.
  * - 2026-03-12: Made HITL option clicks accept normalized label-like IDs (for example `yes once` -> `yes_once`)
  *   so web E2E specs can target approval buttons using the same human-readable wording shown in the UI.
  * - 2026-03-12: Hardened API idle polling to require a short stable idle window so follow-up browser actions
@@ -262,34 +270,91 @@ function buildWorldVariables(): string {
   return `working_directory=${TEST_WORKSPACE_PATH}`;
 }
 
-function buildAgentSystemPrompt(): string {
+function buildAgentPromptFromRules(rules: string[]): string {
   return [
     'You are the Agent World web E2E assistant.',
     'Rules:',
+    `- A user message may optionally begin with "@${TEST_AGENT_NAME} ". Remove that leading mention before matching any branch prefix.`,
+    '- Match tool-permission branches using only the exact prefix before the first colon in the user message. Ignore the rest of the message when choosing the branch.',
     '- For normal user messages, reply with one short sentence that starts with "E2E_OK:" and includes the full user message text.',
-    `- If a user message starts with "WRITE_FILE_READ:", call only write_file with filePath "${WRITE_FILE_TARGET}" and content "read should be blocked". If the tool result mentions "permission level (read)", reply exactly "E2E_WRITE_FILE_READ_BLOCKED". Otherwise reply exactly "E2E_WRITE_FILE_READ_UNEXPECTED".`,
-    `- If a user message starts with "WRITE_FILE_ASK:", call only write_file with filePath "${WRITE_FILE_TARGET}" and content "ASK_WRITE_OK". After the tool returns, reply exactly "E2E_WRITE_FILE_ASK_OK".`,
-    `- If a user message starts with "WRITE_FILE_AUTO:", call only write_file with filePath "${WRITE_FILE_TARGET}" and content "AUTO_WRITE_OK". After the tool returns, reply exactly "E2E_WRITE_FILE_AUTO_OK".`,
-    `- If a user message starts with "WEB_FETCH_READ:", call only web_fetch with url "${TOOL_PERMISSION_FETCH_URL}". After the tool returns, reply exactly "E2E_WEB_FETCH_READ_OK".`,
-    `- If a user message starts with "WEB_FETCH_ASK:", call only web_fetch with url "${TOOL_PERMISSION_FETCH_URL}". After the tool returns, reply exactly "E2E_WEB_FETCH_ASK_OK".`,
-    `- If a user message starts with "WEB_FETCH_AUTO:", call only web_fetch with url "${TOOL_PERMISSION_FETCH_URL}". After the tool returns, reply exactly "E2E_WEB_FETCH_AUTO_OK".`,
+    ...rules,
+    '- Keep responses concise.',
+  ].join('\n');
+}
+
+export function buildAgentSystemPrompt(): string {
+  return buildAgentPromptFromRules([
+    '- Treat every WRITE_FILE_*, WEB_FETCH_*, SHELL_*, CREATE_AGENT_*, and LOAD_SKILL_* prefix as a separate exact branch. Never call a tool from a different branch.',
+    `- If a user message starts with "WRITE_FILE_READ:", immediately call exactly one tool: write_file with filePath "${WRITE_FILE_TARGET}" and content "read should be blocked". Do not answer with plain text before the tool call. If the tool result mentions "permission level (read)", reply exactly "E2E_WRITE_FILE_READ_BLOCKED". Otherwise reply exactly "E2E_WRITE_FILE_READ_UNEXPECTED".`,
+    `- If a user message starts with "WRITE_FILE_ASK:", immediately call exactly one tool: write_file with filePath "${WRITE_FILE_TARGET}" and content "ASK_WRITE_OK". Do not answer with plain text first and do not wait for the user; the tool itself will request approval if needed. After the tool returns, reply exactly "E2E_WRITE_FILE_ASK_OK".`,
+    `- If a user message starts with "WRITE_FILE_AUTO:", immediately call exactly one tool: write_file with filePath "${WRITE_FILE_TARGET}" and content "AUTO_WRITE_OK". Do not answer with plain text before the tool call. After the tool returns, reply exactly "E2E_WRITE_FILE_AUTO_OK".`,
+    `- If a user message starts with "WEB_FETCH_READ:", immediately call exactly one tool: web_fetch with url "${TOOL_PERMISSION_FETCH_URL}". Do not answer with plain text before the tool call. After the tool returns, reply exactly "E2E_WEB_FETCH_READ_OK".`,
+    `- If a user message starts with "WEB_FETCH_ASK:", immediately call exactly one tool: web_fetch with url "${TOOL_PERMISSION_FETCH_URL}". Do not answer with plain text first and do not wait for the user; the tool itself will request approval if needed. After the tool returns, reply exactly "E2E_WEB_FETCH_ASK_OK".`,
+    `- If a user message starts with "WEB_FETCH_AUTO:", immediately call exactly one tool: web_fetch with url "${TOOL_PERMISSION_FETCH_URL}". Do not answer with plain text before the tool call. After the tool returns, reply exactly "E2E_WEB_FETCH_AUTO_OK".`,
     '- If a user message starts with "SHELL_READ:", call only shell_cmd with command "pwd" and no parameters. If the tool result mentions "permission level (read)", reply exactly "E2E_SHELL_READ_BLOCKED".',
     '- If a user message starts with "SHELL_ASK:", call only shell_cmd with command "pwd" and no parameters. After the tool returns, reply exactly "E2E_SHELL_ASK_OK".',
     '- If a user message starts with "SHELL_AUTO:", call only shell_cmd with command "pwd" and no parameters. After the tool returns, reply exactly "E2E_SHELL_AUTO_OK".',
     `- If a user message starts with "SHELL_RISKY_AUTO:", call only shell_cmd with command "rm" and parameters ["${HITL_DELETE_TARGET}"]. After the tool returns, reply exactly "E2E_SHELL_RISKY_AUTO_OK".`,
-    `- If a user message starts with "CREATE_AGENT_READ:", call only create_agent with name "${CREATE_AGENT_ASK_NAME}", role "E2E coverage agent", and nextAgent "human". If the tool result mentions "permission level (read)", reply exactly "E2E_CREATE_AGENT_READ_BLOCKED".`,
-    `- If a user message starts with "CREATE_AGENT_ASK:", call only create_agent with name "${CREATE_AGENT_ASK_NAME}", role "E2E coverage agent", and nextAgent "human". After the tool returns, reply exactly "E2E_CREATE_AGENT_ASK_OK".`,
-    `- If a user message starts with "CREATE_AGENT_AUTO:", call only create_agent with name "${CREATE_AGENT_AUTO_NAME}", role "E2E coverage agent", and nextAgent "human". After the tool returns, reply exactly "E2E_CREATE_AGENT_AUTO_OK".`,
-    `- If a user message starts with "LOAD_SKILL_READ:", call only load_skill with skill_id "${TOOL_PERMISSION_SKILL_ID}". After the tool returns, reply exactly "E2E_LOAD_SKILL_READ_BLOCKED".`,
-    `- If a user message starts with "LOAD_SKILL_ASK:", call only load_skill with skill_id "${TOOL_PERMISSION_SKILL_ID}". After the tool returns, reply exactly "E2E_LOAD_SKILL_ASK_OK".`,
-    `- If a user message starts with "LOAD_SKILL_AUTO:", call only load_skill with skill_id "${TOOL_PERMISSION_SKILL_ID}". After the tool returns, reply exactly "E2E_LOAD_SKILL_AUTO_OK".`,
+    `- Treat "CREATE_AGENT_READ:", "CREATE_AGENT_APPROVAL:", and "CREATE_AGENT_AUTO:" as three separate exact branches. Never reuse the agent name or reply token from a different branch.`,
+    `- If a user message starts with "CREATE_AGENT_READ:", immediately call only create_agent with name "${CREATE_AGENT_ASK_NAME}", role "E2E coverage agent", and nextAgent "human". Do not ask for permission in plain text. If the tool result mentions "permission level (read)", reply exactly "E2E_CREATE_AGENT_READ_BLOCKED".`,
+    `- If a user message starts with "CREATE_AGENT_APPROVAL:", immediately call only create_agent with name "${CREATE_AGENT_ASK_NAME}", role "E2E coverage agent", and nextAgent "human". Do not create "${CREATE_AGENT_AUTO_NAME}" in this branch. Do not ask for permission in plain text and do not wait for the user manually; the app will surface the approval prompt. After the tool returns, reply exactly "E2E_CREATE_AGENT_ASK_OK".`,
+    `- If a user message starts with "CREATE_AGENT_AUTO:", immediately call only create_agent with name "${CREATE_AGENT_AUTO_NAME}", role "E2E coverage agent", and nextAgent "human". Do not create "${CREATE_AGENT_ASK_NAME}" in this branch. Do not ask for permission in plain text and do not wait for the user manually; the app will surface any required approval prompt. After the tool returns, reply exactly "E2E_CREATE_AGENT_AUTO_OK".`,
+    '- Treat "LOAD_SKILL_READ:", "LOAD_SKILL_ASK:", and "LOAD_SKILL_AUTO:" as three separate exact branches. Never reuse the reply token from a different load-skill branch.',
+    `- If a user message starts with "LOAD_SKILL_READ:", immediately call exactly one tool: load_skill with skill_id "${TOOL_PERMISSION_SKILL_ID}". Do not answer with plain text before the tool call. After the tool returns, reply exactly "E2E_LOAD_SKILL_READ_BLOCKED".`,
+    `- If a user message starts with "LOAD_SKILL_ASK:", immediately call exactly one tool: load_skill with skill_id "${TOOL_PERMISSION_SKILL_ID}". Do not answer with plain text first and do not wait for the user; the tool itself will request approval if needed. Do not reply with "E2E_LOAD_SKILL_AUTO_OK" in this branch. After the tool returns, reply exactly "E2E_LOAD_SKILL_ASK_OK".`,
+    `- If a user message starts with "LOAD_SKILL_AUTO:", immediately call exactly one tool: load_skill with skill_id "${TOOL_PERMISSION_SKILL_ID}". Do not answer with plain text before the tool call. Do not reply with "E2E_LOAD_SKILL_ASK_OK" in this branch. After the tool returns, reply exactly "E2E_LOAD_SKILL_AUTO_OK".`,
     `- If a user message includes the exact filename "${HITL_DELETE_TARGET}" and asks to use shell_cmd, do not call human_intervention_request. Call only shell_cmd with command "rm" and parameters ["${HITL_DELETE_TARGET}"].`,
     `- If a user message starts with "SLOW_SHELL:" and includes the exact filename "${HITL_DELETE_TARGET}", do not ask for approval. Call only shell_cmd with command "node" and parameters ["./${SLOW_SHELL_SCRIPT_NAME}", "${HITL_DELETE_TARGET}"].`,
     `- After that shell_cmd completes successfully, reply with exactly "${HITL_SHELL_SUCCESS_TOKEN}".`,
     '- If a user message starts with "HITL:", call the tool "human_intervention_request" with question "Approve the E2E request?" and options ["Approve","Decline"]. Do not answer with plain text first.',
     '- After a generic HITL option is submitted, reply with one short sentence that starts with "E2E_RESUMED:" and includes the chosen option label.',
-    '- Keep responses concise.',
-  ].join('\n');
+  ]);
+}
+
+export function buildWriteFilePermissionPrompt(): string {
+  return buildAgentPromptFromRules([
+    '- Treat every WRITE_FILE_* prefix as a separate exact branch. Never call web_fetch, shell_cmd, create_agent, load_skill, or human_intervention_request in a WRITE_FILE_* branch.',
+    `- If a user message starts with "WRITE_FILE_READ:", immediately call exactly one tool: write_file with filePath "${WRITE_FILE_TARGET}" and content "read should be blocked". Do not answer with plain text before the tool call. If the tool result mentions "permission level (read)", reply exactly "E2E_WRITE_FILE_READ_BLOCKED". Otherwise reply exactly "E2E_WRITE_FILE_READ_UNEXPECTED".`,
+    `- If a user message starts with "WRITE_FILE_ASK:", immediately call exactly one tool: write_file with filePath "${WRITE_FILE_TARGET}" and content "ASK_WRITE_OK". Do not answer with plain text first and do not wait for the user; the tool itself will request approval if needed. After the tool returns, reply exactly "E2E_WRITE_FILE_ASK_OK".`,
+    `- If a user message starts with "WRITE_FILE_AUTO:", immediately call exactly one tool: write_file with filePath "${WRITE_FILE_TARGET}" and content "AUTO_WRITE_OK". Do not answer with plain text before the tool call. After the tool returns, reply exactly "E2E_WRITE_FILE_AUTO_OK".`,
+  ]);
+}
+
+export function buildWebFetchPermissionPrompt(): string {
+  return buildAgentPromptFromRules([
+    '- Treat every WEB_FETCH_* prefix as a separate exact branch. Never call write_file, shell_cmd, create_agent, load_skill, or human_intervention_request in a WEB_FETCH_* branch.',
+    `- If a user message starts with "WEB_FETCH_READ:", immediately call exactly one tool: web_fetch with url "${TOOL_PERMISSION_FETCH_URL}". Do not answer with plain text before the tool call. After the tool returns, reply exactly "E2E_WEB_FETCH_READ_OK".`,
+    `- If a user message starts with "WEB_FETCH_ASK:", immediately call exactly one tool: web_fetch with url "${TOOL_PERMISSION_FETCH_URL}". Do not answer with plain text first and do not wait for the user; the tool itself will request approval if needed. After the tool returns, reply exactly "E2E_WEB_FETCH_ASK_OK".`,
+    `- If a user message starts with "WEB_FETCH_AUTO:", immediately call exactly one tool: web_fetch with url "${TOOL_PERMISSION_FETCH_URL}". Do not answer with plain text before the tool call. After the tool returns, reply exactly "E2E_WEB_FETCH_AUTO_OK".`,
+  ]);
+}
+
+export function buildLoadSkillPermissionPrompt(): string {
+  return buildAgentPromptFromRules([
+    '- Treat "LOAD_SKILL_READ:", "LOAD_SKILL_ASK:", and "LOAD_SKILL_AUTO:" as three separate exact branches. Never call write_file, web_fetch, shell_cmd, create_agent, or human_intervention_request before load_skill in a LOAD_SKILL_* branch, and never reuse a reply token from a different load-skill branch.',
+    `- If a user message starts with "LOAD_SKILL_READ:", immediately call exactly one tool: load_skill with skill_id "${TOOL_PERMISSION_SKILL_ID}". Do not answer with plain text before the tool call. After the tool returns, reply exactly "E2E_LOAD_SKILL_READ_BLOCKED".`,
+    `- If a user message starts with "LOAD_SKILL_ASK:", immediately call exactly one tool: load_skill with skill_id "${TOOL_PERMISSION_SKILL_ID}". Do not answer with plain text first and do not wait for the user; the tool itself will request approval if needed. Do not reply with "E2E_LOAD_SKILL_AUTO_OK" in this branch. After the tool returns, reply exactly "E2E_LOAD_SKILL_ASK_OK".`,
+    `- If a user message starts with "LOAD_SKILL_AUTO:", immediately call exactly one tool: load_skill with skill_id "${TOOL_PERMISSION_SKILL_ID}". Do not answer with plain text before the tool call. Do not reply with "E2E_LOAD_SKILL_ASK_OK" in this branch. After the tool returns, reply exactly "E2E_LOAD_SKILL_AUTO_OK".`,
+  ]);
+}
+
+export function buildShellPermissionPrompt(): string {
+  return buildAgentPromptFromRules([
+    '- Treat "SHELL_READ:", "SHELL_ASK:", "SHELL_AUTO:", and "SHELL_RISKY_AUTO:" as four separate exact branches. Never call write_file, web_fetch, create_agent, load_skill, or human_intervention_request before shell_cmd in a SHELL_* branch, and never reuse a reply token from a different shell branch.',
+    '- If a user message starts with "SHELL_READ:", immediately call exactly one tool: shell_cmd with command "pwd" and no parameters. Do not answer with plain text before the tool call. If the tool result mentions "permission level (read)", reply exactly "E2E_SHELL_READ_BLOCKED". Otherwise reply exactly "E2E_SHELL_READ_UNEXPECTED".',
+    '- If a user message starts with "SHELL_ASK:", immediately call exactly one tool: shell_cmd with command "pwd" and no parameters. Do not answer with plain text first and do not wait for the user; the tool itself will request approval if needed. After the tool returns, reply exactly "E2E_SHELL_ASK_OK".',
+    '- If a user message starts with "SHELL_AUTO:", immediately call exactly one tool: shell_cmd with command "pwd" and no parameters. Do not answer with plain text before the tool call. After the tool returns, reply exactly "E2E_SHELL_AUTO_OK".',
+    `- If a user message starts with "SHELL_RISKY_AUTO:", immediately call exactly one tool: shell_cmd with command "rm" and parameters ["${HITL_DELETE_TARGET}"]. Do not answer with plain text first and do not wait for the user; the tool itself will request approval if needed. After the tool returns, reply exactly "E2E_SHELL_RISKY_AUTO_OK".`,
+  ]);
+}
+
+export function buildCreateAgentPermissionPrompt(): string {
+  return buildAgentPromptFromRules([
+    `- Treat "CREATE_AGENT_READ:", "CREATE_AGENT_APPROVAL:", and "CREATE_AGENT_AUTO:" as three separate exact branches. Never call write_file, web_fetch, shell_cmd, load_skill, or human_intervention_request before create_agent in a CREATE_AGENT_* branch, and never reuse the agent name or reply token from a different create-agent branch.`,
+    `- If a user message starts with "CREATE_AGENT_READ:", immediately call exactly one tool: create_agent with name "${CREATE_AGENT_ASK_NAME}", role "E2E coverage agent", and nextAgent "human". Do not answer with plain text before the tool call. If the tool result mentions "permission level (read)", reply exactly "E2E_CREATE_AGENT_READ_BLOCKED". Otherwise reply exactly "E2E_CREATE_AGENT_READ_UNEXPECTED".`,
+    `- If a user message starts with "CREATE_AGENT_APPROVAL:", immediately call exactly one tool: create_agent with name "${CREATE_AGENT_ASK_NAME}", role "E2E coverage agent", and nextAgent "human". Do not create "${CREATE_AGENT_AUTO_NAME}" in this branch. Do not answer with plain text first and do not wait for the user; the tool itself will request approval if needed. After the tool returns, reply exactly "E2E_CREATE_AGENT_ASK_OK".`,
+    `- If a user message starts with "CREATE_AGENT_AUTO:", immediately call exactly one tool: create_agent with name "${CREATE_AGENT_AUTO_NAME}", role "E2E coverage agent", and nextAgent "human". Do not create "${CREATE_AGENT_ASK_NAME}" in this branch. Do not answer with plain text first and do not wait for the user; the tool itself will request approval if needed. After the tool returns, reply exactly "E2E_CREATE_AGENT_AUTO_OK".`,
+  ]);
 }
 
 function requireChatId(chatId: unknown, label: string): string {
@@ -382,6 +447,13 @@ export async function deleteAllAgents(state: WebBootstrapState): Promise<void> {
       }
     }
   }
+}
+
+export async function setAgentSystemPrompt(state: WebBootstrapState, systemPrompt: string): Promise<void> {
+  await apiRequest(`/worlds/${encodeURIComponent(state.worldName)}/agents/${encodeURIComponent(state.agentName)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ systemPrompt }),
+  });
 }
 
 export function buildShellHitlPrompt(label: string): string {

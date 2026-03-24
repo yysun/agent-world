@@ -17,6 +17,8 @@
  * - Uses wrapper-based execution to exercise real alias/validation behavior.
  *
  * Recent Changes:
+ * - 2026-03-24: Added a regression test that keeps the post-create confirmation prompt ahead of the
+ *   `agent-created` refresh signal so the live web HITL card is not dropped.
  * - 2026-03-12: Added durable synthetic approval prompt/resolution coverage for denied create_agent approvals.
  * - 2026-02-20: Added coverage that `create_agent` forwards manager override to allow in-turn creation while world processing is active.
  * - 2026-02-20: Added initial unit coverage for built-in `create_agent`.
@@ -28,6 +30,10 @@ import { requestWorldOption } from '../../core/hitl.js';
 import { createAgent, claimAgentCreationSlot } from '../../core/managers.js';
 import { wrapToolWithValidation } from '../../core/tool-utils.js';
 import { LLMProvider } from '../../core/types.js';
+
+const { mockPublishEvent } = vi.hoisted(() => ({
+  mockPublishEvent: vi.fn(),
+}));
 
 vi.mock('../../core/hitl.js', () => ({
   requestWorldOption: vi.fn(async () => ({
@@ -62,6 +68,10 @@ vi.mock('../../core/managers.js', () => ({
   })),
 }));
 
+vi.mock('../../core/events/publishers.js', () => ({
+  publishEvent: mockPublishEvent,
+}));
+
 const mockedRequestWorldOption = vi.mocked(requestWorldOption);
 const mockedCreateAgent = vi.mocked(createAgent);
 const mockedClaimAgentCreationSlot = vi.mocked(claimAgentCreationSlot);
@@ -90,6 +100,7 @@ function buildToolContext(overrides?: Record<string, unknown>) {
 describe('core/create-agent-tool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPublishEvent.mockReset();
     mockedClaimAgentCreationSlot.mockResolvedValue({
       claimed: true,
       release: vi.fn(),
@@ -404,6 +415,61 @@ describe('core/create-agent-tool', () => {
         refreshAfterDismiss: true,
       },
     });
+  });
+
+  it('waits for the post-create confirmation before emitting the agent-created refresh event', async () => {
+    let resolveInfoPrompt: ((value: {
+      worldId: string;
+      requestId: string;
+      chatId: string;
+      optionId: string;
+      source: 'user';
+    }) => void) | null = null;
+
+    mockedRequestWorldOption
+      .mockResolvedValueOnce({
+        worldId: 'world-1',
+        requestId: 'req-approval',
+        chatId: 'chat-1',
+        optionId: 'yes',
+        source: 'user',
+      })
+      .mockImplementationOnce(async () => await new Promise((resolve) => {
+        resolveInfoPrompt = resolve;
+      }));
+
+    const tool = buildWrappedCreateAgentTool();
+    const pending = tool.execute(
+      { name: 'Prompt Order Agent' },
+      undefined,
+      undefined,
+      buildToolContext(),
+    );
+
+    await vi.waitFor(() => {
+      expect(resolveInfoPrompt).not.toBeNull();
+    });
+    expect(mockPublishEvent).not.toHaveBeenCalled();
+
+    resolveInfoPrompt?.({
+      worldId: 'world-1',
+      requestId: 'req-created-info',
+      chatId: 'chat-1',
+      optionId: 'dismiss',
+      source: 'user',
+    });
+
+    await pending;
+
+    expect(mockPublishEvent).toHaveBeenCalledTimes(1);
+    expect(mockPublishEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        eventType: 'agent-created',
+      }),
+      'chat-1',
+    );
   });
 
   it('does not emit post-create chat-scoped follow-up when explicit chatId is missing', async () => {

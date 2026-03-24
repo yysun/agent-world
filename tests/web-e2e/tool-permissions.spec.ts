@@ -23,6 +23,15 @@
  *   `auto` default when the `tool_permission` key is absent.
  *
  * Recent Changes:
+ * - 2026-03-24: Isolated shell-cmd and create-agent permission branches in fresh chats with
+ *   narrow seeded prompts so the remaining ask-mode approval paths stay stable in full-suite runs.
+ * - 2026-03-24: Isolated permission-matrix branches in fresh chats and tightened prompt wording
+ *   for write_file, web_fetch, and load_skill so long full-suite runs stay deterministic.
+ * - 2026-03-24: Aligned load_skill web E2E expectations with the current load-only contract:
+ *   ask-mode requires approval to apply a skill that references scripts, but loading the skill
+ *   does not execute those scripts automatically.
+ * - 2026-03-23: Hardened create-agent approval coverage to complete the required post-create dismiss prompt
+ *   before asserting assistant completion or backend agent-list state.
  * - 2026-03-12: Updated header docs to match the full permission-matrix coverage already implemented in this spec.
  * - 2026-03-12: Initial file — web e2e coverage for tool-permission UI and enforcement.
  */
@@ -32,21 +41,28 @@ import path from 'node:path';
 
 import { test, expect } from './support/fixtures.js';
 import {
+  buildCreateAgentPermissionPrompt,
+  buildLoadSkillPermissionPrompt,
+  buildShellPermissionPrompt,
+  buildWebFetchPermissionPrompt,
+  buildWriteFilePermissionPrompt,
   CREATE_AGENT_ASK_NAME,
   CREATE_AGENT_AUTO_NAME,
   HITL_DELETE_TARGET,
   LOAD_SKILL_RUN_MARKER,
   TEST_WORKSPACE_PATH,
   WRITE_FILE_TARGET,
+  createNewChat,
   getWorldAgentNames,
-    gotoWorld,
-    respondToHitlPrompt,
-    sendComposerMessage,
-    setWorldToolPermission,
-    waitForHitlPrompt,
-    waitForAssistantToken,
-    waitForWorldIdle,
-  } from './support/web-harness.js';
+  gotoWorld,
+  respondToHitlPrompt,
+  sendComposerMessage,
+  setAgentSystemPrompt,
+  setWorldToolPermission,
+  waitForHitlPrompt,
+  waitForAssistantToken,
+  waitForWorldIdle,
+} from './support/web-harness.js';
 
 const PERMISSION_FLOW_TIMEOUT_MS = 60_000;
 
@@ -58,6 +74,19 @@ async function reloadWorldWithPermission(
   await setWorldToolPermission(bootstrapState, level);
   await gotoWorld(page, bootstrapState);
   await expect(page.getByLabel('Tool permission level')).toHaveValue(level);
+}
+
+async function preparePermissionScenario(
+  page: Parameters<typeof gotoWorld>[0],
+  bootstrapState: Parameters<typeof gotoWorld>[1],
+  level: 'read' | 'ask' | 'auto',
+): Promise<void> {
+  await reloadWorldWithPermission(page, bootstrapState, level);
+  await createNewChat(page);
+}
+
+function directToAgent(agentName: string, command: string): string {
+  return `@${agentName} ${command}`;
 }
 
 async function pathExists(targetPath: string): Promise<boolean> {
@@ -94,6 +123,23 @@ async function waitForToolSummary(page: Parameters<typeof gotoWorld>[0], toolNam
     .locator('.tool-summary-line', { hasText: `tool: ${toolName} -` })
     .last()
     .waitFor({ state: 'visible', timeout: PERMISSION_FLOW_TIMEOUT_MS });
+}
+
+async function completeCreateAgentFlow(
+  page: Parameters<typeof gotoWorld>[0],
+  bootstrapState: Parameters<typeof gotoWorld>[1],
+  approveToken: string,
+  agentName: string,
+): Promise<void> {
+  await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
+  await respondToHitlPrompt(page, 'yes', PERMISSION_FLOW_TIMEOUT_MS);
+  await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
+  await respondToHitlPrompt(page, 'dismiss', PERMISSION_FLOW_TIMEOUT_MS);
+  await waitForAssistantToken(page, approveToken, PERMISSION_FLOW_TIMEOUT_MS);
+  await waitForWorldIdle(page, PERMISSION_FLOW_TIMEOUT_MS);
+  await expect.poll(() => getWorldAgentNames(bootstrapState), {
+    timeout: PERMISSION_FLOW_TIMEOUT_MS,
+  }).toContain(agentName);
 }
 
 test.describe('Tool permission dropdown — UI affordances', () => {
@@ -154,22 +200,23 @@ test.describe('Tool permission enforcement', () => {
     bootstrapState,
   }) => {
     const writeTargetPath = await resetWorkspaceFile(WRITE_FILE_TARGET);
+    await setAgentSystemPrompt(bootstrapState, buildWriteFilePermissionPrompt());
 
-    await reloadWorldWithPermission(page, bootstrapState, 'read');
-    await sendComposerMessage(page, 'WRITE_FILE_READ: exercise the read block path.');
+    await preparePermissionScenario(page, bootstrapState, 'read');
+    await sendComposerMessage(page, directToAgent(bootstrapState.agentName, 'WRITE_FILE_READ:'));
     await waitForAssistantToken(page, 'E2E_WRITE_FILE_READ_BLOCKED', PERMISSION_FLOW_TIMEOUT_MS);
     await expect(page.getByTestId('hitl-prompt')).toBeHidden();
     await expect(pathExists(writeTargetPath)).resolves.toBe(false);
 
-    await reloadWorldWithPermission(page, bootstrapState, 'ask');
-    await sendComposerMessage(page, 'WRITE_FILE_ASK: exercise the ask path.');
+    await preparePermissionScenario(page, bootstrapState, 'ask');
+    await sendComposerMessage(page, directToAgent(bootstrapState.agentName, 'WRITE_FILE_ASK:'));
     await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
     await respondToHitlPrompt(page, 'approve', PERMISSION_FLOW_TIMEOUT_MS);
     await waitForAssistantToken(page, 'E2E_WRITE_FILE_ASK_OK', PERMISSION_FLOW_TIMEOUT_MS);
     await expect(fs.readFile(writeTargetPath, 'utf8')).resolves.toContain('ASK_WRITE_OK');
 
-    await reloadWorldWithPermission(page, bootstrapState, 'auto');
-    await sendComposerMessage(page, 'WRITE_FILE_AUTO: exercise the auto path.');
+    await preparePermissionScenario(page, bootstrapState, 'auto');
+    await sendComposerMessage(page, directToAgent(bootstrapState.agentName, 'WRITE_FILE_AUTO:'));
     await waitForAssistantToken(page, 'E2E_WRITE_FILE_AUTO_OK', PERMISSION_FLOW_TIMEOUT_MS);
     await expect(page.getByTestId('hitl-prompt')).toBeHidden();
     await expect(fs.readFile(writeTargetPath, 'utf8')).resolves.toContain('AUTO_WRITE_OK');
@@ -179,20 +226,22 @@ test.describe('Tool permission enforcement', () => {
     page,
     bootstrapState,
   }) => {
-    await reloadWorldWithPermission(page, bootstrapState, 'read');
-    await sendComposerMessage(page, 'WEB_FETCH_READ: exercise the read block path.');
+    await setAgentSystemPrompt(bootstrapState, buildWebFetchPermissionPrompt());
+
+    await preparePermissionScenario(page, bootstrapState, 'read');
+    await sendComposerMessage(page, directToAgent(bootstrapState.agentName, 'WEB_FETCH_READ:'));
     await waitForAssistantToken(page, 'E2E_WEB_FETCH_READ_OK', PERMISSION_FLOW_TIMEOUT_MS);
     await waitForWorldIdle(page, PERMISSION_FLOW_TIMEOUT_MS);
     await expect(page.getByTestId('hitl-prompt')).toBeHidden();
 
-    await reloadWorldWithPermission(page, bootstrapState, 'ask');
-    await sendComposerMessage(page, 'WEB_FETCH_ASK: exercise the ask path.');
+    await preparePermissionScenario(page, bootstrapState, 'ask');
+    await sendComposerMessage(page, directToAgent(bootstrapState.agentName, 'WEB_FETCH_ASK:'));
     await waitForAssistantToken(page, 'E2E_WEB_FETCH_ASK_OK', PERMISSION_FLOW_TIMEOUT_MS);
     await waitForWorldIdle(page, PERMISSION_FLOW_TIMEOUT_MS);
     await expect(page.getByTestId('hitl-prompt')).toBeHidden();
 
-    await reloadWorldWithPermission(page, bootstrapState, 'auto');
-    await sendComposerMessage(page, 'WEB_FETCH_AUTO: exercise the auto path.');
+    await preparePermissionScenario(page, bootstrapState, 'auto');
+    await sendComposerMessage(page, directToAgent(bootstrapState.agentName, 'WEB_FETCH_AUTO:'));
     await waitForAssistantToken(page, 'E2E_WEB_FETCH_AUTO_OK', PERMISSION_FLOW_TIMEOUT_MS);
     await waitForWorldIdle(page, PERMISSION_FLOW_TIMEOUT_MS);
     await expect(page.getByTestId('hitl-prompt')).toBeHidden();
@@ -206,21 +255,22 @@ test.describe('Tool permission enforcement', () => {
       HITL_DELETE_TARGET,
       'Disposable file for real web E2E shell_cmd HITL approval coverage.\n',
     );
+    await setAgentSystemPrompt(bootstrapState, buildShellPermissionPrompt());
 
-    await reloadWorldWithPermission(page, bootstrapState, 'read');
-    await sendComposerMessage(page, 'SHELL_READ: exercise the read block path.');
+    await preparePermissionScenario(page, bootstrapState, 'read');
+    await sendComposerMessage(page, directToAgent(bootstrapState.agentName, 'SHELL_READ:'));
     await waitForAssistantToken(page, 'E2E_SHELL_READ_BLOCKED', PERMISSION_FLOW_TIMEOUT_MS);
     await expect(pathExists(deleteTargetPath)).resolves.toBe(true);
 
-    await reloadWorldWithPermission(page, bootstrapState, 'ask');
-    await sendComposerMessage(page, 'SHELL_ASK: exercise the ask path.');
+    await preparePermissionScenario(page, bootstrapState, 'ask');
+    await sendComposerMessage(page, directToAgent(bootstrapState.agentName, 'SHELL_ASK:'));
     await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
     await respondToHitlPrompt(page, 'approve', PERMISSION_FLOW_TIMEOUT_MS);
     await waitForAssistantToken(page, 'E2E_SHELL_ASK_OK', PERMISSION_FLOW_TIMEOUT_MS);
     await waitForWorldIdle(page, PERMISSION_FLOW_TIMEOUT_MS);
 
-    await reloadWorldWithPermission(page, bootstrapState, 'auto');
-    await sendComposerMessage(page, 'SHELL_AUTO: exercise the auto low-risk path.');
+    await preparePermissionScenario(page, bootstrapState, 'auto');
+    await sendComposerMessage(page, directToAgent(bootstrapState.agentName, 'SHELL_AUTO:'));
     await waitForAssistantToken(page, 'E2E_SHELL_AUTO_OK', PERMISSION_FLOW_TIMEOUT_MS);
     await waitForWorldIdle(page, PERMISSION_FLOW_TIMEOUT_MS);
     await expect(page.getByTestId('hitl-prompt')).toBeHidden();
@@ -229,8 +279,8 @@ test.describe('Tool permission enforcement', () => {
       HITL_DELETE_TARGET,
       'Disposable file for real web E2E shell_cmd HITL approval coverage.\n',
     );
-    await reloadWorldWithPermission(page, bootstrapState, 'auto');
-    await sendComposerMessage(page, 'SHELL_RISKY_AUTO: exercise the auto risky path.');
+    await preparePermissionScenario(page, bootstrapState, 'auto');
+    await sendComposerMessage(page, directToAgent(bootstrapState.agentName, 'SHELL_RISKY_AUTO:'));
     await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
     await respondToHitlPrompt(page, 'approve', PERMISSION_FLOW_TIMEOUT_MS);
     await waitForAssistantToken(page, 'E2E_SHELL_RISKY_AUTO_OK', PERMISSION_FLOW_TIMEOUT_MS);
@@ -242,8 +292,9 @@ test.describe('Tool permission enforcement', () => {
     page,
     bootstrapState,
   }) => {
-    await reloadWorldWithPermission(page, bootstrapState, 'read');
-    await sendComposerMessage(page, 'CREATE_AGENT_READ: exercise the read block path.');
+    await setAgentSystemPrompt(bootstrapState, buildCreateAgentPermissionPrompt());
+    await preparePermissionScenario(page, bootstrapState, 'read');
+    await sendComposerMessage(page, directToAgent(bootstrapState.agentName, 'CREATE_AGENT_READ:'));
     await waitForAssistantToken(page, 'E2E_CREATE_AGENT_READ_BLOCKED', PERMISSION_FLOW_TIMEOUT_MS);
     await expect(getWorldAgentNames(bootstrapState)).resolves.not.toContain(CREATE_AGENT_ASK_NAME);
   });
@@ -252,24 +303,30 @@ test.describe('Tool permission enforcement', () => {
     page,
     bootstrapState,
   }) => {
-    await reloadWorldWithPermission(page, bootstrapState, 'ask');
-    await sendComposerMessage(page, 'CREATE_AGENT_ASK: exercise the ask path.');
-    await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
-    await respondToHitlPrompt(page, 'yes', PERMISSION_FLOW_TIMEOUT_MS);
-    await dismissHitlPromptIfPresent(page);
-    await expect(getWorldAgentNames(bootstrapState)).resolves.toContain(CREATE_AGENT_ASK_NAME);
+    await setAgentSystemPrompt(bootstrapState, buildCreateAgentPermissionPrompt());
+    await preparePermissionScenario(page, bootstrapState, 'ask');
+    await sendComposerMessage(page, directToAgent(bootstrapState.agentName, 'CREATE_AGENT_APPROVAL:'));
+    await completeCreateAgentFlow(
+      page,
+      bootstrapState,
+      'E2E_CREATE_AGENT_ASK_OK',
+      CREATE_AGENT_ASK_NAME,
+    );
   });
 
   test('create_agent keeps the approval flow at auto', async ({
     page,
     bootstrapState,
   }) => {
-    await reloadWorldWithPermission(page, bootstrapState, 'auto');
-    await sendComposerMessage(page, 'CREATE_AGENT_AUTO: exercise the auto path.');
-    await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
-    await respondToHitlPrompt(page, 'yes', PERMISSION_FLOW_TIMEOUT_MS);
-    await dismissHitlPromptIfPresent(page);
-    await expect(getWorldAgentNames(bootstrapState)).resolves.toContain(CREATE_AGENT_AUTO_NAME);
+    await setAgentSystemPrompt(bootstrapState, buildCreateAgentPermissionPrompt());
+    await preparePermissionScenario(page, bootstrapState, 'auto');
+    await sendComposerMessage(page, directToAgent(bootstrapState.agentName, 'CREATE_AGENT_AUTO:'));
+    await completeCreateAgentFlow(
+      page,
+      bootstrapState,
+      'E2E_CREATE_AGENT_AUTO_OK',
+      CREATE_AGENT_AUTO_NAME,
+    );
   });
 
   test('load_skill blocks script execution at read', async ({
@@ -277,33 +334,39 @@ test.describe('Tool permission enforcement', () => {
     bootstrapState,
   }) => {
     const markerPath = await resetWorkspaceFile(LOAD_SKILL_RUN_MARKER);
+    await setAgentSystemPrompt(bootstrapState, buildLoadSkillPermissionPrompt());
 
     await reloadWorldWithPermission(page, bootstrapState, 'read');
-    await sendComposerMessage(page, 'LOAD_SKILL_READ: exercise the read block path.');
+    await sendComposerMessage(page, directToAgent(bootstrapState.agentName, 'LOAD_SKILL_READ:'));
     await waitForToolSummary(page, 'load_skill');
     await waitForWorldIdle(page, PERMISSION_FLOW_TIMEOUT_MS);
     await expect(page.getByTestId('hitl-prompt')).toBeHidden();
     await expect(pathExists(markerPath)).resolves.toBe(false);
   });
 
-  test('load_skill asks for approval and runs scripts at ask', async ({
+  test('load_skill asks for approval before applying script-referencing skills at ask', async ({
     page,
     bootstrapState,
   }) => {
-    await reloadWorldWithPermission(page, bootstrapState, 'ask');
-    await sendComposerMessage(page, 'LOAD_SKILL_ASK: exercise the ask path.');
+    await resetWorkspaceFile(LOAD_SKILL_RUN_MARKER);
+    await setAgentSystemPrompt(bootstrapState, buildLoadSkillPermissionPrompt());
+
+    await preparePermissionScenario(page, bootstrapState, 'ask');
+    await sendComposerMessage(page, directToAgent(bootstrapState.agentName, 'LOAD_SKILL_ASK:'));
     await waitForHitlPrompt(page, PERMISSION_FLOW_TIMEOUT_MS);
     await respondToHitlPrompt(page, 'yes once', PERMISSION_FLOW_TIMEOUT_MS);
-    await waitForAssistantToken(page, 'E2E_LOAD_SKILL_ASK_OK', PERMISSION_FLOW_TIMEOUT_MS);
-    await waitForWorldIdle(page, PERMISSION_FLOW_TIMEOUT_MS);
+    await expect(page.getByTestId('hitl-prompt')).toBeHidden();
+    await waitForToolSummary(page, 'load_skill');
   });
 
-  test('load_skill runs scripts without approval at auto', async ({
+  test('load_skill applies script-referencing skills without approval at auto', async ({
     page,
     bootstrapState,
   }) => {
+    await setAgentSystemPrompt(bootstrapState, buildLoadSkillPermissionPrompt());
+
     await reloadWorldWithPermission(page, bootstrapState, 'auto');
-    await sendComposerMessage(page, 'LOAD_SKILL_AUTO: exercise the auto path.');
+    await sendComposerMessage(page, directToAgent(bootstrapState.agentName, 'LOAD_SKILL_AUTO:'));
     await waitForToolSummary(page, 'load_skill');
     await waitForAssistantToken(page, 'E2E_LOAD_SKILL_AUTO_OK', PERMISSION_FLOW_TIMEOUT_MS);
     await waitForWorldIdle(page, PERMISSION_FLOW_TIMEOUT_MS);

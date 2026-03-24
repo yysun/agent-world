@@ -12,6 +12,8 @@
  * - No dedicated DB column — follows the same pattern as `working_directory`.
  *
  * Recent changes:
+ * - 2026-03-23: Added approved `create_agent` coverage so the tool-permission suite locks in the
+ *   full approval-plus-created-info flow that web E2E relies on.
  * - 2026-03-22: Updated `load_skill` permission coverage for the pure-load contract so
  *   skill loading no longer implies or performs script execution at any permission level.
  * - 2026-03-12: Consolidated web_fetch coverage into an explicit allowed-at-all-levels
@@ -24,6 +26,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mockRequestToolApproval = vi.hoisted(() => vi.fn());
 const mockRequestWorldOption = vi.hoisted(() => vi.fn());
 const mockExecuteShellCommand = vi.hoisted(() => vi.fn());
+const mockPublishEvent = vi.hoisted(() => vi.fn());
 
 vi.mock('../../core/tool-approval.js', () => ({
   requestToolApproval: mockRequestToolApproval,
@@ -31,6 +34,10 @@ vi.mock('../../core/tool-approval.js', () => ({
 
 vi.mock('../../core/hitl.js', () => ({
   requestWorldOption: mockRequestWorldOption,
+}));
+
+vi.mock('../../core/events/publishers.js', () => ({
+  publishEvent: mockPublishEvent,
 }));
 
 vi.mock('../../core/shell-cmd-tool.js', async (importOriginal) => {
@@ -364,6 +371,33 @@ describe('tool_permission enforcement via world.variables', () => {
       expect(parsed.ok).toBe(false);
       expect(parsed.status).toBe('denied');
       expect(mockRequestToolApproval).toHaveBeenCalledTimes(1);
+    });
+
+    it('creates the agent and emits the created-info prompt when approval is granted at ask', async () => {
+      const tool = createCreateAgentToolDefinition();
+      const result = await tool.execute(
+        { name: 'ask-agent' },
+        undefined,
+        undefined,
+        {
+          world: { id: 'world-1', variables: 'tool_permission=ask' } as any,
+          chatId: 'chat-1',
+        },
+      );
+
+      const parsed = JSON.parse(String(result));
+      expect(parsed.ok).toBe(true);
+      expect(parsed.status).toBe('created');
+      expect(parsed.agent.name).toBe('ask-agent');
+      expect(mockRequestToolApproval).toHaveBeenCalledTimes(1);
+      expect(mockRequestWorldOption).toHaveBeenCalledTimes(1);
+      expect(mockRequestWorldOption).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          title: 'Agent ask-agent created',
+          defaultOptionId: 'dismiss',
+        }),
+      );
     });
 
     it('keeps approval flow when tool_permission=auto', async () => {
