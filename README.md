@@ -14,7 +14,7 @@
     <img src="https://img.shields.io/badge/Download%20for-Windows-0078D4?style=for-the-badge&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA4OCA4OCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTAgMTIuNDAyIDM1LjY4NyA3LjU0djM0LjE1OEgwVjEyLjQwMnptMzkuOTk1LTUuNDQ4TDg4IDB2NDEuMzk4SDM5Ljk5NVY2Ljk1NHpNMCA0Ni4zMDJoMzUuNjg3djM0LjIwNUwwIDc1LjY0NVY0Ni4zMDJ6bTM5Ljk5NSAwSDg4djQxLjM5OGwtNDguMDA1LTYuNzZWNDYuMzAyeiIvPjwvc3ZnPg%3D%3D" alt="Download for Windows" />
   </a>
 </p>
-<p align="center">Coming soon ...</p>
+<p align="center">Packaged desktop releases are available from GitHub Releases for macOS and Windows.</p>
 
 ## Why Agent World
 
@@ -44,8 +44,10 @@ You define a world, define agents, give them tools and workflow rules, and run t
 - Local-model friendly defaults with `OLLAMA_BASE_URL`
 - World-level tool permission modes: `Read`, `Ask`, `Auto`
 - Cross-client HITL approvals in Web, CLI, and Electron
+- Tool results can show inline previews for files and rich content
 - Queue-backed send flow, heartbeat scheduling, and stop/resume controls
 - Real-time streaming with tool lifecycle visibility and per-chat isolation
+- Packaged Electron desktop app with built-in update checks
 - Marketplace-style imports for worlds, agents, and skills
 - Web app, CLI, Electron desktop app, and core npm package
 
@@ -138,6 +140,8 @@ Agent Skills are reusable capability packs stored as `SKILL.md` files.
 - Agents call `load_skill` only when full instructions are needed
 - `load_skill` loads instructions and static skill context only; it does not execute skill scripts
 - If a task requires script execution, the agent must make a later explicit tool call such as `shell_cmd`
+- Project-based skills follow the active world's working folder
+- The Electron desktop app includes a skill editor with file browsing, import flows, and delete actions
 - Interactive skill activation is approval-gated
 - Skill-linked scripts are scope-validated and follow the same shell safety rules as built-in tool execution
 
@@ -186,6 +190,8 @@ World owners can set tool access to:
 - `Ask`: approval-gated writes and execution
 - `Auto`: automatic execution inside trusted scope
 
+Tool results are shown in a cleaner format so chats stay readable. When a tool creates something you can view directly, Agent World can preview it inline in the web and desktop apps, including markdown, HTML, SVG, images, audio, video, and PDFs.
+
 ### `shell_cmd`
 
 The `shell_cmd` tool is the bridge for local automation and CLI orchestration.
@@ -227,6 +233,19 @@ Each world has a shared event system. Agents respond based on public messages an
 
 Use npm package invocations. GitHub shorthand commands such as `npx agent-world/agent-world` are not supported entrypoints.
 
+### Desktop App
+
+Download the latest packaged desktop app from the GitHub Releases page.
+
+Packaged desktop builds:
+
+- are available for macOS and Windows
+- check GitHub Releases for updates on startup
+- can download updates automatically while keeping install/restart as an explicit user action
+- support stable-by-default updates with optional prerelease opt-in
+
+Source and dev runs remain separate from the packaged updater flow.
+
 ### Web
 
 ```bash
@@ -253,7 +272,7 @@ Pipeline mode:
 echo "hi" | npx -p agent-world@latest agent-world-cli -w default-world
 ```
 
-### Electron Desktop App (repo)
+### Electron Desktop Development (repo)
 
 ```bash
 npm run electron:dev
@@ -292,6 +311,14 @@ npm run electron:start
 ```bash
 npm run build
 npm run check
+```
+
+### Desktop Packaging
+
+```bash
+npm run release:prepare
+npm run electron:dist:mac
+npm run electron:dist:win
 ```
 
 ## Environment Setup
@@ -432,6 +459,9 @@ export AGENT_WORLD_DATA_PATH=./data/worlds
 - [docs/hitl-approval-flow.md](docs/hitl-approval-flow.md) - approval model
 - [docs/core-npm-usage.md](docs/core-npm-usage.md) - integrate the core runtime from npm
 - [docs/electron-desktop.md](docs/electron-desktop.md) - desktop workflow
+- [docs/electron-release-process.md](docs/electron-release-process.md) - desktop packaging and publish flow
+- [docs/electron-release-contract.md](docs/electron-release-contract.md) - desktop versioning and updater contract
+- [docs/Tool Results Contract.md](docs/Tool%20Results%20Contract.md) - tool envelope and artifact preview behavior
 - [openapi.yaml](openapi.yaml) - REST API spec
 - [CHANGELOG.md](CHANGELOG.md) - release history
 

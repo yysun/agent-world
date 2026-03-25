@@ -1,3 +1,34 @@
+v0.16.0
+
+**Highlights**
+- Desktop app releases for macOS and Windows, with built-in update support
+- Better tool results, including inline previews for files and rich content
+- Safer, clearer skill loading and better skill management in the desktop app
+- Refreshed web and desktop interface with cleaner layout and transcript updates
+
+**Desktop Release & Updates**
+- You can now download packaged Agent World desktop apps for macOS and Windows from GitHub Releases
+- The packaged desktop app can check for updates, download them automatically, and show release notes before you restart to install
+- Stable releases are the default, with prerelease updates available as an opt-in setting
+
+**Tool Results & Artifact Previews**
+- Tool results are easier to read in both web and desktop chats
+- When a tool produces rich output, Agent World can now preview it inline, including markdown, HTML, SVG, images, audio, video, and PDFs
+- Tool results now appear more cleanly in conversations, with fewer duplicates and clearer failure states
+- Shell command results are easier to follow and better separated from the model's next step
+
+**Skills, Projects & Permissions**
+- Loading a skill no longer runs extra scripts automatically, which makes skill use more predictable and safer
+- Skills tied to a project now follow the active world's working folder more reliably
+- The desktop app now has better skill management, including improved imports, clearer descriptions, a file tree, and delete actions
+- Agent creation, tool permissions, and queued failure messages are clearer in the UI
+
+**Runtime Compatibility & UX**
+- Improved compatibility with Google and Anthropic tool calling
+- Updated the web and desktop interfaces with cleaner shared UI building blocks and better layout behavior
+- Added a collapsible sidebar in the desktop app and refined how messages and tool activity are shown
+- Added more automated coverage for updates, tool permissions, previews, and skill management
+
 v0.15.0
 
 **Highlights**
