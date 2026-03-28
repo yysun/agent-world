@@ -2,11 +2,11 @@
  * LLM Package Runtime Provider Dispatch Tests
  *
  * Purpose:
- * - Verify that both `createLLMRuntime(...)` and the per-call APIs dispatch through the package-owned provider layer.
+ * - Verify that the per-call APIs dispatch through the package-owned provider layer.
  *
  * Key features:
- * - Covers runtime.generate and runtime.stream provider dispatch.
- * - Verifies constructor/per-call tool resolution reaches the provider adapter.
+ * - Covers per-call generate and stream provider dispatch.
+ * - Verifies explicit-environment and per-call tool resolution reaches the provider adapter.
  * - Uses mocked package provider modules with no real SDK or network usage.
  *
  * Implementation notes:
@@ -59,28 +59,18 @@ describe('@agent-world/llm runtime provider dispatch', () => {
     await __resetLLMCallCachesForTests();
   });
 
-  it('dispatches generate requests through the package-owned provider layer', async () => {
-    const { createLLMRuntime } = await import('../../packages/llm/src/runtime.js');
+  it('dispatches generate requests through an explicit environment', async () => {
+    const { createLLMEnvironment, generate } = await import('../../packages/llm/src/runtime.js');
 
-    const runtime = createLLMRuntime({
+    const environment = createLLMEnvironment({
       providers: {
         openai: {
           apiKey: 'test-openai-key',
         },
       },
-      tools: {
-        builtIns: false,
-        extraTools: [
-          {
-            name: 'project_lookup',
-            description: 'Project lookup',
-            parameters: { type: 'object' },
-          },
-        ],
-      },
     });
 
-    const response = await runtime.generate({
+    const response = await generate({
       provider: 'openai',
       model: 'gpt-5',
       messages: [
@@ -92,14 +82,21 @@ describe('@agent-world/llm runtime provider dispatch', () => {
       context: {
         reasoningEffort: 'high',
       },
-      resolveTools: {
-        extraTools: [
-          {
-            name: 'project_write',
-            description: 'Project write',
-            parameters: { type: 'object' },
-          },
-        ],
+      environment,
+      builtIns: false,
+      extraTools: [
+        {
+          name: 'project_lookup',
+          description: 'Project lookup',
+          parameters: { type: 'object' },
+        },
+      ],
+      tools: {
+        project_write: {
+          name: 'project_write',
+          description: 'Project write',
+          parameters: { type: 'object' },
+        },
       },
     });
 
@@ -118,10 +115,10 @@ describe('@agent-world/llm runtime provider dispatch', () => {
     }));
   });
 
-  it('dispatches stream requests through the package-owned provider layer', async () => {
-    const { createLLMRuntime } = await import('../../packages/llm/src/runtime.js');
+  it('dispatches stream requests through an explicit environment', async () => {
+    const { createLLMEnvironment, stream } = await import('../../packages/llm/src/runtime.js');
 
-    const runtime = createLLMRuntime({
+    const environment = createLLMEnvironment({
       providers: {
         openai: {
           apiKey: 'test-openai-key',
@@ -130,13 +127,10 @@ describe('@agent-world/llm runtime provider dispatch', () => {
       defaults: {
         reasoningEffort: 'medium',
       },
-      tools: {
-        builtIns: false,
-      },
     });
 
     const chunks: Array<{ content?: string; reasoningContent?: string }> = [];
-    const response = await runtime.stream({
+    const response = await stream({
       provider: 'openai',
       model: 'gpt-5',
       messages: [
@@ -148,6 +142,8 @@ describe('@agent-world/llm runtime provider dispatch', () => {
       onChunk: (chunk) => {
         chunks.push(chunk);
       },
+      environment,
+      builtIns: false,
     });
 
     expect(response.content).toBe('streamed');
@@ -163,18 +159,13 @@ describe('@agent-world/llm runtime provider dispatch', () => {
   });
 
   it('rejects per-call request.tools attempts to override reserved built-in names', async () => {
-    const { createLLMRuntime } = await import('../../packages/llm/src/runtime.js');
+    const { generate } = await import('../../packages/llm/src/runtime.js');
 
-    const runtime = createLLMRuntime({
-      providers: {
-        openai: {
-          apiKey: 'test-openai-key',
-        },
-      },
-    });
-
-    await expect(runtime.generate({
+    await expect(generate({
       provider: 'openai',
+      providerConfig: {
+        apiKey: 'test-openai-key',
+      },
       model: 'gpt-5',
       messages: [
         {

@@ -126,7 +126,7 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import {
-  createLLMRuntime,
+  resolveTools,
   type LLMToolDefinition as PackageToolDefinition,
 } from '@agent-world/llm';
 import { getWorld } from './managers.js';
@@ -1940,23 +1940,21 @@ function adaptPackageToolDefinition(tool: PackageToolDefinition): any {
 }
 
 function getPackageHitlBuiltIn(): Record<string, any> {
-  const runtime = createLLMRuntime({
-    tools: {
-      builtIns: {
-        shell_cmd: false,
-        load_skill: false,
-        web_fetch: false,
-        read_file: false,
-        write_file: false,
-        list_files: false,
-        grep: false,
-        human_intervention_request: true,
-      },
+  const tools = resolveTools({
+    builtIns: {
+      shell_cmd: false,
+      load_skill: false,
+      web_fetch: false,
+      read_file: false,
+      write_file: false,
+      list_files: false,
+      grep: false,
+      human_intervention_request: true,
     },
   });
 
   return Object.fromEntries(
-    Object.entries(runtime.getBuiltInTools()).map(([name, tool]) => [name, adaptPackageToolDefinition(tool)]),
+    Object.entries(tools).map(([name, tool]: [string, PackageToolDefinition]) => [name, adaptPackageToolDefinition(tool)]),
   );
 }
 

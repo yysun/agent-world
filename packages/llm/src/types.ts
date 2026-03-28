@@ -234,42 +234,28 @@ export interface SkillRegistry {
   loadSkill: (skillId: string) => Promise<LoadedSkill | undefined>;
 }
 
-export interface LLMRuntimeOptions {
-  providers?: LLMProviderConfigs;
+export interface LLMEnvironment {
+  defaults: {
+    reasoningEffort: ReasoningEffort;
+    toolPermission: ToolPermission;
+  };
+  providerConfigStore: LLMProviderConfigStore;
+  mcpRegistry: MCPRegistry;
+  skillRegistry: SkillRegistry;
+}
+
+export interface LLMEnvironmentOptions {
   defaults?: {
     reasoningEffort?: ReasoningEffort;
     toolPermission?: ToolPermission;
   };
-  mcp?: {
-    config?: MCPConfig | null;
-  };
-  skills?: SkillRegistryOptions;
-  tools?: {
-    builtIns?: BuiltInToolSelection;
-    extraTools?: LLMToolDefinition[];
-  };
-}
-
-export interface LLMRuntimeResolveToolsOptions {
-  enabledBuiltIns?: BuiltInToolSelection;
-  extraTools?: LLMToolDefinition[];
-}
-
-export interface LLMRuntimeProviderCallBase {
-  provider: LLMProviderName;
-  model: string;
-  messages: LLMChatMessage[];
-  temperature?: number;
-  maxTokens?: number;
-  tools?: Record<string, LLMToolDefinition>;
-  resolveTools?: LLMRuntimeResolveToolsOptions;
-  context?: LLMToolExecutionContext;
-}
-
-export interface LLMRuntimeGenerateOptions extends LLMRuntimeProviderCallBase {}
-
-export interface LLMRuntimeStreamOptions extends LLMRuntimeProviderCallBase {
-  onChunk?: (chunk: LLMStreamChunk) => void;
+  providers?: LLMProviderConfigs;
+  providerConfigStore?: LLMProviderConfigStore;
+  mcpConfig?: MCPConfig | null;
+  mcpRegistry?: MCPRegistry;
+  skillRoots?: string[];
+  skillRegistry?: SkillRegistry;
+  skillFileSystem?: SkillFileSystemAdapter;
 }
 
 export interface LLMPerCallProviderOptions {
@@ -285,6 +271,7 @@ export interface LLMPerCallProviderOptions {
   builtIns?: BuiltInToolSelection;
   extraTools?: LLMToolDefinition[];
   tools?: Record<string, LLMToolDefinition>;
+  environment?: LLMEnvironment;
   context?: LLMToolExecutionContext;
 }
 
@@ -300,17 +287,5 @@ export interface LLMResolveToolsOptions {
   builtIns?: BuiltInToolSelection;
   extraTools?: LLMToolDefinition[];
   tools?: Record<string, LLMToolDefinition>;
-}
-
-export interface LLMRuntime extends LLMProviderConfigStore {
-  getDefaults: () => Readonly<Required<NonNullable<LLMRuntimeOptions['defaults']>>>;
-  getBuiltInTools: () => Record<string, LLMToolDefinition>;
-  getMCPRegistry: () => MCPRegistry;
-  getSkillRegistry: () => SkillRegistry;
-  getToolRegistry: () => LLMToolRegistry;
-  resolveTools: (options?: LLMRuntimeResolveToolsOptions) => Record<string, LLMToolDefinition>;
-  resolveToolsAsync: (options?: LLMRuntimeResolveToolsOptions) => Promise<Record<string, LLMToolDefinition>>;
-  generate: (options: LLMRuntimeGenerateOptions) => Promise<LLMResponse>;
-  stream: (options: LLMRuntimeStreamOptions) => Promise<LLMResponse>;
-  shutdown: () => Promise<void>;
+  environment?: LLMEnvironment;
 }

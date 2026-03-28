@@ -26,8 +26,10 @@ import path from 'node:path';
 import process from 'node:process';
 import { config as loadDotEnv } from 'dotenv';
 import {
+  createLLMEnvironment,
   generate,
   type LLMChatMessage,
+  type LLMEnvironment,
   type LLMResponse,
   type LLMStreamChunk,
   resolveToolsAsync,
@@ -239,17 +241,7 @@ async function runToolLoop(
   scenario: ShowcaseScenario,
   workingDirectory: string,
   providerSelection: ShowcaseProviderSelection,
-  mcpConfig: {
-    servers: {
-      showcase: {
-        command: string;
-        args: string[];
-        transport: 'stdio';
-        env: NodeJS.ProcessEnv;
-      };
-    };
-  },
-  skillRoots: string[],
+  environment: LLMEnvironment,
 ): Promise<ShowcaseScenarioResult> {
   const messages: LLMChatMessage[] = [...scenario.messages];
   const chunks: LLMStreamChunk[] = [];
@@ -259,13 +251,11 @@ async function runToolLoop(
     const response: LLMResponse = scenario.mode === 'stream'
       ? await stream({
         provider: providerSelection.provider,
-        providerConfig: providerSelection.providers[providerSelection.provider],
         model: providerSelection.model,
-        mcpConfig,
-        skillRoots,
         builtIns: scenario.builtIns,
         messages,
         temperature: 0,
+        environment,
         context: {
           workingDirectory,
         },
@@ -275,13 +265,11 @@ async function runToolLoop(
       })
       : await generate({
         provider: providerSelection.provider,
-        providerConfig: providerSelection.providers[providerSelection.provider],
         model: providerSelection.model,
-        mcpConfig,
-        skillRoots,
         builtIns: scenario.builtIns,
         messages,
         temperature: 0,
+        environment,
         context: {
           workingDirectory,
         },
@@ -299,8 +287,7 @@ async function runToolLoop(
     }
 
     const tools = await resolveToolsAsync({
-      mcpConfig,
-      skillRoots,
+      environment,
       builtIns: scenario.builtIns,
     });
     for (const toolCall of response.tool_calls) {
@@ -367,16 +354,20 @@ function summarizeChunks(chunks: LLMStreamChunk[]): string {
 
 async function runShowcaseWithSelection(providerSelection: ShowcaseProviderSelection, dryRun: boolean) {
   const workspace = await createShowcaseWorkspace();
-  const mcpConfig = {
-    servers: {
-      showcase: {
-        command: process.execPath,
-        args: [path.resolve('tests/e2e/support/llm-showcase-mcp-server.mjs')],
-        transport: 'stdio' as const,
-        env: { ...process.env },
+  const environment = createLLMEnvironment({
+    providers: providerSelection.providers,
+    mcpConfig: {
+      servers: {
+        showcase: {
+          command: process.execPath,
+          args: [path.resolve('tests/e2e/support/llm-showcase-mcp-server.mjs')],
+          transport: 'stdio',
+          env: { ...process.env },
+        },
       },
     },
-  };
+    skillRoots: workspace.skillRoots,
+  });
   const showcaseBuiltIns = {
     read_file: true,
     load_skill: true,
@@ -394,8 +385,7 @@ async function runShowcaseWithSelection(providerSelection: ShowcaseProviderSelec
     console.log(`model=${providerSelection.model}`);
 
     const resolvedTools = await resolveToolsAsync({
-      mcpConfig,
-      skillRoots: workspace.skillRoots,
+      environment,
       builtIns: showcaseBuiltIns,
     });
     console.log(`tools=${Object.keys(resolvedTools).join(', ')}`);
@@ -411,8 +401,7 @@ async function runShowcaseWithSelection(providerSelection: ShowcaseProviderSelec
         scenario,
         workspace.rootPath,
         providerSelection,
-        mcpConfig,
-        workspace.skillRoots,
+        environment,
       );
       assertScenarioResult(scenario, result);
       console.log(`  tools used: ${result.toolNames.join(', ')}`);
@@ -425,6 +414,7 @@ async function runShowcaseWithSelection(providerSelection: ShowcaseProviderSelec
 
     console.log('\nshowcase status: PASS');
   } finally {
+    await environment.mcpRegistry.shutdown().catch(() => undefined);
     await rm(path.dirname(workspace.rootPath), { recursive: true, force: true }).catch(() => undefined);
   }
 }

@@ -28,7 +28,7 @@ const {
   mockClientClose,
   mockClientCallTool,
   mockClientListTools,
-  mockCreateLLMRuntime,
+  mockResolveTools,
   mockPackageShellExecute,
   mockPackageLoadSkillExecute,
   mockPackageWebFetchExecute,
@@ -43,7 +43,7 @@ const {
   mockClientClose: vi.fn(),
   mockClientCallTool: vi.fn(),
   mockClientListTools: vi.fn(),
-  mockCreateLLMRuntime: vi.fn((options?: any) => {
+  mockResolveTools: vi.fn((options?: any) => {
     const allBuiltIns = {
       human_intervention_request: {
         name: 'human_intervention_request',
@@ -104,13 +104,11 @@ const {
       },
     } as Record<string, any>;
 
-    const enabledBuiltIns = options?.tools?.builtIns;
+    const enabledBuiltIns = options?.builtIns;
 
-    return {
-      getBuiltInTools: () => Object.fromEntries(
-        Object.entries(allBuiltIns).filter(([name]) => enabledBuiltIns?.[name] !== false),
-      ),
-    };
+    return Object.fromEntries(
+      Object.entries(allBuiltIns).filter(([name]) => enabledBuiltIns?.[name] !== false),
+    );
   }),
   mockPackageShellExecute: vi.fn(async () => '{"ok":true,"tool":"shell_cmd"}'),
   mockPackageLoadSkillExecute: vi.fn(async () => '<skill_context id="demo"></skill_context>'),
@@ -127,7 +125,7 @@ vi.mock('../../core/managers.js', () => ({
 }));
 
 vi.mock('@agent-world/llm', () => ({
-  createLLMRuntime: mockCreateLLMRuntime,
+  resolveTools: mockResolveTools,
 }));
 
 vi.mock('../../core/hitl.js', () => ({
@@ -809,18 +807,16 @@ describe('mcp-server-registry behavior', () => {
       agentName: 'assistant',
     };
 
-    expect(mockCreateLLMRuntime).toHaveBeenCalledWith(expect.objectContaining({
-      tools: {
-        builtIns: {
-          shell_cmd: false,
-          load_skill: false,
-          web_fetch: false,
-          read_file: false,
-          write_file: false,
-          list_files: false,
-          grep: false,
-          human_intervention_request: true,
-        },
+    expect(mockResolveTools).toHaveBeenCalledWith(expect.objectContaining({
+      builtIns: {
+        shell_cmd: false,
+        load_skill: false,
+        web_fetch: false,
+        read_file: false,
+        write_file: false,
+        list_files: false,
+        grep: false,
+        human_intervention_request: true,
       },
     }));
     const result = await tools.human_intervention_request.execute(

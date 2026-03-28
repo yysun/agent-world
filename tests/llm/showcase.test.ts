@@ -113,13 +113,12 @@ describe('@agent-world/llm mocked showcase', () => {
     await __resetLLMCallCachesForTests();
   });
 
-  it('showcases built-in tools and skill loading through one runtime', async () => {
-    const { createLLMRuntime } = await import('../../packages/llm/src/runtime.js');
+  it('showcases built-in tools and skill loading through an explicit environment', async () => {
+    const { createLLMEnvironment, resolveTools } = await import('../../packages/llm/src/runtime.js');
 
-    const runtime = createLLMRuntime({
-      skills: {
-        roots: ['/global', '/project'],
-        fileSystem: {
+    const environment = createLLMEnvironment({
+      skillRoots: ['/global', '/project'],
+      skillFileSystem: {
           access: async () => undefined,
           readFile: async (targetPath: string) => targetPath.includes('/project/')
             ? '---\nname: find-skills\ndescription: Project skill\n---\n# Project Skill'
@@ -145,11 +144,12 @@ describe('@agent-world/llm mocked showcase', () => {
             isFile: () => targetPath.endsWith('SKILL.md'),
           }),
         },
-      },
     });
 
-    const builtIns = runtime.getBuiltInTools();
-    const skill = await runtime.getSkillRegistry().loadSkill('find-skills');
+    const builtIns = resolveTools({
+      environment,
+    });
+    const skill = await environment.skillRegistry.loadSkill('find-skills');
 
     expect(Object.keys(builtIns)).toContain('load_skill');
     expect(skill?.description).toBe('Project skill');

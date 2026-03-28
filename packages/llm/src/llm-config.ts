@@ -16,7 +16,7 @@
  *
  * Recent changes:
  * - 2026-03-27: Initial extraction from `core/llm-config` into `packages/llm`.
- * - 2026-03-27: Added instance-scoped provider config stores for `createLLMRuntime(...)`.
+ * - 2026-03-27: Added instance-scoped provider config stores for reusable package environments.
  */
 
 import type {

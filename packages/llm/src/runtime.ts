@@ -2,27 +2,26 @@
  * LLM Package Runtime API
  *
  * Purpose:
- * - Expose the public `generate(...)` and `stream(...)` APIs for `@agent-world/llm`.
+ * - Expose per-call `generate(...)`, `stream(...)`, and tool-resolution APIs for `@agent-world/llm`.
  *
  * Key features:
- * - Supports per-call provider/model/MCP/skill/tool configuration.
- * - Keeps internal caches for provider stores, MCP registries, and skill registries.
- * - Retains `createLLMRuntime(...)` as a compatibility wrapper over the per-call engine.
+ * - Supports explicit `LLMEnvironment` injection for provider/MCP/skill dependencies.
+ * - Retains a convenience per-call path backed by internal caches when no environment is supplied.
+ * - Keeps one shared orchestration engine for buffered and streaming calls.
  *
  * Implementation notes:
- * - The recommended public API is per-call and does not require runtime construction.
- * - Internal caches are keyed by normalized config so equivalent calls reuse package state safely.
- * - The compatibility runtime delegates into the same shared execution path used by `generate(...)` and `stream(...)`.
+ * - The primary public model is per-call plus optional explicit environment injection.
+ * - Internal caches are used only by the convenience path and are not the only execution model.
+ * - Built-in tool ownership and reserved-name validation stay inside the package.
  *
  * Recent changes:
- * - 2026-03-28: Switched the package to a per-call-first API with internal caching.
+ * - 2026-03-28: Added explicit environment injection and removed runtime-constructor dependency from the public API.
  */
 
 import * as path from 'path';
 import {
   assertNoBuiltInToolNameCollisions,
   createBuiltInToolDefinitions,
-  intersectBuiltInToolSelections,
 } from './builtins.js';
 import {
   createAnthropicClient,
@@ -30,9 +29,9 @@ import {
   streamAnthropicResponse,
 } from './anthropic-direct.js';
 import {
+  createGoogleClient,
   generateGoogleResponse,
   streamGoogleResponse,
-  createGoogleClient,
 } from './google-direct.js';
 import { createProviderConfigStore } from './llm-config.js';
 import { createMCPRegistry, normalizeMCPConfig } from './mcp.js';
@@ -45,21 +44,15 @@ import { createSkillRegistry } from './skills.js';
 import { createToolRegistry } from './tools.js';
 import type {
   BuiltInToolSelection,
+  LLMEnvironment,
+  LLMEnvironmentOptions,
   LLMGenerateOptions,
   LLMProviderConfigStore,
   LLMProviderConfigs,
-  LLMResponse,
   LLMResolveToolsOptions,
-  LLMRuntime,
-  LLMRuntimeGenerateOptions,
-  LLMRuntimeOptions,
-  LLMRuntimeResolveToolsOptions,
-  LLMRuntimeStreamOptions,
-  LLMStreamChunk,
+  LLMResponse,
   LLMStreamOptions,
   LLMToolDefinition,
-  LLMToolExecutionContext,
-  LLMToolRegistry,
   MCPConfig,
   MCPRegistry,
   ReasoningEffort,
@@ -74,15 +67,6 @@ type RuntimeDefaults = Readonly<{
   reasoningEffort: ReasoningEffort;
   toolPermission: ToolPermission;
 }>;
-
-type RuntimeExecutionConfig = {
-  defaults: RuntimeDefaults;
-  providerConfigStore: LLMProviderConfigStore;
-  mcpRegistry: MCPRegistry;
-  skillRegistry: SkillRegistry;
-  builtInToolSelection?: BuiltInToolSelection;
-  extraTools: LLMToolDefinition[];
-};
 
 const providerConfigStoreCache = new Map<string, LLMProviderConfigStore>();
 const mcpRegistryCache = new Map<string, MCPRegistry>();
@@ -112,7 +96,7 @@ function normalizeSkillRoots(roots?: string[]): string[] {
   return [...new Set((roots ?? []).map((root) => path.resolve(String(root || '').trim())).filter(Boolean))];
 }
 
-function createDefaults(overrides?: LLMRuntimeOptions['defaults']): RuntimeDefaults {
+function createDefaults(overrides?: LLMEnvironmentOptions['defaults']): RuntimeDefaults {
   return Object.freeze({
     reasoningEffort: overrides?.reasoningEffort ?? DEFAULT_REASONING_EFFORT,
     toolPermission: overrides?.toolPermission ?? DEFAULT_TOOL_PERMISSION,
@@ -120,7 +104,7 @@ function createDefaults(overrides?: LLMRuntimeOptions['defaults']): RuntimeDefau
 }
 
 function mergeProviderConfigs(options: {
-  provider: LLMGenerateOptions['provider'] | LLMStreamOptions['provider'];
+  provider?: LLMGenerateOptions['provider'] | LLMStreamOptions['provider'];
   providerConfig?: LLMGenerateOptions['providerConfig'] | LLMStreamOptions['providerConfig'];
   providers?: LLMProviderConfigs;
 }): LLMProviderConfigs {
@@ -128,7 +112,7 @@ function mergeProviderConfigs(options: {
     ...(options.providers ?? {}),
   };
 
-  if (options.providerConfig) {
+  if (options.provider && options.providerConfig) {
     merged[options.provider] = options.providerConfig as any;
   }
 
@@ -160,9 +144,15 @@ function getOrCreateMCPRegistry(config: MCPConfig | null | undefined): MCPRegist
   return registry;
 }
 
-function getOrCreateSkillRegistry(roots?: string[]): SkillRegistry {
+function getOrCreateSkillRegistry(
+  roots?: string[],
+  fileSystem?: LLMEnvironmentOptions['skillFileSystem'],
+): SkillRegistry {
   const normalizedRoots = normalizeSkillRoots(roots);
-  const cacheKey = stableStringify(normalizedRoots);
+  const cacheKey = stableStringify({
+    roots: normalizedRoots,
+    fileSystem: fileSystem ? 'custom' : 'default',
+  });
   const cached = skillRegistryCache.get(cacheKey);
   if (cached) {
     return cached;
@@ -170,368 +160,285 @@ function getOrCreateSkillRegistry(roots?: string[]): SkillRegistry {
 
   const registry = createSkillRegistry({
     roots: normalizedRoots,
+    ...(fileSystem ? { fileSystem } : {}),
   });
   skillRegistryCache.set(cacheKey, registry);
   return registry;
 }
 
-function buildToolRegistry(extraTools: LLMToolDefinition[]): LLMToolRegistry {
-  const baseToolRegistry = createToolRegistry(extraTools);
-
-  return {
-    registerTool: (tool: LLMToolDefinition) => {
-      assertNoBuiltInToolNameCollisions([tool]);
-      baseToolRegistry.registerTool(tool);
-    },
-    registerTools: (tools: LLMToolDefinition[]) => {
-      assertNoBuiltInToolNameCollisions(tools);
-      baseToolRegistry.registerTools(tools);
-    },
-    getTool: baseToolRegistry.getTool,
-    listTools: baseToolRegistry.listTools,
-    resolveTools: (resolveExtraTools: LLMToolDefinition[] = []) => {
-      assertNoBuiltInToolNameCollisions(resolveExtraTools);
-      return baseToolRegistry.resolveTools(resolveExtraTools);
-    },
-  };
-}
-
-function resolveReasoningEffort(defaults: RuntimeDefaults, context?: LLMToolExecutionContext): ReasoningEffort {
-  return context?.reasoningEffort ?? defaults.reasoningEffort;
-}
-
-function createExecutionApi(config: RuntimeExecutionConfig) {
-  assertNoBuiltInToolNameCollisions(config.extraTools);
-  const builtInTools = createBuiltInToolDefinitions({
-    builtIns: config.builtInToolSelection,
-    skillRegistry: config.skillRegistry,
+export function createLLMEnvironment(options: LLMEnvironmentOptions = {}): LLMEnvironment {
+  const providerConfigStore = options.providerConfigStore ?? createProviderConfigStore(options.providers ?? {});
+  const mcpRegistry = options.mcpRegistry ?? createMCPRegistry(options.mcpConfig ?? null);
+  const skillRegistry = options.skillRegistry ?? createSkillRegistry({
+    roots: normalizeSkillRoots(options.skillRoots),
+    ...(options.skillFileSystem ? { fileSystem: options.skillFileSystem } : {}),
   });
-  const toolRegistry = buildToolRegistry([
-    ...Object.values(builtInTools),
-    ...config.extraTools,
-  ]);
-
-  function resolveRuntimeTools(
-    request: Pick<LLMRuntimeGenerateOptions, 'resolveTools' | 'tools'> | Pick<LLMRuntimeStreamOptions, 'resolveTools' | 'tools'>,
-  ): Record<string, LLMToolDefinition> {
-    const resolveExtraTools = request.resolveTools?.extraTools ?? [];
-    assertNoBuiltInToolNameCollisions(resolveExtraTools);
-    const resolvedBuiltIns = createBuiltInToolDefinitions({
-      builtIns: intersectBuiltInToolSelections(config.builtInToolSelection, request.resolveTools?.enabledBuiltIns),
-      skillRegistry: config.skillRegistry,
-    });
-
-    const resolved = createToolRegistry([
-      ...Object.values(resolvedBuiltIns),
-      ...config.extraTools,
-    ]).resolveTools(resolveExtraTools);
-
-    if (request.tools) {
-      const requestToolValues = Object.values(request.tools);
-      assertNoBuiltInToolNameCollisions(requestToolValues);
-      return {
-        ...resolved,
-        ...request.tools,
-      };
-    }
-
-    return resolved;
-  }
-
-  async function resolveRuntimeToolsAsync(
-    request: Pick<LLMRuntimeGenerateOptions, 'resolveTools' | 'tools'> | Pick<LLMRuntimeStreamOptions, 'resolveTools' | 'tools'>,
-  ): Promise<Record<string, LLMToolDefinition>> {
-    const resolved = resolveRuntimeTools(request);
-    const mcpTools = await config.mcpRegistry.resolveTools();
-    const merged = {
-      ...resolved,
-      ...mcpTools,
-    };
-
-    return Object.fromEntries(
-      Object.entries(merged).sort(([left], [right]) => left.localeCompare(right)),
-    );
-  }
-
-  async function generateInternal(request: LLMRuntimeGenerateOptions): Promise<LLMResponse> {
-    const resolvedTools = await resolveRuntimeToolsAsync(request);
-    const reasoningEffort = resolveReasoningEffort(config.defaults, request.context);
-
-    switch (request.provider) {
-      case 'openai':
-      case 'azure':
-      case 'openai-compatible':
-      case 'xai':
-      case 'ollama':
-        return await generateOpenAIResponse({
-          client: createClientForProvider(
-            request.provider,
-            config.providerConfigStore.getProviderConfig(request.provider as any) as any,
-          ),
-          provider: request.provider,
-          model: request.model,
-          messages: request.messages,
-          tools: resolvedTools,
-          temperature: request.temperature,
-          maxTokens: request.maxTokens,
-          reasoningEffort,
-          abortSignal: request.context?.abortSignal,
-        });
-      case 'anthropic':
-        return await generateAnthropicResponse({
-          client: createAnthropicClient(config.providerConfigStore.getProviderConfig('anthropic')),
-          model: request.model,
-          messages: request.messages,
-          tools: resolvedTools,
-          temperature: request.temperature,
-          maxTokens: request.maxTokens,
-          abortSignal: request.context?.abortSignal,
-        });
-      case 'google':
-        return await generateGoogleResponse({
-          client: createGoogleClient(config.providerConfigStore.getProviderConfig('google')),
-          model: request.model,
-          messages: request.messages,
-          tools: resolvedTools,
-          temperature: request.temperature,
-          maxTokens: request.maxTokens,
-          reasoningEffort,
-          abortSignal: request.context?.abortSignal,
-        });
-      default:
-        throw new Error(`Unsupported provider: ${request.provider}`);
-    }
-  }
-
-  async function streamInternal(request: LLMRuntimeStreamOptions): Promise<LLMResponse> {
-    const resolvedTools = await resolveRuntimeToolsAsync(request);
-    const reasoningEffort = resolveReasoningEffort(config.defaults, request.context);
-    const onChunk = request.onChunk ?? (() => undefined);
-
-    switch (request.provider) {
-      case 'openai':
-      case 'azure':
-      case 'openai-compatible':
-      case 'xai':
-      case 'ollama':
-        return await streamOpenAIResponse({
-          client: createClientForProvider(
-            request.provider,
-            config.providerConfigStore.getProviderConfig(request.provider as any) as any,
-          ),
-          provider: request.provider,
-          model: request.model,
-          messages: request.messages,
-          tools: resolvedTools,
-          temperature: request.temperature,
-          maxTokens: request.maxTokens,
-          reasoningEffort,
-          abortSignal: request.context?.abortSignal,
-          onChunk,
-        });
-      case 'anthropic':
-        return await streamAnthropicResponse({
-          client: createAnthropicClient(config.providerConfigStore.getProviderConfig('anthropic')),
-          model: request.model,
-          messages: request.messages,
-          tools: resolvedTools,
-          temperature: request.temperature,
-          maxTokens: request.maxTokens,
-          abortSignal: request.context?.abortSignal,
-          onChunk,
-        });
-      case 'google':
-        return await streamGoogleResponse({
-          client: createGoogleClient(config.providerConfigStore.getProviderConfig('google')),
-          model: request.model,
-          messages: request.messages,
-          tools: resolvedTools,
-          temperature: request.temperature,
-          maxTokens: request.maxTokens,
-          reasoningEffort,
-          abortSignal: request.context?.abortSignal,
-          onChunk,
-        });
-      default:
-        throw new Error(`Unsupported provider: ${request.provider}`);
-    }
-  }
 
   return {
-    builtInTools,
-    toolRegistry,
-    resolveTools: (resolveOptions: LLMRuntimeResolveToolsOptions = {}) => {
-      const resolveExtraTools = resolveOptions.extraTools ?? [];
-      assertNoBuiltInToolNameCollisions(resolveExtraTools);
-      const resolvedBuiltIns = createBuiltInToolDefinitions({
-        builtIns: intersectBuiltInToolSelections(config.builtInToolSelection, resolveOptions.enabledBuiltIns),
-        skillRegistry: config.skillRegistry,
-      });
-
-      return createToolRegistry([
-        ...Object.values(resolvedBuiltIns),
-        ...config.extraTools,
-      ]).resolveTools(resolveExtraTools);
-    },
-    resolveToolsAsync: async (resolveOptions: LLMRuntimeResolveToolsOptions = {}) => {
-      const resolveExtraTools = resolveOptions.extraTools ?? [];
-      assertNoBuiltInToolNameCollisions(resolveExtraTools);
-      const localTools = createToolRegistry(
-        Object.values(
-          createBuiltInToolDefinitions({
-            builtIns: intersectBuiltInToolSelections(config.builtInToolSelection, resolveOptions.enabledBuiltIns),
-            skillRegistry: config.skillRegistry,
-          }),
-        ).concat(config.extraTools),
-      ).resolveTools(resolveExtraTools);
-
-      const mcpTools = await config.mcpRegistry.resolveTools();
-      return Object.fromEntries(
-        Object.entries({
-          ...localTools,
-          ...mcpTools,
-        }).sort(([left], [right]) => left.localeCompare(right)),
-      );
-    },
-    generateInternal,
-    streamInternal,
-  };
-}
-
-function buildPerCallExecutionConfig(
-  request: LLMGenerateOptions | LLMStreamOptions,
-): RuntimeExecutionConfig {
-  return {
-    defaults: createDefaults(),
-    providerConfigStore: getOrCreateProviderConfigStore(
-      mergeProviderConfigs({
-        provider: request.provider,
-        providerConfig: request.providerConfig,
-        providers: request.providers,
-      }),
-    ),
-    mcpRegistry: getOrCreateMCPRegistry(request.mcpConfig ?? null),
-    skillRegistry: getOrCreateSkillRegistry(request.skillRoots),
-    builtInToolSelection: request.builtIns,
-    extraTools: request.extraTools ?? [],
-  };
-}
-
-function buildPerCallToolExecutionConfig(
-  options: LLMResolveToolsOptions = {},
-): RuntimeExecutionConfig {
-  return {
-    defaults: createDefaults(),
-    providerConfigStore: getOrCreateProviderConfigStore({}),
-    mcpRegistry: getOrCreateMCPRegistry(options.mcpConfig ?? null),
-    skillRegistry: getOrCreateSkillRegistry(options.skillRoots),
-    builtInToolSelection: options.builtIns,
-    extraTools: options.extraTools ?? [],
-  };
-}
-
-function toRuntimeGenerateOptions(request: LLMGenerateOptions): LLMRuntimeGenerateOptions {
-  return {
-    provider: request.provider,
-    model: request.model,
-    messages: request.messages,
-    temperature: request.temperature,
-    maxTokens: request.maxTokens,
-    tools: request.tools,
-    context: request.context,
-  };
-}
-
-function toRuntimeStreamOptions(request: LLMStreamOptions): LLMRuntimeStreamOptions {
-  return {
-    provider: request.provider,
-    model: request.model,
-    messages: request.messages,
-    temperature: request.temperature,
-    maxTokens: request.maxTokens,
-    tools: request.tools,
-    context: request.context,
-    onChunk: request.onChunk,
-  };
-}
-
-export async function generate(request: LLMGenerateOptions): Promise<LLMResponse> {
-  const executionApi = createExecutionApi(buildPerCallExecutionConfig(request));
-  return await executionApi.generateInternal(toRuntimeGenerateOptions(request));
-}
-
-export async function stream(request: LLMStreamOptions): Promise<LLMResponse> {
-  const executionApi = createExecutionApi(buildPerCallExecutionConfig(request));
-  return await executionApi.streamInternal(toRuntimeStreamOptions(request));
-}
-
-export function resolveTools(options: LLMResolveToolsOptions = {}): Record<string, LLMToolDefinition> {
-  const executionApi = createExecutionApi(buildPerCallToolExecutionConfig(options));
-  if (options.tools) {
-    const requestToolValues = Object.values(options.tools);
-    assertNoBuiltInToolNameCollisions(requestToolValues);
-    return Object.fromEntries(
-      Object.entries({
-        ...executionApi.resolveTools(),
-        ...options.tools,
-      }).sort(([left], [right]) => left.localeCompare(right)),
-    );
-  }
-  return executionApi.resolveTools();
-}
-
-export async function resolveToolsAsync(options: LLMResolveToolsOptions = {}): Promise<Record<string, LLMToolDefinition>> {
-  const executionApi = createExecutionApi(buildPerCallToolExecutionConfig(options));
-  if (options.tools) {
-    const requestToolValues = Object.values(options.tools);
-    assertNoBuiltInToolNameCollisions(requestToolValues);
-    const resolved = await executionApi.resolveToolsAsync();
-    return Object.fromEntries(
-      Object.entries({
-        ...resolved,
-        ...options.tools,
-      }).sort(([left], [right]) => left.localeCompare(right)),
-    );
-  }
-  return await executionApi.resolveToolsAsync();
-}
-
-export function createLLMRuntime(options: LLMRuntimeOptions = {}): LLMRuntime {
-  const defaults = createDefaults(options.defaults);
-  const providerConfigStore = createProviderConfigStore(options.providers);
-  const mcpRegistry = createMCPRegistry(options.mcp?.config ?? null);
-  const skillRegistry = createSkillRegistry(options.skills);
-  const builtInToolSelection = options.tools?.builtIns;
-  const extraTools = options.tools?.extraTools ?? [];
-  const executionApi = createExecutionApi({
-    defaults,
+    defaults: createDefaults(options.defaults),
     providerConfigStore,
     mcpRegistry,
     skillRegistry,
-    builtInToolSelection,
-    extraTools,
+  };
+}
+
+function buildCachedEnvironment(options: {
+  provider?: LLMGenerateOptions['provider'] | LLMStreamOptions['provider'];
+  providerConfig?: LLMGenerateOptions['providerConfig'] | LLMStreamOptions['providerConfig'];
+  providers?: LLMProviderConfigs;
+  mcpConfig?: MCPConfig | null;
+  skillRoots?: string[];
+  defaults?: LLMEnvironmentOptions['defaults'];
+}): LLMEnvironment {
+  return {
+    defaults: createDefaults(options.defaults),
+    providerConfigStore: getOrCreateProviderConfigStore(
+      mergeProviderConfigs({
+        provider: options.provider,
+        providerConfig: options.providerConfig,
+        providers: options.providers,
+      }),
+    ),
+    mcpRegistry: getOrCreateMCPRegistry(options.mcpConfig ?? null),
+    skillRegistry: getOrCreateSkillRegistry(options.skillRoots),
+  };
+}
+
+function getEnvironmentForCall(request: {
+  environment?: LLMEnvironment;
+  provider?: LLMGenerateOptions['provider'] | LLMStreamOptions['provider'];
+  providerConfig?: LLMGenerateOptions['providerConfig'] | LLMStreamOptions['providerConfig'];
+  providers?: LLMProviderConfigs;
+  mcpConfig?: MCPConfig | null;
+  skillRoots?: string[];
+}): LLMEnvironment {
+  if (request.environment) {
+    return request.environment;
+  }
+
+  return buildCachedEnvironment({
+    provider: request.provider,
+    providerConfig: request.providerConfig,
+    providers: request.providers,
+    mcpConfig: request.mcpConfig,
+    skillRoots: request.skillRoots,
+  });
+}
+
+function resolveReasoningEffort(environment: LLMEnvironment, request: LLMGenerateOptions | LLMStreamOptions): ReasoningEffort {
+  return request.context?.reasoningEffort ?? environment.defaults.reasoningEffort;
+}
+
+function buildResolvedToolSet(options: {
+  environment: LLMEnvironment;
+  builtIns?: BuiltInToolSelection;
+  extraTools?: LLMToolDefinition[];
+  tools?: Record<string, LLMToolDefinition>;
+}): Record<string, LLMToolDefinition> {
+  const extraTools = options.extraTools ?? [];
+  assertNoBuiltInToolNameCollisions(extraTools);
+
+  const builtInTools = createBuiltInToolDefinitions({
+    builtIns: options.builtIns,
+    skillRegistry: options.environment.skillRegistry,
   });
 
-  return {
-    getDefaults: () => defaults,
-    configureProvider: providerConfigStore.configureProvider,
-    getProviderConfig: providerConfigStore.getProviderConfig,
-    isProviderConfigured: providerConfigStore.isProviderConfigured,
-    getConfiguredProviders: providerConfigStore.getConfiguredProviders,
-    getConfigurationStatus: providerConfigStore.getConfigurationStatus,
-    clearProviderConfiguration: providerConfigStore.clearProviderConfiguration,
-    getBuiltInTools: () => ({ ...executionApi.builtInTools }),
-    getMCPRegistry: () => mcpRegistry,
-    getSkillRegistry: () => skillRegistry,
-    getToolRegistry: () => executionApi.toolRegistry,
-    resolveTools: executionApi.resolveTools,
-    resolveToolsAsync: executionApi.resolveToolsAsync,
-    generate: executionApi.generateInternal,
-    stream: executionApi.streamInternal,
-    shutdown: async () => {
-      await mcpRegistry.shutdown();
-    },
-  };
+  const resolved = createToolRegistry([
+    ...Object.values(builtInTools),
+    ...extraTools,
+  ]).resolveTools();
+
+  if (options.tools) {
+    const requestToolValues = Object.values(options.tools);
+    assertNoBuiltInToolNameCollisions(requestToolValues);
+    return Object.fromEntries(
+      Object.entries({
+        ...resolved,
+        ...options.tools,
+      }).sort(([left], [right]) => left.localeCompare(right)),
+    );
+  }
+
+  return Object.fromEntries(
+    Object.entries(resolved).sort(([left], [right]) => left.localeCompare(right)),
+  );
+}
+
+async function buildResolvedToolSetAsync(options: {
+  environment: LLMEnvironment;
+  builtIns?: BuiltInToolSelection;
+  extraTools?: LLMToolDefinition[];
+  tools?: Record<string, LLMToolDefinition>;
+}): Promise<Record<string, LLMToolDefinition>> {
+  const resolved = buildResolvedToolSet(options);
+  const mcpTools = await options.environment.mcpRegistry.resolveTools();
+
+  return Object.fromEntries(
+    Object.entries({
+      ...resolved,
+      ...mcpTools,
+    }).sort(([left], [right]) => left.localeCompare(right)),
+  );
+}
+
+export function resolveTools(options: LLMResolveToolsOptions = {}): Record<string, LLMToolDefinition> {
+  const environment = getEnvironmentForCall({
+    environment: options.environment,
+    mcpConfig: options.mcpConfig,
+    skillRoots: options.skillRoots,
+  });
+
+  return buildResolvedToolSet({
+    environment,
+    builtIns: options.builtIns,
+    extraTools: options.extraTools,
+    tools: options.tools,
+  });
+}
+
+export async function resolveToolsAsync(options: LLMResolveToolsOptions = {}): Promise<Record<string, LLMToolDefinition>> {
+  const environment = getEnvironmentForCall({
+    environment: options.environment,
+    mcpConfig: options.mcpConfig,
+    skillRoots: options.skillRoots,
+  });
+
+  return await buildResolvedToolSetAsync({
+    environment,
+    builtIns: options.builtIns,
+    extraTools: options.extraTools,
+    tools: options.tools,
+  });
+}
+
+export async function generate(request: LLMGenerateOptions): Promise<LLMResponse> {
+  const environment = getEnvironmentForCall({
+    environment: request.environment,
+    provider: request.provider,
+    providerConfig: request.providerConfig,
+    providers: request.providers,
+    mcpConfig: request.mcpConfig,
+    skillRoots: request.skillRoots,
+  });
+  const tools = await buildResolvedToolSetAsync({
+    environment,
+    builtIns: request.builtIns,
+    extraTools: request.extraTools,
+    tools: request.tools,
+  });
+  const reasoningEffort = resolveReasoningEffort(environment, request);
+
+  switch (request.provider) {
+    case 'openai':
+    case 'azure':
+    case 'openai-compatible':
+    case 'xai':
+    case 'ollama':
+      return await generateOpenAIResponse({
+        client: createClientForProvider(
+          request.provider,
+          environment.providerConfigStore.getProviderConfig(request.provider as any) as any,
+        ),
+        provider: request.provider,
+        model: request.model,
+        messages: request.messages,
+        tools,
+        temperature: request.temperature,
+        maxTokens: request.maxTokens,
+        reasoningEffort,
+        abortSignal: request.context?.abortSignal,
+      });
+    case 'anthropic':
+      return await generateAnthropicResponse({
+        client: createAnthropicClient(environment.providerConfigStore.getProviderConfig('anthropic')),
+        model: request.model,
+        messages: request.messages,
+        tools,
+        temperature: request.temperature,
+        maxTokens: request.maxTokens,
+        abortSignal: request.context?.abortSignal,
+      });
+    case 'google':
+      return await generateGoogleResponse({
+        client: createGoogleClient(environment.providerConfigStore.getProviderConfig('google')),
+        model: request.model,
+        messages: request.messages,
+        tools,
+        temperature: request.temperature,
+        maxTokens: request.maxTokens,
+        reasoningEffort,
+        abortSignal: request.context?.abortSignal,
+      });
+    default:
+      throw new Error(`Unsupported provider: ${request.provider}`);
+  }
+}
+
+export async function stream(request: LLMStreamOptions): Promise<LLMResponse> {
+  const environment = getEnvironmentForCall({
+    environment: request.environment,
+    provider: request.provider,
+    providerConfig: request.providerConfig,
+    providers: request.providers,
+    mcpConfig: request.mcpConfig,
+    skillRoots: request.skillRoots,
+  });
+  const tools = await buildResolvedToolSetAsync({
+    environment,
+    builtIns: request.builtIns,
+    extraTools: request.extraTools,
+    tools: request.tools,
+  });
+  const reasoningEffort = resolveReasoningEffort(environment, request);
+  const onChunk = request.onChunk ?? (() => undefined);
+
+  switch (request.provider) {
+    case 'openai':
+    case 'azure':
+    case 'openai-compatible':
+    case 'xai':
+    case 'ollama':
+      return await streamOpenAIResponse({
+        client: createClientForProvider(
+          request.provider,
+          environment.providerConfigStore.getProviderConfig(request.provider as any) as any,
+        ),
+        provider: request.provider,
+        model: request.model,
+        messages: request.messages,
+        tools,
+        temperature: request.temperature,
+        maxTokens: request.maxTokens,
+        reasoningEffort,
+        abortSignal: request.context?.abortSignal,
+        onChunk,
+      });
+    case 'anthropic':
+      return await streamAnthropicResponse({
+        client: createAnthropicClient(environment.providerConfigStore.getProviderConfig('anthropic')),
+        model: request.model,
+        messages: request.messages,
+        tools,
+        temperature: request.temperature,
+        maxTokens: request.maxTokens,
+        abortSignal: request.context?.abortSignal,
+        onChunk,
+      });
+    case 'google':
+      return await streamGoogleResponse({
+        client: createGoogleClient(environment.providerConfigStore.getProviderConfig('google')),
+        model: request.model,
+        messages: request.messages,
+        tools,
+        temperature: request.temperature,
+        maxTokens: request.maxTokens,
+        reasoningEffort,
+        abortSignal: request.context?.abortSignal,
+        onChunk,
+      });
+    default:
+      throw new Error(`Unsupported provider: ${request.provider}`);
+  }
 }
 
 export async function __resetLLMCallCachesForTests(): Promise<void> {

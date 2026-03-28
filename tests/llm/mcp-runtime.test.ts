@@ -20,7 +20,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   __resetLLMCallCachesForTests,
-  createLLMRuntime,
+  createLLMEnvironment,
   resolveToolsAsync,
 } from '../../packages/llm/src/runtime.js';
 
@@ -103,7 +103,7 @@ describe('@agent-world/llm MCP runtime', () => {
     await __resetLLMCallCachesForTests();
   });
 
-  it('resolves executable MCP tools through the package runtime', async () => {
+  it('resolves executable MCP tools through an explicit environment', async () => {
     listToolsPayload.push({
       name: 'lookup',
       description: 'Lookup tool',
@@ -116,24 +116,22 @@ describe('@agent-world/llm MCP runtime', () => {
       },
     });
 
-    const runtime = createLLMRuntime({
-      mcp: {
-        config: {
-          servers: {
-            demo: {
-              command: 'node',
-              args: ['demo.js'],
-              transport: 'stdio',
-            },
+    const environment = createLLMEnvironment({
+      mcpConfig: {
+        servers: {
+          demo: {
+            command: 'node',
+            args: ['demo.js'],
+            transport: 'stdio',
           },
         },
       },
-      tools: {
-        builtIns: false,
-      },
     });
 
-    const tools = await runtime.resolveToolsAsync();
+    const tools = await resolveToolsAsync({
+      environment,
+      builtIns: false,
+    });
     expect(Object.keys(tools)).toEqual(['demo_lookup']);
 
     const result = await tools.demo_lookup?.execute?.({
@@ -150,7 +148,7 @@ describe('@agent-world/llm MCP runtime', () => {
       },
     });
 
-    await runtime.shutdown();
+    await environment.mcpRegistry.shutdown();
     expect(mockClientClose).toHaveBeenCalledTimes(1);
   });
 

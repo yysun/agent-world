@@ -5,7 +5,7 @@
  * - Export the public API for the publishable `@agent-world/llm` workspace.
  *
  * Key features:
- * - Main runtime factory export.
+ * - Per-call `generate(...)`, `stream(...)`, and explicit environment export.
  * - Package-owned provider configuration helpers.
  * - Package-owned built-in tool catalog and runtime helpers.
  * - MCP, skill, and tool registry helpers and types.
@@ -27,7 +27,7 @@ export * from './skills.js';
 export * from './tools.js';
 export * from './tool-validation.js';
 export {
-  createLLMRuntime,
+  createLLMEnvironment,
   generate,
   resolveTools,
   resolveToolsAsync,

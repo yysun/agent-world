@@ -7,7 +7,7 @@
  * Key features:
  * - MCP config parsing and normalization.
  * - Ordered skill-root precedence with a mocked filesystem adapter.
- * - Tool registry merge behavior through `createLLMRuntime(...)`.
+ * - Tool resolution and environment behavior through the public per-call API.
  *
  * Implementation notes:
  * - Uses a mocked in-memory filesystem adapter for skill-registry coverage.
@@ -22,9 +22,10 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  createLLMRuntime,
+  createLLMEnvironment,
+  resolveTools,
   parseMCPConfigJson,
-  type LLMRuntimeOptions,
+  type LLMEnvironmentOptions,
   type SkillFileSystemAdapter,
 } from '../../packages/llm/src/index.js';
 
@@ -126,14 +127,12 @@ describe('@agent-world/llm runtime', () => {
       '/project/find/SKILL.md': '---\nname: find-skills\ndescription: project description\n---\n# Project',
     });
 
-    const runtime = createLLMRuntime({
-      skills: {
-        roots: ['/global', '/project'],
-        fileSystem,
-      },
+    const environment = createLLMEnvironment({
+      skillRoots: ['/global', '/project'],
+      skillFileSystem: fileSystem,
     });
 
-    const skills = await runtime.getSkillRegistry().listSkills();
+    const skills = await environment.skillRegistry.listSkills();
     expect(skills).toEqual([
       expect.objectContaining({
         skillId: 'find-skills',
@@ -142,81 +141,78 @@ describe('@agent-world/llm runtime', () => {
       }),
     ]);
 
-    const loadedSkill = await runtime.getSkillRegistry().loadSkill('find-skills');
+    const loadedSkill = await environment.skillRegistry.loadSkill('find-skills');
     expect(loadedSkill?.content).toContain('# Project');
   });
 
-  it('merges constructor-time and per-call extra tools deterministically', () => {
-    const runtime = createLLMRuntime({
+  it('merges extra tools and direct tool overrides deterministically', () => {
+    const resolved = resolveTools({
+      builtIns: false,
+      extraTools: [
+        {
+          name: 'project_lookup',
+          description: 'Project lookup',
+          parameters: { type: 'object' },
+        },
+      ],
       tools: {
-        builtIns: false,
-        extraTools: [
-          {
-            name: 'project_lookup',
-            description: 'Project lookup',
-            parameters: { type: 'object' },
-          },
-        ],
+        project_write: {
+          name: 'project_write',
+          description: 'Project write',
+          parameters: { type: 'object' },
+        },
+        project_lookup: {
+          name: 'project_lookup',
+          description: 'Override lookup',
+          parameters: { type: 'object', override: true },
+        },
       },
     });
-
-    const resolved = runtime.getToolRegistry().resolveTools([
-      {
-        name: 'project_write',
-        description: 'Project write',
-        parameters: { type: 'object' },
-      },
-      {
-        name: 'project_lookup',
-        description: 'Override lookup',
-        parameters: { type: 'object', override: true },
-      },
-    ]);
 
     expect(Object.keys(resolved)).toEqual(['project_lookup', 'project_write']);
     expect(resolved.project_lookup?.description).toBe('Override lookup');
     expect(resolved.project_write?.description).toBe('Project write');
   });
 
-  it('keeps provider configuration isolated per runtime instance', () => {
-    const firstRuntime = createLLMRuntime({
+  it('keeps provider configuration isolated per explicit environments', async () => {
+    const firstEnvironment = createLLMEnvironment({
       providers: {
         openai: {
           apiKey: 'first-openai-key',
         },
       },
-    } satisfies LLMRuntimeOptions);
+    } satisfies LLMEnvironmentOptions);
 
-    const secondRuntime = createLLMRuntime({
+    const secondEnvironment = createLLMEnvironment({
       providers: {
         anthropic: {
           apiKey: 'second-anthropic-key',
         },
       },
-    } satisfies LLMRuntimeOptions);
+    } satisfies LLMEnvironmentOptions);
 
-    expect(firstRuntime.getProviderConfig('openai')).toEqual({
+    expect(firstEnvironment.providerConfigStore.getProviderConfig('openai')).toEqual({
       apiKey: 'first-openai-key',
     });
-    expect(firstRuntime.isProviderConfigured('anthropic')).toBe(false);
-    expect(() => secondRuntime.getProviderConfig('openai')).toThrow(
+    expect(firstEnvironment.providerConfigStore.isProviderConfigured('anthropic')).toBe(false);
+    expect(() => secondEnvironment.providerConfigStore.getProviderConfig('openai')).toThrow(
       /No configuration found for openai provider/,
     );
 
-    secondRuntime.configureProvider('openai', {
+    secondEnvironment.providerConfigStore.configureProvider('openai', {
       apiKey: 'second-openai-key',
     });
 
-    expect(firstRuntime.getProviderConfig('openai')).toEqual({
+    expect(firstEnvironment.providerConfigStore.getProviderConfig('openai')).toEqual({
       apiKey: 'first-openai-key',
     });
-    expect(secondRuntime.getProviderConfig('openai')).toEqual({
+    expect(secondEnvironment.providerConfigStore.getProviderConfig('openai')).toEqual({
       apiKey: 'second-openai-key',
     });
   });
 
-  it('accepts constructor-time provider config through the public runtime options', () => {
-    const runtime = createLLMRuntime({
+  it('accepts provider config through the explicit environment options', () => {
+    const environment = createLLMEnvironment({
       providers: {
         azure: {
           apiKey: 'azure-key',
@@ -224,12 +220,12 @@ describe('@agent-world/llm runtime', () => {
           deployment: 'gpt-5',
         },
       },
-    } satisfies LLMRuntimeOptions);
+    } satisfies LLMEnvironmentOptions);
 
-    expect(runtime.getConfigurationStatus()).toMatchObject({
+    expect(environment.providerConfigStore.getConfigurationStatus()).toMatchObject({
       azure: true,
     });
-    expect(runtime.getProviderConfig('azure')).toEqual({
+    expect(environment.providerConfigStore.getProviderConfig('azure')).toEqual({
       apiKey: 'azure-key',
       resourceName: 'azure-resource',
       deployment: 'gpt-5',
@@ -237,9 +233,7 @@ describe('@agent-world/llm runtime', () => {
   });
 
   it('includes internal built-ins by default, including HITL pending requests', () => {
-    const runtime = createLLMRuntime();
-
-    expect(Object.keys(runtime.getBuiltInTools()).sort()).toEqual([
+    expect(Object.keys(resolveTools()).sort()).toEqual([
       'grep',
       'human_intervention_request',
       'list_files',
@@ -251,38 +245,27 @@ describe('@agent-world/llm runtime', () => {
     ]);
   });
 
-  it('supports constructor-time built-in disabling and per-call narrowing', () => {
-    const runtime = createLLMRuntime({
-      tools: {
-        builtIns: {
-          shell_cmd: true,
-          read_file: true,
-          write_file: true,
-          list_files: true,
-        },
+  it('supports per-call built-in selection', () => {
+    const resolved = resolveTools({
+      builtIns: {
+        shell_cmd: true,
+        read_file: true,
+        write_file: true,
+        list_files: true,
       },
-    } satisfies LLMRuntimeOptions);
+    });
 
-    expect(Object.keys(runtime.getBuiltInTools()).sort()).toEqual([
+    expect(Object.keys(resolved).sort()).toEqual([
       'list_files',
       'read_file',
       'shell_cmd',
       'write_file',
     ].sort());
-
-    const narrowed = runtime.resolveTools({
-      enabledBuiltIns: {
-        read_file: true,
-        list_files: true,
-      },
-    });
-
-    expect(Object.keys(narrowed)).toEqual(['list_files', 'read_file']);
   });
 
   it('returns a pending HITL request artifact without requiring an adapter', async () => {
-    const runtime = createLLMRuntime();
-    const result = await runtime.getBuiltInTools().human_intervention_request?.execute?.({
+    const tools = resolveTools();
+    const result = await tools.human_intervention_request?.execute?.({
       question: 'Approve?',
       options: ['Yes', 'No'],
       defaultOption: 'Yes',
@@ -297,25 +280,23 @@ describe('@agent-world/llm runtime', () => {
   });
 
   it('rejects attempts to override reserved built-in tool names', () => {
-    expect(() => createLLMRuntime({
-      tools: {
-        extraTools: [
-          {
-            name: 'read_file',
-            description: 'override',
-            parameters: { type: 'object' },
-          },
-        ],
-      },
-    } satisfies LLMRuntimeOptions)).toThrow(
+    expect(() => resolveTools({
+      extraTools: [
+        {
+          name: 'read_file',
+          description: 'override',
+          parameters: { type: 'object' },
+        },
+      ],
+    })).toThrow(
       'Tool name "read_file" is reserved by @agent-world/llm built-ins.',
     );
   });
 
   it('validates and normalizes built-in tool arguments before execution', async () => {
-    const runtime = createLLMRuntime();
+    const tools = resolveTools();
 
-    const successResult = await runtime.getBuiltInTools().human_intervention_request?.execute?.({
+    const successResult = await tools.human_intervention_request?.execute?.({
       prompt: 'Continue?',
       options: 'Yes',
       default_option: 'Yes',
@@ -328,7 +309,7 @@ describe('@agent-world/llm runtime', () => {
     expect(successResult).toContain('"options": [\n    "Yes"\n  ]');
     expect(successResult).toContain('"defaultOption": "Yes"');
 
-    const failureResult = await runtime.getBuiltInTools().human_intervention_request?.execute?.({
+    const failureResult = await tools.human_intervention_request?.execute?.({
       question: 123,
       options: ['Yes'],
     } as any);
@@ -338,15 +319,17 @@ describe('@agent-world/llm runtime', () => {
     );
   });
 
-  it('allows explicit HITL enablement without requiring an adapter', () => {
-    const runtime = createLLMRuntime({
-      tools: {
-        builtIns: {
-          human_intervention_request: true,
+  it('creates an explicit environment without relying on convenience caches', () => {
+    const environment = createLLMEnvironment({
+      providers: {
+        openai: {
+          apiKey: 'env-openai-key',
         },
       },
-    } satisfies LLMRuntimeOptions);
+    });
 
-    expect(runtime.getBuiltInTools()).toHaveProperty('human_intervention_request');
+    expect(environment.providerConfigStore.getProviderConfig('openai')).toEqual({
+      apiKey: 'env-openai-key',
+    });
   });
 });
