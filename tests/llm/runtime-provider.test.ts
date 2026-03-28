@@ -2,7 +2,7 @@
  * LLM Package Runtime Provider Dispatch Tests
  *
  * Purpose:
- * - Verify that `createLLMRuntime(...)` dispatches provider calls through the package-owned provider layer.
+ * - Verify that both `createLLMRuntime(...)` and the per-call APIs dispatch through the package-owned provider layer.
  *
  * Key features:
  * - Covers runtime.generate and runtime.stream provider dispatch.
@@ -17,7 +17,7 @@
  * - 2026-03-27: Initial provider-dispatch coverage for the publishable `@agent-world/llm` runtime.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const {
   mockCreateClientForProvider,
@@ -54,6 +54,11 @@ vi.mock('../../packages/llm/src/openai-direct.js', () => ({
 }));
 
 describe('@agent-world/llm runtime provider dispatch', () => {
+  afterEach(async () => {
+    const { __resetLLMCallCachesForTests } = await import('../../packages/llm/src/runtime.js');
+    await __resetLLMCallCachesForTests();
+  });
+
   it('dispatches generate requests through the package-owned provider layer', async () => {
     const { createLLMRuntime } = await import('../../packages/llm/src/runtime.js');
 
@@ -185,5 +190,81 @@ describe('@agent-world/llm runtime provider dispatch', () => {
         },
       },
     })).rejects.toThrow('Tool name "read_file" is reserved by @agent-world/llm built-ins.');
+  });
+
+  it('dispatches per-call generate requests without constructing a runtime', async () => {
+    const { generate } = await import('../../packages/llm/src/runtime.js');
+
+    const response = await generate({
+      provider: 'openai',
+      providerConfig: {
+        apiKey: 'test-openai-key',
+      },
+      model: 'gpt-5',
+      messages: [
+        {
+          role: 'user',
+          content: 'Hello',
+        },
+      ],
+      builtIns: false,
+      extraTools: [
+        {
+          name: 'project_lookup',
+          description: 'Project lookup',
+          parameters: { type: 'object' },
+        },
+      ],
+      context: {
+        reasoningEffort: 'low',
+      },
+    });
+
+    expect(response.content).toBe('generated');
+    expect(mockCreateClientForProvider).toHaveBeenCalledWith('openai', {
+      apiKey: 'test-openai-key',
+    });
+    expect(mockGenerateOpenAIResponse).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'openai',
+      model: 'gpt-5',
+      reasoningEffort: 'low',
+      tools: {
+        project_lookup: expect.objectContaining({ name: 'project_lookup' }),
+      },
+    }));
+  });
+
+  it('dispatches per-call stream requests without constructing a runtime', async () => {
+    const { stream } = await import('../../packages/llm/src/runtime.js');
+
+    const chunks: Array<{ content?: string; reasoningContent?: string }> = [];
+    const response = await stream({
+      provider: 'openai',
+      providerConfig: {
+        apiKey: 'test-openai-key',
+      },
+      model: 'gpt-5',
+      messages: [
+        {
+          role: 'user',
+          content: 'Stream please',
+        },
+      ],
+      builtIns: false,
+      onChunk: (chunk) => {
+        chunks.push(chunk);
+      },
+    });
+
+    expect(response.content).toBe('streamed');
+    expect(chunks).toEqual([
+      { content: 'chunk-1' },
+      { reasoningContent: 'reasoning-1' },
+    ]);
+    expect(mockStreamOpenAIResponse).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'openai',
+      model: 'gpt-5',
+      reasoningEffort: 'default',
+    }));
   });
 });

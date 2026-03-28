@@ -6,7 +6,7 @@
  *
  * Key features:
  * - Covers MCP config parsing into executable tools.
- * - Verifies namespaced MCP tool exposure through the runtime async resolution path.
+ * - Verifies namespaced MCP tool exposure through both runtime and per-call async resolution paths.
  * - Verifies MCP tool execution is routed through the SDK client wrapper.
  *
  * Implementation notes:
@@ -17,8 +17,12 @@
  * - 2026-03-27: Initial MCP runtime coverage for the publishable `@agent-world/llm` package.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createLLMRuntime } from '../../packages/llm/src/runtime.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  __resetLLMCallCachesForTests,
+  createLLMRuntime,
+  resolveToolsAsync,
+} from '../../packages/llm/src/runtime.js';
 
 const {
   mockClientConnect,
@@ -95,6 +99,10 @@ describe('@agent-world/llm MCP runtime', () => {
     });
   });
 
+  afterEach(async () => {
+    await __resetLLMCallCachesForTests();
+  });
+
   it('resolves executable MCP tools through the package runtime', async () => {
     listToolsPayload.push({
       name: 'lookup',
@@ -144,5 +152,43 @@ describe('@agent-world/llm MCP runtime', () => {
 
     await runtime.shutdown();
     expect(mockClientClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses cached MCP tool discovery across equivalent per-call requests', async () => {
+    listToolsPayload.push({
+      name: 'lookup',
+      description: 'Lookup tool',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string' },
+        },
+        required: ['query'],
+      },
+    });
+
+    const mcpConfig = {
+      servers: {
+        demo: {
+          command: 'node',
+          args: ['demo.js'],
+          transport: 'stdio' as const,
+        },
+      },
+    };
+
+    const firstTools = await resolveToolsAsync({
+      mcpConfig,
+      builtIns: false,
+    });
+    const secondTools = await resolveToolsAsync({
+      mcpConfig,
+      builtIns: false,
+    });
+
+    expect(Object.keys(firstTools)).toEqual(['demo_lookup']);
+    expect(Object.keys(secondTools)).toEqual(['demo_lookup']);
+    expect(mockClientConnect).toHaveBeenCalledTimes(1);
+    expect(mockClientListTools).toHaveBeenCalledTimes(1);
   });
 });

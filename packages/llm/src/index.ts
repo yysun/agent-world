@@ -26,7 +26,13 @@ export * from './mcp.js';
 export * from './skills.js';
 export * from './tools.js';
 export * from './tool-validation.js';
-export * from './runtime.js';
+export {
+  createLLMRuntime,
+  generate,
+  resolveTools,
+  resolveToolsAsync,
+  stream,
+} from './runtime.js';
 export * from './openai-direct.js';
 export * from './anthropic-direct.js';
 export * from './google-direct.js';

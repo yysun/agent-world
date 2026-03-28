@@ -272,6 +272,36 @@ export interface LLMRuntimeStreamOptions extends LLMRuntimeProviderCallBase {
   onChunk?: (chunk: LLMStreamChunk) => void;
 }
 
+export interface LLMPerCallProviderOptions {
+  provider: LLMProviderName;
+  model: string;
+  messages: LLMChatMessage[];
+  temperature?: number;
+  maxTokens?: number;
+  providerConfig?: ProviderConfig;
+  providers?: LLMProviderConfigs;
+  mcpConfig?: MCPConfig | null;
+  skillRoots?: string[];
+  builtIns?: BuiltInToolSelection;
+  extraTools?: LLMToolDefinition[];
+  tools?: Record<string, LLMToolDefinition>;
+  context?: LLMToolExecutionContext;
+}
+
+export interface LLMGenerateOptions extends LLMPerCallProviderOptions {}
+
+export interface LLMStreamOptions extends LLMPerCallProviderOptions {
+  onChunk?: (chunk: LLMStreamChunk) => void;
+}
+
+export interface LLMResolveToolsOptions {
+  mcpConfig?: MCPConfig | null;
+  skillRoots?: string[];
+  builtIns?: BuiltInToolSelection;
+  extraTools?: LLMToolDefinition[];
+  tools?: Record<string, LLMToolDefinition>;
+}
+
 export interface LLMRuntime extends LLMProviderConfigStore {
   getDefaults: () => Readonly<Required<NonNullable<LLMRuntimeOptions['defaults']>>>;
   getBuiltInTools: () => Record<string, LLMToolDefinition>;

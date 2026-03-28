@@ -10,7 +10,7 @@
  * - Prints a terminal-friendly walkthrough with assertions for each scenario.
  *
  * Implementation notes:
- * - The runner manages its own tool loop around `runtime.generate(...)` and `runtime.stream(...)`.
+ * - The runner manages its own tool loop around package-level `generate(...)` and `stream(...)`.
  * - A temporary workspace provides deterministic files and skills without touching the repo.
  * - `--dry-run` validates setup without making real provider calls.
  *
@@ -26,12 +26,12 @@ import path from 'node:path';
 import process from 'node:process';
 import { config as loadDotEnv } from 'dotenv';
 import {
-  createLLMRuntime,
+  generate,
   type LLMChatMessage,
   type LLMResponse,
-  type LLMRuntime,
-  type LLMRuntimeResolveToolsOptions,
   type LLMStreamChunk,
+  resolveToolsAsync,
+  stream,
 } from '@agent-world/llm';
 import {
   getShowcaseEnvHelp,
@@ -47,7 +47,7 @@ type ShowcaseWorkspace = {
 type ShowcaseScenario = {
   name: string;
   mode: 'generate' | 'stream';
-  resolveTools?: LLMRuntimeResolveToolsOptions;
+  builtIns?: boolean | Record<string, boolean>;
   messages: LLMChatMessage[];
   expectedTools: string[];
   expectedTokens: string[];
@@ -144,11 +144,9 @@ function buildShowcaseScenarios(): ShowcaseScenario[] {
     {
       name: 'Built-ins: read_file + load_skill',
       mode: 'generate',
-      resolveTools: {
-        enabledBuiltIns: {
-          read_file: true,
-          load_skill: true,
-        },
+      builtIns: {
+        read_file: true,
+        load_skill: true,
       },
       expectedTools: ['read_file', 'load_skill'],
       expectedTokens: ['alpha-repo-token', 'skill-beacon-77'],
@@ -176,9 +174,7 @@ function buildShowcaseScenarios(): ShowcaseScenario[] {
     {
       name: 'MCP: namespaced lookup tool',
       mode: 'generate',
-      resolveTools: {
-        enabledBuiltIns: false,
-      },
+      builtIns: false,
       expectedTools: ['showcase_lookup_release'],
       expectedTokens: ['beta-signal-842'],
       messages: [
@@ -203,10 +199,8 @@ function buildShowcaseScenarios(): ShowcaseScenario[] {
     {
       name: 'Streaming: built-ins + MCP together',
       mode: 'stream',
-      resolveTools: {
-        enabledBuiltIns: {
-          read_file: true,
-        },
+      builtIns: {
+        read_file: true,
       },
       expectedTools: ['read_file', 'showcase_lookup_release'],
       expectedTokens: ['stream-marker-21', 'gamma-signal-173'],
@@ -242,10 +236,20 @@ function toToolMessageContent(result: unknown): string {
 }
 
 async function runToolLoop(
-  runtime: LLMRuntime,
   scenario: ShowcaseScenario,
   workingDirectory: string,
   providerSelection: ShowcaseProviderSelection,
+  mcpConfig: {
+    servers: {
+      showcase: {
+        command: string;
+        args: string[];
+        transport: 'stdio';
+        env: NodeJS.ProcessEnv;
+      };
+    };
+  },
+  skillRoots: string[],
 ): Promise<ShowcaseScenarioResult> {
   const messages: LLMChatMessage[] = [...scenario.messages];
   const chunks: LLMStreamChunk[] = [];
@@ -253,12 +257,15 @@ async function runToolLoop(
 
   for (let turn = 1; turn <= MAX_TOOL_TURNS; turn += 1) {
     const response: LLMResponse = scenario.mode === 'stream'
-      ? await runtime.stream({
+      ? await stream({
         provider: providerSelection.provider,
+        providerConfig: providerSelection.providers[providerSelection.provider],
         model: providerSelection.model,
+        mcpConfig,
+        skillRoots,
+        builtIns: scenario.builtIns,
         messages,
         temperature: 0,
-        resolveTools: scenario.resolveTools,
         context: {
           workingDirectory,
         },
@@ -266,12 +273,15 @@ async function runToolLoop(
           chunks.push(chunk);
         },
       })
-      : await runtime.generate({
+      : await generate({
         provider: providerSelection.provider,
+        providerConfig: providerSelection.providers[providerSelection.provider],
         model: providerSelection.model,
+        mcpConfig,
+        skillRoots,
+        builtIns: scenario.builtIns,
         messages,
         temperature: 0,
-        resolveTools: scenario.resolveTools,
         context: {
           workingDirectory,
         },
@@ -288,7 +298,11 @@ async function runToolLoop(
       };
     }
 
-    const tools = await runtime.resolveToolsAsync(scenario.resolveTools);
+    const tools = await resolveToolsAsync({
+      mcpConfig,
+      skillRoots,
+      builtIns: scenario.builtIns,
+    });
     for (const toolCall of response.tool_calls) {
       const tool = tools[toolCall.function.name];
       assert(tool?.execute, `Missing executable tool: ${toolCall.function.name}`);
@@ -353,47 +367,36 @@ function summarizeChunks(chunks: LLMStreamChunk[]): string {
 
 async function runShowcaseWithSelection(providerSelection: ShowcaseProviderSelection, dryRun: boolean) {
   const workspace = await createShowcaseWorkspace();
-  const runtime = createLLMRuntime({
-    providers: providerSelection.providers,
-    skills: {
-      roots: workspace.skillRoots,
-    },
-    mcp: {
-      config: {
-        servers: {
-          showcase: {
-            command: process.execPath,
-            args: [path.resolve('tests/e2e/support/llm-showcase-mcp-server.mjs')],
-            transport: 'stdio',
-            env: { ...process.env },
-          },
-        },
+  const mcpConfig = {
+    servers: {
+      showcase: {
+        command: process.execPath,
+        args: [path.resolve('tests/e2e/support/llm-showcase-mcp-server.mjs')],
+        transport: 'stdio' as const,
+        env: { ...process.env },
       },
     },
-    tools: {
-      builtIns: {
-        read_file: true,
-        load_skill: true,
-        human_intervention_request: false,
-        shell_cmd: false,
-        web_fetch: false,
-        write_file: false,
-        list_files: false,
-        grep: false,
-      },
-    },
-  });
+  };
+  const showcaseBuiltIns = {
+    read_file: true,
+    load_skill: true,
+    human_intervention_request: false,
+    shell_cmd: false,
+    web_fetch: false,
+    write_file: false,
+    list_files: false,
+    grep: false,
+  };
 
   try {
     console.log('LLM package real showcase');
     console.log(`provider=${providerSelection.provider}`);
     console.log(`model=${providerSelection.model}`);
 
-    const resolvedTools = await runtime.resolveToolsAsync({
-      enabledBuiltIns: {
-        read_file: true,
-        load_skill: true,
-      },
+    const resolvedTools = await resolveToolsAsync({
+      mcpConfig,
+      skillRoots: workspace.skillRoots,
+      builtIns: showcaseBuiltIns,
     });
     console.log(`tools=${Object.keys(resolvedTools).join(', ')}`);
 
@@ -404,7 +407,13 @@ async function runShowcaseWithSelection(providerSelection: ShowcaseProviderSelec
 
     for (const scenario of buildShowcaseScenarios()) {
       console.log(`\n[scenario] ${scenario.name}`);
-      const result = await runToolLoop(runtime, scenario, workspace.rootPath, providerSelection);
+      const result = await runToolLoop(
+        scenario,
+        workspace.rootPath,
+        providerSelection,
+        mcpConfig,
+        workspace.skillRoots,
+      );
       assertScenarioResult(scenario, result);
       console.log(`  tools used: ${result.toolNames.join(', ')}`);
       if (scenario.mode === 'stream') {
@@ -416,7 +425,6 @@ async function runShowcaseWithSelection(providerSelection: ShowcaseProviderSelec
 
     console.log('\nshowcase status: PASS');
   } finally {
-    await runtime.shutdown().catch(() => undefined);
     await rm(path.dirname(workspace.rootPath), { recursive: true, force: true }).catch(() => undefined);
   }
 }

@@ -18,7 +18,7 @@
  * - 2026-03-27: Re-labeled as the mocked showcase after adding the real e2e showcase runner.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const {
   mockCreateClientForProvider,
@@ -108,6 +108,11 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
 }));
 
 describe('@agent-world/llm mocked showcase', () => {
+  afterEach(async () => {
+    const { __resetLLMCallCachesForTests } = await import('../../packages/llm/src/runtime.js');
+    await __resetLLMCallCachesForTests();
+  });
+
   it('showcases built-in tools and skill loading through one runtime', async () => {
     const { createLLMRuntime } = await import('../../packages/llm/src/runtime.js');
 
@@ -151,7 +156,7 @@ describe('@agent-world/llm mocked showcase', () => {
     expect(skill?.content).toContain('# Project Skill');
   });
 
-  it('showcases MCP tool discovery and execution through the package runtime', async () => {
+  it('showcases MCP tool discovery and execution through the per-call tool API', async () => {
     listToolsPayload.length = 0;
     listToolsPayload.push({
       name: 'lookup',
@@ -165,32 +170,26 @@ describe('@agent-world/llm mocked showcase', () => {
       },
     });
 
-    const { createLLMRuntime } = await import('../../packages/llm/src/runtime.js');
-    const runtime = createLLMRuntime({
-      mcp: {
-        config: {
-          servers: {
-            demo: {
-              command: 'node',
-              args: ['demo.js'],
-              transport: 'stdio',
-            },
+    const { resolveToolsAsync } = await import('../../packages/llm/src/runtime.js');
+    const tools = await resolveToolsAsync({
+      mcpConfig: {
+        servers: {
+          demo: {
+            command: 'node',
+            args: ['demo.js'],
+            transport: 'stdio',
           },
         },
       },
-      tools: {
-        builtIns: false,
-      },
+      builtIns: false,
     });
-
-    const tools = await runtime.resolveToolsAsync();
     const result = await tools.demo_lookup?.execute?.({ query: 'hello' });
 
     expect(Object.keys(tools)).toContain('demo_lookup');
     expect(result).toBe('showcase-mcp-result');
   });
 
-  it('showcases provider generation with built-ins and MCP tools merged into one call', async () => {
+  it('showcases per-call provider generation with built-ins and MCP tools merged into one call', async () => {
     listToolsPayload.length = 0;
     listToolsPayload.push({
       name: 'lookup',
@@ -204,34 +203,25 @@ describe('@agent-world/llm mocked showcase', () => {
       },
     });
 
-    const { createLLMRuntime } = await import('../../packages/llm/src/runtime.js');
-    const runtime = createLLMRuntime({
-      providers: {
-        openai: {
-          apiKey: 'test-openai-key',
-        },
+    const { generate } = await import('../../packages/llm/src/runtime.js');
+    const response = await generate({
+      provider: 'openai',
+      providerConfig: {
+        apiKey: 'test-openai-key',
       },
-      mcp: {
-        config: {
-          servers: {
-            demo: {
-              command: 'node',
-              args: ['demo.js'],
-              transport: 'stdio',
-            },
+      model: 'gpt-5',
+      mcpConfig: {
+        servers: {
+          demo: {
+            command: 'node',
+            args: ['demo.js'],
+            transport: 'stdio',
           },
         },
       },
-      tools: {
-        builtIns: {
-          read_file: true,
-        },
+      builtIns: {
+        read_file: true,
       },
-    });
-
-    const response = await runtime.generate({
-      provider: 'openai',
-      model: 'gpt-5',
       messages: [
         {
           role: 'user',
