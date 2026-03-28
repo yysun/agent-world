@@ -15,6 +15,10 @@
 !migrations/**
 !bin/
 !bin/**
+!packages/
+!packages/llm/
+!packages/llm/dist/
+!packages/llm/dist/**
 !package.json
 !README.md
 !LICENSE

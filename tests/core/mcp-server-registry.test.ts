@@ -28,7 +28,13 @@ const {
   mockClientClose,
   mockClientCallTool,
   mockClientListTools,
-  mockCreateLoadSkillToolDefinition,
+  mockCreateLLMRuntime,
+  mockPackageShellExecute,
+  mockPackageLoadSkillExecute,
+  mockPackageWebFetchExecute,
+  mockPackageReadFileExecute,
+  mockPackageWriteFileExecute,
+  mockRequestWorldOption,
   failConnectCommands,
   listToolsPayload,
 } = vi.hoisted(() => ({
@@ -37,17 +43,95 @@ const {
   mockClientClose: vi.fn(),
   mockClientCallTool: vi.fn(),
   mockClientListTools: vi.fn(),
-  mockCreateLoadSkillToolDefinition: vi.fn(() => ({
-    description: 'load',
-    parameters: { type: 'object', properties: {} },
-    execute: vi.fn(),
-  })),
+  mockCreateLLMRuntime: vi.fn((options?: any) => {
+    const allBuiltIns = {
+      human_intervention_request: {
+        name: 'human_intervention_request',
+        description: 'pkg-hitl',
+        parameters: { type: 'object', properties: {} },
+        execute: vi.fn(async (args: any, context: any) => JSON.stringify({
+          ok: false,
+          pending: true,
+          status: 'pending',
+          confirmed: false,
+          requestId: String(context?.toolCallId || ''),
+          selectedOption: null,
+          question: String(args?.question || ''),
+          options: Array.isArray(args?.options) ? args.options : [],
+        })),
+      },
+      shell_cmd: {
+        name: 'shell_cmd',
+        description: 'pkg-shell',
+        parameters: { type: 'object', properties: {} },
+        execute: mockPackageShellExecute,
+      },
+      load_skill: {
+        name: 'load_skill',
+        description: 'pkg-load-skill',
+        parameters: { type: 'object', properties: {} },
+        execute: mockPackageLoadSkillExecute,
+      },
+      read_file: {
+        name: 'read_file',
+        description: 'pkg-read',
+        parameters: { type: 'object', properties: {} },
+        execute: mockPackageReadFileExecute,
+      },
+      write_file: {
+        name: 'write_file',
+        description: 'pkg-write',
+        parameters: { type: 'object', properties: {} },
+        execute: mockPackageWriteFileExecute,
+      },
+      list_files: {
+        name: 'list_files',
+        description: 'pkg-list',
+        parameters: { type: 'object', properties: {} },
+        execute: vi.fn(),
+      },
+      grep: {
+        name: 'grep',
+        description: 'pkg-grep',
+        parameters: { type: 'object', properties: {} },
+        execute: vi.fn(),
+      },
+      web_fetch: {
+        name: 'web_fetch',
+        description: 'pkg-web-fetch',
+        parameters: { type: 'object', properties: {} },
+        execute: mockPackageWebFetchExecute,
+      },
+    } as Record<string, any>;
+
+    const enabledBuiltIns = options?.tools?.builtIns;
+
+    return {
+      getBuiltInTools: () => Object.fromEntries(
+        Object.entries(allBuiltIns).filter(([name]) => enabledBuiltIns?.[name] !== false),
+      ),
+    };
+  }),
+  mockPackageShellExecute: vi.fn(async () => '{"ok":true,"tool":"shell_cmd"}'),
+  mockPackageLoadSkillExecute: vi.fn(async () => '<skill_context id="demo"></skill_context>'),
+  mockPackageWebFetchExecute: vi.fn(async () => '{"ok":true,"tool":"web_fetch"}'),
+  mockPackageReadFileExecute: vi.fn(async () => '{"ok":true}'),
+  mockPackageWriteFileExecute: vi.fn(async () => '{"ok":true,"tool":"write_file"}'),
+  mockRequestWorldOption: vi.fn(),
   failConnectCommands: new Set<string>(),
   listToolsPayload: [] as any[],
 }));
 
 vi.mock('../../core/managers.js', () => ({
   getWorld: mockGetWorld,
+}));
+
+vi.mock('@agent-world/llm', () => ({
+  createLLMRuntime: mockCreateLLMRuntime,
+}));
+
+vi.mock('../../core/hitl.js', () => ({
+  requestWorldOption: mockRequestWorldOption,
 }));
 
 vi.mock('../../core/logger.js', () => ({
@@ -124,10 +208,6 @@ vi.mock('../../core/shell-cmd-tool.js', () => ({
     parameters: { type: 'object', properties: {} },
     execute: vi.fn(),
   })),
-}));
-
-vi.mock('../../core/load-skill-tool.js', () => ({
-  createLoadSkillToolDefinition: mockCreateLoadSkillToolDefinition,
 }));
 
 vi.mock('../../core/create-agent-tool.js', () => ({
@@ -218,11 +298,13 @@ describe('mcp-server-registry behavior', () => {
     vi.clearAllMocks();
     failConnectCommands.clear();
     listToolsPayload.length = 0;
-    mockCreateLoadSkillToolDefinition.mockImplementation(() => ({
-      description: 'load',
-      parameters: { type: 'object', properties: {} },
-      execute: vi.fn(),
-    }));
+    mockRequestWorldOption.mockResolvedValue({
+      requestId: 'tool-hitl-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      optionId: 'opt_1',
+      source: 'user',
+    });
     mockGetWorld.mockResolvedValue(null);
     mockClientCallTool.mockResolvedValue({
       content: [{ type: 'text', text: 'ok' }],
@@ -682,11 +764,11 @@ describe('mcp-server-registry behavior', () => {
     const toolsFirst = await getMCPToolsForWorld('world-1');
     expect(toolsFirst).toHaveProperty('shell_cmd');
     expect(toolsFirst).toHaveProperty('load_skill');
+    expect(toolsFirst).toHaveProperty('human_intervention_request');
     expect(toolsFirst).toHaveProperty('send_message');
     expect(toolsFirst).toHaveProperty('web_fetch');
     expect(toolsFirst).toHaveProperty('write_file');
     expect(toolsFirst).toHaveProperty('demo_lookup');
-    expect(mockCreateLoadSkillToolDefinition).toHaveBeenCalled();
     expect(mockClientListTools).toHaveBeenCalledTimes(1);
 
     const toolsSecond = await getMCPToolsForWorld('world-1');
@@ -707,6 +789,100 @@ describe('mcp-server-registry behavior', () => {
 
     await clearToolsCache('demo');
     expect(getToolsCacheStats().totalEntries).toBe(0);
+  });
+
+  it('bridges only the package-owned hitl built-in through the core execute signature', async () => {
+    mockGetWorld.mockResolvedValue({
+      id: 'world-1',
+      variables: 'working_directory=/repo',
+      mcpConfig: null,
+    });
+
+    const tools = await getMCPToolsForWorld('world-1');
+    const toolContext = {
+      world: {
+        id: 'world-1',
+        variables: 'working_directory=/repo',
+      },
+      chatId: 'chat-1',
+      toolCallId: 'tool-hitl-1',
+      agentName: 'assistant',
+    };
+
+    expect(mockCreateLLMRuntime).toHaveBeenCalledWith(expect.objectContaining({
+      tools: {
+        builtIns: {
+          shell_cmd: false,
+          load_skill: false,
+          web_fetch: false,
+          read_file: false,
+          write_file: false,
+          list_files: false,
+          grep: false,
+          human_intervention_request: true,
+        },
+      },
+    }));
+    const result = await tools.human_intervention_request.execute(
+      { question: 'Approve?', options: ['Yes', 'No'] },
+      undefined,
+      undefined,
+      toolContext,
+    );
+
+    expect(JSON.parse(result)).toMatchObject({
+      ok: true,
+      status: 'confirmed',
+      confirmed: true,
+      selectedOption: 'Yes',
+      requestId: 'tool-hitl-1',
+    });
+    expect(mockRequestWorldOption).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'world-1' }),
+      expect.objectContaining({
+        requestId: 'tool-hitl-1',
+        message: 'Approve?',
+        chatId: 'chat-1',
+        options: [
+          { id: 'opt_1', label: 'Yes' },
+          { id: 'opt_2', label: 'No' },
+        ],
+      }),
+    );
+  });
+
+  it('keeps shell, load-skill, web-fetch, and write-file on the core-owned built-ins', async () => {
+    mockGetWorld.mockResolvedValue({
+      id: 'world-1',
+      variables: 'working_directory=/repo',
+      mcpConfig: null,
+    });
+
+    const tools = await getMCPToolsForWorld('world-1');
+    const toolContext = {
+      world: {
+        id: 'world-1',
+        variables: 'working_directory=/repo',
+      },
+      chatId: 'chat-1',
+      workingDirectory: '/repo',
+      toolCallId: 'tool-1',
+    };
+
+    await tools.shell_cmd.execute({ command: 'pwd' }, undefined, undefined, toolContext);
+    await tools.load_skill.execute({ skill_id: 'demo' }, undefined, undefined, toolContext);
+    await tools.web_fetch.execute({ url: 'https://example.com' }, undefined, undefined, toolContext);
+    await tools.write_file.execute(
+      { filePath: 'notes.txt', content: 'hello' },
+      undefined,
+      undefined,
+      toolContext,
+    );
+
+    expect(mockPackageShellExecute).not.toHaveBeenCalled();
+    expect(mockPackageLoadSkillExecute).not.toHaveBeenCalled();
+    expect(mockPackageWebFetchExecute).not.toHaveBeenCalled();
+    expect(mockPackageWriteFileExecute).not.toHaveBeenCalled();
   });
 
   it('reports unhealthy status on failed startup and removes zero-ref servers after timeout', async () => {

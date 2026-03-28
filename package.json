@@ -12,12 +12,17 @@
       "import": "./dist/core/index.js",
       "types": "./dist/core/index.d.ts"
     },
+    "./llm": {
+      "import": "./packages/llm/dist/index.js",
+      "types": "./packages/llm/dist/index.d.ts"
+    },
     "./package.json": "./package.json"
   },
   "type": "module",
   "workspaces": [
     "core",
     "web",
+    "packages/llm",
     "packages/opik"
   ],
   "bin": {
@@ -50,10 +55,10 @@
     "electron:start": "npm run build:core && npm run start --prefix electron",
     "electron:main:build": "npm run main:build --prefix electron",
     "electron:renderer:build": "npm run renderer:build --prefix electron",
-    "build": "npm run build --workspace=core && npm run build --workspace=packages/opik && tsc --project tsconfig.build.json && npm run build --workspace=web && npm run main:build --prefix electron",
+    "build": "npm run build --workspace=packages/llm && npm run build --workspace=core && npm run build --workspace=packages/opik && tsc --project tsconfig.build.json && npm run build --workspace=web && npm run main:build --prefix electron",
     "build:core": "npm run build --workspace=core",
     "build:core:watch": "npm run build --workspace=core -- --watch --preserveWatchOutput",
-    "check": "tsc --noEmit --project tsconfig.build.json && npm run check --workspace=core && npm run check --workspace=web && npm run check --prefix electron",
+    "check": "tsc --noEmit --project tsconfig.build.json && npm run check --workspace=packages/llm && npm run check --workspace=core && npm run check --workspace=web && npm run check --prefix electron",
     "server:dev": "npx tsx server/index.ts",
     "server:watch": "npx tsx --watch server/index.ts",
     "server:start": "node dist/server/index.js",
@@ -63,6 +68,8 @@
     "web:e2e:serve": "node tests/web-e2e/support/start-web-servers.mjs",
     "electron:vite": "npm run dev --prefix electron",
     "test": "vitest run",
+    "test:llm": "vitest run tests/llm/showcase-config.test.ts tests/llm/showcase.test.ts tests/llm/runtime.test.ts tests/llm/runtime-provider.test.ts tests/llm/openai-direct.test.ts tests/llm/mcp-runtime.test.ts",
+    "test:llm-showcase": "npm run build --workspace=packages/llm && npx tsx tests/e2e/llm-package-showcase.ts",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
