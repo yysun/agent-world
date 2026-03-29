@@ -44,8 +44,9 @@ You define a world, define agents, give them tools and workflow rules, and run t
 - Local-model friendly defaults with `OLLAMA_BASE_URL`
 - World-level tool permission modes: `Read`, `Ask`, `Auto`
 - Cross-client HITL approvals in Web, CLI, and Electron
+- Restore-aware recovery for interrupted chats, approvals, and tool-driven turns
 - Tool results can show inline previews for files and rich content
-- Queue-backed send flow, heartbeat scheduling, and stop/resume controls
+- Per-chat queue-backed send flow with concurrent chat execution, heartbeat scheduling, and stop/resume controls
 - Real-time streaming with tool lifecycle visibility and per-chat isolation
 - Packaged Electron desktop app with built-in update checks
 - Marketplace-style imports for worlds, agents, and skills
@@ -141,7 +142,7 @@ Agent Skills are reusable capability packs stored as `SKILL.md` files.
 - `load_skill` loads instructions and static skill context only; it does not execute skill scripts
 - If a task requires script execution, the agent must make a later explicit tool call such as `shell_cmd`
 - Project-based skills follow the active world's working folder
-- The Electron desktop app includes a skill editor with file browsing, import flows, and delete actions
+- The Electron desktop app includes a skill editor with file browsing, preview/import flows, explicit `Project` vs `Global` install scope selection, and delete actions
 - Interactive skill activation is approval-gated
 - Skill-linked scripts are scope-validated and follow the same shell safety rules as built-in tool execution
 

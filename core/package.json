@@ -1,6 +1,6 @@
 {
   "name": "@agent-world/core",
-  "version": "0.3.0",
+  "version": "0.16.5",
   "type": "module",
   "main": "../dist/core/index.js",
   "types": "../dist/core/index.d.ts",

@@ -1,3 +1,30 @@
+v0.16.5
+
+**Highlights**
+- Different chats can now run at the same time instead of waiting behind one global response queue
+- Better recovery for interrupted or restored chats, with fewer stuck or replayed turns
+- More reliable approval and handoff handling during tool-driven agent workflows
+- Clearer desktop skill install flow with easier Project vs Global scope selection
+
+**Concurrent Chats**
+- Long-running work in one chat no longer blocks responses in other chats
+- Messages within a single chat still stay in order, so each conversation remains predictable while multiple chats stay responsive
+- Queue cleanup and status handling are more reliable during extended chat sessions
+
+**Chat Recovery & Reliability**
+- Agent World now keeps stronger turn-state metadata so restored chats can tell more reliably whether a turn is complete, waiting for approval, or still in progress
+- Reopening a chat is less likely to replay work that already finished or leave a half-finished turn stuck in an unclear state
+- Tool execution, follow-up turns, and final responses now go through a more consistent runtime path, which reduces edge-case failures during longer agent runs
+
+**Approvals & Handoffs**
+- Human approval requests and agent handoffs now behave more consistently when a turn reaches a waiting or terminal state
+- Pending approval and tool-request state is reconstructed more reliably after restore, so chats are less likely to lose context around interrupted workflows
+- Successful handoff-style actions now close out the originating turn more cleanly
+
+**Desktop Skill Editor**
+- The desktop skill install flow is easier to follow, with direct `Project` and `Global` radio options instead of a less obvious scope selector
+- GitHub and local install controls stay grouped more cleanly in the toolbar, making it easier to choose a source, pick a skill, and confirm where it should be installed
+
 v0.16.0
 
 **Highlights**

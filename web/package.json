@@ -1,6 +1,6 @@
 {
   "name": "@agent-world/web",
-  "version": "0.16.0",
+  "version": "0.16.5",
   "description": "Web frontend for Agent World - built with AppRun and Vite",
   "main": "index.js",
   "type": "module",
