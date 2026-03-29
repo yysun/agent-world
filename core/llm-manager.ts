@@ -9,7 +9,7 @@
  * - Error handling with SSE error events via world's eventEmitter and timeout management
  * - World-aware event publishing using world.eventEmitter for proper event isolation
  * - Conversation history support with message preparation and context management
- * - Global LLM call queue to ensure serialized execution (one LLM call at a time)
+ * - Chat-scoped LLM call queues to ensure per-chat serialized execution without cross-world blocking
  * - Configuration injection from external sources (CLI/server) for browser compatibility
  * - Automatic MCP tool integration for worlds with mcpConfig
  * - All providers return LLMResponse with unified structure
@@ -61,8 +61,9 @@
  * - Tool result processing and content type identification
  *
  * LLM Queue Implementation:
- * - Global singleton queue prevents concurrent LLM calls across all agents and worlds
- * - FIFO (First In, First Out) processing ensures fair agent response ordering
+ * - Chat-scoped queues serialize LLM calls per world/chat turn stream
+ * - Independent chats can execute concurrently without blocking unrelated worlds
+ * - FIFO (First In, First Out) processing is preserved inside each chat queue
  * - Maximum queue size of 100 items prevents memory overflow issues
  * - 15-minute timeout per LLM call supports long-running tool executions (configurable)
  * - Warning logs at 50% timeout threshold for debugging long-running operations
@@ -91,9 +92,10 @@
  * - All events scoped to specific world instance preventing cross-world interference
  * - Full LLM provider support with configuration validation and error handling
  * - Timeout handling with configurable limits and proper error recovery
- * - Queue-based serialization prevents API rate limits and resource conflicts
+ * - Chat-scoped queue serialization preserves per-chat ordering without a global bottleneck
  *
  * Recent Changes:
+ * - 2026-03-29: Replaced the global singleton LLM queue with chat-scoped serialization so unrelated chats can run concurrently while same-chat ordering stays deterministic.
  * - 2026-03-13: Added streamed `reasoningContent` forwarding and world-variable reasoning-effort propagation for OpenAI-compatible and Google direct providers.
  * - 2026-03-06: Moved `shell_cmd` working-directory prompt guidance into tool-aware system-message injection.
  * - 2026-03-06: Widened queue timeout field typing to `number` so runtime timeout overrides compile cleanly.
@@ -331,7 +333,7 @@ async function getStorageWrappers(): Promise<StorageAPI> {
 }
 
 /**
- * Global LLM call queue to ensure serialized execution
+ * One chat-scoped LLM call queue.
  */
 interface QueuedLLMCall {
   id: string;
@@ -621,8 +623,128 @@ class LLMQueue {
   }
 }
 
-// Global singleton queue instance
-const llmQueue = new LLMQueue();
+class LLMQueueRegistry {
+  private queues = new Map<string, LLMQueue>();
+  private processingTimeoutMs: number = RELIABILITY_CONFIG.llm.processingTimeoutMs;
+
+  private getQueueKey(worldId: string, chatId: string | null): string {
+    return `${worldId}::${normalizeChatId(chatId)}`;
+  }
+
+  private getOrCreateQueue(worldId: string, chatId: string | null): LLMQueue {
+    const queueKey = this.getQueueKey(worldId, chatId);
+    const existing = this.queues.get(queueKey);
+    if (existing) {
+      return existing;
+    }
+
+    const created = new LLMQueue();
+    created.setProcessingTimeout(this.processingTimeoutMs);
+    this.queues.set(queueKey, created);
+    return created;
+  }
+
+  private cleanupQueueIfIdle(worldId: string, chatId: string | null): void {
+    const queueKey = this.getQueueKey(worldId, chatId);
+    const queue = this.queues.get(queueKey);
+    if (!queue) {
+      return;
+    }
+
+    const status = queue.getQueueStatus();
+    if (!status.processing && status.queueLength === 0) {
+      this.queues.delete(queueKey);
+    }
+  }
+
+  async add<T>(
+    agentId: string,
+    worldId: string,
+    chatId: string | null,
+    task: (signal: AbortSignal) => Promise<T>,
+    options?: {
+      onTakingTooLong?: (details: { elapsedMs: number; timeoutMs: number }) => void;
+      onTimedOut?: (details: { elapsedMs: number; timeoutMs: number }) => void;
+    }
+  ): Promise<T> {
+    const queue = this.getOrCreateQueue(worldId, chatId);
+    return queue.add(agentId, worldId, chatId, task, options).finally(() => {
+      this.cleanupQueueIfIdle(worldId, chatId);
+    });
+  }
+
+  getQueueStatus(): {
+    queueLength: number;
+    processing: boolean;
+    nextAgent?: string;
+    nextWorld?: string;
+    maxQueueSize: number;
+    activeChatQueues: number;
+  } {
+    let queueLength = 0;
+    let processing = false;
+    let nextAgent: string | undefined;
+    let nextWorld: string | undefined;
+    let maxQueueSize = 100;
+
+    for (const queue of this.queues.values()) {
+      const status = queue.getQueueStatus();
+      queueLength += status.queueLength;
+      processing = processing || status.processing;
+      maxQueueSize = status.maxQueueSize;
+      if (!nextAgent && (status.processing || status.queueLength > 0)) {
+        nextAgent = status.nextAgent;
+        nextWorld = status.nextWorld;
+      }
+    }
+
+    return {
+      queueLength,
+      processing,
+      nextAgent,
+      nextWorld,
+      maxQueueSize,
+      activeChatQueues: this.queues.size,
+    };
+  }
+
+  clearQueue(): number {
+    let clearedCount = 0;
+    for (const [queueKey, queue] of this.queues.entries()) {
+      clearedCount += queue.clearQueue();
+      const status = queue.getQueueStatus();
+      if (!status.processing && status.queueLength === 0) {
+        this.queues.delete(queueKey);
+      }
+    }
+    return clearedCount;
+  }
+
+  cancelByChat(worldId: string, chatId: string | null): { canceledPending: number; abortedActive: number } {
+    const queueKey = this.getQueueKey(worldId, chatId);
+    const queue = this.queues.get(queueKey);
+    if (!queue) {
+      return { canceledPending: 0, abortedActive: 0 };
+    }
+
+    const result = queue.cancelByChat(worldId, chatId);
+    this.cleanupQueueIfIdle(worldId, chatId);
+    return result;
+  }
+
+  setProcessingTimeout(timeoutMs: number): void {
+    if (timeoutMs < RELIABILITY_CONFIG.llm.minProcessingTimeoutMs) {
+      throw new Error(`Processing timeout must be at least ${RELIABILITY_CONFIG.llm.minProcessingTimeoutMs}ms`);
+    }
+    this.processingTimeoutMs = timeoutMs;
+    for (const queue of this.queues.values()) {
+      queue.setProcessingTimeout(timeoutMs);
+    }
+    loggerQueue.info('LLM queue processing timeout updated', { timeoutMs });
+  }
+}
+
+const llmQueue = new LLMQueueRegistry();
 
 /**
  * LLM configuration interface
@@ -1209,6 +1331,7 @@ export function getLLMQueueStatus(): {
   nextAgent?: string;
   nextWorld?: string;
   maxQueueSize: number;
+  activeChatQueues: number;
 } {
   return llmQueue.getQueueStatus();
 }

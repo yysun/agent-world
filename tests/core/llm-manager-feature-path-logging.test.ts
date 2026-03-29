@@ -14,6 +14,8 @@
  * - Captures per-category logger calls via mocked `createCategoryLogger`.
  *
  * Recent changes:
+ * - 2026-03-29: Added chat-scoped queue serialization coverage so same-chat calls stay ordered while different chats do not block each other.
+ * - 2026-03-29: Added regression coverage that clearing pending LLM queues does not drop same-chat active serialization.
  * - 2026-03-05: Added warning-then-success queue-timeout threshold coverage to verify `taking too long` can precede successful completion without timeout.
  * - 2026-03-05: Added streaming-path timeout parity coverage to verify warning/timeout status behavior matches non-streaming queue semantics.
  * - 2026-03-05: Added queue-timeout warning/timeout system-event coverage (`taking too long` + hard timeout abort path).
@@ -402,5 +404,91 @@ describe('llm-manager feature-path logging', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('serializes LLM calls per chat while allowing different chats to run concurrently', async () => {
+    const { mod, openaiDirectMocks } = await loadModuleWithMocks({ rawEnabled: false });
+    const resolvers: Array<() => void> = [];
+
+    openaiDirectMocks.generateOpenAIResponse.mockImplementation(async (...args: any[]) => {
+      await new Promise<void>((resolve) => {
+        resolvers.push(resolve);
+      });
+      return {
+        type: 'text',
+        content: 'done',
+        assistantMessage: { role: 'assistant', content: 'done' },
+      };
+    });
+
+    const world = buildWorld();
+    const agent = buildAgent();
+    const messages = [
+      { role: 'user', content: 'hello', sender: 'human', createdAt: new Date() },
+    ] as any;
+
+    const firstChat1 = mod.generateAgentResponse(world, agent, messages, undefined, false, 'chat-1');
+    const secondChat1 = mod.generateAgentResponse(world, agent, messages, undefined, false, 'chat-1');
+    const chat2 = mod.generateAgentResponse(world, agent, messages, undefined, false, 'chat-2');
+
+    await vi.waitFor(() => {
+      expect(openaiDirectMocks.generateOpenAIResponse).toHaveBeenCalledTimes(2);
+    });
+
+    const activeResolvers = resolvers.splice(0, 2);
+    for (const resolve of activeResolvers) {
+      resolve();
+    }
+    await Promise.all([firstChat1, chat2]);
+
+    await vi.waitFor(() => {
+      expect(openaiDirectMocks.generateOpenAIResponse).toHaveBeenCalledTimes(3);
+    });
+
+    resolvers.shift()?.();
+    await secondChat1;
+  });
+
+  it('keeps same-chat serialization intact after clearing pending queues while one call is active', async () => {
+    const { mod, openaiDirectMocks } = await loadModuleWithMocks({ rawEnabled: false });
+    const resolvers: Array<() => void> = [];
+
+    openaiDirectMocks.generateOpenAIResponse.mockImplementation(async () => {
+      await new Promise<void>((resolve) => {
+        resolvers.push(resolve);
+      });
+      return {
+        type: 'text',
+        content: 'done',
+        assistantMessage: { role: 'assistant', content: 'done' },
+      };
+    });
+
+    const world = buildWorld();
+    const agent = buildAgent();
+    const messages = [
+      { role: 'user', content: 'hello', sender: 'human', createdAt: new Date() },
+    ] as any;
+
+    const firstChat1 = mod.generateAgentResponse(world, agent, messages, undefined, false, 'chat-1');
+    await vi.waitFor(() => {
+      expect(openaiDirectMocks.generateOpenAIResponse).toHaveBeenCalledTimes(1);
+    });
+
+    expect(mod.clearLLMQueue()).toBe(0);
+
+    const secondChat1 = mod.generateAgentResponse(world, agent, messages, undefined, false, 'chat-1');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(openaiDirectMocks.generateOpenAIResponse).toHaveBeenCalledTimes(1);
+
+    resolvers.shift()?.();
+    await firstChat1;
+
+    await vi.waitFor(() => {
+      expect(openaiDirectMocks.generateOpenAIResponse).toHaveBeenCalledTimes(2);
+    });
+
+    resolvers.shift()?.();
+    await secondChat1;
   });
 });

@@ -37,6 +37,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-03-29: Routed direct persisted tool execution through shared `tool-action-runtime` helpers so initial, continuation, and restore turns share one tool-step runtime owner.
  * - 2026-03-29: Normalized direct-turn tool actions through shared agent-turn helpers so `human_intervention_request` persists as `hitl_request` with `waiting_for_hitl`.
  * - 2026-03-29: Routed initial agent-turn model call / retry / response classification through the explicit `runAgentTurnLoop(...)` helper while preserving existing tool execution semantics.
  * - 2026-03-29: Added explicit assistant turn metadata for final responses, unresolved tool waits, terminal handoff completion, and in-process resume-safe behavior.
@@ -101,19 +102,11 @@ import {
 } from './mention-logic.js';
 import { publishMessage, publishSSE, publishEvent, publishToolEvent, isStreamingEnabled } from './publishers.js';
 import { handleTextResponse } from './memory-manager.js';
+import { validateShellDirectoryRequest, validateShellCommandScope } from '../shell-cmd-tool.js';
 import {
-  formatShellToolErrorEnvelopeContent,
-  validateShellDirectoryRequest,
-  validateShellCommandScope
-} from '../shell-cmd-tool.js';
-import {
-  createTextToolPreview,
-  getToolEventPreviewPayload,
   parseToolExecutionEnvelopeContent,
-  serializeToolExecutionEnvelope,
   stringifyToolExecutionResult,
 } from '../tool-execution-envelope.js';
-import { createSyntheticAssistantToolResultMessage } from '../synthetic-assistant-tool-result.js';
 import {
   beginChatMessageProcessing,
   isMessageProcessingCanceledError,
@@ -131,6 +124,12 @@ import {
   setWaitingForToolResultMetadata,
 } from '../agent-turn.js';
 import { runAgentTurnLoop } from './agent-turn-loop.js';
+import {
+  appendSyntheticAssistantToolResult,
+  executeToolActionStep,
+  formatToolErrorContent,
+  parseToolCallArguments,
+} from './tool-action-runtime.js';
 
 const loggerAgent = createCategoryLogger('agent');
 const loggerResponse = createCategoryLogger('response');
@@ -252,113 +251,6 @@ async function getStorageWrappers(): Promise<StorageAPI> {
   return storageWrappers!;
 }
 
-/**
- * Sanitize and fix common JSON issues from LLM-generated tool arguments
- * Handles: unterminated strings, unescaped quotes, trailing commas, truncation
- */
-function sanitizeAndParseJSON(jsonString: string): Record<string, any> {
-  if (!jsonString || jsonString.trim() === '') {
-    return {};
-  }
-
-  // Try parsing as-is first
-  try {
-    return JSON.parse(jsonString);
-  } catch (firstError) {
-    loggerAgent.debug('Initial JSON parse failed, attempting sanitization', {
-      error: firstError instanceof Error ? firstError.message : String(firstError)
-    });
-  }
-
-  let sanitized = jsonString;
-
-  // Fix 1: Remove trailing commas (common LLM mistake)
-  sanitized = sanitized.replace(/,(\s*[}\]])/g, '$1');
-
-  // Fix 2: Handle unterminated strings at end (truncation)
-  // If the error is "Unterminated string", try to close it
-  const unterminatedMatch = sanitized.match(/"[^"]*$/);
-  if (unterminatedMatch) {
-    loggerAgent.debug('Detected unterminated string at end, attempting to close');
-    sanitized = sanitized + '"';
-
-    // Check if we need to close open braces/brackets
-    const openBraces = (sanitized.match(/{/g) || []).length;
-    const closeBraces = (sanitized.match(/}/g) || []).length;
-    const openBrackets = (sanitized.match(/\[/g) || []).length;
-    const closeBrackets = (sanitized.match(/\]/g) || []).length;
-
-    // Close any unclosed arrays
-    for (let i = 0; i < openBrackets - closeBrackets; i++) {
-      sanitized += ']';
-    }
-    // Close any unclosed objects
-    for (let i = 0; i < openBraces - closeBraces; i++) {
-      sanitized += '}';
-    }
-  }
-
-  // Try parsing sanitized version
-  try {
-    return JSON.parse(sanitized);
-  } catch (secondError) {
-    loggerAgent.debug('Sanitization failed, trying more aggressive fixes');
-  }
-
-  // Fix 3: Try to extract valid JSON from the beginning if there's garbage at the end
-  // Find the last valid closing brace/bracket
-  let lastValidIndex = -1;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-
-  for (let i = 0; i < sanitized.length; i++) {
-    const char = sanitized[i];
-
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-
-    if (char === '\\') {
-      escaped = true;
-      continue;
-    }
-
-    if (char === '"' && !escaped) {
-      inString = !inString;
-      continue;
-    }
-
-    if (!inString) {
-      if (char === '{' || char === '[') {
-        depth++;
-      } else if (char === '}' || char === ']') {
-        depth--;
-        if (depth === 0) {
-          lastValidIndex = i;
-        }
-      }
-    }
-  }
-
-  if (lastValidIndex > 0) {
-    const truncated = sanitized.substring(0, lastValidIndex + 1);
-    try {
-      loggerAgent.debug('Attempting to parse truncated JSON', {
-        originalLength: sanitized.length,
-        truncatedLength: truncated.length
-      });
-      return JSON.parse(truncated);
-    } catch (truncError) {
-      loggerAgent.debug('Truncated parse also failed');
-    }
-  }
-
-  // If all else fails, throw the original error with the sanitized string
-  throw new Error(`Unable to parse or sanitize JSON. Original length: ${jsonString.length}, Sanitized length: ${sanitized.length}`);
-}
-
 function getSuccessfulLoadSkillIdForContinuationSeed(
   toolName: string,
   toolArgs: Record<string, any>,
@@ -379,70 +271,6 @@ function getSuccessfulLoadSkillIdForContinuationSeed(
     : String(serializedToolResult || '');
   const isSuccess = /<skill_context\b/i.test(normalizedResult) && !/<error>/i.test(normalizedResult);
   return isSuccess ? skillId : null;
-}
-
-function formatPersistedToolErrorContent(options: {
-  toolName: string;
-  toolCallId: string;
-  toolArgs?: Record<string, any>;
-  error: unknown;
-}): string {
-  if (options.toolName === 'shell_cmd') {
-    return formatShellToolErrorEnvelopeContent({
-      command: options.toolArgs?.command,
-      parameters: options.toolArgs?.parameters,
-      error: options.error,
-      toolCallId: options.toolCallId,
-    });
-  }
-
-  const message = `Error executing tool: ${options.error instanceof Error ? options.error.message : String(options.error)}`;
-  if (options.toolName === 'load_skill') {
-    return serializeToolExecutionEnvelope({
-      __type: 'tool_execution_envelope',
-      version: 1,
-      tool: 'load_skill',
-      tool_call_id: options.toolCallId,
-      status: 'failed',
-      preview: createTextToolPreview(message),
-      result: message,
-    });
-  }
-
-  return message;
-}
-
-function appendSyntheticAssistantToolResult(options: {
-  world: World;
-  agent: Agent;
-  serializedToolResult: string;
-  sourceMessageId: string;
-  replyToMessageId?: string;
-  chatId: string;
-}): void {
-  const syntheticMessage = createSyntheticAssistantToolResultMessage({
-    serializedToolResult: options.serializedToolResult,
-    sourceMessageId: options.sourceMessageId,
-    replyToMessageId: options.replyToMessageId,
-    sender: options.agent.id,
-    chatId: options.chatId,
-    agentId: options.agent.id,
-  });
-  if (!syntheticMessage) {
-    return;
-  }
-
-  options.agent.memory.push(syntheticMessage);
-  options.world.eventEmitter.emit('message', {
-    content: syntheticMessage.content,
-    sender: syntheticMessage.sender || options.agent.id,
-    timestamp: syntheticMessage.createdAt || new Date(),
-    messageId: syntheticMessage.messageId!,
-    chatId: syntheticMessage.chatId,
-    replyToMessageId: syntheticMessage.replyToMessageId,
-    role: 'assistant',
-    syntheticDisplayOnly: true,
-  });
 }
 
 /**
@@ -740,16 +568,18 @@ export async function processAgentMessage(
       return;
     }
 
+    let resolvedResponse: import('../types.js').LLMResponse = llmResponse;
+
     loggerAgent.debug('LLM response received', {
       agentId: agent.id,
-      responseType: llmResponse.type,
-      hasContent: !!llmResponse.content,
-      hasToolCalls: llmResponse.type === 'tool_calls',
-      toolCallCount: llmResponse.tool_calls?.length || 0
+      responseType: resolvedResponse.type,
+      hasContent: !!resolvedResponse.content,
+      hasToolCalls: resolvedResponse.type === 'tool_calls',
+      toolCallCount: resolvedResponse.tool_calls?.length || 0
     });
 
-    if (llmResponse.type === 'text' && typeof llmResponse.content === 'string' && llmResponse.content.trim()) {
-      const parsedPlainTextToolIntent = parsePlainTextToolIntent(llmResponse.content);
+    if (resolvedResponse.type === 'text' && typeof resolvedResponse.content === 'string' && resolvedResponse.content.trim()) {
+      const parsedPlainTextToolIntent = parsePlainTextToolIntent(resolvedResponse.content);
       if (parsedPlainTextToolIntent) {
         const syntheticToolCallId = generateId();
         loggerAgent.warn('Initial turn received plain-text tool intent; synthesizing tool_call fallback', {
@@ -759,9 +589,9 @@ export async function processAgentMessage(
           syntheticToolCallId,
         });
 
-        llmResponse = {
+        resolvedResponse = {
           type: 'tool_calls',
-          content: llmResponse.content,
+          content: resolvedResponse.content,
           tool_calls: [{
             id: syntheticToolCallId,
             type: 'function',
@@ -772,7 +602,7 @@ export async function processAgentMessage(
           }],
           assistantMessage: {
             role: 'assistant',
-            content: llmResponse.content,
+            content: resolvedResponse.content,
             tool_calls: [{
               id: syntheticToolCallId,
               type: 'function',
@@ -787,8 +617,8 @@ export async function processAgentMessage(
     }
 
     // Handle text responses
-    if (llmResponse.type === 'text') {
-      let responseText = llmResponse.content || '';
+    if (resolvedResponse.type === 'text') {
+      let responseText = resolvedResponse.content || '';
       if (!responseText.trim()) {
         const emptyResponseMessage = '[Error] Agent returned an empty response. Please retry the request.';
         publishEvent(world, 'system', {
@@ -853,8 +683,8 @@ export async function processAgentMessage(
 
     // Handle tool calls - Execute tools through unified execution path
     // This works for both streaming and non-streaming modes
-    if (llmResponse.type === 'tool_calls') {
-      const returnedToolCalls = llmResponse.tool_calls || [];
+    if (resolvedResponse.type === 'tool_calls') {
+      const returnedToolCalls = resolvedResponse.tool_calls || [];
       const executableToolCalls = returnedToolCalls.slice(0, 1);
       const trustedWorkingDirectory = String(
         getEnvValueFromText(world.variables, 'working_directory') || getDefaultWorkingDirectory()
@@ -882,7 +712,7 @@ export async function processAgentMessage(
       // This ensures the tool call is in memory before execution
 
       // Format meaningful content for tool calls if LLM didn't provide text
-      let messageContent = llmResponse.content || '';
+      let messageContent = resolvedResponse.content || '';
       if (displayToolCalls.length > 0 &&
         shouldUpgradeToolCallMessage(messageContent, displayToolCalls)) {
         messageContent = formatToolCallsMessage(displayToolCalls);
@@ -985,24 +815,12 @@ export async function processAgentMessage(
           toolName: toolCall.function.name
         });
 
-        // Get MCP tools
-        const { getMCPToolsForWorld } = await import('../mcp-server-registry.js');
-        const mcpTools = await getMCPToolsForWorld(world.id);
-
         let toolArgs: Record<string, any> = {};
         try {
-          const toolDef = mcpTools[toolCall.function.name];
-          if (!toolDef) {
-            throw new Error(`Tool not found: ${toolCall.function.name}`);
-          }
-
           const rawArgs = toolCall.function.arguments;
-          if (typeof rawArgs === 'string') {
-            try {
-              // Use sanitization function to handle common LLM JSON issues
-              toolArgs = sanitizeAndParseJSON(rawArgs);
-
-              // Log if sanitization was needed (successful parse after initial failure)
+          try {
+            toolArgs = parseToolCallArguments(rawArgs, { sanitizeJsonString: true });
+            if (typeof rawArgs === 'string') {
               try {
                 JSON.parse(rawArgs);
               } catch {
@@ -1013,44 +831,23 @@ export async function processAgentMessage(
                   rawArgsLength: rawArgs.length
                 });
               }
-            } catch (parseError) {
-              // Enhanced error logging for JSON parse failures
+            }
+          } catch (parseError) {
+            if (typeof rawArgs === 'string') {
               loggerAgent.error('Failed to parse tool call arguments as JSON (even after sanitization)', {
                 agentId: agent.id,
                 toolCallId: toolCall.id,
                 toolName: toolCall.function.name,
                 error: parseError instanceof Error ? parseError.message : String(parseError),
                 rawArgsLength: rawArgs.length,
-                rawArgsPreview: rawArgs.substring(0, 500), // First 500 chars
-                rawArgsSuffix: rawArgs.length > 500 ? rawArgs.substring(rawArgs.length - 200) : '', // Last 200 chars
+                rawArgsPreview: rawArgs.substring(0, 500),
+                rawArgsSuffix: rawArgs.length > 500 ? rawArgs.substring(rawArgs.length - 200) : '',
               });
-              throw new Error(`Invalid JSON in tool arguments: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
             }
-          } else if (rawArgs && typeof rawArgs === 'object') {
-            toolArgs = rawArgs as Record<string, any>;
-          } else {
-            toolArgs = {};
+            throw new Error(`Invalid JSON in tool arguments: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
           }
 
-          // Opik integration: tag tool-start event with risk metadata for trace filtering.
           const toolRisk = classifyToolRisk(toolCall.function.name);
-          publishToolEvent(world, {
-            agentName: agent.id,
-            type: 'tool-start',
-            messageId: toolCall.id,
-            chatId: targetChatId,
-            toolExecution: {
-              toolName: toolCall.function.name,
-              toolCallId: toolCall.id,
-              input: toolArgs,
-              metadata: {
-                isStreaming: isStreamingEnabled(),
-                riskLevel: toolRisk.riskLevel,
-                riskTags: toolRisk.riskTags,
-              }
-            }
-          });
-
           logToolBridge('LLM -> TOOL', {
             worldId: world.id,
             agentId: agent.id,
@@ -1078,23 +875,30 @@ export async function processAgentMessage(
             }
           }
 
-          // Execute tool with context
-          const toolContext = {
+          const executionResult = await executeToolActionStep({
             world,
-            messages: agent.memory,
-            toolCallId: toolCall.id,
+            agent,
+            assistantToolCallMessage: assistantMessage,
+            toolCall,
             chatId: targetChatId,
+            toolArgs,
+            trustedWorkingDirectory,
             abortSignal: processingHandle?.signal,
-            workingDirectory: trustedWorkingDirectory,
-            agentName: agent.id,
+            toolEventInput: toolArgs,
+            toolStartMetadata: {
+              isStreaming: isStreamingEnabled(),
+              riskLevel: toolRisk.riskLevel,
+              riskTags: toolRisk.riskTags,
+            },
             llmResultMode: toolCall.function.name === 'shell_cmd' ? 'minimal' : 'verbose',
             persistToolEnvelope: toolCall.function.name === 'shell_cmd'
               || toolCall.function.name === 'load_skill'
               || toolCall.function.name === 'web_fetch',
-          };
+            shouldPersistSuccessfulResult: () => !processingHandle?.isStopped(),
+            shouldPersistExecutionError: (error) => !isMessageProcessingCanceledError(error) && !processingHandle?.isStopped(),
+          });
 
-          const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);
-          if (processingHandle?.isStopped()) {
+          if (executionResult.status === 'skipped_success_persistence') {
             const toolCallMsg = agent.memory.find(
               m => m.role === 'assistant' && (m as any).tool_calls?.some((tc: any) => tc.id === toolCall.id)
             );
@@ -1134,91 +938,56 @@ export async function processAgentMessage(
             return;
           }
 
-          // Tool executed successfully - save result and continue LLM loop
-          loggerAgent.debug('Tool executed successfully', {
-            agentId: agent.id,
-            toolCallId: toolCall.id,
-            resultLength: typeof toolResult === 'string' ? toolResult.length : 0
-          });
+          if (executionResult.status === 'success') {
+            loggerAgent.debug('Tool executed successfully', {
+              agentId: agent.id,
+              toolCallId: toolCall.id,
+              resultLength: executionResult.serializedToolResult.length
+            });
 
-          // Publish tool-execution event
-          publishEvent(world, 'tool-execution', {
-            agentId: agent.id,
-            toolName: toolCall.function.name,
-            toolCallId: toolCall.id,
-            chatId: targetChatId,
-            ...(toolArgs.command && { command: toolArgs.command }),
-            ...(toolArgs.parameters && { parameters: toolArgs.parameters }),
-            ...(toolCall.function.name === 'shell_cmd' && { directory: trustedWorkingDirectory }),
-            ...(toolCall.function.name !== 'shell_cmd' && toolArgs.directory && { directory: toolArgs.directory })
-          }, targetChatId);
-          const serializedToolResult = typeof toolResult === 'string'
-            ? toolResult
-            : JSON.stringify(toolResult) ?? String(toolResult);
-          const toolEnvelope = parseToolExecutionEnvelopeContent(serializedToolResult);
-          const toolEventPreview = getToolEventPreviewPayload(serializedToolResult);
-          const toolEventResult = toolEnvelope ? toolEnvelope.result : toolResult;
-          publishToolEvent(world, {
-            agentName: agent.id,
-            type: 'tool-result',
-            messageId: toolCall.id,
-            chatId: targetChatId,
-            toolExecution: {
+            publishEvent(world, 'tool-execution', {
+              agentId: agent.id,
               toolName: toolCall.function.name,
               toolCallId: toolCall.id,
-              input: toolArgs,
-              ...(toolEventPreview !== undefined ? { preview: toolEventPreview } : {}),
-              result: toolEventResult,
-              resultType: Array.isArray(toolEventResult)
-                ? 'array'
-                : toolEventResult === null
-                  ? 'null'
-                  : typeof toolEventResult === 'string'
-                    ? 'string'
-                    : 'object',
-              resultSize: serializedToolResult.length
-            }
-          });
+              chatId: targetChatId,
+              ...(toolArgs.command && { command: toolArgs.command }),
+              ...(toolArgs.parameters && { parameters: toolArgs.parameters }),
+              ...(toolCall.function.name === 'shell_cmd' && { directory: trustedWorkingDirectory }),
+              ...(toolCall.function.name !== 'shell_cmd' && toolArgs.directory && { directory: toolArgs.directory })
+            }, targetChatId);
 
-          logToolBridge('TOOL -> LLM', {
-            worldId: world.id,
-            agentId: agent.id,
-            chatId: targetChatId,
-            toolCallId: toolCall.id,
-            toolName: toolCall.function.name,
-            resultPreview: getToolResultPreview(toolResult),
-          });
-
-          // Save tool result to agent memory
-          const toolResultMessage: AgentMessage = {
-            role: 'tool',
-            content: serializedToolResult,
-            tool_call_id: toolCall.id,
-            sender: agent.id,
-            createdAt: new Date(),
-            chatId: targetChatId,
-            messageId: generateId(),
-            replyToMessageId: messageId,
-            agentId: agent.id
-          };
-
-          agent.memory.push(toolResultMessage);
-          appendSyntheticAssistantToolResult({
-            world,
-            agent,
-            serializedToolResult,
-            sourceMessageId: toolResultMessage.messageId!,
-            replyToMessageId: toolResultMessage.replyToMessageId,
-            chatId: targetChatId,
-          });
-
-          // Update tool call status to complete
-          const toolCallMsg = agent.memory.find(
-            m => m.role === 'assistant' && (m as any).tool_calls?.some((tc: any) => tc.id === toolCall.id)
-          );
-          if (toolCallMsg && (toolCallMsg as any).toolCallStatus) {
-            (toolCallMsg as any).toolCallStatus[toolCall.id] = { complete: true, result: toolResult };
-            clearWaitingForToolResultMetadata(toolCallMsg as AgentMessage);
+            logToolBridge('TOOL -> LLM', {
+              worldId: world.id,
+              agentId: agent.id,
+              chatId: targetChatId,
+              toolCallId: toolCall.id,
+              toolName: toolCall.function.name,
+              resultPreview: getToolResultPreview(executionResult.toolResult),
+            });
+          } else if (executionResult.status === 'missing_tool') {
+            loggerAgent.error('Tool execution error', {
+              worldId: world.id,
+              chatId: targetChatId,
+              agentId: agent.id,
+              toolCallId: toolCall.id,
+              error: `Tool not found: ${toolCall.function.name}`,
+            });
+          } else {
+            loggerAgent.error('Tool execution error', {
+              worldId: world.id,
+              chatId: targetChatId,
+              agentId: agent.id,
+              toolCallId: toolCall.id,
+              error: executionResult.error instanceof Error ? executionResult.error.message : executionResult.error
+            });
+            logToolBridge('TOOL ERROR -> LLM', {
+              worldId: world.id,
+              agentId: agent.id,
+              chatId: targetChatId,
+              toolCallId: toolCall.id,
+              toolName: toolCall.function.name,
+              error: executionResult.error instanceof Error ? executionResult.error.message : String(executionResult.error),
+            });
           }
 
           // Save agent with tool result
@@ -1228,7 +997,7 @@ export async function processAgentMessage(
             loggerAgent.debug('Tool result saved to memory', {
               agentId: agent.id,
               toolCallId: toolCall.id,
-              messageId: toolResultMessage.messageId
+              messageId: executionResult.toolResultMessage.messageId
             });
           } catch (error) {
             loggerAgent.error('Failed to save tool result', {
@@ -1240,7 +1009,7 @@ export async function processAgentMessage(
             });
           }
 
-          if (toolCall.function.name === 'send_message' && isSuccessfulSendMessageDispatchResult(serializedToolResult)) {
+          if (executionResult.status === 'success' && toolCall.function.name === 'send_message' && isSuccessfulSendMessageDispatchResult(executionResult.serializedToolResult)) {
             const toolCallMsg = agent.memory.find(
               m => m.role === 'assistant' && (m as any).tool_calls?.some((tc: any) => tc.id === toolCall.id)
             );
@@ -1267,23 +1036,24 @@ export async function processAgentMessage(
             return;
           }
 
-          // Continue LLM loop with tool result
-          // The tool result is now in memory, so the next LLM call will see it
           loggerAgent.debug('Continuing LLM loop with tool result', {
             agentId: agent.id,
             toolCallId: toolCall.id,
-            targetChatId
+            targetChatId,
+            executionStatus: executionResult.status,
           });
 
           // Continue the LLM execution loop with the tool result
           // Pass explicit chatId for concurrency-safe continuation
           throwIfMessageProcessingStopped(processingHandle?.signal);
           const { continueLLMAfterToolExecution } = await import('./memory-manager.js');
-          const seededLoadSkillId = getSuccessfulLoadSkillIdForContinuationSeed(
-            toolCall.function.name,
-            toolArgs,
-            serializedToolResult,
-          );
+          const seededLoadSkillId = executionResult.status === 'success'
+            ? getSuccessfulLoadSkillIdForContinuationSeed(
+              toolCall.function.name,
+              toolArgs,
+              executionResult.serializedToolResult,
+            )
+            : null;
           await continueLLMAfterToolExecution(world, agent, targetChatId, {
             abortSignal: processingHandle?.signal,
             turnId,
@@ -1348,7 +1118,6 @@ export async function processAgentMessage(
               error: error instanceof Error ? error.message : String(error)
             }
           });
-
           logToolBridge('TOOL ERROR -> LLM', {
             worldId: world.id,
             agentId: agent.id,
@@ -1361,7 +1130,7 @@ export async function processAgentMessage(
           // Save error as tool result
           const errorMessage: AgentMessage = {
             role: 'tool',
-            content: formatPersistedToolErrorContent({
+            content: formatToolErrorContent({
               toolName: toolCall.function.name,
               toolCallId: toolCall.id,
               toolArgs,

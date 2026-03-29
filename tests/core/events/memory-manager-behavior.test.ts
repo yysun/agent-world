@@ -15,6 +15,7 @@
  * - No real filesystem, database, or external LLM/tool network calls.
  *
  * Recent changes:
+ * - 2026-03-29: Added direct terminal-response idempotency coverage so the same turn does not republish an assistant final response twice.
  * - 2026-03-29: Added restore-resume coverage for terminal `send_message` handoffs and continuation no-op when the turn is already terminal.
  * - 2026-03-29: Added coverage for terminal assistant turn metadata and in-process idempotent pending-tool resume leases.
  * - 2026-03-06: Added coverage ensuring live `tool-result` events publish envelope preview payloads instead of truncated serialized envelope JSON.
@@ -346,6 +347,28 @@ describe('memory-manager behavior', () => {
       outcome: 'completed',
     });
     expect(finalAssistantMessage?.agentTurn?.completion?.mechanism).toBe('assistant_message_metadata');
+  });
+
+  it('does not republish the same direct terminal response twice for one turn', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+    const messageEvent = createMessageEvent({ messageId: 'turn-direct-1', chatId: 'chat-1', sender: 'human' });
+
+    const { handleTextResponse } = await import('../../../core/events/memory-manager.js');
+
+    await handleTextResponse(world, agent, 'Final answer', 'assistant-direct-final-1', messageEvent, 'chat-1', {
+      turnId: 'turn-direct-1',
+      source: 'direct',
+    });
+    await handleTextResponse(world, agent, 'Final answer', 'assistant-direct-final-1', messageEvent, 'chat-1', {
+      turnId: 'turn-direct-1',
+      source: 'direct',
+    });
+
+    expect(mocks.publishMessageWithId).toHaveBeenCalledTimes(1);
+    expect(
+      agent.memory.filter((message) => message.messageId === 'assistant-direct-final-1')
+    ).toHaveLength(1);
   });
 
   it('skips continuation when the target turn is already terminal', async () => {

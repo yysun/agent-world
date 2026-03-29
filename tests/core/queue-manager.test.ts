@@ -16,6 +16,7 @@
  * - Tests are fully deterministic.
  *
  * Recent Changes:
+ * - 2026-03-29: Added duplicate-idle completion coverage so queue removal/advance executes once even if terminal idle events race.
  * - 2026-03-29: Added regression coverage for queued turns that stay in `sending` while persisted turn metadata is waiting for tool results, and only complete after terminal metadata is present.
  * - 2026-03-12: Added regression coverage for sequential completed turns in the same chat so queue
  *   completion listeners fully detach/re-attach and later rows do not stick in `sending`.
@@ -365,6 +366,94 @@ describe('queue-manager', () => {
 
       expect(queueMessages).toEqual([]);
       expect(storageWrappers.removeQueuedMessage).toHaveBeenCalledWith(turnId);
+    });
+
+    it('removes and advances a terminal queued turn only once when duplicate idle events race', async () => {
+      const persistedMemory: any[] = [{
+        role: 'assistant',
+        content: 'Done',
+        sender: 'agent-1',
+        messageId: 'assistant-final-race-1',
+        chatId: 'chat-add',
+        createdAt: new Date('2026-03-29T12:05:00.000Z'),
+        agentTurn: {
+          turnId: 'test-msg-race-1',
+          source: 'continuation',
+          action: 'final_response',
+          outcome: 'completed',
+          updatedAt: '2026-03-29T12:05:00.000Z',
+          completion: {
+            mechanism: 'assistant_message_metadata',
+            completedAt: '2026-03-29T12:05:00.000Z',
+          },
+        },
+      }];
+      let releaseMemoryRead: (() => void) | null = null;
+      const memoryReadGate = new Promise<void>((resolve) => {
+        releaseMemoryRead = resolve;
+      });
+      const storageWrappers = buildQueueStorageWrappers(queueMessages);
+      storageWrappers.getMemory = vi.fn(async () => {
+        await memoryReadGate;
+        return [...persistedMemory];
+      });
+      overrideStorageForTests(storageWrappers);
+
+      const world = makeWorld({
+        agents: new Map([
+          ['agent-1', {
+            id: 'agent-1',
+            name: 'Agent 1',
+            type: 'assistant',
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            llmCallCount: 0,
+            autoReply: true,
+            status: 'active',
+            memory: [],
+          }],
+        ]),
+      });
+      const chatId = 'chat-add';
+
+      await addToQueue('world-q', chatId, 'first queued turn', 'human', {
+        triggerProcessing: true,
+        targetWorld: world,
+        preassignedMessageId: 'test-msg-race-1',
+      });
+      await addToQueue('world-q', chatId, 'second queued turn', 'human', {
+        triggerProcessing: false,
+        targetWorld: world,
+        preassignedMessageId: 'test-msg-race-2',
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      world.eventEmitter.emit('world', {
+        type: 'response-start',
+        chatId,
+        activeChatIds: [chatId],
+      });
+      world.eventEmitter.emit('world', {
+        type: 'idle',
+        chatId,
+        activeChatIds: [],
+      });
+      world.eventEmitter.emit('world', {
+        type: 'idle',
+        chatId,
+        activeChatIds: [],
+      });
+
+      releaseMemoryRead?.();
+      await vi.waitFor(() => {
+        expect(storageWrappers.removeQueuedMessage).toHaveBeenCalledTimes(1);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(storageWrappers.removeQueuedMessage).toHaveBeenCalledWith('test-msg-race-1');
+      expect(queueMessages).toHaveLength(1);
+      expect(queueMessages[0]?.messageId).toBe('test-msg-race-2');
+      expect(queueMessages[0]?.status).toBe('sending');
     });
   });
 

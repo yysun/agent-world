@@ -2,7 +2,7 @@
 
 **Date**: 2026-03-29  
 **Type**: Runtime Orchestration Refactor  
-**Status**: In Progress  
+**Status**: Completed  
 **Related Requirement**: [req-agent-turn-loop-runner.md](../../../reqs/2026/03/29/req-agent-turn-loop-runner.md)
 
 ## Overview
@@ -15,7 +15,7 @@ Introduce one canonical runtime unit that owns a single agent turn loop end-to-e
 - durable persistence between hops
 - idempotent resume semantics
 
-Phase 1 keeps the existing conservative single-tool execution behavior. It does not yet replace the global LLM queue or add multi-tool read batching.
+Phase 1 keeps the existing conservative single-tool execution behavior. It does not add multi-tool read batching.
 
 ## Implementation Update
 
@@ -29,23 +29,23 @@ Phase 1 keeps the existing conservative single-tool execution behavior. It does 
 - Queue completion and stale-`sending` recovery now prefer persisted `agentTurn` lifecycle metadata over assistant-text presence.
 - Live queued turns remain in `sending` while persisted turn state is `waiting_for_tool_result`, and only complete after terminal metadata is present.
 - Continuation now no-ops when the target turn is already terminal, and restore-resumed `send_message` handoffs terminate without spawning duplicate follow-up continuation.
-- Regression coverage was added for terminal metadata, handoff terminality, retry semantics, and same-process resume duplication.
+- Terminal assistant final-response persistence/publication now goes through a shared idempotent helper.
+- Duplicate terminal queue completion events are now guarded so one queued turn cannot remove/advance twice in the same process.
+- Shared persisted tool execution now lives in `core/events/tool-action-runtime.ts` and is used by direct, continuation, and restore tool-action flows.
+- LLM concurrency is now serialized per world/chat instead of through one global singleton queue.
+- Regression coverage now includes the Phase 1 one-tool-per-hop invariant plus per-chat queue serialization.
 
-### Remaining
+### Residual Risk
 
-- Tool execution and action dispatch are still split across `orchestrator.ts` and `memory-manager.ts`.
-- HITL is normalized at the persisted action/state boundary, but execution ownership is still split rather than fully absorbed into the loop runner.
-- Queue/restore now consume persisted turn lifecycle metadata for terminality, but broader action/result normalization and queue/publication idempotency are still unfinished.
-- Phase 1 still lacks an explicit “one tool call per hop” regression test.
-- Global LLM queue narrowing remains a later phase.
+- Exactly-once side-effect execution across hard process crashes is still not backed by a cross-process execution ledger. The delivered runtime covers same-process duplicate resume, queue re-entry, and ordinary restore/reload paths, but not a heavier crash-proof exactly-once guarantee.
 
 ## Current-State Findings
 
 1. `core/events/memory-manager.ts` already contains the practical loop body in `continueLLMAfterToolExecution(...)`, including hop counting, tool execution, persistence, retries, and post-tool continuation.
-2. `core/llm-manager.ts` is already a pure provider/orchestration boundary for LLM calls, but concurrency is currently enforced by one global singleton queue.
+2. `core/llm-manager.ts` is a pure provider/orchestration boundary for LLM calls, and concurrency is now enforced per world/chat instead of by a global singleton queue.
 3. `core/send-message-tool.ts` already behaves like a loop-owned action in practice, but its result is still treated as just another tool payload rather than a first-class handoff action result.
 4. Queue progression and restore logic depend on durable artifacts and are already stronger than most chat-with-tools implementations.
-5. Completion semantics are still too implicit because terminality is inferred from assistant text publication and side effects rather than from a dedicated persisted completion contract.
+5. Completion semantics now rely on dedicated persisted completion metadata instead of implicit assistant-text side effects.
 
 ## Target Architecture
 
@@ -169,7 +169,7 @@ flowchart TD
 
 - [x] Move current continuation orchestration under the new runner boundary.
 - [x] Keep `core/llm-manager.ts` focused on LLM request/response work, not turn ownership.
-- [ ] Reduce `core/events/memory-manager.ts` from “implicit loop owner” to “message persistence and helper boundary.”
+- [x] Reduce `core/events/memory-manager.ts` from “implicit loop owner” to “message persistence and helper boundary.”
 - [x] Preserve current hop guards, empty-text retries, invalid-tool-call handling, and tool-result persistence behavior.
 
 ### Phase 3: Final Response and Completion Metadata
@@ -177,31 +177,31 @@ flowchart TD
 - [x] Persist structured completion metadata with the terminal assistant response.
 - [x] Make queue progression consume completion metadata instead of assistant-text presence.
 - [x] Make restore logic respect the same completion metadata.
-- [ ] Ensure terminal assistant publication stays single-shot under repeated resume attempts.
+- [x] Ensure terminal assistant publication stays single-shot under repeated resume attempts.
 
 ### Phase 4: Action Normalization
 
 - [x] Normalize tool calls, HITL requests, handoffs, and final responses under one action classification boundary.
-- [ ] Treat `send_message` as `agent_handoff` in runner logic while preserving its existing routing and safety rules.
-- [ ] Persist enough action-linked metadata to explain stop reason and next resume boundary.
+- [x] Treat `send_message` as `agent_handoff` in runner logic while preserving its existing routing and safety rules.
+- [x] Persist enough action-linked metadata to explain stop reason and next resume boundary.
 
 ### Phase 5: Idempotent Resume
 
 - [x] Define the resume key for one persisted turn instance.
 - [x] Ensure resume no-ops or rejoins when the same turn is already active.
-- [ ] Ensure repeated resume cannot duplicate:
-  - [ ] tool execution
+- [x] Ensure repeated resume cannot duplicate within one running process and ordinary restore/queue re-entry paths:
+  - [x] tool execution
   - [x] handoff dispatch
-  - [ ] terminal assistant publish
-  - [ ] queue advancement
-- [ ] Preserve current chat/world isolation and stop behavior.
+  - [x] terminal assistant publish
+  - [x] queue advancement
+- [x] Preserve current chat/world isolation and stop behavior.
 
 ### Phase 6: Queue and Restore Integration
 
 - [x] Update queue progression to rely on terminal completion metadata and terminal outcome.
-- [ ] Preserve the rule that only queue-owned user turns auto-resume.
-- [ ] Preserve durable failed-turn recovery semantics and do not auto-retry failed user turns.
-- [ ] Preserve HITL reconstruction from persisted messages.
+- [x] Preserve the rule that only queue-owned user turns auto-resume.
+- [x] Preserve durable failed-turn recovery semantics and do not auto-retry failed user turns.
+- [x] Preserve HITL reconstruction from persisted messages.
 
 ### Phase 7: Tests
 
@@ -210,7 +210,7 @@ flowchart TD
 - [x] Add a regression test proving repeated resume of the same persisted turn is idempotent.
 - [x] Add a regression test proving `send_message` handoff is recorded as a loop-owned action with terminal outcome `handoff_dispatched`.
 - [x] Add queue/restore regression coverage proving waiting-tool turns remain in-flight until persisted terminal metadata exists.
-- [ ] Add a regression test proving Phase 1 still executes at most one tool call per hop.
+- [x] Add a regression test proving Phase 1 still executes at most one tool call per hop.
 - [x] Run `npm run integration` because queue/restore/runtime transport paths are in scope.
 
 ## File Scope

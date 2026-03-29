@@ -2,7 +2,7 @@
 
 **Date**: 2026-03-29
 **Type**: Feature
-**Status**: Phase 1 Partially Implemented
+**Status**: Completed
 
 ## Overview
 
@@ -173,18 +173,18 @@ The result is a runtime that behaves like an agent harness, but does not yet pre
 
 ## Acceptance Criteria
 
-- [ ] The system exposes one canonical runtime unit that owns a single agent turn loop end-to-end.
+- [x] The system exposes one canonical runtime unit that owns a single agent turn loop end-to-end.
 - [x] The runtime no longer relies solely on assistant text presence to infer that a turn is complete.
 - [x] Each turn run records explicit durable turn state and, when terminal, a terminal outcome.
-- [ ] Tool calls, HITL requests, handoffs, and final responses are representable as loop-owned actions rather than unrelated side paths.
+- [x] Tool calls, HITL requests, handoffs, and final responses are representable as loop-owned actions rather than unrelated side paths.
 - [x] A `send_message` handoff is visible as a loop-owned action outcome and can participate in persistence/recovery rules.
 - [x] Phase 1 uses structured completion metadata on the terminal assistant response as the canonical completion mechanism.
 - [x] Restore and replay can reconstruct interrupted loop state from persisted artifacts without relying on a hidden transient loop owner.
-- [ ] Repeating resume against the same persisted in-flight turn does not duplicate tool calls, handoffs, assistant finalization, or queue advancement.
+- [x] Repeating resume against the same persisted in-flight turn does not duplicate tool calls, handoffs, assistant finalization, or queue advancement within one running process and ordinary restore/queue re-entry paths.
 - [x] Existing world/chat isolation and current queue/HITL recovery rules remain intact.
 - [x] The initial delivery preserves conservative single-tool execution semantics for unsafe or mutating actions.
 - [x] The architecture leaves room for later bounded read-only multi-tool batching without another orchestration redesign.
-- [ ] Concurrency correctness can be explained in per-chat terms rather than by a mandatory global singleton LLM queue.
+- [x] Concurrency correctness can be explained in per-chat terms rather than by a mandatory global singleton LLM queue.
 
 ## Implementation Update
 
@@ -200,13 +200,15 @@ The result is a runtime that behaves like an agent harness, but does not yet pre
 - Made queue completion consume persisted turn lifecycle metadata so queued user turns stay live across durable tool waits and only clear on terminal turn metadata.
 - Made stale `sending` restore recovery remove rows when persisted terminal turn metadata already exists instead of replaying or erroring those turns.
 - Added continuation no-op guards for already-terminal turns and stopped restore-resumed `send_message` handoffs from falling through into duplicate follow-up continuation.
+- Centralized terminal assistant response persistence/publication behind a shared idempotent helper so repeated same-turn final-response calls do not append/publish twice.
+- Added an in-process queue completion guard so duplicate terminal `idle`/`response-end` events do not remove or advance the same queued turn twice.
+- Extracted shared persisted tool-action execution into `core/events/tool-action-runtime.ts` and routed direct, continuation, and restore tool execution through that runtime helper.
+- Replaced the global singleton LLM queue with chat-scoped queue serialization so unrelated chats no longer block each other.
+- Added explicit regression coverage that Phase 1 still executes at most one tool call per hop and that same-chat serialization remains ordered while different chats can run concurrently.
 
-### Explicitly not finished yet
+### Residual Risk
 
-- Tool execution and full action dispatch are still implemented in `orchestrator.ts` and `memory-manager.ts`, not fully absorbed into `runAgentTurnLoop(...)`.
-- HITL is now normalized at the persisted action/state metadata boundary, but HITL execution lifecycle ownership is still split rather than fully absorbed into the loop runner.
-- Resume idempotency is improved for unresolved tool resumes, already-terminal continuation entry, and restore-resumed handoff completion, but not yet complete for all terminal publication and queue-advancement paths.
-- Global LLM queue narrowing is still deferred.
+- Exactly-once tool execution across hard process crashes is still bounded by durable transcript state plus process-local leases, not by a cross-process distributed execution lock. The delivered runtime prevents duplicate same-turn execution inside one running process and across ordinary restore/queue re-entry paths, but it does not introduce a heavier crash-proof global execution ledger.
 
 ## References
 

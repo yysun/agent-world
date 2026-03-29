@@ -22,6 +22,7 @@
  * - All other dependencies (events/index.js, storage-init.ts, etc.) are static.
  *
  * Recent Changes:
+ * - 2026-03-29: Added an in-process queue completion guard so duplicate terminal idle events cannot remove/advance the same queued turn twice.
  * - 2026-03-29: Switched queue completion and stale-sending recovery to prefer persisted turn metadata for terminality, with waiting-tool turns remaining in-flight until terminal completion.
  * - 2026-03-22: Made queue dispatch failure messages user-facing and mention-aware so
  *   missing targeted agents surface as "no agent '@name' found in this world" instead of
@@ -65,6 +66,7 @@ const loggerQueue = createCategoryLogger('message.queue');
 const inFlightQueueResumeKeys = new Set<string>();
 export const pausedQueues = new Set<string>();
 const queueListenerActive = new Set<string>();
+const queueCompletionInProgress = new Set<string>();
 const queueAdvanceListeners = new Map<string, (payload: any) => void>();
 const queueResponderRefreshAttempted = new Set<string>();
 const QUEUE_NO_RESPONSE_FALLBACK_MS = RELIABILITY_CONFIG.queue.noResponseFallbackMs;
@@ -539,9 +541,12 @@ function attachQueueAdvanceListener(world: World, chatId: string): void {
     if (payload.type !== 'idle' && payload.type !== 'response-end') return;
     const activeChatIds: string[] = payload.activeChatIds || [];
     if (activeChatIds.includes(chatId)) return; // this chat is still processing
+    if (queueCompletionInProgress.has(listenerKey)) return;
+    queueCompletionInProgress.add(listenerKey);
 
     void (async () => {
       const inFlightMessageId = queueDispatchStateByChat.get(listenerKey)?.messageId || null;
+      let shouldTriggerNext = false;
       try {
         if (!inFlightMessageId) {
           loggerQueue.warn('Queue completion observed without tracked in-flight message', {
@@ -571,6 +576,7 @@ function attachQueueAdvanceListener(world: World, chatId: string): void {
 
         detachQueueAdvanceListener(world, chatId);
         queueDispatchStateByChat.delete(listenerKey);
+        shouldTriggerNext = true;
         const messages = await queueStorage.getQueuedMessages(world.id, chatId);
         const sendingMsg = messages?.find((m: QueuedMessage) => m.messageId === inFlightMessageId && m.status === 'sending');
         if (sendingMsg) {
@@ -601,9 +607,13 @@ function attachQueueAdvanceListener(world: World, chatId: string): void {
           messageId: inFlightMessageId,
           error: String(err),
         });
+      } finally {
+        queueCompletionInProgress.delete(listenerKey);
       }
-      // Chain: trigger the next queued message
-      triggerPendingQueueResume(world, chatId);
+      if (shouldTriggerNext) {
+        // Chain: trigger the next queued message
+        triggerPendingQueueResume(world, chatId);
+      }
     })();
   }
 

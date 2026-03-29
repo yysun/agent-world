@@ -13,6 +13,7 @@
  * - Keeps execution in-memory and deterministic.
  *
  * Recent Changes:
+ * - 2026-03-29: Added Phase 1 regression coverage that direct tool-call turns execute at most one tool per hop.
  * - 2026-03-29: Added coverage that direct HITL tool requests persist `hitl_request` action metadata with `waiting_for_hitl` state.
  * - 2026-03-29: Added coverage that successful `send_message` tool execution marks the assistant tool request as terminal handoff-dispatched metadata and stops follow-up continuation.
  * - 2026-03-24: Added coverage that plain-text initial tool intents are synthesized into executable tool calls.
@@ -186,6 +187,53 @@ describe('processAgentMessage chat isolation', () => {
     );
   });
 
+  it('executes at most one direct tool call per hop when the model returns multiple tools', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+    const firstExecute = vi.fn(async () => 'first-ok');
+    const secondExecute = vi.fn(async () => 'second-ok');
+
+    mocks.generateAgentResponse.mockResolvedValueOnce({
+      response: {
+        type: 'tool_calls',
+        content: 'Calling 2 tools',
+        tool_calls: [
+          {
+            id: 'tool-call-1',
+            type: 'function',
+            function: {
+              name: 'demo_tool',
+              arguments: '{}',
+            },
+          },
+          {
+            id: 'tool-call-2',
+            type: 'function',
+            function: {
+              name: 'second_tool',
+              arguments: '{}',
+            },
+          },
+        ],
+      },
+      messageId: 'assistant-tool-msg-multi-1',
+    });
+
+    mocks.getMCPToolsForWorld.mockResolvedValue({
+      demo_tool: { execute: firstExecute },
+      second_tool: { execute: secondExecute },
+    });
+
+    const { processAgentMessage } = await import('../../../core/events/orchestrator.js');
+    await processAgentMessage(world, agent, createMessageEvent('chat-1'));
+
+    expect(firstExecute).toHaveBeenCalledTimes(1);
+    expect(secondExecute).not.toHaveBeenCalled();
+    const assistantToolRequest = agent.memory.find((message) => message.messageId === 'assistant-tool-msg-multi-1');
+    expect(assistantToolRequest?.tool_calls).toHaveLength(1);
+    expect(assistantToolRequest?.tool_calls?.[0]?.function.name).toBe('demo_tool');
+  });
+
   it('synthesizes plain-text initial tool intents into executable tool calls', async () => {
     const world = createWorld();
     const agent = createAgent();
@@ -337,7 +385,7 @@ describe('processAgentMessage chat isolation', () => {
     await processPromise;
   });
 
-  it('logs tool execution failures with world/chat scope', async () => {
+  it('persists direct tool execution failures with scoped logs and completed tool status', async () => {
     const world = createWorld();
     const agent = createAgent();
 
@@ -380,6 +428,15 @@ describe('processAgentMessage chat isolation', () => {
       agentId: 'agent-a',
       toolCallId: 'tool-call-err-1',
       error: 'tool exploded',
+    });
+
+    const persistedToolError = agent.memory.find((message) => message.role === 'tool' && message.tool_call_id === 'tool-call-err-1');
+    expect(persistedToolError?.content).toContain('tool exploded');
+
+    const assistantToolRequest = agent.memory.find((message) => message.messageId === 'assistant-tool-msg-err-1');
+    expect(assistantToolRequest?.toolCallStatus?.['tool-call-err-1']).toMatchObject({
+      complete: true,
+      result: expect.stringContaining('tool exploded'),
     });
   });
 

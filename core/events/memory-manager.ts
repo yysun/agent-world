@@ -20,6 +20,8 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-03-29: Moved shared tool-action execution/persistence mechanics into `tool-action-runtime` so direct, continuation, and restore flows use one runtime owner for persisted tool steps.
+ * - 2026-03-29: Centralized terminal assistant response persistence/publication behind an idempotent helper so duplicate same-turn final publishes are suppressed.
  * - 2026-03-29: Added shared HITL/handoff action classification plus terminal-turn no-op guards so restore/continuation avoids duplicate handoff follow-up and skips already-terminal turns.
  * - 2026-03-29: Routed continuation model call / retry / response classification through the explicit `runAgentTurnLoop(...)` helper while preserving existing single-tool execution semantics.
  * - 2026-03-29: Added explicit terminal assistant turn metadata support for direct and continuation loop completion.
@@ -88,19 +90,10 @@ import { beginWorldActivity } from '../activity-tracker.js';
 import { createStorageWithWrappers } from '../storage/storage-factory.js';
 import { generateAgentResponse } from '../llm-manager.js';
 import {
-  formatShellToolErrorEnvelopeContent,
-} from '../shell-cmd-tool.js';
-import {
-  createTextToolPreview,
   getToolEventPreviewPayload,
   parseToolExecutionEnvelopeContent,
-  serializeToolExecutionEnvelope,
-  stringifyToolExecutionResult,
 } from '../tool-execution-envelope.js';
-import {
-  createSyntheticAssistantToolResultMessage,
-  parseSyntheticAssistantToolResultContent,
-} from '../synthetic-assistant-tool-result.js';
+import { parseSyntheticAssistantToolResultContent } from '../synthetic-assistant-tool-result.js';
 import {
   isMessageProcessingCanceledError,
   throwIfMessageProcessingStopped
@@ -126,6 +119,18 @@ import {
   setTerminalTurnMetadata,
 } from '../agent-turn.js';
 import { runAgentTurnLoop } from './agent-turn-loop.js';
+import {
+  appendSyntheticAssistantToolResult,
+  buildShellCommandSignature,
+  executeToolActionStep,
+  formatToolErrorContent,
+  getLoadSkillIdFromRawToolArguments,
+  getLoadSkillIdFromToolArgs,
+  isSuccessfulLoadSkillResult,
+  parseToolCallArguments,
+  resolveToolLlmResultMode as resolveShellContinuationLlmResultMode,
+  sanitizeToolArgsForEventPayload,
+} from './tool-action-runtime.js';
 
 const loggerMemory = createCategoryLogger('memory');
 const loggerAgent = createCategoryLogger('agent');
@@ -154,6 +159,7 @@ type ActiveContinuationRun = {
 const activeContinuationRuns = new Map<string, ActiveContinuationRun>();
 const continuationRunLoadedSkills = new Map<string, Set<string>>();
 const continuationRunShellCommandResults = new Map<string, Map<string, string>>();
+const terminalPublishScopeKeys = new Set<string>();
 
 function normalizeContinuationChatId(chatId: string | null | undefined): string {
   if (chatId === undefined || chatId === null) {
@@ -220,43 +226,178 @@ function getShellCommandResultsForContinuationRun(runId: string): Map<string, st
   return created;
 }
 
-function normalizeShellCommandParameterList(parameters: unknown): string[] {
-  if (!Array.isArray(parameters)) {
-    return [];
-  }
-  return parameters.map((parameter) => String(parameter));
-}
-
-function buildShellCommandSignature(toolArgs: Record<string, any>, trustedWorkingDirectory: string): string {
-  const command = String(toolArgs?.command || '').trim();
-  const parameters = normalizeShellCommandParameterList(toolArgs?.parameters);
-  const requestedDirectory = typeof toolArgs?.directory === 'string' && toolArgs.directory.trim()
-    ? toolArgs.directory.trim()
-    : trustedWorkingDirectory;
-
-  return JSON.stringify({
-    command,
-    parameters,
-    directory: requestedDirectory,
-  });
-}
-
-function sanitizeToolArgsForEventPayload(toolName: string, toolArgs: Record<string, any>): Record<string, any> {
-  if (toolName !== 'shell_cmd' || !toolArgs || typeof toolArgs !== 'object') {
-    return toolArgs;
-  }
-  const sanitized = { ...toolArgs };
-  delete sanitized.output_format;
-  delete sanitized.output_detail;
-  return sanitized;
-}
-
 function cleanupContinuationRunState(runId: string): void {
   if (isContinuationRunActive(runId)) {
     return;
   }
   continuationRunLoadedSkills.delete(runId);
   continuationRunShellCommandResults.delete(runId);
+}
+
+function getTerminalPublishScopeKey(
+  worldId: string,
+  agentId: string,
+  chatId: string,
+  turnId: string,
+  messageId: string,
+): string {
+  return `${worldId}::${agentId}::${chatId}::${turnId}::${messageId}`;
+}
+
+async function persistAndPublishTerminalAssistantResponse(params: {
+  world: World;
+  agent: Agent;
+  targetChatId: string;
+  messageId: string;
+  responseText: string;
+  replyToMessageId?: string;
+  turnId: string;
+  source: 'direct' | 'continuation' | 'restore';
+  senderForAutoMention?: string | null;
+}): Promise<{ published: boolean; message: AgentMessage | null; finalResponse: string | null }> {
+  const normalizedTurnId = String(params.turnId || '').trim() || params.messageId;
+  const existingTurnLifecycle = readAgentTurnLifecycleFromMessages(params.agent.memory, {
+    turnId: normalizedTurnId,
+    chatId: params.targetChatId,
+  });
+  if (existingTurnLifecycle.status === 'terminal') {
+    loggerMessagePublish.debug('Skipped terminal assistant publish because turn is already terminal', {
+      worldId: params.world.id,
+      chatId: params.targetChatId,
+      agentId: params.agent.id,
+      messageId: params.messageId,
+      turnId: normalizedTurnId,
+      outcome: existingTurnLifecycle.outcome,
+      source: params.source,
+    });
+    return { published: false, message: null, finalResponse: null };
+  }
+
+  const existingMessage = params.agent.memory.find((message) =>
+    message.role === 'assistant'
+    && String(message.messageId || '').trim() === params.messageId
+    && String(message.chatId || '').trim() === params.targetChatId
+  );
+  if (existingMessage) {
+    loggerMessagePublish.debug('Skipped terminal assistant publish because message id already exists in memory', {
+      worldId: params.world.id,
+      chatId: params.targetChatId,
+      agentId: params.agent.id,
+      messageId: params.messageId,
+      turnId: normalizedTurnId,
+      source: params.source,
+    });
+    return { published: false, message: existingMessage, finalResponse: existingMessage.content };
+  }
+
+  const publishScopeKey = getTerminalPublishScopeKey(
+    params.world.id,
+    params.agent.id,
+    params.targetChatId,
+    normalizedTurnId,
+    params.messageId,
+  );
+  if (terminalPublishScopeKeys.has(publishScopeKey)) {
+    loggerMessagePublish.debug('Skipped terminal assistant publish because publish is already in-flight for this turn/message', {
+      worldId: params.world.id,
+      chatId: params.targetChatId,
+      agentId: params.agent.id,
+      messageId: params.messageId,
+      turnId: normalizedTurnId,
+      source: params.source,
+    });
+    return { published: false, message: null, finalResponse: null };
+  }
+
+  terminalPublishScopeKeys.add(publishScopeKey);
+  try {
+    const sanitizedResponse = removeSelfMentions(params.responseText, params.agent.id);
+    let finalResponse = sanitizedResponse;
+    const autoMentionSender = String(params.senderForAutoMention || '').trim();
+    if (
+      autoMentionSender
+      && params.agent.autoReply !== false
+      && shouldAutoMention(sanitizedResponse, autoMentionSender, params.agent.id)
+    ) {
+      finalResponse = addAutoMention(sanitizedResponse, autoMentionSender);
+      loggerAutoMention.debug('Auto-mention applied', {
+        agentId: params.agent.id,
+        originalSender: autoMentionSender,
+        responsePreview: finalResponse.substring(0, 100),
+      });
+    } else if (autoMentionSender) {
+      loggerAutoMention.debug('Auto-mention not needed', {
+        agentId: params.agent.id,
+        autoReply: params.agent.autoReply !== false,
+        hasAnyMention: hasAnyMentionAtBeginning(sanitizedResponse),
+      });
+    }
+
+    const assistantMessage: AgentMessage = {
+      role: 'assistant',
+      content: finalResponse,
+      messageId: params.messageId,
+      sender: params.agent.id,
+      createdAt: new Date(),
+      chatId: params.targetChatId,
+      replyToMessageId: params.replyToMessageId,
+      agentId: params.agent.id,
+    };
+    setTerminalTurnMetadata(assistantMessage, {
+      turnId: normalizedTurnId,
+      source: params.source,
+      action: 'final_response',
+      outcome: 'completed',
+    });
+
+    params.agent.memory.push(assistantMessage);
+
+    try {
+      const storage = await getStorageWrappers();
+      await storage.saveAgent(params.world.id, params.agent);
+      loggerMemory.debug('Agent response saved to memory', {
+        agentId: params.agent.id,
+        messageId: params.messageId,
+        memorySize: params.agent.memory.length,
+      });
+    } catch (error) {
+      loggerMemory.error('Failed to save agent response', {
+        worldId: params.world.id,
+        chatId: params.targetChatId,
+        agentId: params.agent.id,
+        messageId: params.messageId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    publishMessageWithId(
+      params.world,
+      finalResponse,
+      params.agent.id,
+      params.messageId,
+      params.targetChatId,
+      params.replyToMessageId,
+    );
+
+    loggerMessagePublish.debug('Published assistant response message', {
+      worldId: params.world.id,
+      chatId: params.targetChatId,
+      agentId: params.agent.id,
+      messageId: params.messageId,
+      turnId: normalizedTurnId,
+      replyToMessageId: params.replyToMessageId,
+      responseLength: finalResponse.length,
+      source: params.source,
+    });
+
+    return {
+      published: true,
+      message: assistantMessage,
+      finalResponse,
+    };
+  } finally {
+    terminalPublishScopeKeys.delete(publishScopeKey);
+  }
 }
 
 type TitlePromptMessage = {
@@ -429,122 +570,6 @@ function isTitleGenerationCanceledError(error: unknown): boolean {
   return false;
 }
 
-function parseToolCallArguments(rawArguments: unknown): Record<string, any> {
-  if (rawArguments == null) return {};
-
-  if (typeof rawArguments === 'object' && !Array.isArray(rawArguments)) {
-    return rawArguments as Record<string, any>;
-  }
-
-  if (typeof rawArguments !== 'string') {
-    return {};
-  }
-
-  const trimmed = rawArguments.trim();
-  if (!trimmed) return {};
-
-  const parsed = JSON.parse(trimmed);
-  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-    return parsed as Record<string, any>;
-  }
-
-  return {};
-}
-
-function getLoadSkillIdFromToolArgs(toolArgs: Record<string, any>): string | null {
-  const skillId = typeof toolArgs?.skill_id === 'string' ? toolArgs.skill_id.trim() : '';
-  return skillId || null;
-}
-
-function getLoadSkillIdFromRawToolArguments(rawArguments: unknown): string | null {
-  const parsed = parseToolCallArguments(rawArguments);
-  return getLoadSkillIdFromToolArgs(parsed);
-}
-
-function isSuccessfulLoadSkillResult(toolResult: string): boolean {
-  const envelope = parseToolExecutionEnvelopeContent(toolResult);
-  const normalized = envelope
-    ? stringifyToolExecutionResult(envelope.result)
-    : String(toolResult || '');
-  return /<skill_context\b/i.test(normalized) && !/<error>/i.test(normalized);
-}
-
-function formatToolErrorContent(options: {
-  toolName: string;
-  toolCallId: string;
-  toolArgs?: Record<string, any>;
-  error: unknown;
-  failureReason?: 'validation_error' | 'execution_error';
-}): string {
-  if (options.toolName === 'shell_cmd') {
-    return formatShellToolErrorEnvelopeContent({
-      command: options.toolArgs?.command,
-      parameters: options.toolArgs?.parameters,
-      error: options.error,
-      failureReason: options.failureReason,
-      toolCallId: options.toolCallId,
-    });
-  }
-
-  const message = `Error executing tool: ${options.error instanceof Error ? options.error.message : String(options.error)}`;
-  if (options.toolName === 'load_skill') {
-    return serializeToolExecutionEnvelope({
-      __type: 'tool_execution_envelope',
-      version: 1,
-      tool: 'load_skill',
-      tool_call_id: options.toolCallId,
-      status: 'failed',
-      preview: createTextToolPreview(message),
-      result: message,
-    });
-  }
-
-  return message;
-}
-
-function appendSyntheticAssistantToolResult(options: {
-  world: World;
-  agent: Agent;
-  serializedToolResult: string;
-  sourceMessageId: string;
-  replyToMessageId?: string;
-  chatId: string;
-}): void {
-  const syntheticMessage = createSyntheticAssistantToolResultMessage({
-    serializedToolResult: options.serializedToolResult,
-    sourceMessageId: options.sourceMessageId,
-    replyToMessageId: options.replyToMessageId,
-    sender: options.agent.id,
-    chatId: options.chatId,
-    agentId: options.agent.id,
-  });
-  if (!syntheticMessage) {
-    return;
-  }
-
-  options.agent.memory.push(syntheticMessage);
-  options.world.eventEmitter.emit('message', {
-    content: syntheticMessage.content,
-    sender: syntheticMessage.sender || options.agent.id,
-    timestamp: syntheticMessage.createdAt || new Date(),
-    messageId: syntheticMessage.messageId!,
-    chatId: syntheticMessage.chatId,
-    replyToMessageId: syntheticMessage.replyToMessageId,
-    role: 'assistant',
-    syntheticDisplayOnly: true,
-  });
-}
-
-function resolveShellContinuationLlmResultMode(options: {
-  toolName: string;
-}): 'minimal' | 'verbose' {
-  if (options.toolName !== 'shell_cmd') {
-    return 'verbose';
-  }
-
-  return 'minimal';
-}
-
 function getLatestUnresolvedToolCallForChat(
   agent: Agent,
   chatId: string
@@ -682,351 +707,175 @@ export async function resumePendingToolCallsForChat(
     }
 
     try {
-    loggerRestoreResumeTools.debug('Resume pending tool calls found pending tool call', {
-      worldId: world.id,
-      chatId,
-      agentId: agent.id,
-      toolName: toolCall.function.name,
-      toolCallId: toolCall.id,
-      assistantMessageId: assistantMessage.messageId || null,
-      resumeKey,
-    });
-    let toolArgs: Record<string, any> = {};
-    try {
-      toolArgs = parseToolCallArguments(toolCall.function.arguments);
-    } catch (parseError) {
-      loggerRestoreResumeTools.warn('Resume pending tool calls failed to parse tool arguments', {
+      loggerRestoreResumeTools.debug('Resume pending tool calls found pending tool call', {
         worldId: world.id,
         chatId,
         agentId: agent.id,
         toolName: toolCall.function.name,
         toolCallId: toolCall.id,
-        error: parseError instanceof Error ? parseError.message : String(parseError),
+        assistantMessageId: assistantMessage.messageId || null,
+        resumeKey,
       });
-      const errorContent = toolCall.function.name === 'shell_cmd' || toolCall.function.name === 'load_skill'
-        ? formatToolErrorContent({
+      let toolArgs: Record<string, any> = {};
+      try {
+        toolArgs = parseToolCallArguments(toolCall.function.arguments);
+      } catch (parseError) {
+        loggerRestoreResumeTools.warn('Resume pending tool calls failed to parse tool arguments', {
+          worldId: world.id,
+          chatId,
+          agentId: agent.id,
           toolName: toolCall.function.name,
           toolCallId: toolCall.id,
-          toolArgs,
-          error: `Invalid JSON in tool arguments: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
-          failureReason: 'validation_error',
-        })
-        : `Error executing tool: Invalid JSON in tool arguments: ${parseError instanceof Error ? parseError.message : String(parseError)}`;
-      const toolErrorMessage: AgentMessage = {
-        role: 'tool',
-        content: errorContent,
-        tool_call_id: toolCall.id,
-        sender: agent.id,
-        createdAt: new Date(),
-        chatId,
-        messageId: generateId(),
-        replyToMessageId: assistantMessage.messageId,
-        agentId: agent.id,
-      };
-      agent.memory.push(toolErrorMessage);
-      appendSyntheticAssistantToolResult({
-        world,
-        agent,
-        serializedToolResult: toolErrorMessage.content,
-        sourceMessageId: toolErrorMessage.messageId!,
-        replyToMessageId: toolErrorMessage.replyToMessageId,
-        chatId,
-      });
-      if (assistantMessage.toolCallStatus) {
-        assistantMessage.toolCallStatus[toolCall.id] = { complete: true, result: errorContent };
+          error: parseError instanceof Error ? parseError.message : String(parseError),
+        });
+        const errorContent = toolCall.function.name === 'shell_cmd' || toolCall.function.name === 'load_skill'
+          ? formatToolErrorContent({
+            toolName: toolCall.function.name,
+            toolCallId: toolCall.id,
+            toolArgs,
+            error: `Invalid JSON in tool arguments: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
+            failureReason: 'validation_error',
+          })
+          : `Error executing tool: Invalid JSON in tool arguments: ${parseError instanceof Error ? parseError.message : String(parseError)}`;
+        const toolErrorMessage: AgentMessage = {
+          role: 'tool',
+          content: errorContent,
+          tool_call_id: toolCall.id,
+          sender: agent.id,
+          createdAt: new Date(),
+          chatId,
+          messageId: generateId(),
+          replyToMessageId: assistantMessage.messageId,
+          agentId: agent.id,
+        };
+        agent.memory.push(toolErrorMessage);
+        appendSyntheticAssistantToolResult({
+          world,
+          agent,
+          serializedToolResult: toolErrorMessage.content,
+          sourceMessageId: toolErrorMessage.messageId!,
+          replyToMessageId: toolErrorMessage.replyToMessageId,
+          chatId,
+        });
+        if (assistantMessage.toolCallStatus) {
+          assistantMessage.toolCallStatus[toolCall.id] = { complete: true, result: errorContent };
+        }
+        clearWaitingForToolResultMetadata(assistantMessage);
+        await storage.saveAgent(world.id, agent);
+        await continueLLMAfterToolExecution(world, agent, chatId, {
+          turnId,
+        });
+        loggerRestoreResumeTools.debug('Resume pending tool calls continued after parse error', {
+          worldId: world.id,
+          chatId,
+          agentId: agent.id,
+          toolCallId: toolCall.id,
+        });
+        resumedCount += 1;
+        continue;
       }
-      clearWaitingForToolResultMetadata(assistantMessage);
-      await storage.saveAgent(world.id, agent);
-      await continueLLMAfterToolExecution(world, agent, chatId, {
-        turnId,
-      });
-      loggerRestoreResumeTools.debug('Resume pending tool calls continued after parse error', {
-        worldId: world.id,
-        chatId,
-        agentId: agent.id,
-        toolCallId: toolCall.id,
-      });
-      resumedCount += 1;
-      continue;
-    }
 
-    const toolDef = mcpTools[toolCall.function.name];
-    if (!toolDef) {
-      loggerRestoreResumeTools.warn('Resume pending tool calls tool definition missing', {
+      loggerRestoreResumeTools.debug('Resume pending tool calls executing tool', {
         worldId: world.id,
         chatId,
         agentId: agent.id,
         toolName: toolCall.function.name,
         toolCallId: toolCall.id,
       });
-      const errorContent = toolCall.function.name === 'shell_cmd' || toolCall.function.name === 'load_skill'
-        ? formatToolErrorContent({
-          toolName: toolCall.function.name,
-          toolCallId: toolCall.id,
-          toolArgs,
-          error: `Tool not found: ${toolCall.function.name}`,
-          failureReason: 'execution_error',
-        })
-        : `Error executing tool: Tool not found: ${toolCall.function.name}`;
-      const toolErrorMessage: AgentMessage = {
-        role: 'tool',
-        content: errorContent,
-        tool_call_id: toolCall.id,
-        sender: agent.id,
-        createdAt: new Date(),
-        chatId,
-        messageId: generateId(),
-        replyToMessageId: assistantMessage.messageId,
-        agentId: agent.id,
-      };
-      agent.memory.push(toolErrorMessage);
-      appendSyntheticAssistantToolResult({
-        world,
-        agent,
-        serializedToolResult: toolErrorMessage.content,
-        sourceMessageId: toolErrorMessage.messageId!,
-        replyToMessageId: toolErrorMessage.replyToMessageId,
-        chatId,
-      });
-      if (assistantMessage.toolCallStatus) {
-        assistantMessage.toolCallStatus[toolCall.id] = { complete: true, result: errorContent };
-      }
-      clearWaitingForToolResultMetadata(assistantMessage);
-      publishToolEvent(world, {
-        agentName: agent.id,
-        type: 'tool-error',
-        messageId: toolCall.id,
-        chatId,
-        toolExecution: {
-          toolName: toolCall.function.name,
-          toolCallId: toolCall.id,
-          input: toolArgs,
-          error: `Tool not found: ${toolCall.function.name}`,
-        },
-      });
-      await storage.saveAgent(world.id, agent);
-      await continueLLMAfterToolExecution(world, agent, chatId, {
-        turnId,
-      });
-      loggerRestoreResumeTools.debug('Resume pending tool calls continued after missing tool definition', {
-        worldId: world.id,
-        chatId,
-        agentId: agent.id,
-        toolCallId: toolCall.id,
-      });
-      resumedCount += 1;
-      continue;
-    }
-
-    loggerRestoreResumeTools.debug('Resume pending tool calls executing tool', {
-      worldId: world.id,
-      chatId,
-      agentId: agent.id,
-      toolName: toolCall.function.name,
-      toolCallId: toolCall.id,
-    });
-    let seededLoadSkillIdForContinuation: string | null = null;
-
-    publishToolEvent(world, {
-      agentName: agent.id,
-      type: 'tool-start',
-      messageId: toolCall.id,
-      chatId,
-      toolExecution: {
-        toolName: toolCall.function.name,
-        toolCallId: toolCall.id,
-        input: toolArgs,
-      },
-    });
-
-    try {
+      let seededLoadSkillIdForContinuation: string | null = null;
       const trustedWorkingDirectory = String(
         getEnvValueFromText(world.variables, 'working_directory') || getDefaultWorkingDirectory()
       ).trim() || getDefaultWorkingDirectory();
-
-      const toolContext = {
+      const executionResult = await executeToolActionStep({
         world,
-        messages: agent.memory,
-        toolCallId: toolCall.id,
+        agent,
+        assistantToolCallMessage: assistantMessage,
+        toolCall,
         chatId,
-        workingDirectory: trustedWorkingDirectory,
-        agentName: agent.id,
+        toolArgs,
+        trustedWorkingDirectory,
+        toolEventInput: toolArgs,
         llmResultMode: resolveShellContinuationLlmResultMode({
           toolName: toolCall.function.name,
         }),
         persistToolEnvelope: toolCall.function.name === 'shell_cmd'
           || toolCall.function.name === 'load_skill'
           || toolCall.function.name === 'web_fetch',
-      };
+      });
 
-      const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);
-      const serializedToolResult = typeof toolResult === 'string'
-        ? toolResult
-        : JSON.stringify(toolResult) ?? String(toolResult);
-      if (toolCall.function.name === 'load_skill') {
-        const requestedSkillId = getLoadSkillIdFromToolArgs(toolArgs);
-        if (requestedSkillId && isSuccessfulLoadSkillResult(serializedToolResult)) {
-          seededLoadSkillIdForContinuation = requestedSkillId;
+      if (executionResult.status === 'success') {
+        if (toolCall.function.name === 'load_skill') {
+          const requestedSkillId = getLoadSkillIdFromToolArgs(toolArgs);
+          if (requestedSkillId && isSuccessfulLoadSkillResult(executionResult.serializedToolResult)) {
+            seededLoadSkillIdForContinuation = requestedSkillId;
+          }
         }
-      }
 
-      const toolResultMessage: AgentMessage = {
-        role: 'tool',
-        content: serializedToolResult,
-        tool_call_id: toolCall.id,
-        sender: agent.id,
-        createdAt: new Date(),
-        chatId,
-        messageId: generateId(),
-        replyToMessageId: assistantMessage.messageId,
-        agentId: agent.id,
-      };
-      agent.memory.push(toolResultMessage);
-      appendSyntheticAssistantToolResult({
-        world,
-        agent,
-        serializedToolResult,
-        sourceMessageId: toolResultMessage.messageId!,
-        replyToMessageId: toolResultMessage.replyToMessageId,
-        chatId,
-      });
-
-      if (assistantMessage.toolCallStatus) {
-        assistantMessage.toolCallStatus[toolCall.id] = {
-          complete: true,
-          result: serializedToolResult,
-        };
-      }
-      clearWaitingForToolResultMetadata(assistantMessage);
-
-      const toolEnvelope = parseToolExecutionEnvelopeContent(serializedToolResult);
-      const toolEventPreview = getToolEventPreviewPayload(serializedToolResult);
-      const toolEventResult = toolEnvelope ? toolEnvelope.result : toolResult;
-      publishToolEvent(world, {
-        agentName: agent.id,
-        type: 'tool-result',
-        messageId: toolCall.id,
-        chatId,
-        toolExecution: {
-          toolName: toolCall.function.name,
-          toolCallId: toolCall.id,
-          input: toolArgs,
-          ...(toolEventPreview !== undefined ? { preview: toolEventPreview } : {}),
-          result: toolEventResult,
-          resultType: Array.isArray(toolEventResult)
-            ? 'array'
-            : toolEventResult === null
-              ? 'null'
-              : typeof toolEventResult === 'string'
-                ? 'string'
-                : 'object',
-          resultSize: serializedToolResult.length,
-        },
-      });
-      loggerRestoreResumeTools.debug('Resume pending tool calls tool execution result persisted', {
-        worldId: world.id,
-        chatId,
-        agentId: agent.id,
-        toolName: toolCall.function.name,
-        toolCallId: toolCall.id,
-        resultSize: serializedToolResult.length,
-      });
-
-      if (toolCall.function.name === 'send_message' && isSuccessfulSendMessageDispatchResult(serializedToolResult)) {
-        setTerminalTurnMetadata(assistantMessage, {
-          turnId,
-          source: 'restore',
-          action: 'agent_handoff',
-          outcome: 'handoff_dispatched',
-        });
-        await storage.saveAgent(world.id, agent);
-        loggerRestoreResumeTools.debug('Resume pending tool calls completed terminal handoff without continuation', {
+        loggerRestoreResumeTools.debug('Resume pending tool calls tool execution result persisted', {
           worldId: world.id,
           chatId,
           agentId: agent.id,
+          toolName: toolCall.function.name,
           toolCallId: toolCall.id,
-          turnId,
+          resultSize: executionResult.serializedToolResult.length,
         });
-        resumedCount += 1;
-        continue;
+
+        if (toolCall.function.name === 'send_message' && isSuccessfulSendMessageDispatchResult(executionResult.serializedToolResult)) {
+          setTerminalTurnMetadata(assistantMessage, {
+            turnId,
+            source: 'restore',
+            action: 'agent_handoff',
+            outcome: 'handoff_dispatched',
+          });
+          await storage.saveAgent(world.id, agent);
+          loggerRestoreResumeTools.debug('Resume pending tool calls completed terminal handoff without continuation', {
+            worldId: world.id,
+            chatId,
+            agentId: agent.id,
+            toolCallId: toolCall.id,
+            turnId,
+          });
+          resumedCount += 1;
+          continue;
+        }
+      } else if (executionResult.status === 'error') {
+        loggerRestoreResumeTools.warn('Resume pending tool calls tool execution failed', {
+          worldId: world.id,
+          chatId,
+          agentId: agent.id,
+          toolName: toolCall.function.name,
+          toolCallId: toolCall.id,
+          error: executionResult.error instanceof Error ? executionResult.error.message : String(executionResult.error),
+        });
+      } else if (executionResult.status === 'missing_tool') {
+        loggerRestoreResumeTools.warn('Resume pending tool calls tool definition missing', {
+          worldId: world.id,
+          chatId,
+          agentId: agent.id,
+          toolName: toolCall.function.name,
+          toolCallId: toolCall.id,
+        });
       }
-    } catch (toolError) {
-      loggerRestoreResumeTools.warn('Resume pending tool calls tool execution failed', {
+
+      await storage.saveAgent(world.id, agent);
+      loggerRestoreResumeTools.debug('Resume pending tool calls saved agent state', {
         worldId: world.id,
         chatId,
         agentId: agent.id,
-        toolName: toolCall.function.name,
         toolCallId: toolCall.id,
-        error: toolError instanceof Error ? toolError.message : String(toolError),
       });
-      const errorContent = formatToolErrorContent({
-        toolName: toolCall.function.name,
-        toolCallId: toolCall.id,
-        toolArgs,
-        error: toolError,
+      await continueLLMAfterToolExecution(world, agent, chatId, {
+        turnId,
+        ...(seededLoadSkillIdForContinuation ? { preloadedSkillIds: [seededLoadSkillIdForContinuation] } : {}),
       });
-      const toolErrorMessage: AgentMessage = {
-        role: 'tool',
-        content: errorContent,
-        tool_call_id: toolCall.id,
-        sender: agent.id,
-        createdAt: new Date(),
+      loggerRestoreResumeTools.debug('Resume pending tool calls continued LLM after tool execution', {
+        worldId: world.id,
         chatId,
-        messageId: generateId(),
-        replyToMessageId: assistantMessage.messageId,
         agentId: agent.id,
-      };
-      agent.memory.push(toolErrorMessage);
-      appendSyntheticAssistantToolResult({
-        world,
-        agent,
-        serializedToolResult: toolErrorMessage.content,
-        sourceMessageId: toolErrorMessage.messageId!,
-        replyToMessageId: toolErrorMessage.replyToMessageId,
-        chatId,
+        toolCallId: toolCall.id,
+        ...(seededLoadSkillIdForContinuation ? { seededLoadSkillIdForContinuation } : {}),
       });
-
-      if (assistantMessage.toolCallStatus) {
-        assistantMessage.toolCallStatus[toolCall.id] = {
-          complete: true,
-          result: errorContent,
-        };
-      }
-      clearWaitingForToolResultMetadata(assistantMessage);
-
-      publishToolEvent(world, {
-        agentName: agent.id,
-        type: 'tool-error',
-        messageId: toolCall.id,
-        chatId,
-        toolExecution: {
-          toolName: toolCall.function.name,
-          toolCallId: toolCall.id,
-          input: toolArgs,
-          error: toolError instanceof Error ? toolError.message : String(toolError),
-        },
-      });
-    }
-
-    await storage.saveAgent(world.id, agent);
-    loggerRestoreResumeTools.debug('Resume pending tool calls saved agent state', {
-      worldId: world.id,
-      chatId,
-      agentId: agent.id,
-      toolCallId: toolCall.id,
-    });
-    await continueLLMAfterToolExecution(world, agent, chatId, {
-      turnId,
-      ...(seededLoadSkillIdForContinuation ? { preloadedSkillIds: [seededLoadSkillIdForContinuation] } : {}),
-    });
-    loggerRestoreResumeTools.debug('Resume pending tool calls continued LLM after tool execution', {
-      worldId: world.id,
-      chatId,
-      agentId: agent.id,
-      toolCallId: toolCall.id,
-      ...(seededLoadSkillIdForContinuation ? { seededLoadSkillIdForContinuation } : {}),
-    });
-    resumedCount += 1;
+      resumedCount += 1;
     } finally {
       releaseAgentTurnResumeLease(resumeKey);
     }
@@ -1521,25 +1370,27 @@ export async function continueLLMAfterToolExecution(
       return;
     }
 
+    let resolvedResponse: import('../types.js').LLMResponse = llmResponse;
+
     loggerAgent.debug('LLM response received after tool execution', {
       agentId: agent.id,
-      responseType: llmResponse.type,
-      hasContent: !!llmResponse.content,
-      toolCallCount: llmResponse.tool_calls?.length || 0
+      responseType: resolvedResponse.type,
+      hasContent: !!resolvedResponse.content,
+      toolCallCount: resolvedResponse.tool_calls?.length || 0
     });
 
     logToolBridge('LLM -> CONTINUE', {
       worldId: world.id,
       agentId: agent.id,
       chatId: targetChatId,
-      responseType: llmResponse.type,
-      hasContent: !!llmResponse.content,
-      contentPreview: String(llmResponse.content || '').substring(0, 200),
-      toolCallCount: Array.isArray(llmResponse.tool_calls) ? llmResponse.tool_calls.length : 0,
+      responseType: resolvedResponse.type,
+      hasContent: !!resolvedResponse.content,
+      contentPreview: String(resolvedResponse.content || '').substring(0, 200),
+      toolCallCount: Array.isArray(resolvedResponse.tool_calls) ? resolvedResponse.tool_calls.length : 0,
     });
 
-    if (llmResponse.type === 'text' && typeof llmResponse.content === 'string' && llmResponse.content.trim()) {
-      const parsedPlainTextToolIntent = parsePlainTextToolIntent(llmResponse.content);
+    if (resolvedResponse.type === 'text' && typeof resolvedResponse.content === 'string' && resolvedResponse.content.trim()) {
+      const parsedPlainTextToolIntent = parsePlainTextToolIntent(resolvedResponse.content);
       if (parsedPlainTextToolIntent) {
         const syntheticToolCallId = generateId();
         loggerAgent.warn('Continuation received plain-text tool intent; synthesizing tool_call fallback', {
@@ -1558,9 +1409,9 @@ export async function continueLLMAfterToolExecution(
           syntheticToolCallId,
         });
 
-        llmResponse = {
+        resolvedResponse = {
           type: 'tool_calls',
-          content: llmResponse.content,
+          content: resolvedResponse.content,
           tool_calls: [{
             id: syntheticToolCallId,
             type: 'function',
@@ -1571,7 +1422,7 @@ export async function continueLLMAfterToolExecution(
           }],
           assistantMessage: {
             role: 'assistant',
-            content: llmResponse.content,
+            content: resolvedResponse.content,
             tool_calls: [{
               id: syntheticToolCallId,
               type: 'function',
@@ -1585,8 +1436,8 @@ export async function continueLLMAfterToolExecution(
       }
     }
 
-    if (llmResponse.type === 'tool_calls') {
-      const returnedToolCalls = Array.isArray(llmResponse.tool_calls) ? llmResponse.tool_calls : [];
+    if (resolvedResponse.type === 'tool_calls') {
+      const returnedToolCalls = Array.isArray(resolvedResponse.tool_calls) ? resolvedResponse.tool_calls : [];
       const validReturnedToolCalls = returnedToolCalls.filter((tc: any) => {
         const name = String(tc?.function?.name || '').trim();
         return name.length > 0;
@@ -1646,7 +1497,7 @@ export async function continueLLMAfterToolExecution(
 
         const assistantMalformedToolCallMessage: AgentMessage = {
           role: 'assistant',
-          content: llmResponse.content || `Calling tool: ${fallbackToolName}`,
+          content: resolvedResponse.content || `Calling tool: ${fallbackToolName}`,
           sender: agent.id,
           createdAt: new Date(),
           chatId: targetChatId,
@@ -1788,7 +1639,7 @@ export async function continueLLMAfterToolExecution(
 
       const assistantToolCallMessage: AgentMessage = {
         role: 'assistant',
-        content: llmResponse.content || `Calling tool: ${toolCall.function.name}`,
+        content: resolvedResponse.content || `Calling tool: ${toolCall.function.name}`,
         sender: agent.id,
         createdAt: new Date(),
         chatId: targetChatId,
@@ -1846,72 +1697,9 @@ export async function continueLLMAfterToolExecution(
       (toolCallEvent as any).toolCallStatus = assistantToolCallMessage.toolCallStatus;
       world.eventEmitter.emit('message', toolCallEvent);
 
-      const { getMCPToolsForWorld } = await import('../mcp-server-registry.js');
-      const mcpTools = await getMCPToolsForWorld(world.id);
-      const toolDef = mcpTools[toolCall.function.name];
       const trustedWorkingDirectory = String(
         getEnvValueFromText(world.variables, 'working_directory') || getDefaultWorkingDirectory()
       ).trim() || getDefaultWorkingDirectory();
-
-      if (!toolDef) {
-        const missingToolResult: AgentMessage = {
-          role: 'tool',
-          content: toolCall.function.name === 'shell_cmd' || toolCall.function.name === 'load_skill'
-            ? formatToolErrorContent({
-              toolName: toolCall.function.name,
-              toolCallId: toolCall.id,
-              toolArgs: {},
-              error: `Tool not found: ${toolCall.function.name}`,
-              failureReason: 'execution_error',
-            })
-            : `Error executing tool: Tool not found: ${toolCall.function.name}`,
-          tool_call_id: toolCall.id,
-          sender: agent.id,
-          createdAt: new Date(),
-          chatId: targetChatId,
-          messageId: generateId(),
-          replyToMessageId: messageId,
-          agentId: agent.id,
-        };
-        agent.memory.push(missingToolResult);
-        appendSyntheticAssistantToolResult({
-          world,
-          agent,
-          serializedToolResult: missingToolResult.content,
-          sourceMessageId: missingToolResult.messageId!,
-          replyToMessageId: missingToolResult.replyToMessageId,
-          chatId: targetChatId,
-        });
-
-        if (assistantToolCallMessage.toolCallStatus) {
-          assistantToolCallMessage.toolCallStatus[toolCall.id] = {
-            complete: true,
-            result: missingToolResult.content,
-          };
-        }
-        clearWaitingForToolResultMetadata(assistantToolCallMessage);
-
-        publishToolEvent(world, {
-          agentName: agent.id,
-          type: 'tool-error',
-          messageId: toolCall.id,
-          chatId: targetChatId,
-          toolExecution: {
-            toolName: toolCall.function.name,
-            toolCallId: toolCall.id,
-            error: `Tool not found: ${toolCall.function.name}`,
-          },
-        });
-
-        const storage = await getStorageWrappers();
-        await storage.saveAgent(world.id, agent);
-        await continueLLMAfterToolExecution(world, agent, targetChatId, {
-          ...options,
-          hopCount: hopCount + 1,
-          continuationRunId,
-        });
-        return;
-      }
 
       let toolArgs: Record<string, any> = {};
       try {
@@ -2059,155 +1847,41 @@ export async function continueLLMAfterToolExecution(
         }
       }
 
-      publishToolEvent(world, {
-        agentName: agent.id,
-        type: 'tool-start',
-        messageId: toolCall.id,
+      const executionResult = await executeToolActionStep({
+        world,
+        agent,
+        assistantToolCallMessage,
+        toolCall,
         chatId: targetChatId,
-        toolExecution: {
-          toolName: toolCall.function.name,
-          toolCallId: toolCall.id,
-          input: sanitizedToolArgsForEventPayload,
-          metadata: {
-            isStreaming: isStreamingEnabled(),
-          },
+        toolArgs,
+        trustedWorkingDirectory,
+        abortSignal: options?.abortSignal,
+        toolEventInput: sanitizedToolArgsForEventPayload,
+        toolStartMetadata: {
+          isStreaming: isStreamingEnabled(),
         },
+        llmResultMode: resolveShellContinuationLlmResultMode({
+          toolName: toolCall.function.name,
+        }),
+        persistToolEnvelope: toolCall.function.name === 'shell_cmd'
+          || toolCall.function.name === 'load_skill'
+          || toolCall.function.name === 'web_fetch',
       });
 
-      try {
-        const toolContext = {
-          world,
-          messages: agent.memory,
-          toolCallId: toolCall.id,
-          chatId: targetChatId,
-          abortSignal: options?.abortSignal,
-          workingDirectory: trustedWorkingDirectory,
-          agentName: agent.id,
-          llmResultMode: resolveShellContinuationLlmResultMode({
-            toolName: toolCall.function.name,
-          }),
-          persistToolEnvelope: toolCall.function.name === 'shell_cmd'
-            || toolCall.function.name === 'load_skill'
-            || toolCall.function.name === 'web_fetch',
-        };
-
-        const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);
-        const serializedToolResult = typeof toolResult === 'string'
-          ? toolResult
-          : JSON.stringify(toolResult) ?? String(toolResult);
-
-        if (
-          toolCall.function.name === 'load_skill'
-          && requestedLoadSkillId
-          && isSuccessfulLoadSkillResult(serializedToolResult)
-        ) {
-          loadedSkillsForRun.add(requestedLoadSkillId);
-        }
-        if (toolCall.function.name === 'shell_cmd' && shellCommandSignature) {
-          shellCommandResultsForRun.set(shellCommandSignature, serializedToolResult);
-        }
-
-        const toolResultMessage: AgentMessage = {
-          role: 'tool',
-          content: serializedToolResult,
-          tool_call_id: toolCall.id,
-          sender: agent.id,
-          createdAt: new Date(),
-          chatId: targetChatId,
-          messageId: generateId(),
-          replyToMessageId: messageId,
-          agentId: agent.id,
-        };
-        agent.memory.push(toolResultMessage);
-        appendSyntheticAssistantToolResult({
-          world,
-          agent,
-          serializedToolResult,
-          sourceMessageId: toolResultMessage.messageId!,
-          replyToMessageId: toolResultMessage.replyToMessageId,
-          chatId: targetChatId,
-        });
-
-        if (assistantToolCallMessage.toolCallStatus) {
-          assistantToolCallMessage.toolCallStatus[toolCall.id] = {
-            complete: true,
-            result: serializedToolResult,
-          };
-        }
-        clearWaitingForToolResultMetadata(assistantToolCallMessage);
-
-        const toolEnvelope = parseToolExecutionEnvelopeContent(serializedToolResult);
-        const toolEventPreview = getToolEventPreviewPayload(serializedToolResult);
-        const toolEventResult = toolEnvelope ? toolEnvelope.result : toolResult;
-        publishToolEvent(world, {
-          agentName: agent.id,
-          type: 'tool-result',
-          messageId: toolCall.id,
-          chatId: targetChatId,
-          toolExecution: {
-            toolName: toolCall.function.name,
-            toolCallId: toolCall.id,
-            input: sanitizedToolArgsForEventPayload,
-            ...(toolEventPreview !== undefined ? { preview: toolEventPreview } : {}),
-            result: toolEventResult,
-            resultType: Array.isArray(toolEventResult)
-              ? 'array'
-              : toolEventResult === null
-                ? 'null'
-                : typeof toolEventResult === 'string'
-                  ? 'string'
-                  : 'object',
-            resultSize: serializedToolResult.length,
-          },
-        });
-      } catch (toolError) {
-        const errorContent = formatToolErrorContent({
-          toolName: toolCall.function.name,
-          toolCallId: toolCall.id,
-          toolArgs,
-          error: toolError,
-        });
-        const toolErrorMessage: AgentMessage = {
-          role: 'tool',
-          content: errorContent,
-          tool_call_id: toolCall.id,
-          sender: agent.id,
-          createdAt: new Date(),
-          chatId: targetChatId,
-          messageId: generateId(),
-          replyToMessageId: messageId,
-          agentId: agent.id,
-        };
-        agent.memory.push(toolErrorMessage);
-        appendSyntheticAssistantToolResult({
-          world,
-          agent,
-          serializedToolResult: toolErrorMessage.content,
-          sourceMessageId: toolErrorMessage.messageId!,
-          replyToMessageId: toolErrorMessage.replyToMessageId,
-          chatId: targetChatId,
-        });
-
-        if (assistantToolCallMessage.toolCallStatus) {
-          assistantToolCallMessage.toolCallStatus[toolCall.id] = {
-            complete: true,
-            result: errorContent,
-          };
-        }
-        clearWaitingForToolResultMetadata(assistantToolCallMessage);
-
-        publishToolEvent(world, {
-          agentName: agent.id,
-          type: 'tool-error',
-          messageId: toolCall.id,
-          chatId: targetChatId,
-          toolExecution: {
-            toolName: toolCall.function.name,
-            toolCallId: toolCall.id,
-            input: sanitizedToolArgsForEventPayload,
-            error: toolError instanceof Error ? toolError.message : String(toolError),
-          },
-        });
+      if (
+        executionResult.status === 'success'
+        && toolCall.function.name === 'load_skill'
+        && requestedLoadSkillId
+        && isSuccessfulLoadSkillResult(executionResult.serializedToolResult)
+      ) {
+        loadedSkillsForRun.add(requestedLoadSkillId);
+      }
+      if (
+        executionResult.status === 'success'
+        && toolCall.function.name === 'shell_cmd'
+        && shellCommandSignature
+      ) {
+        shellCommandResultsForRun.set(shellCommandSignature, executionResult.serializedToolResult);
       }
 
       try {
@@ -2223,12 +1897,8 @@ export async function continueLLMAfterToolExecution(
         });
       }
 
-      if (toolCall.function.name === 'send_message' && isSuccessfulSendMessageDispatchResult(
-        String(
-          agent.memory[agent.memory.length - 1]?.role === 'tool'
-            ? agent.memory[agent.memory.length - 1]?.content || ''
-            : ''
-        )
+      if (executionResult.status === 'success' && toolCall.function.name === 'send_message' && isSuccessfulSendMessageDispatchResult(
+        executionResult.serializedToolResult
       )) {
         setTerminalTurnMetadata(assistantToolCallMessage, {
           turnId,
@@ -2261,8 +1931,8 @@ export async function continueLLMAfterToolExecution(
       return;
     }
 
-    if (llmResponse.type !== 'text' || !llmResponse.content) {
-      if (llmResponse.type === 'text' && !llmResponse.content && emptyTextRetryCount < maxEmptyTextRetries) {
+    if (resolvedResponse.type !== 'text' || !resolvedResponse.content) {
+      if (resolvedResponse.type === 'text' && !resolvedResponse.content && emptyTextRetryCount < maxEmptyTextRetries) {
         loggerAgent.warn('Post-tool continuation returned empty text; retrying continuation call', {
           agentId: agent.id,
           chatId: targetChatId,
@@ -2290,16 +1960,16 @@ export async function continueLLMAfterToolExecution(
 
       loggerAgent.warn('LLM response after tool execution is not text or empty - no message will be published', {
         agentId: agent.id,
-        responseType: llmResponse.type,
-        hasContent: !!llmResponse.content,
-        contentLength: llmResponse.content?.length || 0,
-        hasToolCalls: !!llmResponse.tool_calls,
-        toolCallCount: llmResponse.tool_calls?.length || 0,
+        responseType: resolvedResponse.type,
+        hasContent: !!resolvedResponse.content,
+        contentLength: resolvedResponse.content?.length || 0,
+        hasToolCalls: !!resolvedResponse.tool_calls,
+        toolCallCount: resolvedResponse.tool_calls?.length || 0,
         emptyTextRetryCount,
         maxEmptyTextRetries,
       });
 
-      if (llmResponse.type === 'text' && !llmResponse.content && emptyTextRetryCount >= maxEmptyTextRetries) {
+      if (resolvedResponse.type === 'text' && !resolvedResponse.content && emptyTextRetryCount >= maxEmptyTextRetries) {
         publishEvent(world, 'system', {
           message: '[Warning] Agent returned empty follow-up after tool execution. Please retry or refine the prompt.',
           type: 'warning'
@@ -2317,64 +1987,23 @@ export async function continueLLMAfterToolExecution(
       return;
     }
 
-    const responseText = llmResponse.content;
-    const sanitizedResponse = removeSelfMentions(responseText, agent.id);
-
-    const assistantMessage: AgentMessage = {
-      role: 'assistant',
-      content: sanitizedResponse,
+    const terminalPublishResult = await persistAndPublishTerminalAssistantResponse({
+      world,
+      agent,
+      targetChatId,
       messageId,
-      sender: agent.id,
-      createdAt: new Date(),
-      chatId: targetChatId,
-      agentId: agent.id
-    };
-    setTerminalTurnMetadata(assistantMessage, {
+      responseText: resolvedResponse.content,
       turnId,
       source: 'continuation',
-      action: 'final_response',
-      outcome: 'completed',
     });
 
-    // Save response to agent memory with all required fields
-    agent.memory.push(assistantMessage);
-
-    try {
-      const storage = await getStorageWrappers();
-      await storage.saveAgent(world.id, agent);
-      loggerMemory.debug('Agent response saved to memory after tool execution', {
+    if (terminalPublishResult.published && terminalPublishResult.finalResponse) {
+      loggerAgent.debug('Agent response published after tool execution', {
         agentId: agent.id,
         messageId,
-        memorySize: agent.memory.length
-      });
-    } catch (error) {
-      loggerMemory.error('Failed to save agent response after tool execution', {
-        worldId: world.id,
-        chatId: targetChatId,
-        agentId: agent.id,
-        messageId,
-        error: error instanceof Error ? error.message : String(error)
+        responseLength: terminalPublishResult.finalResponse.length,
       });
     }
-
-    // Publish the response message using the same messageId from streaming
-    publishMessageWithId(world, sanitizedResponse, agent.id, messageId, targetChatId, undefined);
-
-    loggerMessagePublish.debug('Published assistant response message', {
-      worldId: world.id,
-      chatId: targetChatId,
-      agentId: agent.id,
-      messageId,
-      turnId: messageId,
-      responseLength: sanitizedResponse.length,
-      source: 'continuation',
-    });
-
-    loggerAgent.debug('Agent response published after tool execution', {
-      agentId: agent.id,
-      messageId,
-      responseLength: sanitizedResponse.length
-    });
   } catch (error) {
     if (isMessageProcessingCanceledError(error) || options?.abortSignal?.aborted) {
       loggerAgent.info('Skipped continuation after stop request', {
@@ -2439,91 +2068,34 @@ export async function handleTextResponse(
     throw new Error(`handleTextResponse: explicit chatId is required for agent ${agent.id}`);
   }
 
-  const sanitizedResponse = removeSelfMentions(responseText, agent.id);
-
   // const needsInfiniteEtudePedagogueHandoff =
   //   world.id === 'infinite-etude' &&
   //   agent.id === 'madame-pedagogue' &&
-  //   !/^\s*@monsieur-engraver\b/im.test(sanitizedResponse);
+  //   !/^\s*@monsieur-engraver\b/im.test(responseText);
 
   // const responseWithRequiredHandoff = needsInfiniteEtudePedagogueHandoff
-  //   ? `${sanitizedResponse.trimEnd()}\n\n@monsieur-engraver please render this.`
-  //   : sanitizedResponse;
+  //   ? `${responseText.trimEnd()}\n\n@monsieur-engraver please render this.`
+  //   : responseText;
 
-  // Apply auto-mention logic if needed
-  let finalResponse = sanitizedResponse; // responseWithRequiredHandoff;
-  if (agent.autoReply !== false && shouldAutoMention(sanitizedResponse, messageEvent.sender, agent.id)) {
-    finalResponse = addAutoMention(sanitizedResponse, messageEvent.sender);
-    loggerAutoMention.debug('Auto-mention applied', {
-      agentId: agent.id,
-      originalSender: messageEvent.sender,
-      responsePreview: finalResponse.substring(0, 100)
-    });
-  } else {
-    loggerAutoMention.debug('Auto-mention not needed', {
-      agentId: agent.id,
-      autoReply: agent.autoReply !== false,
-      hasAnyMention: hasAnyMentionAtBeginning(sanitizedResponse)
-    });
-  }
-
-  const assistantMessage: AgentMessage = {
-    role: 'assistant',
-    content: finalResponse,
+  const terminalPublishResult = await persistAndPublishTerminalAssistantResponse({
+    world,
+    agent,
+    targetChatId,
     messageId,
-    sender: agent.id,
-    createdAt: new Date(),
-    chatId: targetChatId,
+    responseText, // responseWithRequiredHandoff,
     replyToMessageId: messageEvent.messageId,
-    agentId: agent.id
-  };
-  setTerminalTurnMetadata(assistantMessage, {
     turnId: String(options?.turnId || messageEvent.messageId || messageId).trim() || messageId,
     source: options?.source || 'direct',
-    action: 'final_response',
-    outcome: 'completed',
+    senderForAutoMention: messageEvent.sender,
   });
 
-  // Save response to agent memory with all required fields
-  agent.memory.push(assistantMessage);
-
-  try {
-    const storage = await getStorageWrappers();
-    await storage.saveAgent(world.id, agent);
-    loggerMemory.debug('Agent response saved to memory', {
+  if (terminalPublishResult.published && terminalPublishResult.finalResponse) {
+    loggerAgent.debug('Agent response published', {
       agentId: agent.id,
       messageId,
-      memorySize: agent.memory.length
-    });
-  } catch (error) {
-    loggerMemory.error('Failed to save agent response', {
-      worldId: world.id,
-      chatId: targetChatId,
-      agentId: agent.id,
-      messageId,
-      error: error instanceof Error ? error.message : String(error)
+      responseLength: terminalPublishResult.finalResponse.length,
     });
   }
-
-  // Publish the response message using the same messageId from streaming
-  publishMessageWithId(world, finalResponse, agent.id, messageId, targetChatId, messageEvent.messageId);
-
-  loggerMessagePublish.debug('Published assistant response message', {
-    worldId: world.id,
-    chatId: targetChatId,
-    agentId: agent.id,
-    messageId,
-    turnId: messageId,
-    replyToMessageId: messageEvent.messageId,
-    responseLength: finalResponse.length,
-    source: 'direct',
-  });
-
-  loggerAgent.debug('Agent response published', {
-    agentId: agent.id,
-    messageId,
-    responseLength: finalResponse.length
-  });
 }
 
 /**
