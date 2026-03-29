@@ -37,6 +37,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-03-29: Normalized direct-turn tool actions through shared agent-turn helpers so `human_intervention_request` persists as `hitl_request` with `waiting_for_hitl`.
  * - 2026-03-29: Routed initial agent-turn model call / retry / response classification through the explicit `runAgentTurnLoop(...)` helper while preserving existing tool execution semantics.
  * - 2026-03-29: Added explicit assistant turn metadata for final responses, unresolved tool waits, terminal handoff completion, and in-process resume-safe behavior.
  * - 2026-03-24: Retried one empty initial LLM text response with an explicit non-empty/tool-call reminder and now emits a durable chat-scoped error instead of silently ending the turn.
@@ -124,7 +125,9 @@ import {
   buildAgentTurnResumeKey,
   clearWaitingForToolResultMetadata,
   isSuccessfulSendMessageDispatchResult,
+  resolveAgentTurnActionForToolName,
   setTerminalTurnMetadata,
+  setWaitingForHitlMetadata,
   setWaitingForToolResultMetadata,
 } from '../agent-turn.js';
 import { runAgentTurnLoop } from './agent-turn-loop.js';
@@ -917,10 +920,11 @@ export async function processAgentMessage(
         }, {} as Record<string, { complete: boolean; result: any }>)
       };
       if (pendingToolCallCandidate) {
-        setWaitingForToolResultMetadata(assistantMessage, {
+        const pendingAction = resolveAgentTurnActionForToolName(pendingToolCallCandidate.function.name);
+        const waitingMetadataParams = {
           turnId,
-          source: 'direct',
-          action: pendingToolCallCandidate.function.name === 'send_message' ? 'agent_handoff' : 'tool_call',
+          source: 'direct' as const,
+          action: pendingAction,
           resumeKey: buildAgentTurnResumeKey({
             worldId: world.id,
             agentId: agent.id,
@@ -928,7 +932,12 @@ export async function processAgentMessage(
             assistantMessageId: messageId,
             toolCallId: pendingToolCallCandidate.id,
           }),
-        });
+        };
+        if (pendingAction === 'hitl_request') {
+          setWaitingForHitlMetadata(assistantMessage, waitingMetadataParams);
+        } else {
+          setWaitingForToolResultMetadata(assistantMessage, waitingMetadataParams);
+        }
       }
 
       agent.memory.push(assistantMessage);

@@ -24,16 +24,18 @@ Phase 1 keeps the existing conservative single-tool execution behavior. It does 
 - `runAgentTurnLoop(...)` now exists and is used by both the direct-turn and continuation-turn model-call paths.
 - Terminal assistant completion metadata is persisted through `agent_memory.message_metadata`.
 - Successful `send_message` tool dispatches now terminate as `handoff_dispatched`.
+- Direct and continuation `human_intervention_request` tool requests now persist as `hitl_request` actions with `waiting_for_hitl` state.
 - Restore-time unresolved tool resumes now use a process-local resume lease to reduce duplicate same-turn execution.
 - Queue completion and stale-`sending` recovery now prefer persisted `agentTurn` lifecycle metadata over assistant-text presence.
 - Live queued turns remain in `sending` while persisted turn state is `waiting_for_tool_result`, and only complete after terminal metadata is present.
+- Continuation now no-ops when the target turn is already terminal, and restore-resumed `send_message` handoffs terminate without spawning duplicate follow-up continuation.
 - Regression coverage was added for terminal metadata, handoff terminality, retry semantics, and same-process resume duplication.
 
 ### Remaining
 
 - Tool execution and action dispatch are still split across `orchestrator.ts` and `memory-manager.ts`.
-- HITL has not yet been normalized under the same action boundary.
-- Queue/restore now consume persisted turn lifecycle metadata for terminality, but action/result normalization and broader queue idempotency are still unfinished.
+- HITL is normalized at the persisted action/state boundary, but execution ownership is still split rather than fully absorbed into the loop runner.
+- Queue/restore now consume persisted turn lifecycle metadata for terminality, but broader action/result normalization and queue/publication idempotency are still unfinished.
 - Phase 1 still lacks an explicit “one tool call per hop” regression test.
 - Global LLM queue narrowing remains a later phase.
 
@@ -179,7 +181,7 @@ flowchart TD
 
 ### Phase 4: Action Normalization
 
-- [ ] Normalize tool calls, HITL requests, handoffs, and final responses under one action classification boundary.
+- [x] Normalize tool calls, HITL requests, handoffs, and final responses under one action classification boundary.
 - [ ] Treat `send_message` as `agent_handoff` in runner logic while preserving its existing routing and safety rules.
 - [ ] Persist enough action-linked metadata to explain stop reason and next resume boundary.
 
@@ -189,7 +191,7 @@ flowchart TD
 - [x] Ensure resume no-ops or rejoins when the same turn is already active.
 - [ ] Ensure repeated resume cannot duplicate:
   - [ ] tool execution
-  - [ ] handoff dispatch
+  - [x] handoff dispatch
   - [ ] terminal assistant publish
   - [ ] queue advancement
 - [ ] Preserve current chat/world isolation and stop behavior.

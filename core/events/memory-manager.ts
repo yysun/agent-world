@@ -20,6 +20,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-03-29: Added shared HITL/handoff action classification plus terminal-turn no-op guards so restore/continuation avoids duplicate handoff follow-up and skips already-terminal turns.
  * - 2026-03-29: Routed continuation model call / retry / response classification through the explicit `runAgentTurnLoop(...)` helper while preserving existing single-tool execution semantics.
  * - 2026-03-29: Added explicit terminal assistant turn metadata support for direct and continuation loop completion.
  * - 2026-03-21: Excluded persisted display-only synthetic assistant tool-result rows from
@@ -117,7 +118,10 @@ import {
   buildAgentTurnResumeKey,
   clearWaitingForToolResultMetadata,
   isSuccessfulSendMessageDispatchResult,
+  readAgentTurnLifecycleFromMessages,
   releaseAgentTurnResumeLease,
+  resolveAgentTurnActionForToolName,
+  setWaitingForHitlMetadata,
   setWaitingForToolResultMetadata,
   setTerminalTurnMetadata,
 } from '../agent-turn.js';
@@ -638,6 +642,27 @@ export async function resumePendingToolCallsForChat(
     }
 
     const { assistantMessage, toolCall } = pending;
+    const turnId = String(
+      assistantMessage.agentTurn?.turnId
+      || assistantMessage.replyToMessageId
+      || assistantMessage.messageId
+      || ''
+    ).trim() || 'unknown-turn';
+    const turnLifecycle = readAgentTurnLifecycleFromMessages(agent.memory, {
+      turnId,
+      chatId,
+    });
+    if (turnLifecycle.status === 'terminal') {
+      loggerRestoreResumeTools.debug('Resume pending tool calls skipped terminal turn', {
+        worldId: world.id,
+        chatId,
+        agentId: agent.id,
+        toolCallId: toolCall.id,
+        turnId,
+        outcome: turnLifecycle.outcome,
+      });
+      continue;
+    }
     const resumeKey = buildAgentTurnResumeKey({
       worldId: world.id,
       agentId: agent.id,
@@ -713,7 +738,7 @@ export async function resumePendingToolCallsForChat(
       clearWaitingForToolResultMetadata(assistantMessage);
       await storage.saveAgent(world.id, agent);
       await continueLLMAfterToolExecution(world, agent, chatId, {
-        turnId: assistantMessage.agentTurn?.turnId || assistantMessage.replyToMessageId || assistantMessage.messageId,
+        turnId,
       });
       loggerRestoreResumeTools.debug('Resume pending tool calls continued after parse error', {
         worldId: world.id,
@@ -781,7 +806,7 @@ export async function resumePendingToolCallsForChat(
       });
       await storage.saveAgent(world.id, agent);
       await continueLLMAfterToolExecution(world, agent, chatId, {
-        turnId: assistantMessage.agentTurn?.turnId || assistantMessage.replyToMessageId || assistantMessage.messageId,
+        turnId,
       });
       loggerRestoreResumeTools.debug('Resume pending tool calls continued after missing tool definition', {
         worldId: world.id,
@@ -906,6 +931,25 @@ export async function resumePendingToolCallsForChat(
         toolCallId: toolCall.id,
         resultSize: serializedToolResult.length,
       });
+
+      if (toolCall.function.name === 'send_message' && isSuccessfulSendMessageDispatchResult(serializedToolResult)) {
+        setTerminalTurnMetadata(assistantMessage, {
+          turnId,
+          source: 'restore',
+          action: 'agent_handoff',
+          outcome: 'handoff_dispatched',
+        });
+        await storage.saveAgent(world.id, agent);
+        loggerRestoreResumeTools.debug('Resume pending tool calls completed terminal handoff without continuation', {
+          worldId: world.id,
+          chatId,
+          agentId: agent.id,
+          toolCallId: toolCall.id,
+          turnId,
+        });
+        resumedCount += 1;
+        continue;
+      }
     } catch (toolError) {
       loggerRestoreResumeTools.warn('Resume pending tool calls tool execution failed', {
         worldId: world.id,
@@ -972,7 +1016,7 @@ export async function resumePendingToolCallsForChat(
       toolCallId: toolCall.id,
     });
     await continueLLMAfterToolExecution(world, agent, chatId, {
-      turnId: assistantMessage.agentTurn?.turnId || assistantMessage.replyToMessageId || assistantMessage.messageId,
+      turnId,
       ...(seededLoadSkillIdForContinuation ? { preloadedSkillIds: [seededLoadSkillIdForContinuation] } : {}),
     });
     loggerRestoreResumeTools.debug('Resume pending tool calls continued LLM after tool execution', {
@@ -1257,6 +1301,20 @@ export async function continueLLMAfterToolExecution(
   }
   const targetChatId = continuationChatId;
   const turnId = String(options?.turnId || '').trim() || generateId();
+  const existingTurnLifecycle = readAgentTurnLifecycleFromMessages(agent.memory, {
+    turnId,
+    chatId: targetChatId,
+  });
+  if (existingTurnLifecycle.status === 'terminal') {
+    loggerAgent.debug('Skipping continuation because turn is already terminal', {
+      worldId: world.id,
+      agentId: agent.id,
+      chatId: targetChatId,
+      turnId,
+      outcome: existingTurnLifecycle.outcome,
+    });
+    return;
+  }
   const continuationRunId = String(options?.continuationRunId || '').trim() || generateId();
   const continuationScopeKey = getContinuationScopeKey(world.id, agent.id, continuationChatId);
   const enteredScope = enterContinuationScope(continuationScopeKey, continuationRunId);
@@ -1742,10 +1800,11 @@ export async function continueLLMAfterToolExecution(
           return acc;
         }, {} as Record<string, { complete: boolean; result: any }>),
       };
-      setWaitingForToolResultMetadata(assistantToolCallMessage, {
+      const pendingAction = resolveAgentTurnActionForToolName(toolCall.function.name);
+      const waitingMetadataParams = {
         turnId,
-        source: 'continuation',
-        action: toolCall.function.name === 'send_message' ? 'agent_handoff' : 'tool_call',
+        source: 'continuation' as const,
+        action: pendingAction,
         resumeKey: buildAgentTurnResumeKey({
           worldId: world.id,
           agentId: agent.id,
@@ -1753,7 +1812,12 @@ export async function continueLLMAfterToolExecution(
           assistantMessageId: messageId,
           toolCallId: toolCall.id,
         }),
-      });
+      };
+      if (pendingAction === 'hitl_request') {
+        setWaitingForHitlMetadata(assistantToolCallMessage, waitingMetadataParams);
+      } else {
+        setWaitingForToolResultMetadata(assistantToolCallMessage, waitingMetadataParams);
+      }
 
       agent.memory.push(assistantToolCallMessage);
 

@@ -7,6 +7,7 @@
  * Key Features:
  * - Stable turn resume-key generation for unresolved tool-call resumes.
  * - Helpers for waiting-tool and terminal assistant metadata.
+ * - Canonical action classification for tool calls, handoffs, and HITL requests.
  * - Detection of successful `send_message` handoff dispatch results.
  * - Read-model helper to resolve persisted turn lifecycle state from chat messages.
  * - In-process resume leases to prevent duplicate same-turn resume execution.
@@ -16,6 +17,7 @@
  * - Resume leases are intentionally process-local; persisted transcript state remains authoritative.
  *
  * Recent Changes:
+ * - 2026-03-29: Added canonical HITL/handoff action classification and waiting-for-HITL metadata helpers.
  * - 2026-03-29: Added persisted turn lifecycle read-model helper for queue/restore terminality decisions.
  * - 2026-03-29: Initial helper module for explicit agent-turn loop metadata and resume guards.
  */
@@ -26,6 +28,17 @@ const activeResumeLeases = new Set<string>();
 
 function nowIsoString(): string {
   return new Date().toISOString();
+}
+
+export function resolveAgentTurnActionForToolName(toolName: string): AgentTurnAction {
+  const normalizedToolName = String(toolName || '').trim();
+  if (normalizedToolName === 'send_message') {
+    return 'agent_handoff';
+  }
+  if (normalizedToolName === 'human_intervention_request') {
+    return 'hitl_request';
+  }
+  return 'tool_call';
 }
 
 export function buildAgentTurnResumeKey(params: {
@@ -58,6 +71,26 @@ export function setWaitingForToolResultMetadata(
     source: params.source,
     action: params.action ?? 'tool_call',
     state: 'waiting_for_tool_result',
+    resumeKey: params.resumeKey,
+    updatedAt: nowIsoString(),
+  };
+  return message;
+}
+
+export function setWaitingForHitlMetadata(
+  message: AgentMessage,
+  params: {
+    turnId: string;
+    source: AgentTurnSource;
+    action?: AgentTurnAction;
+    resumeKey?: string;
+  }
+): AgentMessage {
+  message.agentTurn = {
+    turnId: params.turnId,
+    source: params.source,
+    action: params.action ?? 'hitl_request',
+    state: 'waiting_for_hitl',
     resumeKey: params.resumeKey,
     updatedAt: nowIsoString(),
   };

@@ -15,6 +15,7 @@
  * - No real filesystem, database, or external LLM/tool network calls.
  *
  * Recent changes:
+ * - 2026-03-29: Added restore-resume coverage for terminal `send_message` handoffs and continuation no-op when the turn is already terminal.
  * - 2026-03-29: Added coverage for terminal assistant turn metadata and in-process idempotent pending-tool resume leases.
  * - 2026-03-06: Added coverage ensuring live `tool-result` events publish envelope preview payloads instead of truncated serialized envelope JSON.
  * - 2026-03-06: Added coverage for canonical shell approval-denied failure reasons and null exit codes in continuation-persisted tool results.
@@ -345,6 +346,40 @@ describe('memory-manager behavior', () => {
       outcome: 'completed',
     });
     expect(finalAssistantMessage?.agentTurn?.completion?.mechanism).toBe('assistant_message_metadata');
+  });
+
+  it('skips continuation when the target turn is already terminal', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    agent.memory.push({
+      role: 'assistant',
+      content: 'Already done',
+      sender: agent.id,
+      createdAt: new Date('2026-03-29T10:05:00.000Z'),
+      chatId: 'chat-1',
+      messageId: 'assistant-terminal-existing',
+      agentId: agent.id,
+      agentTurn: {
+        turnId: 'turn-terminal-1',
+        source: 'continuation',
+        action: 'final_response',
+        outcome: 'completed',
+        updatedAt: '2026-03-29T10:05:00.000Z',
+        completion: {
+          mechanism: 'assistant_message_metadata',
+          completedAt: '2026-03-29T10:05:00.000Z',
+        },
+      },
+    } as any);
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    await continueLLMAfterToolExecution(world, agent, 'chat-1', {
+      turnId: 'turn-terminal-1',
+    });
+
+    expect(mocks.generateAgentResponse).not.toHaveBeenCalled();
+    expect(mocks.publishMessageWithId).not.toHaveBeenCalled();
   });
 
   it('skips duplicate same-process resume for the same unresolved tool call', async () => {
@@ -711,5 +746,69 @@ describe('memory-manager behavior', () => {
       'chat-1',
       undefined
     );
+  });
+
+  it('marks resumed pending send_message handoffs terminal and skips follow-up continuation', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    agent.memory.push({
+      role: 'assistant',
+      content: 'Calling tool: send_message',
+      sender: agent.id,
+      createdAt: new Date('2026-03-29T10:10:00.000Z'),
+      chatId: 'chat-1',
+      messageId: 'assistant-handoff-pending',
+      replyToMessageId: 'turn-handoff-1',
+      agentId: agent.id,
+      tool_calls: [
+        {
+          id: 'tc-handoff',
+          type: 'function',
+          function: {
+            name: 'send_message',
+            arguments: JSON.stringify({ agent: 'agent-b', message: 'Take over.' }),
+          },
+        },
+      ],
+      toolCallStatus: {
+        'tc-handoff': {
+          complete: false,
+          result: null,
+        },
+      },
+      agentTurn: {
+        turnId: 'turn-handoff-1',
+        source: 'direct',
+        action: 'agent_handoff',
+        state: 'waiting_for_tool_result',
+        updatedAt: '2026-03-29T10:10:00.000Z',
+      },
+    } as any);
+
+    world.agents.set(agent.id, agent);
+
+    const execute = vi.fn(async () => JSON.stringify({
+      ok: true,
+      status: 'dispatched',
+      dispatched: 1,
+    }));
+    mocks.getMCPToolsForWorld.mockResolvedValue({ send_message: { execute } });
+
+    const { resumePendingToolCallsForChat } = await import('../../../core/events/memory-manager.js');
+    const resumed = await resumePendingToolCallsForChat(world, 'chat-1');
+
+    expect(resumed).toBe(1);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(mocks.generateAgentResponse).not.toHaveBeenCalled();
+    expect(mocks.publishMessageWithId).not.toHaveBeenCalled();
+
+    const assistantMessage = agent.memory.find((message) => message.messageId === 'assistant-handoff-pending');
+    expect(assistantMessage?.agentTurn).toMatchObject({
+      turnId: 'turn-handoff-1',
+      source: 'restore',
+      action: 'agent_handoff',
+      outcome: 'handoff_dispatched',
+    });
   });
 });

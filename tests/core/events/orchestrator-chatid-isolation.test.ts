@@ -13,6 +13,7 @@
  * - Keeps execution in-memory and deterministic.
  *
  * Recent Changes:
+ * - 2026-03-29: Added coverage that direct HITL tool requests persist `hitl_request` action metadata with `waiting_for_hitl` state.
  * - 2026-03-29: Added coverage that successful `send_message` tool execution marks the assistant tool request as terminal handoff-dispatched metadata and stops follow-up continuation.
  * - 2026-03-24: Added coverage that plain-text initial tool intents are synthesized into executable tool calls.
  * - 2026-03-24: Added coverage that empty initial LLM text responses retry once and then fail with a chat-scoped durable error instead of ending silently.
@@ -271,6 +272,69 @@ describe('processAgentMessage chat isolation', () => {
       outcome: 'handoff_dispatched',
     });
     expect(assistantToolRequest?.agentTurn?.completion?.mechanism).toBe('assistant_message_metadata');
+  });
+
+  it('persists waiting HITL action metadata for direct human_intervention_request tool calls', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+    let resolveExecute: ((value: string) => void) | null = null;
+
+    mocks.generateAgentResponse.mockResolvedValueOnce({
+      response: {
+        type: 'tool_calls',
+        content: 'Calling tool: human_intervention_request',
+        tool_calls: [{
+          id: 'tool-call-hitl-1',
+          type: 'function',
+          function: {
+            name: 'human_intervention_request',
+            arguments: JSON.stringify({
+              question: 'Proceed?',
+              options: ['Yes', 'No'],
+            }),
+          },
+        }],
+      },
+      messageId: 'assistant-hitl-msg-1',
+    });
+
+    mocks.getMCPToolsForWorld.mockResolvedValue({
+      human_intervention_request: {
+        execute: vi.fn(
+          async () =>
+            await new Promise<string>((resolve) => {
+              resolveExecute = resolve;
+            })
+        ),
+      },
+    });
+
+    const { processAgentMessage } = await import('../../../core/events/orchestrator.js');
+    const processPromise = processAgentMessage(world, agent, createMessageEvent('chat-1'));
+    await vi.waitFor(() => {
+      expect(
+        agent.memory.find((message) => message.messageId === 'assistant-hitl-msg-1')
+      ).toBeDefined();
+    });
+
+    const pendingAssistantMessage = agent.memory.find(
+      (message) => message.messageId === 'assistant-hitl-msg-1'
+    );
+    expect(pendingAssistantMessage?.agentTurn).toMatchObject({
+      source: 'direct',
+      action: 'hitl_request',
+      state: 'waiting_for_hitl',
+    });
+
+    resolveExecute?.(JSON.stringify({
+      ok: true,
+      status: 'confirmed',
+      confirmed: true,
+      selectedOption: 'Yes',
+      source: 'user',
+      requestId: 'hitl-req-1',
+    }));
+    await processPromise;
   });
 
   it('logs tool execution failures with world/chat scope', async () => {
