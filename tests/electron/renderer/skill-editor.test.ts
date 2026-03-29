@@ -15,6 +15,12 @@
  * - Tests BaseEditor slot contract by inspecting children tree structure.
  *
  * Recent Changes:
+ * - 2026-03-29: Updated GitHub sizing coverage for the shared repo+skill flex group that prevents left-side clipping.
+ * - 2026-03-29: Tightened GitHub primary-row sizing coverage for the compact repo and skill widths.
+ * - 2026-03-29: Added GitHub no-wrap primary-row sizing coverage so the skill selector stays beside the repo field.
+ * - 2026-03-29: Replaced install-scope select assertions with radio-group coverage beside the action buttons.
+ * - 2026-03-29: Added coverage for the install-mode back button vertical offset.
+ * - 2026-03-29: Added coverage for the install toolbar primary-row grouping in GitHub and local source modes.
  * - 2026-03-23: Added coverage that collapsed-sidebar mode forwards toolbar inset spacing into BaseEditor.
  * - 2026-03-22: Updated coverage for the restored back button and icon-only save button with dirty-state gating.
  * - 2026-03-22: Added selected-file and loading-state coverage for tree-driven skill file switching.
@@ -57,7 +63,7 @@ vi.mock('../../../electron/renderer/src/design-system/patterns/BaseEditor', () =
 }));
 
 import { SkillEditor } from '../../../electron/renderer/src/features/skills';
-import { Select, Textarea } from '../../../electron/renderer/src/design-system/primitives';
+import { Radio, Select, Textarea } from '../../../electron/renderer/src/design-system/primitives';
 
 function allDescendants(node: any): any[] {
   if (!node || typeof node !== 'object') return [];
@@ -69,6 +75,10 @@ function allDescendants(node: any): any[] {
 
 function allNodes(toolbar: any): any[] {
   return allDescendants(toolbar);
+}
+
+function hasClassName(node: any, className: string): boolean {
+  return typeof node?.props?.className === 'string' && node.props.className.includes(className);
 }
 
 describe('SkillEditor', () => {
@@ -380,6 +390,7 @@ describe('SkillEditor', () => {
     const onInstall = vi.fn();
     const onBrowseInstallSource = vi.fn();
     const onLoadInstallOptions = vi.fn();
+    const onInstallTargetScopeChange = vi.fn();
 
     const result: any = SkillEditor({
       mode: 'install',
@@ -403,6 +414,7 @@ describe('SkillEditor', () => {
       installItemName: 'reviewer',
       installOptions: ['planner', 'reviewer'],
       installTargetScope: 'project',
+      onInstallTargetScopeChange,
       onBrowseInstallSource,
       onLoadInstallOptions,
       onPreviewInstall,
@@ -433,27 +445,98 @@ describe('SkillEditor', () => {
     expect(contentStr).not.toContain('Skill preview');
 
     const toolbarNodes = allDescendants(result.props.toolbar);
+    const primaryRow = toolbarNodes.find((node: any) => hasClassName(node, 'install-toolbar-primary-row'));
+    const actionRow = toolbarNodes.find((node: any) => hasClassName(node, 'install-toolbar-action-row'));
     const toolbarPreviewButton = toolbarNodes.find((node: any) => node?.type === 'button' && node?.props?.onClick === onPreviewInstall);
     const toolbarInstallButton = toolbarNodes.find((node: any) => node?.type === 'button' && node?.props?.onClick === onInstall);
     const toolbarLoadButton = toolbarNodes.find((node: any) => node?.type === 'button' && node?.props?.onClick === onLoadInstallOptions);
     const toolbarBrowseButton = toolbarNodes.find((node: any) => node?.type === 'button' && node?.props?.onClick === onBrowseInstallSource);
     const toolbarSkillSelect = toolbarNodes.find((node: any) => node?.type === Select && node?.props?.['aria-label'] === 'GitHub skill');
+    const scopeSelect = toolbarNodes.find((node: any) => node?.type === Select && node?.props?.['aria-label'] === 'Install scope');
+    const backButton = toolbarNodes.find((node: any) => node?.type === 'button' && node?.props?.['aria-label'] === 'Back');
 
+    expect(primaryRow).toBeDefined();
+    expect(actionRow).toBeDefined();
+    expect(JSON.stringify(primaryRow)).toContain('INSTALL SKILL');
+    expect(JSON.stringify(primaryRow)).toContain('owner/repo');
+    expect(JSON.stringify(primaryRow)).toContain('GitHub skill');
+    expect(JSON.stringify(primaryRow)).not.toContain('Install scope');
+    expect(primaryRow?.props?.className).toContain('flex-nowrap');
+    expect(JSON.stringify(actionRow)).toContain('Choose a repo and skill, then confirm the install scope.');
     expect(toolbarPreviewButton).toBeDefined();
     expect(toolbarInstallButton).toBeDefined();
     expect(toolbarInstallButton.props.disabled).toBe(false);
     expect(toolbarLoadButton).toBeDefined();
     expect(toolbarBrowseButton).toBeUndefined();
     expect(toolbarSkillSelect).toBeDefined();
+    expect(backButton?.props?.className).toContain('mt-2');
+    expect(scopeSelect).toBeUndefined();
+
+    const scopeGroup = toolbarNodes.find((node: any) => node?.props?.role === 'radiogroup' && node?.props?.['aria-label'] === 'Install scope');
+    const projectRadio = toolbarNodes.find((node: any) => node?.type === Radio && node?.props?.['aria-label'] === 'Project');
+    const globalRadio = toolbarNodes.find((node: any) => node?.type === Radio && node?.props?.['aria-label'] === 'Global');
+    const repoField = toolbarNodes.find((node: any) => hasClassName(node, 'min-w-0 flex-1'));
+
+    expect(scopeGroup).toBeDefined();
+    expect(JSON.stringify(actionRow)).toContain('Install scope');
+    expect(projectRadio).toBeDefined();
+    expect(projectRadio?.props?.checked).toBe(true);
+    expect(globalRadio).toBeDefined();
+    expect(globalRadio?.props?.checked).toBe(false);
+    expect(repoField).toBeDefined();
+    expect(toolbarSkillSelect?.props?.className).toContain('w-[132px]');
 
     toolbarLoadButton.props.onClick();
+    globalRadio.props.onChange();
     toolbarPreviewButton.props.onClick();
     toolbarInstallButton.props.onClick();
 
     expect(onLoadInstallOptions).toHaveBeenCalledTimes(1);
+    expect(onInstallTargetScopeChange).toHaveBeenCalledWith('global');
     expect(onPreviewInstall).toHaveBeenCalledTimes(1);
     expect(onInstall).toHaveBeenCalledTimes(1);
     expect(onBrowseInstallSource).toHaveBeenCalledTimes(0);
+  });
+
+  it('keeps local install path and scope in the primary toolbar row', () => {
+    const onBrowseInstallSource = vi.fn();
+
+    const result: any = SkillEditor({
+      mode: 'install',
+      skillId: '',
+      sourceScope: 'project',
+      selectedFilePath: 'SKILL.md',
+      content: '# Draft Skill',
+      onContentChange: () => { },
+      onBack: () => { },
+      onSave: () => { },
+      onDelete: () => { },
+      onSelectFile: () => { },
+      folderEntries: [],
+      hasUnsavedChanges: false,
+      loadingFile: false,
+      saving: false,
+      deleting: false,
+      installSourceType: 'local',
+      installSourcePath: '/tmp/my-skill',
+      installTargetScope: 'global',
+      onBrowseInstallSource,
+    });
+
+    const toolbarNodes = allDescendants(result.props.toolbar);
+    const primaryRow = toolbarNodes.find((node: any) => hasClassName(node, 'install-toolbar-primary-row'));
+    const actionRow = toolbarNodes.find((node: any) => hasClassName(node, 'install-toolbar-action-row'));
+    const browseButton = toolbarNodes.find((node: any) => node?.type === 'button' && node?.props?.onClick === onBrowseInstallSource);
+
+    expect(primaryRow).toBeDefined();
+    expect(JSON.stringify(primaryRow)).toContain('INSTALL SKILL');
+    expect(JSON.stringify(primaryRow)).toContain('Skill folder path');
+    expect(browseButton).toBeDefined();
+    expect(JSON.stringify(primaryRow)).not.toContain('Install scope');
+    expect(JSON.stringify(actionRow)).toContain('Choose a local skill folder, then confirm the install scope.');
+
+    browseButton.props.onClick();
+    expect(onBrowseInstallSource).toHaveBeenCalledTimes(1);
   });
 
   it('disables install editing for non-text preview files', () => {

@@ -15,6 +15,12 @@
  * - Back button fires `onBack` without prompting (unsaved changes are parent's concern).
  *
  * Recent Changes:
+ * - 2026-03-29: Reworked the GitHub primary-row sizing so the repo field can shrink inside a shared flex group instead of clipping the left side.
+ * - 2026-03-29: Tightened the GitHub repo and skill widths so the primary row fits without shoving the toolbar left.
+ * - 2026-03-29: Kept the GitHub skill select on the primary row by giving the repo field more width and disabling row wrap for that source mode.
+ * - 2026-03-29: Replaced the install-scope select with inline radios beside Preview and Install so scope stays attached to the action buttons.
+ * - 2026-03-29: Lowered the install-mode back button slightly so it aligns better with the denser two-row toolbar.
+ * - 2026-03-29: Reorganized install mode into a single primary repo row that keeps the install label, skill picker, and scope selector aligned for faster scanning.
  * - 2026-03-23: Rewired install-form controls and the main editor textarea onto shared design-system primitives.
  * - 2026-03-23: Reserve extra left toolbar space when the main sidebar is collapsed so the back button clears the macOS traffic lights.
  * - 2026-03-22: Propagated busy state into the file tree so save/delete/load work disables file switching consistently.
@@ -28,7 +34,7 @@
 
 import React from 'react';
 import BaseEditor from '../../../design-system/patterns/BaseEditor';
-import { Input, Select, Textarea } from '../../../design-system/primitives';
+import { Input, Radio, Select, Textarea } from '../../../design-system/primitives';
 import type { SkillFolderEntry } from '../../../types/desktop-api';
 import SkillFolderPane from './SkillFolderPane';
 
@@ -110,6 +116,10 @@ export default function SkillEditor({
 }) {
   const isInstallMode = mode === 'install';
   const busy = saving || deleting || loadingFile || installing;
+  const backButtonClassName = isInstallMode
+    ? 'mt-2 flex self-start items-center gap-1.5 rounded-md px-2 py-1 text-xs text-foreground/70 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
+    : 'flex self-start items-center gap-1.5 rounded-md px-2 py-1 text-xs text-foreground/70 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50';
+  const toolbarClassName = isInstallMode ? 'flex items-start gap-3' : 'flex items-center gap-3';
   const canSave = !busy && hasUnsavedChanges;
   const canPreview = isInstallMode
     ? (installSourceType === 'github'
@@ -125,15 +135,26 @@ export default function SkillEditor({
   const textareaPlaceholder = isInstallMode && !currentFileEditable
     ? `${selectedFilePath || 'SKILL.md'} cannot be edited in preview.`
     : `Contents of ${selectedFilePath || 'SKILL.md'}…`;
+  const installHint = installSourceType === 'github'
+    ? 'Choose a repo and skill, then confirm the install scope.'
+    : 'Choose a local skill folder, then confirm the install scope.';
+  const installPrimaryRowClassName = installSourceType === 'github'
+    ? 'install-toolbar-primary-row flex min-w-0 flex-nowrap items-center gap-2'
+    : 'install-toolbar-primary-row flex min-w-0 flex-wrap items-center justify-end gap-2';
+
+  const installScopeOptions: Array<{ label: 'Project' | 'Global'; value: 'project' | 'global' }> = [
+    { label: 'Project', value: 'project' },
+    { label: 'Global', value: 'global' },
+  ];
 
   const toolbar = (
-    <div className="flex items-center gap-3">
+    <div className={toolbarClassName}>
       <button
         type="button"
         onClick={onBack}
         disabled={busy}
         aria-label="Back"
-        className="flex self-start items-center gap-1.5 rounded-md px-2 py-1 text-xs text-foreground/70 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        className={backButtonClassName}
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -152,9 +173,9 @@ export default function SkillEditor({
         Back
       </button>
       {isInstallMode ? (
-        <>
-          <p className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{scopeLabel}</p>
-          <div className="ml-auto flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+        <div className="ml-auto flex min-w-0 flex-1 flex-col items-stretch gap-2">
+          <div className={installPrimaryRowClassName}>
+            <p className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{scopeLabel}</p>
             <div className="inline-flex items-center rounded-md border border-border bg-muted/30 p-0.5">
               {(['local', 'github'] as SkillInstallSourceType[]).map((option) => (
                 <button
@@ -172,7 +193,7 @@ export default function SkillEditor({
               ))}
             </div>
             {installSourceType === 'local' ? (
-              <div className="flex min-w-[220px] flex-1 items-center gap-2 sm:max-w-[360px]">
+              <div className="flex min-w-[240px] flex-[1_1_340px] items-center gap-2">
                 <Input
                   value={installSourcePath}
                   onChange={(event) => onInstallSourcePathChange?.(event.target.value)}
@@ -190,8 +211,8 @@ export default function SkillEditor({
                 </button>
               </div>
             ) : (
-              <>
-                <div className="relative min-w-[180px] flex-1 sm:max-w-[260px]">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <div className="relative min-w-0 flex-1">
                   <Input
                     value={installRepo}
                     onChange={(event) => onInstallRepoChange?.(event.target.value)}
@@ -230,7 +251,7 @@ export default function SkillEditor({
                   value={installItemName}
                   onChange={(event) => onInstallItemNameChange?.(event.target.value)}
                   disabled={busy || loadingInstallOptions || installOptions.length === 0}
-                  className="w-40 px-2 py-1 text-[11px]"
+                  className="min-w-[132px] w-[132px] max-w-[132px] shrink-0 px-2 py-1 text-[11px]"
                   aria-label="GitHub skill"
                 >
                   <option value="">
@@ -240,18 +261,34 @@ export default function SkillEditor({
                     <option key={option} value={option}>{option}</option>
                   ))}
                 </Select>
-              </>
+              </div>
             )}
-            <Select
-              value={installTargetScope}
-              onChange={(event) => onInstallTargetScopeChange?.(event.target.value === 'global' ? 'global' : 'project')}
-              disabled={busy}
-              className="w-auto px-2 py-1 text-[11px]"
+          </div>
+          <div className="install-toolbar-action-row flex min-w-0 flex-wrap items-center justify-end gap-2">
+            <p className="mr-auto min-w-0 flex-1 text-[11px] text-muted-foreground">{installHint}</p>
+            <div
+              role="radiogroup"
               aria-label="Install scope"
+              className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/30 px-2 py-1"
             >
-              <option value="project">Project</option>
-              <option value="global">Global</option>
-            </Select>
+              {installScopeOptions.map((option) => (
+                <label
+                  key={option.value}
+                  className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] ${busy ? 'opacity-60' : 'cursor-pointer'} ${installTargetScope === option.value ? 'text-foreground' : 'text-muted-foreground'}`}
+                >
+                  <Radio
+                    name="skill-install-scope"
+                    value={option.value}
+                    checked={installTargetScope === option.value}
+                    onChange={() => onInstallTargetScopeChange?.(option.value)}
+                    disabled={busy}
+                    aria-label={option.label}
+                    className="h-3.5 w-3.5"
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
             <button
               type="button"
               onClick={onPreviewInstall}
@@ -269,7 +306,7 @@ export default function SkillEditor({
               {installing ? 'Installing…' : 'Install'}
             </button>
           </div>
-        </>
+        </div>
       ) : (
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{scopeLabel}</p>
