@@ -15,6 +15,7 @@
  * - Output contracts stay deterministic and string-based for compatibility with current callers.
  *
  * Recent changes:
+ * - 2026-03-29: Switched glob-backed file discovery to the namespace `glob` helper so the package compiles under its stricter workspace tsconfig.
  * - 2026-03-27: Added package-owned executors for built-in tools.
  */
 
@@ -227,7 +228,7 @@ async function createListFilesExecutor(_options: BuiltInExecutorOptions, args: R
     const maxEntries = clamp(Number(args.maxEntries ?? DEFAULT_LIST_MAX_ENTRIES), 1, DEFAULT_LIST_MAX_ENTRIES);
     const includePattern = String(args.includePattern ?? '').trim();
 
-    const entries = await fg(['**/*'], {
+    const entries = await fg.glob(['**/*'], {
       cwd: resolvedPath,
       deep: maxDepth,
       onlyFiles: false,
@@ -267,7 +268,7 @@ async function createListFilesExecutor(_options: BuiltInExecutorOptions, args: R
 }
 
 async function collectFilesRecursively(rootPath: string): Promise<string[]> {
-  return fg(['**/*'], {
+  return fg.glob(['**/*'], {
     cwd: rootPath,
     onlyFiles: true,
     dot: true,
