@@ -16,6 +16,9 @@
  *
  * Notes:
  * - No filesystem/database access; all DB interactions are fake callback handlers.
+ *
+ * Recent changes:
+ * - 2026-03-29: Added coverage for durable `message_metadata` round-trip mapping on agent memory rows.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -236,6 +239,96 @@ describe('sqlite-storage behavior', () => {
       onRun: (sql) => (sql.includes('DELETE FROM worlds') ? { error: new Error('delete fail') } : {}),
     });
     await expect(deleteWorld(createCtx(failingDelete.db, true), 'world-1')).resolves.toBe(false);
+  });
+
+  it('round-trips message_metadata for agent turn persistence', async () => {
+    const insertedMetadata: Array<any> = [];
+    const mock = createMockDb({
+      onRun: (sql, params) => {
+        if (sql.includes('INSERT INTO agent_memory')) {
+          insertedMetadata.push(params[11]);
+        }
+        return { changes: 1 };
+      },
+      onAll: (sql) => {
+        if (sql.includes('FROM agent_memory')) {
+          return [{
+            role: 'assistant',
+            content: 'Done',
+            sender: 'agent-a',
+            chatId: 'chat-1',
+            messageId: 'assistant-1',
+            replyToMessageId: 'turn-1',
+            toolCalls: null,
+            toolCallId: null,
+            messageMetadata: JSON.stringify({
+              agentTurn: {
+                turnId: 'turn-1',
+                source: 'direct',
+                action: 'final_response',
+                outcome: 'completed',
+                updatedAt: '2026-03-29T12:00:00.000Z',
+                completion: {
+                  mechanism: 'assistant_message_metadata',
+                  completedAt: '2026-03-29T12:00:00.000Z',
+                },
+              },
+            }),
+            agentId: 'agent-a',
+            createdAt: '2026-03-29T12:00:00.000Z',
+          }];
+        }
+        return [];
+      },
+    });
+    const ctx = createCtx(mock.db, true);
+
+    await saveAgentMemory(ctx, 'world-1', 'agent-a', [{
+      role: 'assistant',
+      content: 'Done',
+      sender: 'agent-a',
+      chatId: 'chat-1',
+      messageId: 'assistant-1',
+      replyToMessageId: 'turn-1',
+      createdAt: new Date('2026-03-29T12:00:00.000Z'),
+      agentTurn: {
+        turnId: 'turn-1',
+        source: 'direct',
+        action: 'final_response',
+        outcome: 'completed',
+        updatedAt: '2026-03-29T12:00:00.000Z',
+        completion: {
+          mechanism: 'assistant_message_metadata',
+          completedAt: '2026-03-29T12:00:00.000Z',
+        },
+      },
+    } as AgentMessage]);
+
+    expect(insertedMetadata).toEqual([
+      JSON.stringify({
+        agentTurn: {
+          turnId: 'turn-1',
+          source: 'direct',
+          action: 'final_response',
+          outcome: 'completed',
+          updatedAt: '2026-03-29T12:00:00.000Z',
+          completion: {
+            mechanism: 'assistant_message_metadata',
+            completedAt: '2026-03-29T12:00:00.000Z',
+          },
+        },
+      }),
+    ]);
+
+    const messages = await getMemory(ctx, 'world-1', 'chat-1');
+    expect(messages).toHaveLength(1);
+    expect(messages[0].agentTurn).toMatchObject({
+      turnId: 'turn-1',
+      source: 'direct',
+      action: 'final_response',
+      outcome: 'completed',
+    });
+    expect(messages[0].agentTurn?.completion?.mechanism).toBe('assistant_message_metadata');
   });
 
   it('persists heartbeat fields on worlds and restores booleans/nullables', async () => {

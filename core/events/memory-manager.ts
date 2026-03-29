@@ -20,6 +20,8 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-03-29: Routed continuation model call / retry / response classification through the explicit `runAgentTurnLoop(...)` helper while preserving existing single-tool execution semantics.
+ * - 2026-03-29: Added explicit terminal assistant turn metadata support for direct and continuation loop completion.
  * - 2026-03-21: Excluded persisted display-only synthetic assistant tool-result rows from
  *   chat-title prompt assembly so title generation never re-ingests display payloads.
  * - 2026-03-13: Phase 1 — weak fallback no-commit: `pickFallbackTitle` returns '' instead of 'Chat Session' so low-signal LLM results keep the chat in 'New Chat' state.
@@ -110,6 +112,16 @@ import {
 } from './mention-logic.js';
 import { publishMessage, publishMessageWithId, publishSSE, publishEvent, publishToolEvent, isStreamingEnabled } from './publishers.js';
 import { logToolBridge } from './tool-bridge-logging.js';
+import {
+  acquireAgentTurnResumeLease,
+  buildAgentTurnResumeKey,
+  clearWaitingForToolResultMetadata,
+  isSuccessfulSendMessageDispatchResult,
+  releaseAgentTurnResumeLease,
+  setWaitingForToolResultMetadata,
+  setTerminalTurnMetadata,
+} from '../agent-turn.js';
+import { runAgentTurnLoop } from './agent-turn-loop.js';
 
 const loggerMemory = createCategoryLogger('memory');
 const loggerAgent = createCategoryLogger('agent');
@@ -626,6 +638,25 @@ export async function resumePendingToolCallsForChat(
     }
 
     const { assistantMessage, toolCall } = pending;
+    const resumeKey = buildAgentTurnResumeKey({
+      worldId: world.id,
+      agentId: agent.id,
+      chatId,
+      assistantMessageId: String(assistantMessage.messageId || '').trim() || 'unknown-assistant-message',
+      toolCallId: toolCall.id,
+    });
+    if (!acquireAgentTurnResumeLease(resumeKey)) {
+      loggerRestoreResumeTools.debug('Resume pending tool calls skipped active resume lease', {
+        worldId: world.id,
+        chatId,
+        agentId: agent.id,
+        toolCallId: toolCall.id,
+        resumeKey,
+      });
+      continue;
+    }
+
+    try {
     loggerRestoreResumeTools.debug('Resume pending tool calls found pending tool call', {
       worldId: world.id,
       chatId,
@@ -633,6 +664,7 @@ export async function resumePendingToolCallsForChat(
       toolName: toolCall.function.name,
       toolCallId: toolCall.id,
       assistantMessageId: assistantMessage.messageId || null,
+      resumeKey,
     });
     let toolArgs: Record<string, any> = {};
     try {
@@ -678,8 +710,11 @@ export async function resumePendingToolCallsForChat(
       if (assistantMessage.toolCallStatus) {
         assistantMessage.toolCallStatus[toolCall.id] = { complete: true, result: errorContent };
       }
+      clearWaitingForToolResultMetadata(assistantMessage);
       await storage.saveAgent(world.id, agent);
-      await continueLLMAfterToolExecution(world, agent, chatId);
+      await continueLLMAfterToolExecution(world, agent, chatId, {
+        turnId: assistantMessage.agentTurn?.turnId || assistantMessage.replyToMessageId || assistantMessage.messageId,
+      });
       loggerRestoreResumeTools.debug('Resume pending tool calls continued after parse error', {
         worldId: world.id,
         chatId,
@@ -731,6 +766,7 @@ export async function resumePendingToolCallsForChat(
       if (assistantMessage.toolCallStatus) {
         assistantMessage.toolCallStatus[toolCall.id] = { complete: true, result: errorContent };
       }
+      clearWaitingForToolResultMetadata(assistantMessage);
       publishToolEvent(world, {
         agentName: agent.id,
         type: 'tool-error',
@@ -744,7 +780,9 @@ export async function resumePendingToolCallsForChat(
         },
       });
       await storage.saveAgent(world.id, agent);
-      await continueLLMAfterToolExecution(world, agent, chatId);
+      await continueLLMAfterToolExecution(world, agent, chatId, {
+        turnId: assistantMessage.agentTurn?.turnId || assistantMessage.replyToMessageId || assistantMessage.messageId,
+      });
       loggerRestoreResumeTools.debug('Resume pending tool calls continued after missing tool definition', {
         worldId: world.id,
         chatId,
@@ -834,6 +872,7 @@ export async function resumePendingToolCallsForChat(
           result: serializedToolResult,
         };
       }
+      clearWaitingForToolResultMetadata(assistantMessage);
 
       const toolEnvelope = parseToolExecutionEnvelopeContent(serializedToolResult);
       const toolEventPreview = getToolEventPreviewPayload(serializedToolResult);
@@ -909,6 +948,7 @@ export async function resumePendingToolCallsForChat(
           result: errorContent,
         };
       }
+      clearWaitingForToolResultMetadata(assistantMessage);
 
       publishToolEvent(world, {
         agentName: agent.id,
@@ -932,6 +972,7 @@ export async function resumePendingToolCallsForChat(
       toolCallId: toolCall.id,
     });
     await continueLLMAfterToolExecution(world, agent, chatId, {
+      turnId: assistantMessage.agentTurn?.turnId || assistantMessage.replyToMessageId || assistantMessage.messageId,
       ...(seededLoadSkillIdForContinuation ? { preloadedSkillIds: [seededLoadSkillIdForContinuation] } : {}),
     });
     loggerRestoreResumeTools.debug('Resume pending tool calls continued LLM after tool execution', {
@@ -942,6 +983,9 @@ export async function resumePendingToolCallsForChat(
       ...(seededLoadSkillIdForContinuation ? { seededLoadSkillIdForContinuation } : {}),
     });
     resumedCount += 1;
+    } finally {
+      releaseAgentTurnResumeLease(resumeKey);
+    }
   }
 
   loggerRestoreResumeTools.debug('Resume pending tool calls completed', {
@@ -1204,6 +1248,7 @@ export async function continueLLMAfterToolExecution(
     continuationRunId?: string;
     transientContinuationInstruction?: string;
     preloadedSkillIds?: string[];
+    turnId?: string;
   }
 ): Promise<void> {
   const continuationChatId = typeof chatId === 'string' ? chatId.trim() : '';
@@ -1211,6 +1256,7 @@ export async function continueLLMAfterToolExecution(
     throw new Error(`continueLLMAfterToolExecution: explicit chatId is required for agent ${agent.id}`);
   }
   const targetChatId = continuationChatId;
+  const turnId = String(options?.turnId || '').trim() || generateId();
   const continuationRunId = String(options?.continuationRunId || '').trim() || generateId();
   const continuationScopeKey = getContinuationScopeKey(world.id, agent.id, continuationChatId);
   const enteredScope = enterContinuationScope(continuationScopeKey, continuationRunId);
@@ -1307,45 +1353,6 @@ export async function continueLLMAfterToolExecution(
       }))
     });
 
-    // Tool execution already happened before this function was called
-    // The canonical tool result is already in memory with bounded preview fields for shell output
-    // Now prepare messages for LLM - loads fresh data from storage
-
-    // Prepare messages with system prompt and complete conversation history
-    const messages = await prepareMessagesForLLM(
-      world.id,
-      agent,
-      targetChatId ?? null
-    );
-    throwIfMessageProcessingStopped(options?.abortSignal);
-
-    const llmMessages = transientGuardrailError
-      ? [
-        ...messages,
-        {
-          role: 'user',
-          content: transientGuardrailError,
-        },
-      ]
-      : messages;
-
-    loggerAgent.debug('Calling LLM with memory after tool execution', {
-      agentId: agent.id,
-      targetChatId,
-      preparedMessageCount: llmMessages.length,
-      systemMessagesInPrepared: llmMessages.filter(m => m.role === 'system').length,
-      userMessages: llmMessages.filter(m => m.role === 'user').length,
-      assistantMessages: llmMessages.filter(m => m.role === 'assistant').length,
-      toolMessages: llmMessages.filter(m => m.role === 'tool').length,
-      lastThreeMessages: llmMessages.slice(-3).map((m: any) => ({
-        role: m.role,
-        hasContent: !!m.content,
-        contentPreview: m.content?.substring(0, 100),
-        hasToolCalls: !!m.tool_calls,
-        toolCallId: m.tool_call_id
-      }))
-    });
-
     // Increment LLM call count
     agent.llmCallCount++;
     agent.lastLLMCall = new Date();
@@ -1362,44 +1369,99 @@ export async function continueLLMAfterToolExecution(
       });
     }
 
-    // Generate LLM response (streaming or non-streaming)
-    let messageId: string;
+    let messageId = '';
+    let llmResponse: import('../types.js').LLMResponse | null = null;
+    let continuationStoppedOnEmptyText = false;
 
-    let llmResponse: import('../types.js').LLMResponse;
+    await runAgentTurnLoop({
+      world,
+      agent,
+      chatId: targetChatId,
+      abortSignal: options?.abortSignal,
+      label: 'continuation',
+      emptyTextRetryLimit: maxEmptyTextRetries,
+      initialEmptyTextRetryCount: emptyTextRetryCount,
+      buildMessages: async ({ transientInstruction }) => {
+        // Tool execution already happened before this function was called.
+        // Prepare the next LLM view from persisted chat memory on each hop.
+        const messages = await prepareMessagesForLLM(
+          world.id,
+          agent,
+          targetChatId ?? null
+        );
+        throwIfMessageProcessingStopped(options?.abortSignal);
 
-    // Create a wrapped publishSSE that captures the targetChatId for concurrency-safe event routing
-    // This ensures SSE events stay bound to the originating session during tool continuation
-    const publishSSEWithChatId = (w: import('../types.js').World, data: Partial<import('../types.js').WorldSSEEvent>) => {
-      publishSSE(w, { ...data, chatId: targetChatId });
-    };
+        const effectiveInstruction = transientInstruction || transientGuardrailError;
+        transientGuardrailError = undefined;
+        const llmMessages = effectiveInstruction
+          ? [
+            ...messages,
+            {
+              role: 'user',
+              content: effectiveInstruction,
+            },
+          ]
+          : messages;
 
-    if (isStreamingEnabled()) {
-      const { streamAgentResponse } = await import('../llm-manager.js');
-      const result = await streamAgentResponse(
-        world,
-        agent,
-        llmMessages as any,
-        publishSSEWithChatId,
-        targetChatId ?? null,
-        options?.abortSignal
-      );
-      llmResponse = result.response;
-      messageId = result.messageId;
-    } else {
-      const { generateAgentResponse } = await import('../llm-manager.js');
-      const result = await generateAgentResponse(
-        world,
-        agent,
-        llmMessages as any,
-        undefined,
-        false,
-        targetChatId ?? null,
-        options?.abortSignal
-      );
-      llmResponse = result.response;
-      messageId = result.messageId;
-    }
+        loggerAgent.debug('Calling LLM with memory after tool execution', {
+          agentId: agent.id,
+          targetChatId,
+          preparedMessageCount: llmMessages.length,
+          systemMessagesInPrepared: llmMessages.filter(m => m.role === 'system').length,
+          userMessages: llmMessages.filter(m => m.role === 'user').length,
+          assistantMessages: llmMessages.filter(m => m.role === 'assistant').length,
+          toolMessages: llmMessages.filter(m => m.role === 'tool').length,
+          lastThreeMessages: llmMessages.slice(-3).map((m: any) => ({
+            role: m.role,
+            hasContent: !!m.content,
+            contentPreview: m.content?.substring(0, 100),
+            hasToolCalls: !!m.tool_calls,
+            toolCallId: m.tool_call_id
+          }))
+        });
+
+        return llmMessages as any;
+      },
+      parsePlainTextToolIntent,
+      onTextResponse: async ({ responseText, messageId: loopMessageId }) => {
+        messageId = loopMessageId;
+        llmResponse = {
+          type: 'text',
+          content: responseText,
+        } as import('../types.js').LLMResponse;
+      },
+      onToolCallsResponse: async ({ llmResponse: loopResponse, messageId: loopMessageId }) => {
+        messageId = loopMessageId;
+        llmResponse = loopResponse;
+      },
+      onEmptyTextStop: async ({ retryCount }) => {
+        continuationStoppedOnEmptyText = true;
+        loggerAgent.warn('Post-tool continuation returned empty text; stopping continuation loop', {
+          agentId: agent.id,
+          chatId: targetChatId,
+          hopCount,
+          emptyTextRetryCount: retryCount,
+          maxEmptyTextRetries,
+        });
+        publishEvent(world, 'system', {
+          message: '[Warning] Agent returned empty follow-up after tool execution. Please retry or refine the prompt.',
+          type: 'warning'
+        }, targetChatId);
+
+        logToolBridge('CONTINUE EMPTY_TEXT_STOP', {
+          worldId: world.id,
+          agentId: agent.id,
+          chatId: targetChatId,
+          emptyTextRetryCount: retryCount,
+          maxEmptyTextRetries,
+        });
+      },
+    });
     throwIfMessageProcessingStopped(options?.abortSignal);
+
+    if (continuationStoppedOnEmptyText || !llmResponse) {
+      return;
+    }
 
     loggerAgent.debug('LLM response received after tool execution', {
       agentId: agent.id,
@@ -1680,6 +1742,18 @@ export async function continueLLMAfterToolExecution(
           return acc;
         }, {} as Record<string, { complete: boolean; result: any }>),
       };
+      setWaitingForToolResultMetadata(assistantToolCallMessage, {
+        turnId,
+        source: 'continuation',
+        action: toolCall.function.name === 'send_message' ? 'agent_handoff' : 'tool_call',
+        resumeKey: buildAgentTurnResumeKey({
+          worldId: world.id,
+          agentId: agent.id,
+          chatId: targetChatId,
+          assistantMessageId: messageId,
+          toolCallId: toolCall.id,
+        }),
+      });
 
       agent.memory.push(assistantToolCallMessage);
 
@@ -1751,6 +1825,7 @@ export async function continueLLMAfterToolExecution(
             result: missingToolResult.content,
           };
         }
+        clearWaitingForToolResultMetadata(assistantToolCallMessage);
 
         publishToolEvent(world, {
           agentName: agent.id,
@@ -1814,6 +1889,7 @@ export async function continueLLMAfterToolExecution(
             result: parseErrorResult.content,
           };
         }
+        clearWaitingForToolResultMetadata(assistantToolCallMessage);
 
         publishToolEvent(world, {
           agentName: agent.id,
@@ -1878,6 +1954,7 @@ export async function continueLLMAfterToolExecution(
               result: reusedShellCommandResult,
             };
           }
+          clearWaitingForToolResultMetadata(assistantToolCallMessage);
 
           const reusedToolEnvelope = parseToolExecutionEnvelopeContent(reusedShellCommandResult);
           const reusedToolEventPreview = getToolEventPreviewPayload(reusedShellCommandResult);
@@ -1993,6 +2070,7 @@ export async function continueLLMAfterToolExecution(
             result: serializedToolResult,
           };
         }
+        clearWaitingForToolResultMetadata(assistantToolCallMessage);
 
         const toolEnvelope = parseToolExecutionEnvelopeContent(serializedToolResult);
         const toolEventPreview = getToolEventPreviewPayload(serializedToolResult);
@@ -2052,6 +2130,7 @@ export async function continueLLMAfterToolExecution(
             result: errorContent,
           };
         }
+        clearWaitingForToolResultMetadata(assistantToolCallMessage);
 
         publishToolEvent(world, {
           agentName: agent.id,
@@ -2080,11 +2159,40 @@ export async function continueLLMAfterToolExecution(
         });
       }
 
+      if (toolCall.function.name === 'send_message' && isSuccessfulSendMessageDispatchResult(
+        String(
+          agent.memory[agent.memory.length - 1]?.role === 'tool'
+            ? agent.memory[agent.memory.length - 1]?.content || ''
+            : ''
+        )
+      )) {
+        setTerminalTurnMetadata(assistantToolCallMessage, {
+          turnId,
+          source: 'continuation',
+          action: 'agent_handoff',
+          outcome: 'handoff_dispatched',
+        });
+        try {
+          const storage = await getStorageWrappers();
+          await storage.saveAgent(world.id, agent);
+        } catch (error) {
+          loggerMemory.error('Failed to save continuation handoff terminal metadata', {
+            worldId: world.id,
+            chatId: targetChatId,
+            agentId: agent.id,
+            toolCallId: toolCall.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        return;
+      }
+
       throwIfMessageProcessingStopped(options?.abortSignal);
       await continueLLMAfterToolExecution(world, agent, targetChatId, {
         ...options,
         hopCount: hopCount + 1,
         continuationRunId,
+        turnId,
       });
       return;
     }
@@ -2148,8 +2256,7 @@ export async function continueLLMAfterToolExecution(
     const responseText = llmResponse.content;
     const sanitizedResponse = removeSelfMentions(responseText, agent.id);
 
-    // Save response to agent memory with all required fields
-    agent.memory.push({
+    const assistantMessage: AgentMessage = {
       role: 'assistant',
       content: sanitizedResponse,
       messageId,
@@ -2157,7 +2264,16 @@ export async function continueLLMAfterToolExecution(
       createdAt: new Date(),
       chatId: targetChatId,
       agentId: agent.id
+    };
+    setTerminalTurnMetadata(assistantMessage, {
+      turnId,
+      source: 'continuation',
+      action: 'final_response',
+      outcome: 'completed',
     });
+
+    // Save response to agent memory with all required fields
+    agent.memory.push(assistantMessage);
 
     try {
       const storage = await getStorageWrappers();
@@ -2246,7 +2362,11 @@ export async function handleTextResponse(
   responseText: string,
   messageId: string,
   messageEvent: WorldMessageEvent,
-  chatId?: string | null
+  chatId?: string | null,
+  options?: {
+    turnId?: string;
+    source?: 'direct' | 'continuation' | 'restore';
+  }
 ): Promise<void> {
   const explicitChatId = typeof chatId === 'string' ? chatId.trim() : '';
   const messageChatId = typeof messageEvent.chatId === 'string' ? messageEvent.chatId.trim() : '';
@@ -2283,8 +2403,7 @@ export async function handleTextResponse(
     });
   }
 
-  // Save response to agent memory with all required fields
-  agent.memory.push({
+  const assistantMessage: AgentMessage = {
     role: 'assistant',
     content: finalResponse,
     messageId,
@@ -2293,7 +2412,16 @@ export async function handleTextResponse(
     chatId: targetChatId,
     replyToMessageId: messageEvent.messageId,
     agentId: agent.id
+  };
+  setTerminalTurnMetadata(assistantMessage, {
+    turnId: String(options?.turnId || messageEvent.messageId || messageId).trim() || messageId,
+    source: options?.source || 'direct',
+    action: 'final_response',
+    outcome: 'completed',
   });
+
+  // Save response to agent memory with all required fields
+  agent.memory.push(assistantMessage);
 
   try {
     const storage = await getStorageWrappers();

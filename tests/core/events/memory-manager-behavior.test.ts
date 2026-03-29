@@ -15,6 +15,7 @@
  * - No real filesystem, database, or external LLM/tool network calls.
  *
  * Recent changes:
+ * - 2026-03-29: Added coverage for terminal assistant turn metadata and in-process idempotent pending-tool resume leases.
  * - 2026-03-06: Added coverage ensuring live `tool-result` events publish envelope preview payloads instead of truncated serialized envelope JSON.
  * - 2026-03-06: Added coverage for canonical shell approval-denied failure reasons and null exit codes in continuation-persisted tool results.
  * - 2026-03-06: Updated shell continuation coverage to assert the unified bounded-preview shell result mode across default and skill-script contexts.
@@ -48,6 +49,23 @@ vi.mock('../../../core/storage/storage-factory.js', () => ({
   createStorageWithWrappers: vi.fn(async () => ({
     saveAgent: mocks.saveAgent,
     getMemory: mocks.getMemory,
+    loadWorld: vi.fn(async (worldId: string) => ({
+      id: worldId,
+      name: worldId,
+      agents: new Map(),
+      chats: new Map(),
+      eventEmitter: new EventEmitter(),
+    })),
+    listAgents: vi.fn(async () => []),
+    listChats: vi.fn(async () => [{
+      id: 'chat-1',
+      name: 'Chat 1',
+      description: null,
+      createdAt: new Date('2026-03-29T10:00:00.000Z'),
+      updatedAt: new Date('2026-03-29T10:00:00.000Z'),
+      titleProvenance: null,
+    }]),
+    saveChatData: vi.fn(async () => undefined),
   })),
 }));
 
@@ -81,6 +99,7 @@ vi.mock('../../../core/events/publishers.js', () => ({
 }));
 
 vi.mock('../../../core/logger.js', () => ({
+  initializeLogger: vi.fn(),
   createCategoryLogger: (category: string) => ({
     trace: (message: unknown, data?: unknown) => mocks.loggerCalls.push({ category, level: 'trace', message, data }),
     debug: (message: unknown, data?: unknown) => mocks.loggerCalls.push({ category, level: 'debug', message, data }),
@@ -297,6 +316,102 @@ describe('memory-manager behavior', () => {
       'chat-1',
       undefined
     );
+    const finalAssistantMessage = agent.memory.find((message) => message.role === 'assistant' && message.messageId === 'assistant-2');
+    expect(finalAssistantMessage?.agentTurn).toMatchObject({
+      turnId: expect.any(String),
+      source: 'continuation',
+      action: 'final_response',
+      outcome: 'completed',
+    });
+    expect(finalAssistantMessage?.agentTurn?.completion?.mechanism).toBe('assistant_message_metadata');
+  });
+
+  it('persists terminal assistant turn metadata for continuation text completion', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    mocks.generateAgentResponse.mockResolvedValueOnce(textResult('assistant-final-meta-1', 'All done'));
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    await continueLLMAfterToolExecution(world, agent, 'chat-1', {
+      turnId: 'turn-123',
+    });
+
+    const finalAssistantMessage = agent.memory.find((message) => message.messageId === 'assistant-final-meta-1');
+    expect(finalAssistantMessage?.agentTurn).toMatchObject({
+      turnId: 'turn-123',
+      source: 'continuation',
+      action: 'final_response',
+      outcome: 'completed',
+    });
+    expect(finalAssistantMessage?.agentTurn?.completion?.mechanism).toBe('assistant_message_metadata');
+  });
+
+  it('skips duplicate same-process resume for the same unresolved tool call', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+    world.agents.set(agent.id, agent);
+
+    vi.doMock('../../../core/mcp-server-registry.js', () => ({
+      getMCPToolsForWorld: mocks.getMCPToolsForWorld,
+    }));
+
+    let releaseExecute: ((value: string) => void) | null = null;
+    const execute = vi.fn(
+      async () =>
+        await new Promise<string>((resolve) => {
+          releaseExecute = resolve;
+        })
+    );
+
+    mocks.getMCPToolsForWorld.mockResolvedValue({
+      demo_tool: { execute },
+    });
+    mocks.generateAgentResponse.mockResolvedValueOnce(textResult('assistant-after-resume-1', 'Resume complete'));
+
+    agent.memory.push({
+      role: 'assistant',
+      content: 'Calling tool: demo_tool',
+      sender: agent.id,
+      createdAt: new Date('2026-03-29T10:00:00.000Z'),
+      chatId: 'chat-1',
+      messageId: 'assistant-pending-1',
+      replyToMessageId: 'turn-root-1',
+      agentId: agent.id,
+      tool_calls: [
+        {
+          id: 'tool-call-pending-1',
+          type: 'function',
+          function: {
+            name: 'demo_tool',
+            arguments: '{}',
+          },
+        },
+      ],
+      toolCallStatus: {
+        'tool-call-pending-1': { complete: false, result: null },
+      },
+      agentTurn: {
+        turnId: 'turn-root-1',
+        source: 'direct',
+        action: 'tool_call',
+        state: 'waiting_for_tool_result',
+        resumeKey: 'world-1:agent-a:chat-1:assistant-pending-1:tool-call-pending-1',
+        updatedAt: '2026-03-29T10:00:00.000Z',
+      },
+    } as any);
+
+    const { resumePendingToolCallsForChat } = await import('../../../core/events/memory-manager.js');
+    const firstResume = resumePendingToolCallsForChat(world, 'chat-1');
+    await Promise.resolve();
+
+    const secondResumeCount = await resumePendingToolCallsForChat(world, 'chat-1');
+    expect(secondResumeCount).toBe(0);
+    expect(execute).toHaveBeenCalledTimes(1);
+
+    releaseExecute?.('tool-result');
+    await firstResume;
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it('logs continuation tool-result persistence failures with world/chat scope', async () => {

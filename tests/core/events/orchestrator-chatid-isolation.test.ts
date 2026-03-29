@@ -13,6 +13,7 @@
  * - Keeps execution in-memory and deterministic.
  *
  * Recent Changes:
+ * - 2026-03-29: Added coverage that successful `send_message` tool execution marks the assistant tool request as terminal handoff-dispatched metadata and stops follow-up continuation.
  * - 2026-03-24: Added coverage that plain-text initial tool intents are synthesized into executable tool calls.
  * - 2026-03-24: Added coverage that empty initial LLM text responses retry once and then fail with a chat-scoped durable error instead of ending silently.
  * - 2026-03-10: Added coverage that terminal agent-turn failures publish one chat-scoped persisted `system` error event.
@@ -82,6 +83,7 @@ vi.mock('../../../core/events/memory-manager.js', () => ({
 }));
 
 vi.mock('../../../core/logger.js', () => ({
+  initializeLogger: vi.fn(),
   createCategoryLogger: (category: string) => ({
     trace: (message: unknown, data?: unknown) => mocks.loggerCalls.push({ category, level: 'trace', message, data }),
     debug: (message: unknown, data?: unknown) => mocks.loggerCalls.push({ category, level: 'debug', message, data }),
@@ -223,6 +225,54 @@ describe('processAgentMessage chat isolation', () => {
     );
   });
 
+  it('marks successful send_message tool execution as terminal handoff and skips continuation', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    mocks.generateAgentResponse.mockResolvedValueOnce({
+      response: {
+        type: 'tool_calls',
+        content: 'Calling tool: send_message',
+        tool_calls: [{
+          id: 'tool-call-send-message-1',
+          type: 'function',
+          function: {
+            name: 'send_message',
+            arguments: '{"messages":["Forward this"]}',
+          },
+        }],
+      },
+      messageId: 'assistant-tool-msg-send-1',
+    });
+
+    mocks.getMCPToolsForWorld.mockResolvedValue({
+      send_message: {
+        execute: vi.fn(async () => JSON.stringify({
+          ok: true,
+          status: 'dispatched',
+          requested: 1,
+          accepted: 1,
+          dispatched: 1,
+          failed: 0,
+          results: [{ index: 0, status: 'dispatched' }],
+        })),
+      },
+    });
+
+    const { processAgentMessage } = await import('../../../core/events/orchestrator.js');
+    await processAgentMessage(world, agent, createMessageEvent('chat-1'));
+
+    expect(mocks.continueLLMAfterToolExecution).not.toHaveBeenCalled();
+    const assistantToolRequest = agent.memory.find((message) => message.messageId === 'assistant-tool-msg-send-1');
+    expect(assistantToolRequest?.agentTurn).toMatchObject({
+      turnId: 'msg-user-1',
+      source: 'direct',
+      action: 'agent_handoff',
+      outcome: 'handoff_dispatched',
+    });
+    expect(assistantToolRequest?.agentTurn?.completion?.mechanism).toBe('assistant_message_metadata');
+  });
+
   it('logs tool execution failures with world/chat scope', async () => {
     const world = createWorld();
     const agent = createAgent();
@@ -316,13 +366,31 @@ describe('processAgentMessage chat isolation', () => {
     await processAgentMessage(world, agent, createMessageEvent('chat-1'));
 
     expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(2);
+    const retryGenerateCall = mocks.generateAgentResponse.mock.calls[1];
+    expect(retryGenerateCall?.[2]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'system',
+          content: expect.stringContaining('Do not return an empty response'),
+        }),
+      ]),
+    );
     expect(mocks.handleTextResponse).toHaveBeenCalledWith(
       world,
       agent,
       'Recovered reply',
       'assistant-recovered-1',
-      expect.objectContaining({ chatId: 'chat-1' }),
+      expect.objectContaining({
+        chatId: 'chat-1',
+        messageId: 'msg-user-1',
+        sender: 'human',
+        content: 'Run the test tool',
+      }),
       'chat-1',
+      {
+        turnId: 'msg-user-1',
+        source: 'direct',
+      },
     );
     expect(mocks.publishEvent).not.toHaveBeenCalledWith(
       world,

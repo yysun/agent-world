@@ -14,6 +14,7 @@
  * - Avoids any real provider/tool execution and filesystem-backed state.
  *
  * Recent Changes:
+ * - 2026-03-29: Updated continuation guard coverage for the extracted `runAgentTurnLoop(...)` runner and preserved retry-state assertions across continuation re-entry.
  * - 2026-03-06: Updated shell continuation guard coverage to assert the unified bounded-preview shell result mode instead of the removed `smart` branch.
  * - 2026-03-05: Added bounded empty-follow-up continuation retry coverage for recovery (retry succeeds) and exhaustion (stops after configured max retries).
  * - 2026-03-01: Added coverage that duplicate `shell_cmd` suppression ignores `output_format`/`output_detail` differences and omits those format fields from tool event payloads.
@@ -87,16 +88,6 @@ function createDeferred<T>() {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitForGenerateCallCount(count: number, timeoutMs = 250): Promise<void> {
-  const startTime = Date.now();
-  while (Date.now() - startTime < timeoutMs) {
-    if (mocks.generateAgentResponse.mock.calls.length >= count) {
-      return;
-    }
-    await delay(10);
-  }
 }
 
 function createWorld(): World {
@@ -176,9 +167,18 @@ describe('continueLLMAfterToolExecution guard', () => {
 
   it('skips duplicate concurrent continuation run for same scope', async () => {
     const deferred = createDeferred<void>();
-    mocks.generateAgentResponse.mockImplementation(async () => {
+    const runAgentTurnLoopMock = vi.fn(async () => {
       await deferred.promise;
-      return buildTextResponse('assistant-1');
+    });
+
+    vi.doMock('../../../core/events/agent-turn-loop.js', async () => {
+      const actual = await vi.importActual<typeof import('../../../core/events/agent-turn-loop.js')>(
+        '../../../core/events/agent-turn-loop.js'
+      );
+      return {
+        ...actual,
+        runAgentTurnLoop: runAgentTurnLoopMock,
+      };
     });
 
     const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
@@ -186,9 +186,7 @@ describe('continueLLMAfterToolExecution guard', () => {
     const agent = createAgent();
 
     const firstRun = continueLLMAfterToolExecution(world, agent, 'chat-1');
-
-    await waitForGenerateCallCount(1);
-    expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(1);
+    await delay(20);
 
     const secondRun = continueLLMAfterToolExecution(world, agent, 'chat-1');
     const secondRunOutcome = await Promise.race([
@@ -197,12 +195,12 @@ describe('continueLLMAfterToolExecution guard', () => {
     ]);
 
     expect(secondRunOutcome).toBe('resolved');
-    expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(1);
 
     deferred.resolve();
     await firstRun;
 
-    expect(mocks.publishMessageWithId).toHaveBeenCalledTimes(1);
+    expect(runAgentTurnLoopMock).toHaveBeenCalledTimes(1);
+    vi.doUnmock('../../../core/events/agent-turn-loop.js');
   });
 
   it('allows a new run after previous continuation completes', async () => {

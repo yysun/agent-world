@@ -9,6 +9,7 @@
  * - Comprehensive LLM provider enumeration (OpenAI, Anthropic, Azure, Google, XAI, Ollama)
  *
  * Recent Changes:
+ * - 2026-03-29: Added explicit agent-turn state/outcome metadata types for durable loop completion and resume semantics.
  * - 2026-03-13: Added optional SSE `reasoningContent` for transport-safe reasoning-token streaming.
  * - 2026-03-12: Added tool_permission enforcement via world.variables env key (no dedicated DB column).
  * - 2026-02-28: Added optional world-level message subscription cleanup handle (`_worldMessagesUnsubscriber`) for refresh-safe title listener rebinds.
@@ -86,6 +87,35 @@ export interface AgentMessage extends ChatMessage {
    * Maps tool_call_id to completion status and result payload.
    */
   toolCallStatus?: Record<string, { complete: boolean; result: any }>;
+
+  /**
+   * Explicit runtime-owned turn metadata for durable loop state and completion semantics.
+   */
+  agentTurn?: AgentTurnMetadata;
+}
+
+export type AgentTurnState = 'running' | 'waiting_for_hitl' | 'waiting_for_tool_result';
+
+export type AgentTurnOutcome = 'completed' | 'handoff_dispatched' | 'guardrailed' | 'cancelled' | 'timed_out';
+
+export type AgentTurnAction = 'tool_call' | 'agent_handoff' | 'final_response' | 'hitl_request';
+
+export type AgentTurnSource = 'direct' | 'continuation' | 'restore';
+
+export interface AgentTurnCompletionMetadata {
+  mechanism: 'assistant_message_metadata';
+  completedAt: string;
+}
+
+export interface AgentTurnMetadata {
+  turnId: string;
+  source: AgentTurnSource;
+  action?: AgentTurnAction;
+  state?: AgentTurnState;
+  outcome?: AgentTurnOutcome;
+  completion?: AgentTurnCompletionMetadata;
+  resumeKey?: string;
+  updatedAt: string;
 }
 
 // Agent Types

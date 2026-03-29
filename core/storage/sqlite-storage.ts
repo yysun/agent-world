@@ -33,6 +33,7 @@
  * - Complete type safety with proper TypeScript interfaces
  *
  * Recent Changes:
+ * - 2026-03-29: Added durable `message_metadata` persistence for assistant turn-state/outcome metadata.
  * - 2026-03-12: Removed dormant chat snapshot reads/writes; SQLite chat metadata now matches file and memory backends.
  * - 2026-02-25: Fixed `listAgents` memory hydration to parse aliased `toolCalls`/`toolCallId` fields so runtime agent memory preserves persisted tool-call metadata.
  * - 2026-02-13: Added atomic compare-and-set chat title update helper (`updateChatNameIfCurrent`).
@@ -324,7 +325,7 @@ export async function loadAgent(ctx: SQLiteStorageContext, worldId: string, agen
   if (!agentData) return null;
   const memoryData = await all(ctx, `
     SELECT role, content, sender, chat_id as chatId, message_id as messageId, reply_to_message_id as replyToMessageId, 
-           tool_calls as toolCalls, tool_call_id as toolCallId, created_at as createdAt
+           tool_calls as toolCalls, tool_call_id as toolCallId, message_metadata as messageMetadata, created_at as createdAt
     FROM agent_memory
     WHERE agent_id = ? AND world_id = ?
     ORDER BY created_at ASC
@@ -340,7 +341,8 @@ export async function loadAgent(ctx: SQLiteStorageContext, worldId: string, agen
       createdAt: msg.createdAt ? new Date(msg.createdAt) : new Date(),
       chatId: msg.chatId, // Preserve chatId field
       tool_calls: (msg as any).toolCalls ? JSON.parse((msg as any).toolCalls) : undefined,
-      tool_call_id: (msg as any).toolCallId || undefined
+      tool_call_id: (msg as any).toolCallId || undefined,
+      agentTurn: (msg as any).messageMetadata ? JSON.parse((msg as any).messageMetadata).agentTurn : undefined,
     })),
   } as Agent;
   return agent;
@@ -371,7 +373,7 @@ export async function listAgents(ctx: SQLiteStorageContext, worldId: string): Pr
   for (const agentData of agents) {
     const memoryData = await all(ctx, `
       SELECT role, content, sender, chat_id as chatId, message_id as messageId, reply_to_message_id as replyToMessageId,
-             tool_calls as toolCalls, tool_call_id as toolCallId, created_at as createdAt
+             tool_calls as toolCalls, tool_call_id as toolCallId, message_metadata as messageMetadata, created_at as createdAt
       FROM agent_memory
       WHERE agent_id = ? AND world_id = ?
       ORDER BY created_at ASC
@@ -388,7 +390,8 @@ export async function listAgents(ctx: SQLiteStorageContext, worldId: string): Pr
         chatId: msg.chatId, // Preserve chatId field
         replyToMessageId: msg.replyToMessageId, // Preserve replyToMessageId field
         tool_calls: (msg as any).toolCalls ? JSON.parse((msg as any).toolCalls) : undefined,
-        tool_call_id: (msg as any).toolCallId || undefined
+        tool_call_id: (msg as any).toolCallId || undefined,
+        agentTurn: (msg as any).messageMetadata ? JSON.parse((msg as any).messageMetadata).agentTurn : undefined,
       })),
     } as Agent;
     result.push(agent);
@@ -414,13 +417,17 @@ export async function saveAgentMemory(ctx: SQLiteStorageContext, worldId: string
 
   for (const message of filteredMemory) {
     await run(ctx, `
-      INSERT INTO agent_memory (agent_id, world_id, role, content, sender, chat_id, message_id, reply_to_message_id, tool_calls, tool_call_id, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO agent_memory (
+        agent_id, world_id, role, content, sender, chat_id, message_id, reply_to_message_id,
+        tool_calls, tool_call_id, created_at, message_metadata
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
       agentId, worldId, message.role, message.content, message.sender, message.chatId, message.messageId, message.replyToMessageId,
       message.tool_calls ? JSON.stringify(message.tool_calls) : null,
       message.tool_call_id || null,
-      message.createdAt instanceof Date ? message.createdAt.toISOString() : (message.createdAt || new Date().toISOString())
+      message.createdAt instanceof Date ? message.createdAt.toISOString() : (message.createdAt || new Date().toISOString()),
+      message.agentTurn ? JSON.stringify({ agentTurn: message.agentTurn }) : null,
     );
   }
 }
@@ -439,7 +446,7 @@ export async function getMemory(ctx: SQLiteStorageContext, worldId: string, chat
   await ensureInitialized(ctx);
   const rows = await all(ctx, `
     SELECT role, content, sender, chat_id as chatId, message_id as messageId, reply_to_message_id as replyToMessageId,
-           tool_calls as toolCalls, tool_call_id as toolCallId, agent_id as agentId, created_at as createdAt
+           tool_calls as toolCalls, tool_call_id as toolCallId, message_metadata as messageMetadata, agent_id as agentId, created_at as createdAt
     FROM agent_memory
     WHERE world_id = ? AND (? = '' OR chat_id = ?)
     ORDER BY datetime(created_at) ASC, rowid ASC
@@ -454,6 +461,7 @@ export async function getMemory(ctx: SQLiteStorageContext, worldId: string, chat
     replyToMessageId: r.replyToMessageId, // FIX: Include replyToMessageId from database
     tool_calls: r.toolCalls ? JSON.parse(r.toolCalls) : undefined,
     tool_call_id: r.toolCallId || undefined,
+    agentTurn: r.messageMetadata ? JSON.parse(r.messageMetadata).agentTurn : undefined,
     agentId: r.agentId,
     createdAt: r.createdAt ? new Date(r.createdAt) : new Date()
   }));
