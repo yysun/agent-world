@@ -16,6 +16,7 @@
  * - Tests are fully deterministic.
  *
  * Recent Changes:
+ * - 2026-03-29: Added regression coverage for queued turns that stay in `sending` while persisted turn metadata is waiting for tool results, and only complete after terminal metadata is present.
  * - 2026-03-12: Added regression coverage for sequential completed turns in the same chat so queue
  *   completion listeners fully detach/re-attach and later rows do not stick in `sending`.
  * - 2026-03-09: Initial tests added as part of queue-manager extraction.
@@ -267,6 +268,103 @@ describe('queue-manager', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(queueMessages).toEqual([]);
+    });
+
+    it('keeps a queued turn in sending while persisted turn metadata is waiting for a tool result, then removes it after terminal metadata appears', async () => {
+      const persistedMemory: any[] = [];
+      const storageWrappers = buildQueueStorageWrappers(queueMessages);
+      storageWrappers.getMemory = vi.fn().mockImplementation(async () => [...persistedMemory]);
+      overrideStorageForTests(storageWrappers);
+
+      const world = makeWorld({
+        agents: new Map([
+          ['agent-1', {
+            id: 'agent-1',
+            name: 'Agent 1',
+            type: 'assistant',
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            llmCallCount: 0,
+            autoReply: true,
+            status: 'active',
+            memory: [],
+          }],
+        ]),
+      });
+      const chatId = 'chat-add';
+      const turnId = 'test-msg-queue-waiting-1';
+
+      await addToQueue('world-q', chatId, 'tool-backed turn', 'human', {
+        triggerProcessing: true,
+        targetWorld: world,
+        preassignedMessageId: turnId,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(queueMessages).toHaveLength(1);
+      expect(queueMessages[0]?.status).toBe('sending');
+
+      persistedMemory.splice(0, persistedMemory.length, {
+        role: 'assistant',
+        content: 'Calling tool',
+        sender: 'agent-1',
+        messageId: 'assistant-tool-1',
+        chatId,
+        createdAt: new Date('2026-03-29T12:00:00.000Z'),
+        agentTurn: {
+          turnId,
+          source: 'direct',
+          action: 'tool_call',
+          state: 'waiting_for_tool_result',
+          updatedAt: '2026-03-29T12:00:00.000Z',
+        },
+      });
+
+      world.eventEmitter.emit('world', {
+        type: 'response-start',
+        chatId,
+        activeChatIds: [chatId],
+      });
+      world.eventEmitter.emit('world', {
+        type: 'idle',
+        chatId,
+        activeChatIds: [],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(queueMessages).toHaveLength(1);
+      expect(queueMessages[0]?.messageId).toBe(turnId);
+      expect(queueMessages[0]?.status).toBe('sending');
+
+      persistedMemory.splice(0, persistedMemory.length, {
+        role: 'assistant',
+        content: 'Done',
+        sender: 'agent-1',
+        messageId: 'assistant-final-1',
+        chatId,
+        createdAt: new Date('2026-03-29T12:00:05.000Z'),
+        agentTurn: {
+          turnId,
+          source: 'continuation',
+          action: 'final_response',
+          outcome: 'completed',
+          updatedAt: '2026-03-29T12:00:05.000Z',
+          completion: {
+            mechanism: 'assistant_message_metadata',
+            completedAt: '2026-03-29T12:00:05.000Z',
+          },
+        },
+      });
+
+      world.eventEmitter.emit('world', {
+        type: 'idle',
+        chatId,
+        activeChatIds: [],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(queueMessages).toEqual([]);
+      expect(storageWrappers.removeQueuedMessage).toHaveBeenCalledWith(turnId);
     });
   });
 

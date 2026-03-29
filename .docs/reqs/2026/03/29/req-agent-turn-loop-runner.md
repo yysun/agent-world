@@ -179,7 +179,7 @@ The result is a runtime that behaves like an agent harness, but does not yet pre
 - [ ] Tool calls, HITL requests, handoffs, and final responses are representable as loop-owned actions rather than unrelated side paths.
 - [x] A `send_message` handoff is visible as a loop-owned action outcome and can participate in persistence/recovery rules.
 - [x] Phase 1 uses structured completion metadata on the terminal assistant response as the canonical completion mechanism.
-- [ ] Restore and replay can reconstruct interrupted loop state from persisted artifacts without relying on a hidden transient loop owner.
+- [x] Restore and replay can reconstruct interrupted loop state from persisted artifacts without relying on a hidden transient loop owner.
 - [ ] Repeating resume against the same persisted in-flight turn does not duplicate tool calls, handoffs, assistant finalization, or queue advancement.
 - [x] Existing world/chat isolation and current queue/HITL recovery rules remain intact.
 - [x] The initial delivery preserves conservative single-tool execution semantics for unsafe or mutating actions.
@@ -196,12 +196,13 @@ The result is a runtime that behaves like an agent harness, but does not yet pre
 - Routed both direct initial turns and post-tool continuation turns through `runAgentTurnLoop(...)` for model-call ownership.
 - Marked successful `send_message` dispatches as terminal `handoff_dispatched` outcomes.
 - Added same-process resume leases for unresolved tool-call restoration to reduce duplicate resume side effects.
+- Made queue completion consume persisted turn lifecycle metadata so queued user turns stay live across durable tool waits and only clear on terminal turn metadata.
+- Made stale `sending` restore recovery remove rows when persisted terminal turn metadata already exists instead of replaying or erroring those turns.
 
 ### Explicitly not finished yet
 
 - Tool execution and full action dispatch are still implemented in `orchestrator.ts` and `memory-manager.ts`, not fully absorbed into `runAgentTurnLoop(...)`.
 - HITL is not yet normalized into the same first-class action boundary.
-- Queue progression and restore logic do not yet key primarily off terminal completion metadata.
 - Resume idempotency is improved for unresolved tool resumes, but not yet complete for all terminal publication and queue-advancement paths.
 - Global LLM queue narrowing is still deferred.
 

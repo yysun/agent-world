@@ -8,6 +8,7 @@
  * - Stable turn resume-key generation for unresolved tool-call resumes.
  * - Helpers for waiting-tool and terminal assistant metadata.
  * - Detection of successful `send_message` handoff dispatch results.
+ * - Read-model helper to resolve persisted turn lifecycle state from chat messages.
  * - In-process resume leases to prevent duplicate same-turn resume execution.
  *
  * Implementation Notes:
@@ -15,6 +16,7 @@
  * - Resume leases are intentionally process-local; persisted transcript state remains authoritative.
  *
  * Recent Changes:
+ * - 2026-03-29: Added persisted turn lifecycle read-model helper for queue/restore terminality decisions.
  * - 2026-03-29: Initial helper module for explicit agent-turn loop metadata and resume guards.
  */
 
@@ -138,4 +140,104 @@ export function releaseAgentTurnResumeLease(resumeKey: string): void {
     return;
   }
   activeResumeLeases.delete(normalized);
+}
+
+export type AgentTurnLifecycleState =
+  | { status: 'terminal'; outcome: AgentTurnOutcome; action?: AgentTurnAction; messageId?: string }
+  | { status: 'waiting_for_tool_result'; action?: AgentTurnAction; messageId?: string }
+  | { status: 'waiting_for_hitl'; action?: AgentTurnAction; messageId?: string }
+  | { status: 'running'; action?: AgentTurnAction; messageId?: string }
+  | { status: 'missing' };
+
+function getMetadataTimestamp(message: AgentMessage, metadata: AgentTurnMetadata): number {
+  const completionTime = String(metadata.completion?.completedAt || '').trim();
+  if (completionTime) {
+    const parsed = Date.parse(completionTime);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  const updatedTime = String(metadata.updatedAt || '').trim();
+  if (updatedTime) {
+    const parsed = Date.parse(updatedTime);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  const createdAt = message.createdAt instanceof Date
+    ? message.createdAt.getTime()
+    : Date.parse(String(message.createdAt || ''));
+  return Number.isFinite(createdAt) ? createdAt : 0;
+}
+
+export function readAgentTurnLifecycleFromMessages(
+  messages: AgentMessage[],
+  params: {
+    turnId: string;
+    chatId?: string | null;
+  }
+): AgentTurnLifecycleState {
+  const turnId = String(params.turnId || '').trim();
+  if (!turnId) {
+    return { status: 'missing' };
+  }
+
+  const normalizedChatId = String(params.chatId || '').trim();
+  const scopedMessages = (Array.isArray(messages) ? messages : []).filter((message) => {
+    if (!normalizedChatId) {
+      return true;
+    }
+    return String(message?.chatId || '').trim() === normalizedChatId;
+  });
+
+  const matchingEntries = scopedMessages
+    .map((message) => ({
+      message,
+      metadata: message.agentTurn,
+    }))
+    .filter((entry): entry is { message: AgentMessage; metadata: AgentTurnMetadata } => {
+      return Boolean(entry.metadata && String(entry.metadata.turnId || '').trim() === turnId);
+    })
+    .sort((left, right) => getMetadataTimestamp(right.message, right.metadata) - getMetadataTimestamp(left.message, left.metadata));
+
+  if (matchingEntries.length === 0) {
+    return { status: 'missing' };
+  }
+
+  const terminalEntry = matchingEntries.find((entry) => Boolean(entry.metadata.outcome));
+  if (terminalEntry?.metadata.outcome) {
+    return {
+      status: 'terminal',
+      outcome: terminalEntry.metadata.outcome,
+      action: terminalEntry.metadata.action,
+      messageId: terminalEntry.message.messageId,
+    };
+  }
+
+  const waitingHitlEntry = matchingEntries.find((entry) => entry.metadata.state === 'waiting_for_hitl');
+  if (waitingHitlEntry) {
+    return {
+      status: 'waiting_for_hitl',
+      action: waitingHitlEntry.metadata.action,
+      messageId: waitingHitlEntry.message.messageId,
+    };
+  }
+
+  const waitingToolEntry = matchingEntries.find((entry) => entry.metadata.state === 'waiting_for_tool_result');
+  if (waitingToolEntry) {
+    return {
+      status: 'waiting_for_tool_result',
+      action: waitingToolEntry.metadata.action,
+      messageId: waitingToolEntry.message.messageId,
+    };
+  }
+
+  const runningEntry = matchingEntries[0];
+  return {
+    status: 'running',
+    action: runningEntry.metadata.action,
+    messageId: runningEntry.message.messageId,
+  };
 }

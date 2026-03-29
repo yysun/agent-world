@@ -22,6 +22,7 @@
  * - All other dependencies (events/index.js, storage-init.ts, etc.) are static.
  *
  * Recent Changes:
+ * - 2026-03-29: Switched queue completion and stale-sending recovery to prefer persisted turn metadata for terminality, with waiting-tool turns remaining in-flight until terminal completion.
  * - 2026-03-22: Made queue dispatch failure messages user-facing and mention-aware so
  *   missing targeted agents surface as "no agent '@name' found in this world" instead of
  *   exposing the internal `no-responder-preflight` reason code.
@@ -52,6 +53,7 @@ import {
 } from './events/index.js';
 import { listPendingHitlPromptEventsFromMessages } from './hitl.js';
 import { nanoid } from 'nanoid';
+import { readAgentTurnLifecycleFromMessages } from './agent-turn.js';
 import type {
   World, Agent, QueuedMessage, StorageAPI, WorldMessageEvent,
 } from './types.js';
@@ -328,6 +330,8 @@ async function runQueueResponderPreflight(
 
 type StaleSendingRecoveryDecision =
   | { action: 'recover'; reason: string }
+  | { action: 'remove'; reason: string }
+  | { action: 'keep-sending'; reason: string }
   | { action: 'mark-error'; reason: string };
 
 async function resolveStaleSendingRecoveryDecision(
@@ -366,6 +370,22 @@ async function resolveStaleSendingRecoveryDecision(
   const currentMemory = typeof storageWrappers?.getMemory === 'function'
     ? await storageWrappers.getMemory(world.id, chatId)
     : [];
+  const turnLifecycle = readAgentTurnLifecycleFromMessages(
+    Array.isArray(currentMemory) ? currentMemory : [],
+    { turnId: messageId, chatId },
+  );
+  if (turnLifecycle.status === 'terminal') {
+    return {
+      action: 'remove',
+      reason: `terminal-turn:${turnLifecycle.outcome}`,
+    };
+  }
+  if (turnLifecycle.status === 'waiting_for_tool_result') {
+    return {
+      action: 'keep-sending',
+      reason: 'waiting_for_tool_result',
+    };
+  }
   const pendingHitlPrompts = listPendingHitlPromptEventsFromMessages(
     Array.isArray(currentMemory) ? currentMemory : [],
     chatId,
@@ -520,12 +540,8 @@ function attachQueueAdvanceListener(world: World, chatId: string): void {
     const activeChatIds: string[] = payload.activeChatIds || [];
     if (activeChatIds.includes(chatId)) return; // this chat is still processing
 
-    // Chat processing just completed — clean up listener
-    detachQueueAdvanceListener(world, chatId);
-
     void (async () => {
       const inFlightMessageId = queueDispatchStateByChat.get(listenerKey)?.messageId || null;
-      queueDispatchStateByChat.delete(listenerKey);
       try {
         if (!inFlightMessageId) {
           loggerQueue.warn('Queue completion observed without tracked in-flight message', {
@@ -536,9 +552,36 @@ function attachQueueAdvanceListener(world: World, chatId: string): void {
         }
 
         const queueStorage = getQueueStorageOrThrow('attachQueueAdvanceListener');
+        const currentMemory = typeof storageWrappers?.getMemory === 'function'
+          ? await storageWrappers.getMemory(world.id, chatId)
+          : [];
+        const turnLifecycle = readAgentTurnLifecycleFromMessages(
+          Array.isArray(currentMemory) ? currentMemory : [],
+          { turnId: inFlightMessageId, chatId },
+        );
+        if (turnLifecycle.status === 'waiting_for_tool_result' || turnLifecycle.status === 'waiting_for_hitl') {
+          loggerQueue.debug('Queue completion deferred because turn is still durably waiting', {
+            worldId: world.id,
+            chatId,
+            messageId: inFlightMessageId,
+            turnStatus: turnLifecycle.status,
+          });
+          return;
+        }
+
+        detachQueueAdvanceListener(world, chatId);
+        queueDispatchStateByChat.delete(listenerKey);
         const messages = await queueStorage.getQueuedMessages(world.id, chatId);
         const sendingMsg = messages?.find((m: QueuedMessage) => m.messageId === inFlightMessageId && m.status === 'sending');
         if (sendingMsg) {
+          if (turnLifecycle.status !== 'terminal') {
+            loggerQueue.warn('Queue completion fell back to legacy sending-row removal without terminal turn metadata', {
+              worldId: world.id,
+              chatId,
+              messageId: inFlightMessageId,
+              turnStatus: turnLifecycle.status,
+            });
+          }
           // Successful completion — remove from queue (message now lives in agent_memory)
           await queueStorage.removeQueuedMessage(sendingMsg.messageId);
           clearQueueResponderRefreshAttempt(world.id, chatId, sendingMsg.messageId);
@@ -595,6 +638,35 @@ function scheduleQueueNoResponseFallback(world: World, chatId: string, messageId
         const messages = await queueStorage.getQueuedMessages(world.id, chatId);
         const sendingMessage = messages?.find((m: QueuedMessage) => m.messageId === messageId && m.status === 'sending');
         if (!sendingMessage) return;
+        const currentMemory = typeof storageWrappers?.getMemory === 'function'
+          ? await storageWrappers.getMemory(world.id, chatId)
+          : [];
+        const turnLifecycle = readAgentTurnLifecycleFromMessages(
+          Array.isArray(currentMemory) ? currentMemory : [],
+          { turnId: messageId, chatId },
+        );
+        if (turnLifecycle.status === 'terminal') {
+          await queueStorage.removeQueuedMessage(messageId);
+          clearQueueResponderRefreshAttempt(world.id, chatId, messageId);
+          queueDispatchStateByChat.delete(queueKey);
+          world._queuedChatIds?.delete(chatId);
+          loggerQueue.debug('Queue fallback removed sending row because persisted turn is already terminal', {
+            worldId: world.id,
+            chatId,
+            messageId,
+            outcome: turnLifecycle.outcome,
+          });
+          return;
+        }
+        if (turnLifecycle.status === 'waiting_for_tool_result' || turnLifecycle.status === 'waiting_for_hitl') {
+          loggerQueue.debug('Queue fallback skipped because persisted turn is durably waiting', {
+            worldId: world.id,
+            chatId,
+            messageId,
+            turnStatus: turnLifecycle.status,
+          });
+          return;
+        }
 
         await handleQueueDispatchFailure(world, chatId, messageId, 'no-response-timeout', {
           content: sendingMessage.content,
@@ -675,8 +747,30 @@ export function triggerPendingQueueResume(
           messageIds: staleSendingMessages.map((m: QueuedMessage) => m.messageId),
         });
 
+        let hasBlockingSendingTurn = false;
         for (const staleMessage of staleSendingMessages) {
           const decision = await resolveStaleSendingRecoveryDecision(world, chatId, staleMessage.messageId);
+          if (decision.action === 'remove') {
+            await queueStorage.removeQueuedMessage(staleMessage.messageId);
+            clearQueueResponderRefreshAttempt(world.id, chatId, staleMessage.messageId);
+            loggerQueue.debug('Removed stale sending queue message because persisted turn is already terminal', {
+              worldId: world.id,
+              chatId,
+              messageId: staleMessage.messageId,
+              reason: decision.reason,
+            });
+            continue;
+          }
+          if (decision.action === 'keep-sending') {
+            hasBlockingSendingTurn = true;
+            loggerQueue.debug('Kept stale sending queue message in-flight because persisted turn is still waiting', {
+              worldId: world.id,
+              chatId,
+              messageId: staleMessage.messageId,
+              reason: decision.reason,
+            });
+            continue;
+          }
           if (decision.action === 'mark-error') {
             await queueStorage.updateMessageQueueStatus(staleMessage.messageId, 'error');
             loggerQueue.debug('Marked stale sending queue message error during resume', {
@@ -698,6 +792,13 @@ export function triggerPendingQueueResume(
         }
 
         messages = await queueStorage.getQueuedMessages(world.id, chatId);
+        if (hasBlockingSendingTurn) {
+          loggerQueue.debug('Queue resume stopped because a sending turn is still durably waiting', {
+            worldId: world.id,
+            chatId,
+          });
+          return;
+        }
       }
 
       nextMessage = messages?.find((m: QueuedMessage) => m.status === 'queued');

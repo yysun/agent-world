@@ -18,6 +18,7 @@
  * - Verifies queue status updates and publish calls as observable outcomes.
  *
  * Recent Changes:
+ * - 2026-03-29: Added terminal-turn metadata recovery coverage so stale `sending` rows are removed instead of retried when persisted completion is already present.
  * - 2026-03-10: Removed memory-based restore resend and narrowed auto-resume to queue-owned recovery only.
  * - 2026-03-10: Added pending-HITL recovery coverage so stale `sending` rows do not auto-resume across persisted approval boundaries.
  */
@@ -252,6 +253,75 @@ describe('restore-time queue-owned auto-resume guardrails', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(storageWrappers.updateMessageQueueStatus).toHaveBeenCalledWith('user-last-1', 'error');
+    expect(publishMessageWithId).not.toHaveBeenCalled();
+  });
+
+  it('removes a stale sending row when persisted turn metadata is already terminal', async () => {
+    vi.resetModules();
+
+    const storageWrappers = buildBaseStorageWrappers({
+      getEventsByWorldAndChat: createLatestEventQueryMock({
+        message: [
+          createStoredEvent(1, 'message', 'user-last-1', { content: 'hi', sender: 'human', role: 'user' }),
+        ],
+        sse: [],
+      }),
+    });
+    storageWrappers.getMemory = vi.fn().mockResolvedValue([
+      {
+        role: 'user',
+        content: 'hi',
+        sender: 'human',
+        messageId: 'user-last-1',
+        chatId: 'chat-2',
+        createdAt: new Date('2026-01-01T10:00:00Z'),
+      },
+      {
+        role: 'assistant',
+        content: 'Done',
+        sender: 'agent-1',
+        messageId: 'assistant-terminal-1',
+        chatId: 'chat-2',
+        createdAt: new Date('2026-01-01T10:00:05Z'),
+        agentTurn: {
+          turnId: 'user-last-1',
+          source: 'direct',
+          action: 'final_response',
+          outcome: 'completed',
+          updatedAt: '2026-01-01T10:00:05.000Z',
+          completion: {
+            mechanism: 'assistant_message_metadata',
+            completedAt: '2026-01-01T10:00:05.000Z',
+          },
+        },
+      },
+    ]);
+    storageWrappers.getQueuedMessages = vi.fn()
+      .mockResolvedValueOnce([
+        {
+          messageId: 'user-last-1',
+          chatId: 'chat-2',
+          content: 'hi',
+          sender: 'human',
+          status: 'sending',
+          retryCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    mockStorageFactory(storageWrappers);
+
+    const { publishMessageWithId } = await setupCommonMocks();
+    const managers = await import('../../core/managers.js');
+
+    const restored = await managers.restoreChat('world-1', 'chat-2');
+    expect(restored).not.toBeNull();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(storageWrappers.removeQueuedMessage).toHaveBeenCalledWith('user-last-1');
+    expect(storageWrappers.updateMessageQueueStatus).not.toHaveBeenCalledWith('user-last-1', 'error');
     expect(publishMessageWithId).not.toHaveBeenCalled();
   });
 

@@ -25,13 +25,15 @@ Phase 1 keeps the existing conservative single-tool execution behavior. It does 
 - Terminal assistant completion metadata is persisted through `agent_memory.message_metadata`.
 - Successful `send_message` tool dispatches now terminate as `handoff_dispatched`.
 - Restore-time unresolved tool resumes now use a process-local resume lease to reduce duplicate same-turn execution.
+- Queue completion and stale-`sending` recovery now prefer persisted `agentTurn` lifecycle metadata over assistant-text presence.
+- Live queued turns remain in `sending` while persisted turn state is `waiting_for_tool_result`, and only complete after terminal metadata is present.
 - Regression coverage was added for terminal metadata, handoff terminality, retry semantics, and same-process resume duplication.
 
 ### Remaining
 
 - Tool execution and action dispatch are still split across `orchestrator.ts` and `memory-manager.ts`.
 - HITL has not yet been normalized under the same action boundary.
-- Queue progression and restore do not yet consume completion metadata as their primary terminality signal.
+- Queue/restore now consume persisted turn lifecycle metadata for terminality, but action/result normalization and broader queue idempotency are still unfinished.
 - Phase 1 still lacks an explicit “one tool call per hop” regression test.
 - Global LLM queue narrowing remains a later phase.
 
@@ -171,8 +173,8 @@ flowchart TD
 ### Phase 3: Final Response and Completion Metadata
 
 - [x] Persist structured completion metadata with the terminal assistant response.
-- [ ] Make queue progression consume completion metadata instead of assistant-text presence.
-- [ ] Make restore logic respect the same completion metadata.
+- [x] Make queue progression consume completion metadata instead of assistant-text presence.
+- [x] Make restore logic respect the same completion metadata.
 - [ ] Ensure terminal assistant publication stays single-shot under repeated resume attempts.
 
 ### Phase 4: Action Normalization
@@ -194,7 +196,7 @@ flowchart TD
 
 ### Phase 6: Queue and Restore Integration
 
-- [ ] Update queue progression to rely on terminal completion metadata and terminal outcome.
+- [x] Update queue progression to rely on terminal completion metadata and terminal outcome.
 - [ ] Preserve the rule that only queue-owned user turns auto-resume.
 - [ ] Preserve durable failed-turn recovery semantics and do not auto-retry failed user turns.
 - [ ] Preserve HITL reconstruction from persisted messages.
@@ -205,6 +207,7 @@ flowchart TD
 - [x] Add a regression test proving a terminal assistant response carries the expected completion metadata.
 - [x] Add a regression test proving repeated resume of the same persisted turn is idempotent.
 - [x] Add a regression test proving `send_message` handoff is recorded as a loop-owned action with terminal outcome `handoff_dispatched`.
+- [x] Add queue/restore regression coverage proving waiting-tool turns remain in-flight until persisted terminal metadata exists.
 - [ ] Add a regression test proving Phase 1 still executes at most one tool call per hop.
 - [x] Run `npm run integration` because queue/restore/runtime transport paths are in scope.
 
