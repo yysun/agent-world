@@ -6,14 +6,14 @@
  *
  * Key Features:
  * - Verifies the root TypeScript config maps `@agent-world/llm` to the workspace package boundary.
- * - Verifies the `core` TypeScript config preserves the same package-boundary resolution contract for direct workspace checks.
+ * - Verifies the `core` TypeScript config no longer carries a temporary direct package-path override.
  *
  * Notes on Implementation:
  * - Reads the real tsconfig files because the contract is the checked-in compiler configuration.
  * - Keeps coverage fast and deterministic without invoking `tsc` from the test process.
  *
  * Summary of Recent Changes:
- * - 2026-03-29: Added regression coverage for `@agent-world/llm` workspace path mapping.
+ * - 2026-03-29: Added regression coverage for root package mapping and removal of the temporary core override.
  */
 
 import { readFileSync } from 'node:fs';
@@ -49,12 +49,10 @@ describe('workspace TypeScript package resolution', () => {
     ]);
   });
 
-  it('maps @agent-world/llm from the core tsconfig to the workspace package boundary', () => {
+  it('does not keep a temporary @agent-world/llm path override in the core tsconfig', () => {
     const coreTsconfig = readTsConfig('core/tsconfig.json');
 
-    expect(coreTsconfig.compilerOptions?.baseUrl).toBe('.');
-    expect(coreTsconfig.compilerOptions?.paths?.['@agent-world/llm']).toEqual([
-      '../packages/llm',
-    ]);
+    expect(coreTsconfig.compilerOptions?.baseUrl).toBeUndefined();
+    expect(coreTsconfig.compilerOptions?.paths?.['@agent-world/llm']).toBeUndefined();
   });
 });

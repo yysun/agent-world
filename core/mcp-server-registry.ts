@@ -107,6 +107,7 @@
  * Scenario-based logging: Split into lifecycle, connection, tools, execution (October 2025)
  * Lifecycle management: Connection resilience and automatic reconnection (November 2025)
  * Explicit execution safety system: Replaced heuristic detection with structured metadata (November 2025)
+ * 2026-03-29: Restored core-owned `human_intervention_request` registration and removed the temporary package-backed HITL bridge.
  * 2026-02-20: Added built-in `human_intervention_request` tool registration for generic human-in-the-loop prompts.
  * 2026-02-20: Added built-in `create_agent` tool registration for approval-gated agent creation.
  * 2026-02-14: Added built-in `load_skill` tool registration for progressive skill instruction loading.
@@ -125,13 +126,10 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import {
-  resolveTools,
-  type LLMToolDefinition as PackageToolDefinition,
-} from '@agent-world/llm';
 import { getWorld } from './managers.js';
 import { createCategoryLogger } from './logger.js';
 import { createCreateAgentToolDefinition } from './create-agent-tool.js';
+import { createHitlToolDefinition } from './hitl-tool.js';
 import { createSendMessageToolDefinition } from './send-message-tool.js';
 import {
   createReadFileToolDefinition,
@@ -146,8 +144,6 @@ import { wrapToolWithValidation } from './tool-utils.js';
 import { type World } from './types.js';
 import { RELIABILITY_CONFIG } from './reliability-config.js';
 import { startChatScopedWaitStatusEmitter } from './reliability-runtime.js';
-import { getEnvValueFromText } from './utils.js';
-import { requestWorldOption, type HitlOption } from './hitl.js';
 
 // Scenario-based loggers for different MCP operations
 const lifecycleLogger = createCategoryLogger('mcp.lifecycle');
@@ -1780,200 +1776,29 @@ export async function updateMCPServersForWorld(worldId: string, newMcpConfig: st
  * 
  * @returns Record of built-in tool definitions
  */
-function resolveDefaultOptionId(options: HitlOption[], defaultOption: string | undefined): string | undefined {
-  const normalizedDefault = String(defaultOption || '').trim().toLowerCase();
-  if (!normalizedDefault) {
-    return undefined;
-  }
-
-  const explicitMatch = options.find((option) => option.label.toLowerCase() === normalizedDefault);
-  if (explicitMatch) {
-    return explicitMatch.id;
-  }
-
-  const shorthandPattern = new RegExp(`^${normalizedDefault.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\b|[\\s,;:()\\-])`, 'i');
-  const shorthandMatches = options.filter((option) => shorthandPattern.test(option.label));
-  return shorthandMatches.length === 1 ? shorthandMatches[0]?.id : undefined;
-}
-
-function isPendingHitlToolResult(value: unknown): value is {
-  status: 'pending';
-  pending: true;
-  requestId: string;
-  question: string;
-  options: string[];
-  defaultOption?: string;
-  timeoutMs?: number;
-  metadata?: Record<string, unknown>;
-} {
-  return !!value
-    && typeof value === 'object'
-    && (value as any).status === 'pending'
-    && (value as any).pending === true
-    && typeof (value as any).question === 'string'
-    && Array.isArray((value as any).options);
-}
-
-function buildHitlFinalResult(options: {
-  requestId: string;
-  selectedOption: string | null;
-  status: 'confirmed' | 'timeout' | 'error';
-  source: 'user' | 'timeout' | 'system';
-  message?: string;
-}): string {
-  const ok = options.status === 'confirmed';
-  return JSON.stringify({
-    ok,
-    status: options.status,
-    confirmed: ok,
-    selectedOption: options.selectedOption,
-    source: options.source,
-    requestId: options.requestId,
-    message: options.message,
-  });
-}
-
-async function bridgePendingHitlToolResult(pendingResult: {
-  requestId: string;
-  question: string;
-  options: string[];
-  defaultOption?: string;
-  timeoutMs?: number;
-  metadata?: Record<string, unknown>;
-}, context?: {
-  world?: World | null;
-  chatId?: string | null;
-  agentName?: string | null;
-  toolCallId?: string;
-}): Promise<string> {
-  const world = context?.world ?? null;
-  const worldId = String(world?.id || '').trim();
-  const chatId = typeof context?.chatId === 'string' && context.chatId.trim()
-    ? context.chatId.trim()
-    : null;
-
-  if (!world || !worldId) {
-    return buildHitlFinalResult({
-      requestId: '',
-      selectedOption: null,
-      status: 'error',
-      source: 'system',
-      message: 'human_intervention_request requires a valid world context.',
-    });
-  }
-
-  if (!chatId) {
-    return buildHitlFinalResult({
-      requestId: '',
-      selectedOption: null,
-      status: 'error',
-      source: 'system',
-      message: 'human_intervention_request requires an explicit chatId in the tool execution context.',
-    });
-  }
-
-  const promptOptions: HitlOption[] = pendingResult.options.map((label, index) => ({
-    id: `opt_${index + 1}`,
-    label,
-  }));
-
-  try {
-    const resolution = await requestWorldOption(world, {
-      requestId: pendingResult.requestId,
-      title: 'Human input required',
-      message: pendingResult.question,
-      options: promptOptions,
-      chatId,
-      timeoutMs: pendingResult.timeoutMs,
-      defaultOptionId: resolveDefaultOptionId(promptOptions, pendingResult.defaultOption),
-      metadata: {
-        ...(pendingResult.metadata || {}),
-        tool: 'human_intervention_request',
-        ...(typeof context?.toolCallId === 'string' && context.toolCallId.trim()
-          ? { toolCallId: context.toolCallId.trim() }
-          : {}),
-      },
-      agentName: typeof context?.agentName === 'string' ? context.agentName : null,
-    });
-
-    return buildHitlFinalResult({
-      requestId: resolution.requestId,
-      selectedOption: promptOptions.find((option) => option.id === resolution.optionId)?.label || null,
-      status: resolution.source === 'timeout' ? 'timeout' : 'confirmed',
-      source: resolution.source,
-      ...(resolution.source === 'timeout'
-        ? { message: 'HITL request timed out before user selection.' }
-        : {}),
-    });
-  } catch (error) {
-    return buildHitlFinalResult({
-      requestId: '',
-      selectedOption: null,
-      status: 'error',
-      source: 'system',
-      message: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
-function adaptPackageToolDefinition(tool: PackageToolDefinition): any {
-  return {
-    description: tool.description,
-    parameters: tool.parameters,
-    execute: async (args: any, _sequenceId?: string, _parentToolCall?: string, context?: any) => {
-      const result = await tool.execute?.(args, context);
-      if (tool.name !== 'human_intervention_request' || typeof result !== 'string') {
-        return result;
-      }
-
-      try {
-        const parsedResult = JSON.parse(result);
-        if (!isPendingHitlToolResult(parsedResult)) {
-          return result;
-        }
-        return await bridgePendingHitlToolResult(parsedResult, context);
-      } catch {
-        return result;
-      }
-    },
-  };
-}
-
-function getPackageHitlBuiltIn(): Record<string, any> {
-  const tools = resolveTools({
-    builtIns: {
-      shell_cmd: false,
-      load_skill: false,
-      web_fetch: false,
-      read_file: false,
-      write_file: false,
-      list_files: false,
-      grep: false,
-      human_intervention_request: true,
-    },
-  });
-
-  return Object.fromEntries(
-    Object.entries(tools).map(([name, tool]: [string, PackageToolDefinition]) => [name, adaptPackageToolDefinition(tool)]),
-  );
-}
-
-function getBuiltInTools(world?: World | null): Record<string, any> {
+function getBuiltInTools(): Record<string, any> {
+  const shellCmdTool = createShellCmdToolDefinition();
+  const loadSkillTool = createLoadSkillToolDefinition();
   const createAgentTool = createCreateAgentToolDefinition();
+  const hitlTool = createHitlToolDefinition();
   const sendMessageTool = createSendMessageToolDefinition();
-  const packageHitlBuiltIn = getPackageHitlBuiltIn();
+  const webFetchTool = createWebFetchToolDefinition();
+  const readFileTool = createReadFileToolDefinition();
+  const writeFileTool = createWriteFileToolDefinition();
+  const listFilesTool = createListFilesToolDefinition();
+  const grepTool = createGrepToolDefinition();
 
   return {
-    'shell_cmd': wrapToolWithValidation(createShellCmdToolDefinition(), 'shell_cmd'),
-    'load_skill': wrapToolWithValidation(createLoadSkillToolDefinition(), 'load_skill'),
-    'web_fetch': wrapToolWithValidation(createWebFetchToolDefinition(), 'web_fetch'),
-    'read_file': wrapToolWithValidation(createReadFileToolDefinition(), 'read_file'),
-    'write_file': wrapToolWithValidation(createWriteFileToolDefinition(), 'write_file'),
-    'list_files': wrapToolWithValidation(createListFilesToolDefinition(), 'list_files'),
-    'grep': wrapToolWithValidation(createGrepToolDefinition(), 'grep'),
-    ...packageHitlBuiltIn,
+    'shell_cmd': wrapToolWithValidation(shellCmdTool, 'shell_cmd'),
+    'load_skill': wrapToolWithValidation(loadSkillTool, 'load_skill'),
     'create_agent': wrapToolWithValidation(createAgentTool, 'create_agent'),
+    'human_intervention_request': wrapToolWithValidation(hitlTool, 'human_intervention_request'),
     'send_message': wrapToolWithValidation(sendMessageTool, 'send_message'),
+    'web_fetch': wrapToolWithValidation(webFetchTool, 'web_fetch'),
+    'read_file': wrapToolWithValidation(readFileTool, 'read_file'),
+    'write_file': wrapToolWithValidation(writeFileTool, 'write_file'),
+    'list_files': wrapToolWithValidation(listFilesTool, 'list_files'),
+    'grep': wrapToolWithValidation(grepTool, 'grep'),
   };
 }
 
@@ -1991,7 +1816,7 @@ export async function getMCPToolsForWorld(worldId: string): Promise<Record<strin
   const world = await getWorld(worldId);
 
   // Start with built-in tools
-  const allTools: Record<string, any> = getBuiltInTools(world);
+  const allTools: Record<string, any> = getBuiltInTools();
 
   if (!world?.mcpConfig) {
     logger.debug(`No MCP config for world: ${worldId}, returning built-in tools only`, {

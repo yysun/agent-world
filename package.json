@@ -70,6 +70,7 @@
     "test": "vitest run",
     "test:llm": "vitest run tests/llm/showcase-config.test.ts tests/llm/showcase.test.ts tests/llm/runtime.test.ts tests/llm/runtime-provider.test.ts tests/llm/openai-direct.test.ts tests/llm/mcp-runtime.test.ts",
     "test:llm-showcase": "npm run build --workspace=packages/llm && npx tsx tests/e2e/llm-package-showcase.ts",
+    "test:llm-turn-loop-showcase": "npm run build --workspace=packages/llm && npx tsx tests/e2e/llm-turn-loop-showcase.ts",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",

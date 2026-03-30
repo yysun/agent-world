@@ -14,6 +14,7 @@
  * - Reloads module per test to isolate global configuration state.
  *
  * Recent changes:
+ * - 2026-03-29: Updated expectations to match the restored core-owned configuration semantics.
  * - 2026-02-27: Added targeted production-path coverage for llm-config runtime behavior.
  */
 
@@ -93,8 +94,9 @@ describe('llm-config runtime behavior', () => {
     expect(status[LLMProvider.OPENAI]).toBe(false);
 
     mod.clearAllConfiguration();
-    expect(mod.getConfiguredProviders()).toEqual([]);
+    expect(mod.getConfiguredProviders()).toEqual([LLMProvider.OLLAMA]);
     expect(mod.isProviderConfigured(LLMProvider.GOOGLE)).toBe(false);
+    expect(mod.isProviderConfigured(LLMProvider.OLLAMA)).toBe(true);
   });
 
   it('rejects unsupported provider values', async () => {
@@ -102,6 +104,6 @@ describe('llm-config runtime behavior', () => {
 
     expect(() =>
       mod.validateProviderConfig('unsupported-provider' as unknown as LLMProvider, {})
-    ).toThrow('Unsupported provider: unsupported-provider');
+    ).toThrow('Unknown provider: unsupported-provider');
   });
 });

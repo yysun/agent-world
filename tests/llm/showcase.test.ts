@@ -14,6 +14,7 @@
  * - Each test exercises one major user-facing capability of the package with no live provider traffic.
  *
  * Recent changes:
+ * - 2026-03-29: Added mocked `runTurnLoop(...)` showcase coverage.
  * - 2026-03-27: Initial terminal showcase suite for `@agent-world/llm`.
  * - 2026-03-27: Re-labeled as the mocked showcase after adding the real e2e showcase runner.
  */
@@ -237,5 +238,81 @@ describe('@agent-world/llm mocked showcase', () => {
         demo_lookup: expect.any(Object),
       }),
     }));
+  });
+
+  it('showcases the generic runTurnLoop API driving a tool round-trip', async () => {
+    const { runTurnLoop } = await import('../../packages/llm/src/turn-loop.js');
+
+    const responses = [
+      {
+        type: 'tool_calls',
+        content: 'Calling tool',
+        tool_calls: [{
+          id: 'tool-1',
+          type: 'function' as const,
+          function: {
+            name: 'demo_lookup',
+            arguments: '{"query":"hello"}',
+          },
+        }],
+        assistantMessage: {
+          role: 'assistant' as const,
+          content: 'Calling tool',
+          tool_calls: [{
+            id: 'tool-1',
+            type: 'function' as const,
+            function: {
+              name: 'demo_lookup',
+              arguments: '{"query":"hello"}',
+            },
+          }],
+        },
+      },
+      {
+        type: 'text',
+        content: 'TURN_LOOP_TOKEN=showcase-mcp-result',
+        assistantMessage: {
+          role: 'assistant' as const,
+          content: 'TURN_LOOP_TOKEN=showcase-mcp-result',
+        },
+      },
+    ];
+
+    const result = await runTurnLoop({
+      initialState: {
+        messages: [{ role: 'user' as const, content: 'Find the token' }],
+        toolNames: [] as string[],
+        finalText: '',
+      },
+      emptyTextRetryLimit: 0,
+      callModel: async () => responses.shift() as any,
+      buildMessages: async ({ state }) => state.messages,
+      onToolCallsResponse: async ({ state, response }) => ({
+        state: {
+          ...state,
+          toolNames: [...state.toolNames, response.tool_calls?.[0]?.function.name ?? ''],
+          messages: [
+            ...state.messages,
+            response.assistantMessage,
+            {
+              role: 'tool' as const,
+              tool_call_id: response.tool_calls?.[0]?.id,
+              content: 'showcase-mcp-result',
+            },
+          ],
+        },
+        next: { control: 'continue' },
+      }),
+      onTextResponse: async ({ state, responseText }) => ({
+        state: {
+          ...state,
+          finalText: responseText,
+        },
+      }),
+    });
+
+    expect(result.state.toolNames).toEqual(['demo_lookup']);
+    expect(result.state.finalText).toBe('TURN_LOOP_TOKEN=showcase-mcp-result');
+    expect(result.iterations).toBe(2);
   });
 });

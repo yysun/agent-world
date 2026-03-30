@@ -19,7 +19,7 @@
  * - 2026-03-27: Restricted the live showcase to Google Gemini only.
  */
 
-import type { LLMProviderConfigs } from '@agent-world/llm';
+import type { LLMProviderConfigs } from '../../../packages/llm/src/index.js';
 
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 
