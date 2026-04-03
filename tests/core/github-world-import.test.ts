@@ -15,6 +15,7 @@
  * - Uses Vitest expectations for explicit error-code assertions.
  *
  * Recent Changes:
+ * - 2026-04-03: Added coverage for repo-root SKILL.md discovery and direct-file staging for Electron skill installs.
  * - 2026-02-27: Added stageGitHubWorldFromShorthand success/error/limit tests with mocked fetch and fs.
  * - 2026-02-25: Added baseline unit coverage for GitHub shorthand import resolver.
  */
@@ -305,6 +306,29 @@ describe('stageGitHubFolderFromRepo', () => {
       code: 'invalid-shorthand',
     });
   });
+
+  it('stages a direct SKILL.md file into the target folder', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ sha: 'def456' }))
+      .mockResolvedValueOnce(jsonResponse({
+        type: 'file',
+        path: 'SKILL.md',
+        download_url: 'https://download/root-skill',
+      }))
+      .mockResolvedValueOnce(bytesResponse('# Root skill'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const staged = await stageGitHubFolderFromRepo('octo/tools#dev', 'SKILL.md', {
+      folderName: 'tools',
+      tempPrefix: 'aw-stage-',
+    });
+
+    expect(staged.folderPath).toBe(path.join(MOCK_STAGING_ROOT, 'tools'));
+    expect(fsPromisesMocks.writeFile).toHaveBeenCalledWith(
+      path.join(MOCK_STAGING_ROOT, 'tools', 'SKILL.md'),
+      expect.any(Uint8Array),
+    );
+  });
 });
 
 describe('listGitHubDirectoryNames', () => {
@@ -335,6 +359,34 @@ describe('listGitHubDirectoryNames', () => {
       branch: 'dev',
       directoryPath: 'skills',
       directoryNames: ['planner', 'reviewer'],
+      fileNames: ['README.md'],
+    });
+  });
+
+  it('lists root directories and files when the repo root is requested', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(jsonResponse([
+      {
+        type: 'file',
+        path: 'SKILL.md',
+      },
+      {
+        type: 'dir',
+        path: 'skills',
+      },
+      {
+        type: 'file',
+        path: 'README.md',
+      },
+    ])));
+
+    await expect(listGitHubDirectoryNames('octo/tools#dev', '.')).resolves.toEqual({
+      repoInput: 'octo/tools#dev',
+      owner: 'octo',
+      repo: 'tools',
+      branch: 'dev',
+      directoryPath: '.',
+      directoryNames: ['skills'],
+      fileNames: ['README.md', 'SKILL.md'],
     });
   });
 

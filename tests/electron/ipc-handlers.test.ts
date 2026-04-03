@@ -17,6 +17,8 @@
  *   shape used by the Electron main process.
  *
  * Recent changes:
+ * - 2026-04-03: Root GitHub skill listing/import now use the SKILL.md `name` front-matter field when present.
+ * - 2026-04-03: Added GitHub root-skill discovery/import coverage for repo-level SKILL.md installs.
  * - 2026-03-22: Added relative-path skill file coverage so the editor can open files selected from the tree view.
  * - 2026-03-22: Added skill-folder-structure handler coverage for the skill editor right pane.
  * - 2026-03-22: Added delete-skill handler coverage for removing the skill folder behind `SKILL.md`.
@@ -191,13 +193,17 @@ describe('createMainIpcHandlers — readSkillContent / readSkillFolderStructure 
       GitHubWorldImportError: Error,
       stageGitHubWorldFromShorthand: async () => ({ stagingRootPath: '', worldFolderPath: '', source: { shorthand: '', owner: '', repo: '', branch: '', worldPath: '', commitSha: null }, cleanup: async () => { } }),
       stageGitHubFolderFromRepo: async () => ({ stagingRootPath: '', folderPath: '', source: { repoInput: '', owner: '', repo: '', branch: '', folderPath: '', commitSha: null }, cleanup: async () => { } }),
-      listGitHubDirectoryNames: async () => ({ directoryNames: [] }),
+      listGitHubDirectoryNames: async () => ({ directoryNames: [], fileNames: [] }),
       heartbeatManager: { startJob: () => ({ started: true, reason: null, job: { status: 'running' } }), restartJob: () => ({ started: true, reason: null, job: { status: 'running' } }), pauseJob: () => { }, resumeJob: () => { }, stopJob: () => { }, stopAll: () => { }, listJobs: () => [] },
     };
   }
 
   it('listGitHubSkills returns skill directory names from the repo skills folder', async () => {
-    const listGitHubDirectoryNames = vi.fn(async () => ({ directoryNames: ['planner', 'reviewer'] }));
+    const listGitHubDirectoryNames = vi.fn(async (_repo: string, directoryPath: string) => (
+      directoryPath === '.'
+        ? { directoryNames: ['skills'], fileNames: [] }
+        : { directoryNames: ['planner', 'reviewer'], fileNames: [] }
+    ));
 
     const handlers = createMainIpcHandlers({
       ...makeDeps(() => undefined),
@@ -205,7 +211,50 @@ describe('createMainIpcHandlers — readSkillContent / readSkillFolderStructure 
     } as any);
 
     await expect((handlers as any).listGitHubSkills({ repo: 'yysun/awesome-agent-world' })).resolves.toEqual(['planner', 'reviewer']);
+    expect(listGitHubDirectoryNames).toHaveBeenNthCalledWith(1, 'yysun/awesome-agent-world', '.');
     expect(listGitHubDirectoryNames).toHaveBeenCalledWith('yysun/awesome-agent-world', 'skills');
+  });
+
+  it('listGitHubSkills includes the repo name when the repo root contains SKILL.md', async () => {
+    const rootSkillPath = absoluteTestPath('staging', 'awesome-agent-world', 'SKILL.md');
+    const listGitHubDirectoryNames = vi.fn(async (_repo: string, directoryPath: string) => (
+      directoryPath === '.'
+        ? { directoryNames: ['skills'], fileNames: ['SKILL.md'] }
+        : { directoryNames: ['planner'], fileNames: [] }
+    ));
+    fsMockState.readFile.mockImplementation(async (targetPath: string) => {
+      if (targetPath === rootSkillPath) {
+        return '---\nname: repo-root-skill\n---\n# Root skill';
+      }
+      return '# SKILL content';
+    });
+    const cleanup = vi.fn(async () => undefined);
+    const stageGitHubFolderFromRepo = vi.fn(async (_repoInput: string, folderPath: string, options?: { folderName?: string }) => {
+      expect(folderPath).toBe('SKILL.md');
+      expect(options).toEqual({ folderName: 'awesome-agent-world' });
+      return {
+        stagingRootPath: absoluteTestPath('staging'),
+        folderPath: absoluteTestPath('staging', 'awesome-agent-world'),
+        source: {
+          repoInput: 'yysun/awesome-agent-world',
+          owner: 'yysun',
+          repo: 'awesome-agent-world',
+          branch: 'main',
+          folderPath,
+          commitSha: null,
+        },
+        cleanup,
+      };
+    });
+
+    const handlers = createMainIpcHandlers({
+      ...makeDeps(() => undefined),
+      listGitHubDirectoryNames,
+      stageGitHubFolderFromRepo,
+    } as any);
+
+    await expect((handlers as any).listGitHubSkills({ repo: 'yysun/awesome-agent-world' })).resolves.toEqual(['planner', 'repo-root-skill']);
+    expect(cleanup).toHaveBeenCalledTimes(1);
   });
 
   it('readSkillContent returns file content for a known skill path', async () => {
@@ -399,6 +448,84 @@ describe('createMainIpcHandlers — readSkillContent / readSkillFolderStructure 
     expect(fsMockState.cp).toHaveBeenCalledWith(importedSkillFolder, targetSkillPath, { recursive: true, force: true });
     expect(fsMockState.writeFile).toHaveBeenCalledWith(targetSkillFilePath, '# Updated skill', 'utf8');
     expect(fsMockState.writeFile).toHaveBeenCalledTimes(1);
+    expect(syncSkills).toHaveBeenCalledWith({ projectSkillRoots: [absoluteTestPath('workspace', '.agents', 'skills'), absoluteTestPath('workspace', 'skills')] });
+  });
+
+  it('importSkill falls back to repo-root SKILL.md when the selected skill matches the root front-matter name', async () => {
+    class MockGitHubWorldImportError extends Error {
+      code: string;
+      details?: Record<string, unknown>;
+
+      constructor(code: string, message: string, details?: Record<string, unknown>) {
+        super(message);
+        this.name = 'GitHubWorldImportError';
+        this.code = code;
+        this.details = details;
+      }
+    }
+
+    const syncSkills = vi.fn(async () => undefined);
+    const workspacePath = absoluteTestPath('workspace');
+    const stagedSkillFolder = absoluteTestPath('staging', 'repo-root-skill');
+    const stagedSkillFilePath = absoluteTestPath('staging', 'repo-root-skill', 'SKILL.md');
+    const targetSkillPath = absoluteTestPath('workspace', 'skills', 'repo-root-skill');
+    const existingPaths = new Set([
+      path.normalize(stagedSkillFolder),
+      path.normalize(stagedSkillFilePath),
+    ]);
+    fsMockState.existsSync.mockImplementation((targetPath: string) => (
+      typeof targetPath === 'string' && existingPaths.has(path.normalize(targetPath))
+    ));
+    fsMockState.statSync.mockImplementation(() => ({ isDirectory: () => true }));
+    fsMockState.readFile.mockImplementation(async (targetPath: string) => {
+      if (targetPath === stagedSkillFilePath) {
+        return '---\nname: repo-root-skill\n---\n# Root skill';
+      }
+      return '# SKILL content';
+    });
+
+    const cleanup = vi.fn(async () => undefined);
+    const stageGitHubFolderFromRepo = vi.fn(async (_repoInput: string, folderPath: string, options?: { folderName?: string }) => {
+      if (folderPath === 'SKILL.md') {
+        return {
+          stagingRootPath: absoluteTestPath('staging'),
+          folderPath: stagedSkillFolder,
+          source: {
+            repoInput: 'yysun/awesome-agent-world',
+            owner: 'yysun',
+            repo: 'awesome-agent-world',
+            branch: 'main',
+            folderPath,
+            commitSha: null,
+          },
+          cleanup,
+        };
+      }
+
+      throw new MockGitHubWorldImportError('source-not-found', `Missing ${folderPath}`, { folderName: options?.folderName });
+    });
+
+    const handlers = createMainIpcHandlers({
+      ...makeDeps(() => undefined),
+      GitHubWorldImportError: MockGitHubWorldImportError,
+      stageGitHubFolderFromRepo,
+      getWorkspaceState: () => ({ workspacePath, storagePath: workspacePath, coreInitialized: true }),
+      getMainWindow: () => ({ isDestroyed: () => false }),
+      syncSkills,
+    } as any);
+
+    const result = await (handlers as any).importSkill({
+      repo: 'yysun/awesome-agent-world',
+      itemName: 'repo-root-skill',
+    });
+
+    expect(result.success).toBe(true);
+    expect(stageGitHubFolderFromRepo).toHaveBeenNthCalledWith(1, 'yysun/awesome-agent-world', 'skills/repo-root-skill', { folderName: 'repo-root-skill' });
+    expect(stageGitHubFolderFromRepo).toHaveBeenNthCalledWith(2, 'yysun/awesome-agent-world', '.agents/skills/repo-root-skill', { folderName: 'repo-root-skill' });
+    expect(stageGitHubFolderFromRepo).toHaveBeenNthCalledWith(3, 'yysun/awesome-agent-world', 'repo-root-skill', { folderName: 'repo-root-skill' });
+    expect(stageGitHubFolderFromRepo).toHaveBeenNthCalledWith(4, 'yysun/awesome-agent-world', 'SKILL.md', { folderName: 'repo-root-skill' });
+    expect(fsMockState.cp).toHaveBeenCalledWith(stagedSkillFolder, targetSkillPath, { recursive: true, force: true });
+    expect(cleanup).toHaveBeenCalledTimes(1);
     expect(syncSkills).toHaveBeenCalledWith({ projectSkillRoots: [absoluteTestPath('workspace', '.agents', 'skills'), absoluteTestPath('workspace', 'skills')] });
   });
 });

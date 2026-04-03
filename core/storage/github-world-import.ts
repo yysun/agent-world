@@ -19,6 +19,7 @@
  * - Uses temp directories and explicit cleanup callbacks.
  *
  * Recent Changes:
+ * - 2026-04-03: Added root-directory file listing and direct-file staging support so Electron skill installs can discover and stage repo-level SKILL.md files.
  * - 2026-02-25: Added shorthand resolver and secure GitHub staging for world import.
  */
 
@@ -135,6 +136,7 @@ export interface GitHubDirectoryListingResult {
   branch: string;
   directoryPath: string;
   directoryNames: string[];
+  fileNames: string[];
 }
 
 function sanitizeWorldName(worldName: string): string {
@@ -195,11 +197,21 @@ function getPathBasename(value: string): string {
   return segments[segments.length - 1] || '';
 }
 
-function normalizeRelativePath(worldPath: string, fullPath: string): string {
-  const prefix = `${worldPath}/`;
-  if (fullPath === worldPath) {
+function normalizeGitHubContentsPath(value: string): string {
+  const trimmed = String(value || '').trim();
+  if (!trimmed || trimmed === '.' || trimmed === '/') {
     return '';
   }
+
+  return trimmed.replace(/^\/+|\/+$/g, '');
+}
+
+function normalizeRelativePath(worldPath: string, fullPath: string): string {
+  if (fullPath === worldPath) {
+    return getPathBasename(fullPath);
+  }
+
+  const prefix = `${worldPath}/`;
   if (!fullPath.startsWith(prefix)) {
     throw new GitHubWorldImportError('unsafe-path', 'Fetched file path does not match resolved world path.', {
       fullPath,
@@ -399,27 +411,24 @@ export async function listGitHubDirectoryNames(
     ? Math.max(1, Number(options.requestTimeoutMs))
     : DEFAULT_REQUEST_TIMEOUT_MS;
   const resolvedRepo = resolveGitHubRepoSource(repoInput);
-  const normalizedDirectoryPath = String(directoryPath || '').trim().replace(/^\/+|\/+$/g, '');
+  const normalizedDirectoryPath = normalizeGitHubContentsPath(directoryPath);
+  const resolvedDirectoryPath = normalizedDirectoryPath || '.';
 
-  if (!normalizedDirectoryPath) {
-    throw new GitHubWorldImportError('invalid-shorthand', 'GitHub directory path is required.', {
-      repoInput,
-      directoryPath,
-    });
+  if (normalizedDirectoryPath) {
+    ensureSafeRelativePath(normalizedDirectoryPath);
   }
 
-  ensureSafeRelativePath(normalizedDirectoryPath);
-
   const encodedPath = encodeGithubPathSegments(normalizedDirectoryPath);
-  const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(resolvedRepo.owner)}/${encodeURIComponent(resolvedRepo.repo)}/contents/${encodedPath}?ref=${encodeURIComponent(resolvedRepo.branch)}`;
+  const contentsPath = encodedPath ? `/contents/${encodedPath}` : '/contents';
+  const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(resolvedRepo.owner)}/${encodeURIComponent(resolvedRepo.repo)}${contentsPath}?ref=${encodeURIComponent(resolvedRepo.branch)}`;
   const response = await fetchJson(url, requestTimeoutMs);
 
   if (response.status === 404) {
-    throw new GitHubWorldImportError('source-not-found', `GitHub path not found: ${resolvedRepo.owner}/${resolvedRepo.repo}/${normalizedDirectoryPath}@${resolvedRepo.branch}`, {
+    throw new GitHubWorldImportError('source-not-found', `GitHub path not found: ${resolvedRepo.owner}/${resolvedRepo.repo}/${resolvedDirectoryPath}@${resolvedRepo.branch}`, {
       owner: resolvedRepo.owner,
       repo: resolvedRepo.repo,
       branch: resolvedRepo.branch,
-      directoryPath: normalizedDirectoryPath,
+      directoryPath: resolvedDirectoryPath,
     });
   }
 
@@ -428,7 +437,7 @@ export async function listGitHubDirectoryNames(
       owner: resolvedRepo.owner,
       repo: resolvedRepo.repo,
       branch: resolvedRepo.branch,
-      directoryPath: normalizedDirectoryPath,
+      directoryPath: resolvedDirectoryPath,
       status: response.status,
     });
   }
@@ -436,6 +445,7 @@ export async function listGitHubDirectoryNames(
   const payload = await response.json() as GitHubContentsEntry[] | GitHubContentsEntry;
   const entries = Array.isArray(payload) ? payload : [payload];
   const directoryNames: string[] = [];
+  const fileNames: string[] = [];
 
   for (const entry of entries) {
     if (entry.type === 'dir') {
@@ -447,6 +457,10 @@ export async function listGitHubDirectoryNames(
     }
 
     if (entry.type === 'file') {
+      const fileName = getPathBasename(entry.path);
+      if (fileName) {
+        fileNames.push(fileName);
+      }
       continue;
     }
 
@@ -461,14 +475,16 @@ export async function listGitHubDirectoryNames(
   }
 
   directoryNames.sort((left, right) => left.localeCompare(right));
+  fileNames.sort((left, right) => left.localeCompare(right));
 
   return {
     repoInput: resolvedRepo.repoInput,
     owner: resolvedRepo.owner,
     repo: resolvedRepo.repo,
     branch: resolvedRepo.branch,
-    directoryPath: normalizedDirectoryPath,
+    directoryPath: resolvedDirectoryPath,
     directoryNames,
+    fileNames,
   };
 }
 

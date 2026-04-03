@@ -12,6 +12,8 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-04-03: Repo-root GitHub skill discovery now reads the SKILL.md `name` front-matter field and uses it for both listing and import resolution.
+ * - 2026-04-03: Skill GitHub install flows now surface repo-root SKILL.md files and fall back to them when the selected skill matches the repo name.
  * - 2026-03-22: Extended skill content read/save handling with optional relative paths so the editor can open files from the folder tree.
  * - 2026-03-22: Added `readSkillFolderStructure` IPC handling so the skill editor can show the current skill folder tree.
  * - 2026-03-22: Added `deleteSkill` IPC handling to remove a skill folder after renderer confirmation from the skill editor.
@@ -445,7 +447,7 @@ interface MainIpcHandlerFactoryDependencies {
     folderPath: string,
     options?: { folderName?: string }
   ) => Promise<GitHubFolderImportStagedResult>;
-  listGitHubDirectoryNames: (repoInput: string, directoryPath: string) => Promise<{ directoryNames: string[] }>;
+  listGitHubDirectoryNames: (repoInput: string, directoryPath: string) => Promise<{ directoryNames: string[]; fileNames?: string[] }>;
   heartbeatManager: {
     startJob: (world: any, chatId: string) => { started: boolean; reason: string | null; job: { status: 'running' | 'paused' | 'stopped' } | null };
     restartJob: (world: any, chatId: string) => { started: boolean; reason: string | null; job: { status: 'running' | 'paused' | 'stopped' } | null };
@@ -647,14 +649,102 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     return normalized;
   }
 
-  function buildGitHubFolderCandidates(kind: 'world' | 'agent' | 'skill', itemName: string): string[] {
+  function getGitHubRepoName(repoInput: unknown): string {
+    const trimmedRepo = String(repoInput || '').trim().replace(/^https?:\/\/github\.com\//i, '');
+    const [repoPart] = trimmedRepo.split('#', 2);
+    const normalizedRepoPart = String(repoPart || '').trim().replace(/^\/+|\/+$/g, '');
+    const segments = normalizedRepoPart
+      .split('/')
+      .map((segment) => segment.trim())
+      .filter(Boolean);
+
+    return segments.length >= 2 ? segments[1] || '' : '';
+  }
+
+  function buildGitHubFolderCandidates(kind: 'world' | 'agent' | 'skill', itemName: string, repoInput = ''): string[] {
     if (kind === 'world') {
       return [`data/worlds/${itemName}`, `worlds/${itemName}`, itemName];
     }
     if (kind === 'agent') {
       return [`agents/${itemName}`, `data/agents/${itemName}`, itemName];
     }
+
     return [`skills/${itemName}`, `.agents/skills/${itemName}`, itemName];
+  }
+
+  function normalizeSkillFrontMatterValue(value: string): string {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return '';
+    }
+
+    const hasMatchingQuotes =
+      (trimmed.startsWith('"') && trimmed.endsWith('"'))
+      || (trimmed.startsWith("'") && trimmed.endsWith("'"));
+
+    if (hasMatchingQuotes && trimmed.length >= 2) {
+      return trimmed.slice(1, -1).trim();
+    }
+
+    return trimmed;
+  }
+
+  function parseSkillNameFromMarkdown(markdown: string): string {
+    const normalizedMarkdown = String(markdown || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+    const frontMatterMatch = normalizedMarkdown.match(/^---\s*\n([\s\S]*?)\n---\s*(?:\n|$)/);
+    if (!frontMatterMatch || !frontMatterMatch[1]) {
+      return '';
+    }
+
+    for (const rawLine of frontMatterMatch[1].split(/\r?\n/)) {
+      const keyValueMatch = rawLine.match(/^\s*name\s*:\s*(.*)$/i);
+      if (!keyValueMatch) {
+        continue;
+      }
+
+      return normalizeSkillFrontMatterValue(String(keyValueMatch[1] || ''));
+    }
+
+    return '';
+  }
+
+  async function stageGitHubRootSkill(repoInput: string, folderName: string): Promise<GitHubFolderImportStagedResult | null> {
+    try {
+      return await stageGitHubFolderFromRepo(repoInput, 'SKILL.md', { folderName });
+    } catch (error) {
+      if (error instanceof GitHubWorldImportError && error.message && (error as GitHubWorldImportErrorLike).details) {
+        const typedError = error as GitHubWorldImportErrorLike;
+        if ((typedError as any).code === 'source-not-found') {
+          return null;
+        }
+      }
+      throw error;
+    }
+  }
+
+  async function readGitHubRootSkillMetadata(repoInput: string, folderName?: string): Promise<{
+    skillName: string;
+    stagedSkill: GitHubFolderImportStagedResult;
+  } | null> {
+    const fallbackFolderName = String(folderName || getGitHubRepoName(repoInput) || 'skill').trim() || 'skill';
+    const stagedSkill = await stageGitHubRootSkill(repoInput, fallbackFolderName);
+    if (!stagedSkill) {
+      return null;
+    }
+
+    try {
+      const skillFilePath = path.join(stagedSkill.folderPath, 'SKILL.md');
+      const markdown = await fs.promises.readFile(skillFilePath, 'utf8');
+      const skillName = parseSkillNameFromMarkdown(markdown) || getGitHubRepoName(repoInput);
+
+      return {
+        skillName: String(skillName || '').trim(),
+        stagedSkill,
+      };
+    } catch (error) {
+      await stagedSkill.cleanup();
+      throw error;
+    }
   }
 
   function toDateOrUndefined(value: unknown): Date | undefined {
@@ -740,7 +830,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
 
     const normalizedRepo = repo;
     const normalizedItemName = normalizeImportItemName(itemName, `${kind[0].toUpperCase()}${kind.slice(1)} name`);
-    const candidates = buildGitHubFolderCandidates(kind, normalizedItemName);
+    const candidates = buildGitHubFolderCandidates(kind, normalizedItemName, normalizedRepo);
     let lastNotFoundError: GitHubWorldImportErrorLike | null = null;
 
     for (const folderPath of candidates) {
@@ -755,6 +845,18 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
           }
         }
         throw error;
+      }
+    }
+
+    if (kind === 'skill') {
+      const rootSkillMetadata = await readGitHubRootSkillMetadata(normalizedRepo, normalizedItemName);
+      if (rootSkillMetadata) {
+        const normalizedRootSkillName = normalizeImportItemName(rootSkillMetadata.skillName, 'Skill name');
+        if (normalizedRootSkillName === normalizedItemName) {
+          return rootSkillMetadata.stagedSkill;
+        }
+
+        await rootSkillMetadata.stagedSkill.cleanup();
       }
     }
 
@@ -1902,8 +2004,29 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
         throw new Error('GitHub repo is required.');
       }
 
-      const result = await listGitHubDirectoryNames(repo, 'skills');
-      return Array.isArray(result.directoryNames) ? result.directoryNames : [];
+      const rootEntries = await listGitHubDirectoryNames(repo, '.');
+      const skillDirectoryNames = rootEntries.directoryNames.includes('skills')
+        ? await listGitHubDirectoryNames(repo, 'skills')
+        : { directoryNames: [] as string[] };
+      const hasRootSkillFile = Array.isArray(rootEntries.fileNames)
+        && rootEntries.fileNames.some((fileName) => String(fileName || '').trim().toLowerCase() === 'skill.md');
+      let rootSkillName = '';
+
+      if (hasRootSkillFile) {
+        const rootSkillMetadata = await readGitHubRootSkillMetadata(repo);
+        if (rootSkillMetadata) {
+          rootSkillName = rootSkillMetadata.skillName;
+          await rootSkillMetadata.stagedSkill.cleanup();
+        }
+      }
+
+      const discoveredSkillNames = [
+        ...((Array.isArray(skillDirectoryNames.directoryNames) ? skillDirectoryNames.directoryNames : []).map((value) => String(value || '').trim()).filter(Boolean)),
+        ...(rootSkillName ? [rootSkillName] : []),
+      ];
+
+      return Array.from(new Set(discoveredSkillNames))
+        .sort((left, right) => left.localeCompare(right));
     } catch (error) {
       if (error instanceof GitHubWorldImportError) {
         throw new Error(`Failed to list GitHub skills: ${error.message}`);
