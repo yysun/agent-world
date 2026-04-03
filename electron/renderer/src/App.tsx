@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-04-03: Added edit-mode markdown preview state for the skill editor and reset it to preview when opening or switching skill files.
  * - 2026-03-23: Passed the collapsed-sidebar state into the full-area skill editor so its toolbar clears the macOS traffic lights.
  * - 2026-03-22: Guarded skill file selection against overlapping busy-state requests so stale file loads cannot overwrite the active editor view.
  * - 2026-03-22: Added skill dirty-state tracking so Save only enables after the current file changes.
@@ -307,6 +308,7 @@ function AppContent({ api }: { api: DesktopApi }) {
   const [editorMode, setEditorMode] = useState<SkillEditorMode>('none');
   const [editingSkillEntry, setEditingSkillEntry] = useState<SkillEditorEntry | null>(null);
   const [editingSkillFilePath, setEditingSkillFilePath] = useState('SKILL.md');
+  const [editingSkillMarkdownView, setEditingSkillMarkdownView] = useState<'preview' | 'markdown'>('preview');
   const [editingSkillContent, setEditingSkillContent] = useState('');
   const [savedSkillContent, setSavedSkillContent] = useState('');
   const [editingSkillFolderEntries, setEditingSkillFolderEntries] = useState<SkillFolderEntry[]>([]);
@@ -334,6 +336,7 @@ function AppContent({ api }: { api: DesktopApi }) {
   const resetInstallPreviewState = useCallback(() => {
     const emptyPreviewState = createEmptySkillInstallPreviewState();
     setEditingSkillFilePath(emptyPreviewState.selectedFilePath);
+    setEditingSkillMarkdownView('preview');
     setEditingSkillContent(emptyPreviewState.content);
     setSavedSkillContent(emptyPreviewState.savedContent);
     setEditingSkillFolderEntries(emptyPreviewState.folderEntries);
@@ -1308,6 +1311,7 @@ function AppContent({ api }: { api: DesktopApi }) {
       setInstallSkillTargetScope('project');
       setEditingSkillEntry(entry);
       setEditingSkillFilePath(initialFilePath);
+      setEditingSkillMarkdownView('preview');
       setEditingSkillContent(typeof content === 'string' ? content : '');
       setSavedSkillContent(typeof content === 'string' ? content : '');
       setEditingSkillFolderEntries(normalizedFolderEntries);
@@ -1407,6 +1411,7 @@ function AppContent({ api }: { api: DesktopApi }) {
       setInstallSkillDescription(rawDescription ? formatFullSkillDescription(rawDescription) : '');
       setInstallSkillItemName(String(preview.rootName || previewPayload.itemName || '').trim());
       setEditingSkillFilePath(initialFilePath || 'SKILL.md');
+      setEditingSkillMarkdownView('preview');
       setEditingSkillContent(initialContent);
       setSavedSkillContent(initialContent);
       setStatusText(`Loaded skill preview: ${String(preview.rootName || 'skill')}`, 'success');
@@ -1458,6 +1463,7 @@ function AppContent({ api }: { api: DesktopApi }) {
         : (installSkillPreviewFiles[nextFilePath] ?? '');
       const previewContent = installSkillPreviewFiles[nextFilePath] ?? '';
       setEditingSkillFilePath(nextFilePath);
+      setEditingSkillMarkdownView('preview');
       setEditingSkillContent(nextContent);
       setSavedSkillContent(previewContent);
       return;
@@ -1475,6 +1481,7 @@ function AppContent({ api }: { api: DesktopApi }) {
         return;
       }
       setEditingSkillFilePath(nextFilePath);
+      setEditingSkillMarkdownView('preview');
       setEditingSkillContent(typeof content === 'string' ? content : '');
       setSavedSkillContent(typeof content === 'string' ? content : '');
     } catch (error) {
@@ -1983,8 +1990,10 @@ function AppContent({ api }: { api: DesktopApi }) {
                 sourceScope={editorMode === 'edit' ? String(editingSkillEntry?.sourceScope || 'project') : installSkillTargetScope}
                 leftSidebarCollapsed={leftSidebarCollapsed}
                 selectedFilePath={editingSkillFilePath}
+                markdownViewMode={editingSkillMarkdownView}
                 content={editingSkillContent}
                 onContentChange={onChangeSkillEditorContent}
+                onMarkdownViewModeChange={setEditingSkillMarkdownView}
                 onBack={onCloseSkillEditor}
                 onSave={onSaveSkillContent}
                 onDelete={onDeleteSkillContent}

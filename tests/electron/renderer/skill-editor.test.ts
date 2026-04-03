@@ -1,12 +1,12 @@
 /**
  * SkillEditor Component Tests
  * Purpose:
- * - Verify SkillEditor renders the updated header/actions, textarea content,
+ * - Verify SkillEditor renders the updated header/actions, markdown preview/edit toggles,
  *   and dispatches correct callbacks.
  *
  * Key Features:
  * - Back button fires onBack; Delete and Save buttons fire their callbacks.
- * - Textarea displays current content via value prop.
+ * - Markdown files in edit mode default to rendered preview with a toggle back to raw markdown.
  * - Right pane shows the current skill folder structure.
  * - Save stays disabled until the file content changes.
  *
@@ -15,6 +15,7 @@
  * - Tests BaseEditor slot contract by inspecting children tree structure.
  *
  * Recent Changes:
+ * - 2026-04-03: Added edit-mode markdown preview toggle coverage and updated markdown-file expectations to default to preview.
  * - 2026-04-03: Added coverage for formatted SKILL.md markdown rendering in install preview.
  * - 2026-04-03: Added coverage for pressing Enter in the GitHub repo input to load skills from the selected repository.
  * - 2026-04-03: Updated install-mode assertions for the new reference-matching split between the top toolbar and file-header action row.
@@ -85,7 +86,7 @@ function hasClassName(node: any, className: string): boolean {
 }
 
 describe('SkillEditor', () => {
-  it('renders BaseEditor with scope-aware header and right pane tree', () => {
+  it('renders BaseEditor with scope-aware header and markdown preview for SKILL.md', () => {
     const onSelectFile = vi.fn();
     const result: any = SkillEditor({
       skillId: 'rpd',
@@ -110,12 +111,12 @@ describe('SkillEditor', () => {
     expect(result.type).toBe(baseEditorStub);
     expect(result.props.chatPaneContext).toBeUndefined();
 
-    // The textarea in children should have the content as value
     const nodes = allDescendants(result.props.children);
     const textarea = nodes.find((n: any) => n?.type === Textarea);
-    expect(textarea).toBeDefined();
-    expect(textarea.props.value).toBe('# RPD Skill');
-    expect(textarea.props.disabled).toBe(false);
+    const preview = nodes.find((node: any) => node?.props?.['aria-label'] === 'Preview SKILL.md for rpd');
+    expect(textarea).toBeUndefined();
+    expect(preview).toBeDefined();
+    expect(String(preview?.props?.dangerouslySetInnerHTML?.__html || '')).toContain('<h1');
 
     // toolbar should contain the scope + skill name, but not the file name
     const toolbarStr = JSON.stringify(result.props.toolbar);
@@ -132,6 +133,40 @@ describe('SkillEditor', () => {
 
     const contentAreaStr = JSON.stringify(result.props.children);
     expect(contentAreaStr).toContain('SKILL.md');
+  });
+
+  it('shows Preview and Markdown radios for markdown files in edit mode', () => {
+    const onMarkdownViewModeChange = vi.fn();
+    const result: any = SkillEditor({
+      skillId: 'my-skill',
+      sourceScope: 'global',
+      selectedFilePath: 'docs/guide.md',
+      markdownViewMode: 'preview',
+      content: '# Guide',
+      onContentChange: () => { },
+      onMarkdownViewModeChange,
+      onBack: () => { },
+      onSave: () => { },
+      onDelete: () => { },
+      onSelectFile: () => { },
+      folderEntries: [],
+      hasUnsavedChanges: false,
+      loadingFile: false,
+      saving: false,
+      deleting: false,
+    });
+
+    const nodes = allDescendants(result.props.children);
+    const viewModeGroup = nodes.find((node: any) => node?.props?.role === 'radiogroup' && node?.props?.['aria-label'] === 'Markdown view mode');
+    const previewRadio = nodes.find((node: any) => node?.type === Radio && node?.props?.['aria-label'] === 'Preview');
+    const markdownRadio = nodes.find((node: any) => node?.type === Radio && node?.props?.['aria-label'] === 'Markdown');
+
+    expect(viewModeGroup).toBeDefined();
+    expect(previewRadio?.props?.checked).toBe(true);
+    expect(markdownRadio?.props?.checked).toBe(false);
+
+    markdownRadio?.props?.onChange();
+    expect(onMarkdownViewModeChange).toHaveBeenCalledWith('markdown');
   });
 
   it('back button onClick is wired to onBack', () => {
@@ -268,7 +303,7 @@ describe('SkillEditor', () => {
     const result: any = SkillEditor({
       skillId: 'my-skill',
       sourceScope: 'global',
-      selectedFilePath: 'SKILL.md',
+      selectedFilePath: 'config.json',
       content: 'hello',
       onContentChange: () => { },
       onBack: () => { },
@@ -297,7 +332,7 @@ describe('SkillEditor', () => {
     const result: any = SkillEditor({
       skillId: 'my-skill',
       sourceScope: 'project',
-      selectedFilePath: 'SKILL.md',
+      selectedFilePath: 'config.json',
       content: 'hello',
       onContentChange: () => { },
       onBack: () => { },
@@ -362,7 +397,7 @@ describe('SkillEditor', () => {
     const result: any = SkillEditor({
       skillId: 'loading-skill',
       sourceScope: 'global',
-      selectedFilePath: 'docs/guide.md',
+      selectedFilePath: 'docs/guide.txt',
       content: 'hello',
       onContentChange: () => { },
       onBack: () => { },
