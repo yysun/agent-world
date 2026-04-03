@@ -15,6 +15,7 @@
  * - Uses native `details/summary` rows for a simple deterministic tree view.
  *
  * Recent Changes:
+ * - 2026-04-03: Switched the install-preview file pane onto the main editor surface styling so it matches the updated install screen.
  * - 2026-03-22: Added a disabled state so busy save/delete/load work can block file switching from the tree.
  * - 2026-03-22: Replaced raw DIR/FILE labels with icon-based tree rows.
  * - 2026-03-22: Added clickable tree rows so selecting a file opens it in the left editor pane.
@@ -28,7 +29,7 @@ function FolderGlyph() {
   return (
     <svg
       aria-hidden="true"
-      className="h-3.5 w-3.5 flex-none text-sidebar-foreground/55"
+      className="h-3.5 w-3.5 flex-none text-foreground/45"
       viewBox="0 0 16 16"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
@@ -47,7 +48,7 @@ function FileGlyph() {
   return (
     <svg
       aria-hidden="true"
-      className="h-3.5 w-3.5 flex-none text-sidebar-foreground/50"
+      className="h-3.5 w-3.5 flex-none text-foreground/40"
       viewBox="0 0 16 16"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
@@ -67,7 +68,7 @@ function ChevronGlyph() {
   return (
     <svg
       aria-hidden="true"
-      className="h-3 w-3 flex-none text-sidebar-foreground/35"
+      className="h-3 w-3 flex-none text-foreground/35"
       viewBox="0 0 16 16"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
@@ -94,14 +95,14 @@ function renderSkillFolderNodes(
           <summary
             role="treeitem"
             aria-expanded={hasChildren}
-            className="flex cursor-pointer list-none items-center gap-2 rounded-md py-1 text-xs text-sidebar-foreground/75 hover:bg-sidebar-accent/40"
+            className="flex cursor-pointer list-none items-center gap-2 rounded-xl px-2 py-1.5 text-xs text-foreground/70 hover:bg-muted"
             style={indentStyle}
           >
             <ChevronGlyph />
             <FolderGlyph />
             <span className="truncate font-medium">{entry.name}</span>
           </summary>
-          <div className="mt-0.5 min-w-0 border-l border-sidebar-border/70 pl-2" role="group">
+          <div className="mt-0.5 min-w-0 border-l border-border/80 pl-2" role="group">
             {hasChildren ? renderSkillFolderNodes(entry.children || [], selectedPath, onSelectFile, disabled, depth + 1) : null}
           </div>
         </details>
@@ -118,15 +119,15 @@ function renderSkillFolderNodes(
           disabled={disabled}
           onClick={() => onSelectFile(entry.relativePath)}
           className={[
-            'flex w-full items-center gap-2 rounded-md py-1 text-left text-xs',
+            'flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-xs',
             isSelected
-              ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-              : 'text-sidebar-foreground/75 hover:bg-sidebar-accent/40',
+              ? 'bg-muted text-foreground shadow-sm'
+              : 'text-foreground/70 hover:bg-muted',
             disabled ? 'cursor-not-allowed opacity-50' : '',
           ].join(' ')}
           style={indentStyle}
         >
-          <span className="flex h-3 w-3 flex-none items-center justify-center text-sidebar-foreground/35">
+          <span className="flex h-3 w-3 flex-none items-center justify-center text-foreground/30">
             <span className="h-px w-2 bg-current" />
           </span>
           <FileGlyph />
@@ -151,18 +152,18 @@ export default function SkillFolderPane({
   disabled?: boolean;
 }) {
   return (
-    <div className="flex h-full flex-col border-l border-sidebar-border bg-sidebar">
-      <div className="border-b border-sidebar-border px-4 py-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-sidebar-foreground/60">
+    <div className="flex h-full flex-col border-l border-border bg-background">
+      <div className="border-b border-border px-5 py-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-foreground/55">
           Skill Files
         </p>
-        <p className="mt-0.5 truncate text-xs text-sidebar-foreground/45">{skillId}</p>
+        <p className="mt-1 truncate text-xs text-foreground/45">{skillId}</p>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto px-3 py-3" role="tree" aria-label={`${skillId} file tree`} aria-disabled={disabled ? 'true' : 'false'}>
+      <div className="min-h-0 flex-1 overflow-auto px-3 py-4" role="tree" aria-label={`${skillId} file tree`} aria-disabled={disabled ? 'true' : 'false'}>
         {entries.length > 0 ? (
           <div className="space-y-0.5">{renderSkillFolderNodes(entries, selectedPath, onSelectFile, Boolean(disabled))}</div>
         ) : (
-          <p className="text-xs text-sidebar-foreground/40">This skill folder only contains SKILL.md.</p>
+          <p className="px-2 text-xs text-foreground/40">This skill folder only contains SKILL.md.</p>
         )}
       </div>
     </div>

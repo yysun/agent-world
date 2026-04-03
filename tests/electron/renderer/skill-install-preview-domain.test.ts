@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createEmptySkillInstallPreviewState,
+  extractSkillDescriptionFromMarkdown,
+  extractSkillDescriptionFromPreviewFiles,
   isSkillInstallFileEditable,
   mergeSkillInstallDraftFiles,
   resolveSelectedGitHubSkillName,
@@ -42,5 +44,27 @@ describe('skill install preview domain', () => {
       previewFiles: {},
       draftFiles: {},
     });
+  });
+
+  it('extracts folded front-matter descriptions from skill markdown', () => {
+    const markdown = [
+      '---',
+      'name: reviewer',
+      'description: >',
+      '  Review pull requests for correctness, regressions, and missing tests.',
+      '  Keep findings concise and severity-ordered.',
+      '---',
+      '',
+      '# Reviewer',
+    ].join('\n');
+
+    expect(extractSkillDescriptionFromMarkdown(markdown)).toBe('Review pull requests for correctness, regressions, and missing tests. Keep findings concise and severity-ordered.');
+  });
+
+  it('finds the skill description from preview files', () => {
+    expect(extractSkillDescriptionFromPreviewFiles({
+      'docs/readme.md': '# Docs',
+      'SKILL.md': '---\ndescription: "Helpful install summary"\n---\n# Skill',
+    })).toBe('Helpful install summary');
   });
 });

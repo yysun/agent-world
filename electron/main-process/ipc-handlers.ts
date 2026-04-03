@@ -724,6 +724,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
 
   async function readGitHubRootSkillMetadata(repoInput: string, folderName?: string): Promise<{
     skillName: string;
+    repoName: string;
     stagedSkill: GitHubFolderImportStagedResult;
   } | null> {
     const fallbackFolderName = String(folderName || getGitHubRepoName(repoInput) || 'skill').trim() || 'skill';
@@ -739,6 +740,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
 
       return {
         skillName: String(skillName || '').trim(),
+        repoName: String(getGitHubRepoName(repoInput) || '').trim(),
         stagedSkill,
       };
     } catch (error) {
@@ -852,7 +854,10 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       const rootSkillMetadata = await readGitHubRootSkillMetadata(normalizedRepo, normalizedItemName);
       if (rootSkillMetadata) {
         const normalizedRootSkillName = normalizeImportItemName(rootSkillMetadata.skillName, 'Skill name');
-        if (normalizedRootSkillName === normalizedItemName) {
+        const normalizedRepoName = rootSkillMetadata.repoName
+          ? normalizeImportItemName(rootSkillMetadata.repoName, 'Skill name')
+          : '';
+        if (normalizedRootSkillName === normalizedItemName || normalizedRepoName === normalizedItemName) {
           return rootSkillMetadata.stagedSkill;
         }
 
@@ -2023,6 +2028,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       const discoveredSkillNames = [
         ...((Array.isArray(skillDirectoryNames.directoryNames) ? skillDirectoryNames.directoryNames : []).map((value) => String(value || '').trim()).filter(Boolean)),
         ...(rootSkillName ? [rootSkillName] : []),
+        ...((hasRootSkillFile ? [getGitHubRepoName(repo)] : []).map((value) => String(value || '').trim()).filter(Boolean)),
       ];
 
       return Array.from(new Set(discoveredSkillNames))

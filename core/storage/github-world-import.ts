@@ -19,6 +19,7 @@
  * - Uses temp directories and explicit cleanup callbacks.
  *
  * Recent Changes:
+ * - 2026-04-03: Resolve the repo's default branch for generic GitHub folder imports when the user does not specify one.
  * - 2026-04-03: Added root-directory file listing and direct-file staging support so Electron skill installs can discover and stage repo-level SKILL.md files.
  * - 2026-02-25: Added shorthand resolver and secure GitHub staging for world import.
  */
@@ -92,6 +93,10 @@ interface GitHubContentsEntry {
   path: string;
   size?: number;
   download_url?: string | null;
+}
+
+interface GitHubRepoMetadata {
+  default_branch?: string;
 }
 
 interface StageRemoteWorldOptions {
@@ -402,6 +407,46 @@ export function resolveGitHubRepoSource(repoInput: string): ResolvedGitHubRepoSo
   );
 }
 
+function hasExplicitGitHubBranch(repoInput: string): boolean {
+  const trimmed = String(repoInput || '').trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  const withoutScheme = trimmed.replace(/^https?:\/\/github\.com\//i, '');
+  const [, branchPart] = withoutScheme.split('#', 2);
+  return Boolean(String(branchPart || '').trim());
+}
+
+async function fetchDefaultBranch(owner: string, repo: string, timeoutMs: number): Promise<string | null> {
+  const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+  const response = await fetchJson(url, timeoutMs);
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload = await response.json() as GitHubRepoMetadata;
+  const defaultBranch = String(payload.default_branch || '').trim();
+  return defaultBranch || null;
+}
+
+async function resolveGitHubRepoSourceForRequest(repoInput: string, timeoutMs: number): Promise<ResolvedGitHubRepoSource> {
+  const resolvedRepo = resolveGitHubRepoSource(repoInput);
+  if (hasExplicitGitHubBranch(repoInput)) {
+    return resolvedRepo;
+  }
+
+  const defaultBranch = await fetchDefaultBranch(resolvedRepo.owner, resolvedRepo.repo, timeoutMs);
+  if (!defaultBranch || defaultBranch === resolvedRepo.branch) {
+    return resolvedRepo;
+  }
+
+  return {
+    ...resolvedRepo,
+    branch: defaultBranch,
+  };
+}
+
 export async function listGitHubDirectoryNames(
   repoInput: string,
   directoryPath: string,
@@ -410,7 +455,7 @@ export async function listGitHubDirectoryNames(
   const requestTimeoutMs = Number.isFinite(options.requestTimeoutMs)
     ? Math.max(1, Number(options.requestTimeoutMs))
     : DEFAULT_REQUEST_TIMEOUT_MS;
-  const resolvedRepo = resolveGitHubRepoSource(repoInput);
+  const resolvedRepo = await resolveGitHubRepoSourceForRequest(repoInput, requestTimeoutMs);
   const normalizedDirectoryPath = normalizeGitHubContentsPath(directoryPath);
   const resolvedDirectoryPath = normalizedDirectoryPath || '.';
 
@@ -500,7 +545,7 @@ export async function stageGitHubFolderFromRepo(
     : DEFAULT_REQUEST_TIMEOUT_MS;
   const tempPrefix = String(options.tempPrefix || 'agent-world-github-import-');
 
-  const resolvedRepo = resolveGitHubRepoSource(repoInput);
+  const resolvedRepo = await resolveGitHubRepoSourceForRequest(repoInput, requestTimeoutMs);
   const normalizedFolderPath = String(folderPath || '').trim().replace(/^\/+|\/+$/g, '');
   if (!normalizedFolderPath) {
     throw new GitHubWorldImportError('invalid-shorthand', 'GitHub folder path is required.', {

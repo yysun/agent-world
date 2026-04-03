@@ -42,6 +42,13 @@ renderer is ready for it.
 - If the UI encodes chat/settings/shell semantics, keep it in the owning feature or shell layer.
 - When moving code out of `components/`, move it directly to its owner instead of creating a second transitional bucket.
 
+### Primitive styling contract
+
+- When feature code uses renderer primitives such as `Button`, `IconButton`, `Input`, `Select`, `Textarea`, `Radio`, `Checkbox`, or `Switch`, prefer the primitive's public `variant`, `size`, and `tone` props before adding local styling.
+- Feature-level `className` on primitives should be layout-only whenever possible: width, flex behavior, positioning, margin, and similar composition concerns.
+- Do not restyle primitive visuals inside feature code by overriding radius, border, background, shadow, or text-size classes just to make one screen look different.
+- If a new visual treatment is genuinely needed, move it into the primitive or extract a design-system pattern instead of baking it into the feature component.
+
 ### Review checklist
 
 - Does this change add a new renderer UI file to `components/` when it should live in `app/shell` or `features`?
@@ -49,6 +56,7 @@ renderer is ready for it.
 - Does a primitive or pattern depend on feature/shell/transitional UI?
 - If `app/shell` still consumes a transitional component, is that usage routed through the shell seam?
 - Did you update `tests/electron/renderer/design-system-layer-boundaries.test.ts` if the contract changed?
+- Does any feature pass visual override classes onto a primitive when the same result should come from the primitive API or a shared pattern?
 
 ## Electron Renderer Hook & Event Rules (Strict)
 

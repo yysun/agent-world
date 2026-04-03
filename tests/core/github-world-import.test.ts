@@ -15,6 +15,7 @@
  * - Uses Vitest expectations for explicit error-code assertions.
  *
  * Recent Changes:
+ * - 2026-04-03: Added regression coverage for repo imports that rely on the GitHub default branch instead of assuming `main`.
  * - 2026-04-03: Added coverage for repo-root SKILL.md discovery and direct-file staging for Electron skill installs.
  * - 2026-02-27: Added stageGitHubWorldFromShorthand success/error/limit tests with mocked fetch and fs.
  * - 2026-02-25: Added baseline unit coverage for GitHub shorthand import resolver.
@@ -300,6 +301,49 @@ describe('stageGitHubFolderFromRepo', () => {
     );
   });
 
+  it('resolves the repo default branch when no branch is specified', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ default_branch: 'master' }))
+      .mockResolvedValueOnce(jsonResponse({ sha: 'def456' }))
+      .mockResolvedValueOnce(jsonResponse([
+        {
+          type: 'file',
+          path: 'skills/research/SKILL.md',
+          download_url: 'https://download/skill',
+        },
+      ]))
+      .mockResolvedValueOnce(bytesResponse('# Research skill'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const staged = await stageGitHubFolderFromRepo('octo/tools', 'skills/research', {
+      folderName: 'research',
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://api.github.com/repos/octo/tools',
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://api.github.com/repos/octo/tools/commits/master',
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      'https://api.github.com/repos/octo/tools/contents/skills/research?ref=master',
+      expect.any(Object),
+    );
+    expect(staged.source).toEqual({
+      repoInput: 'octo/tools',
+      owner: 'octo',
+      repo: 'tools',
+      branch: 'master',
+      folderPath: 'skills/research',
+      commitSha: 'def456',
+    });
+  });
+
   it('rejects empty folder paths', async () => {
     await expect(stageGitHubFolderFromRepo('octo/tools', '')).rejects.toMatchObject({
       name: 'GitHubWorldImportError',
@@ -390,8 +434,43 @@ describe('listGitHubDirectoryNames', () => {
     });
   });
 
+  it('uses the repo default branch when listing without an explicit branch', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ default_branch: 'master' }))
+      .mockResolvedValueOnce(jsonResponse([
+        {
+          type: 'dir',
+          path: 'skills/reviewer',
+        },
+      ]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(listGitHubDirectoryNames('octo/tools', 'skills')).resolves.toEqual({
+      repoInput: 'octo/tools',
+      owner: 'octo',
+      repo: 'tools',
+      branch: 'master',
+      directoryPath: 'skills',
+      directoryNames: ['reviewer'],
+      fileNames: [],
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://api.github.com/repos/octo/tools',
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://api.github.com/repos/octo/tools/contents/skills?ref=master',
+      expect.any(Object),
+    );
+  });
+
   it('maps missing repo paths to source-not-found', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response('', { status: 404 })));
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ default_branch: 'main' }))
+      .mockResolvedValueOnce(new Response('', { status: 404 })));
 
     await expect(listGitHubDirectoryNames('octo/tools', 'skills')).rejects.toMatchObject({
       name: 'GitHubWorldImportError',
