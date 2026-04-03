@@ -15,6 +15,7 @@
  * - Tests BaseEditor slot contract by inspecting children tree structure.
  *
  * Recent Changes:
+ * - 2026-04-03: Added coverage for formatted SKILL.md markdown rendering in install preview.
  * - 2026-04-03: Added coverage for pressing Enter in the GitHub repo input to load skills from the selected repository.
  * - 2026-04-03: Updated install-mode assertions for the new reference-matching split between the top toolbar and file-header action row.
  * - 2026-03-29: Updated GitHub sizing coverage for the shared repo+skill flex group that prevents left-side clipping.
@@ -446,7 +447,7 @@ describe('SkillEditor', () => {
     expect(contentStr).not.toContain('Preview a local or GitHub skill to inspect its files before installing.');
     expect(contentStr).not.toContain('Skill preview');
     expect(contentStr).toContain('Project');
-    expect(contentStr).not.toContain('Preview');
+    expect(contentStr).not.toContain('children":"Preview"');
     expect(contentStr).toContain('Install');
 
     const toolbarNodes = allDescendants(result.props.toolbar);
@@ -642,5 +643,41 @@ describe('SkillEditor', () => {
 
     expect(textarea?.props?.disabled).toBe(true);
     expect(textarea?.props?.placeholder).toContain('cannot be edited in preview');
+  });
+
+  it('renders formatted SKILL.md markdown in install preview', () => {
+    const result: any = SkillEditor({
+      mode: 'install',
+      skillId: 'preview-skill',
+      sourceScope: 'project',
+      selectedFilePath: 'SKILL.md',
+      content: '# Preview Skill\n\n- First item\n- Second item',
+      onContentChange: () => { },
+      onBack: () => { },
+      onSave: () => { },
+      onDelete: () => { },
+      onSelectFile: () => { },
+      folderEntries: [
+        { name: 'SKILL.md', relativePath: 'SKILL.md', type: 'file' },
+      ],
+      hasUnsavedChanges: false,
+      loadingFile: false,
+      saving: false,
+      deleting: false,
+      installRepo: 'yysun/apprun-skills',
+      installItemName: 'apprun-skills',
+      installOptions: ['apprun-skills'],
+      hasInstallPreview: true,
+    });
+
+    const nodes = allDescendants(result.props.children);
+    const textarea = nodes.find((node: any) => node?.type === Textarea);
+    const markdownPreview = nodes.find((node: any) => node?.props?.['aria-label'] === 'Preview SKILL.md for preview-skill');
+
+    expect(textarea).toBeUndefined();
+    expect(markdownPreview).toBeDefined();
+    expect(markdownPreview?.props?.className).toContain('prose');
+    expect(String(markdownPreview?.props?.dangerouslySetInnerHTML?.__html || '')).toContain('<h1');
+    expect(String(markdownPreview?.props?.dangerouslySetInnerHTML?.__html || '')).toContain('<ul');
   });
 });

@@ -15,6 +15,7 @@
  * - Back button fires `onBack` without prompting (unsaved changes are parent's concern).
  *
  * Recent Changes:
+ * - 2026-04-03: Render SKILL.md as formatted markdown in install preview while keeping raw text editing for normal edit mode and non-markdown preview files.
  * - 2026-04-03: Allow pressing Enter in the GitHub repo input to load the repo skill list without reaching for the refresh icon.
  * - 2026-04-03: Reworked install mode to match the denser desktop reference layout with a dedicated top control bar and file-header action row.
  * - 2026-03-29: Reworked the GitHub primary-row sizing so the repo field can shrink inside a shared flex group instead of clipping the left side.
@@ -38,6 +39,7 @@ import React from 'react';
 import BaseEditor from '../../../design-system/patterns/BaseEditor';
 import { Button, IconButton, Input, Radio, Select, Textarea } from '../../../design-system/primitives';
 import type { SkillFolderEntry } from '../../../types/desktop-api';
+import { renderMarkdown } from '../../../utils/markdown';
 import SkillFolderPane from './SkillFolderPane';
 
 type SkillEditorMode = 'edit' | 'install';
@@ -134,6 +136,8 @@ export default function SkillEditor({
     : (sourceScope === 'project' ? 'Project skill' : 'Global skill');
   const titleText = skillId;
   const textareaDisabled = busy || (isInstallMode && !currentFileEditable);
+  const isSkillMarkdownPreview = isInstallMode && /(^|\/)SKILL\.md$/i.test(String(selectedFilePath || '').trim() || 'SKILL.md');
+  const renderedSkillMarkdown = isSkillMarkdownPreview ? renderMarkdown(content) : '';
   const textareaPlaceholder = isInstallMode && !currentFileEditable
     ? `${selectedFilePath || 'SKILL.md'} cannot be edited in preview.`
     : `Contents of ${selectedFilePath || 'SKILL.md'}…`;
@@ -435,16 +439,24 @@ export default function SkillEditor({
             </div>
           )}
         </div>
-        <Textarea
-          className="h-full resize-none p-4 text-xs leading-5 focus:border-transparent focus:ring-0"
-          value={content}
-          onChange={(e) => onContentChange(e.target.value)}
-          disabled={textareaDisabled}
-          spellCheck={false}
-          placeholder={textareaPlaceholder}
-          aria-label={`Edit ${selectedFilePath || 'SKILL.md'} for ${skillId}`}
-          size="md"
-        />
+        {isSkillMarkdownPreview ? (
+          <div
+            className="prose max-w-none flex-1 overflow-y-auto p-4 text-foreground"
+            aria-label={`Preview ${selectedFilePath || 'SKILL.md'} for ${skillId}`}
+            dangerouslySetInnerHTML={{ __html: renderedSkillMarkdown || '<p>(empty markdown)</p>' }}
+          />
+        ) : (
+          <Textarea
+            className="h-full resize-none p-4 text-xs leading-5 focus:border-transparent focus:ring-0"
+            value={content}
+            onChange={(e) => onContentChange(e.target.value)}
+            disabled={textareaDisabled}
+            spellCheck={false}
+            placeholder={textareaPlaceholder}
+            aria-label={`Edit ${selectedFilePath || 'SKILL.md'} for ${skillId}`}
+            size="md"
+          />
+        )}
       </div>
     </BaseEditor>
   );
