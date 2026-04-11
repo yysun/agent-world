@@ -445,6 +445,53 @@ describe('createMainIpcHandlers — readSkillContent / readSkillFolderStructure 
     ]);
   });
 
+  it('listLocalSkills expands tilde-prefixed home paths before scanning', async () => {
+    const rootPath = path.join(homedir(), '.agents', 'skills');
+    const reviewerSkillPath = path.join(rootPath, 'reviewer', 'SKILL.md');
+    const existingPaths = new Set([
+      path.normalize(rootPath),
+      path.normalize(reviewerSkillPath),
+    ]);
+    fsMockState.existsSync.mockImplementation((targetPath: string) => (
+      typeof targetPath === 'string' && existingPaths.has(path.normalize(targetPath))
+    ));
+    fsMockState.statSync.mockImplementation((targetPath: string) => ({
+      isDirectory: () => path.normalize(String(targetPath || '')) === path.normalize(rootPath),
+    }) as any);
+    fsMockState.readdir.mockImplementation(async (targetPath: string, options?: { withFileTypes?: boolean }) => {
+      const withFileTypes = options?.withFileTypes === true;
+      const dirent = (name: string, isDirectory: boolean) => ({
+        name,
+        isDirectory: () => isDirectory,
+        isSymbolicLink: () => false,
+      });
+      const normalizedPath = path.normalize(targetPath);
+
+      if (normalizedPath === path.normalize(rootPath)) {
+        return withFileTypes ? [dirent('reviewer', true)] as any : ['reviewer'] as any;
+      }
+
+      return withFileTypes ? [] as any : [] as any;
+    });
+    fsMockState.readFile.mockImplementation(async (targetPath: string) => {
+      if (path.normalize(targetPath) === path.normalize(reviewerSkillPath)) {
+        return '---\ndescription: Reviews home skill folders.\n---\n# Reviewer';
+      }
+      return '# SKILL content';
+    });
+
+    const handlers = createMainIpcHandlers(makeDeps(() => undefined));
+
+    await expect((handlers as any).listLocalSkills({ source: '~/.agents/skills' })).resolves.toEqual([
+      {
+        skillId: 'reviewer',
+        description: 'Reviews home skill folders.',
+        folderPath: path.join(rootPath, 'reviewer'),
+        relativePath: 'reviewer',
+      },
+    ]);
+  });
+
   it('listLocalSkills skips ignored dependency and build directories while scanning', async () => {
     const rootPath = absoluteTestPath('workspace', 'scan-root');
     const nodeModulesPath = absoluteTestPath('workspace', 'scan-root', 'node_modules');

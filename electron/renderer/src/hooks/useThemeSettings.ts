@@ -13,6 +13,7 @@
  * - Preserves existing App.jsx behavior by returning state + action helpers.
  *
  * Recent Changes:
+ * - 2026-04-11: Added post-install skill enable support so newly installed skills are enabled automatically in the matching scope.
  * - 2026-02-28: Added immediate autosave handlers for skill scope/row toggles with serialized persistence and registry refresh.
  * - 2026-02-27: Added unsaved-change tracking support for `showToolMessages` desktop setting.
  * - 2026-02-17: Extracted theme/settings logic from `App.jsx` for Phase 3.
@@ -50,6 +51,44 @@ function extractSkillSettingsSnapshot(settings: any): SkillSettingsSnapshot {
     enableProjectSkills: normalized.enableProjectSkills !== false,
     disabledGlobalSkillIds: normalizeStringList(normalized.disabledGlobalSkillIds),
     disabledProjectSkillIds: normalizeStringList(normalized.disabledProjectSkillIds),
+  };
+}
+
+export function deriveEnabledSkillSettingsUpdate(settings: any, sourceScope: string, skillId: string): {
+  changed: boolean;
+  nextSettings: any;
+  nextSkillSettings: SkillSettingsSnapshot;
+} {
+  const normalizedSkillId = String(skillId || '').trim();
+  const currentSettings = normalizeSystemSettings(settings);
+
+  if (!normalizedSkillId) {
+    return {
+      changed: false,
+      nextSettings: currentSettings,
+      nextSkillSettings: extractSkillSettingsSnapshot(currentSettings),
+    };
+  }
+
+  const projectScope = sourceScope === 'project';
+  const enableKey = projectScope ? 'enableProjectSkills' : 'enableGlobalSkills';
+  const disabledKey = projectScope ? 'disabledProjectSkillIds' : 'disabledGlobalSkillIds';
+  const disabledIds = new Set(normalizeStringList(currentSettings[disabledKey]));
+  const scopeWasEnabled = currentSettings[enableKey] !== false;
+  const skillWasEnabled = !disabledIds.has(normalizedSkillId);
+
+  disabledIds.delete(normalizedSkillId);
+
+  const nextSettings = normalizeSystemSettings({
+    ...currentSettings,
+    [enableKey]: true,
+    [disabledKey]: [...disabledIds].sort((left, right) => left.localeCompare(right)),
+  });
+
+  return {
+    changed: !scopeWasEnabled || !skillWasEnabled,
+    nextSettings,
+    nextSkillSettings: extractSkillSettingsSnapshot(nextSettings),
   };
 }
 
@@ -195,11 +234,11 @@ export function useThemeSettings({
     [skillRegistryEntries],
   );
 
-  const enqueueSkillSettingsAutosave = useCallback((nextSkillSettings: SkillSettingsSnapshot) => {
+  const enqueueSkillSettingsAutosave = useCallback((nextSkillSettings: SkillSettingsSnapshot): Promise<boolean> => {
     pendingSkillAutosaveCountRef.current += 1;
     setSavingSystemSettings(true);
 
-    skillAutosaveQueueRef.current = skillAutosaveQueueRef.current
+    const queuedSave = skillAutosaveQueueRef.current
       .then(async () => {
         const result = await persistSkillSettingsAutosave({
           api,
@@ -211,11 +250,12 @@ export function useThemeSettings({
 
         if (result.saved) {
           savedSystemSettingsRef.current = result.nextSavedSystemSettings;
-          return;
+          return true;
         }
 
         systemSettingsRef.current = result.nextSavedSystemSettings;
         setSystemSettings(result.nextSavedSystemSettings);
+        return false;
       })
       .finally(() => {
         pendingSkillAutosaveCountRef.current = Math.max(0, pendingSkillAutosaveCountRef.current - 1);
@@ -223,6 +263,9 @@ export function useThemeSettings({
           setSavingSystemSettings(false);
         }
       });
+
+    skillAutosaveQueueRef.current = queuedSave.then(() => undefined);
+    return queuedSave;
   }, [api, refreshSkillRegistry, setStatusText]);
 
   const setGlobalSkillsEnabled = useCallback((enabled: boolean) => {
@@ -233,7 +276,7 @@ export function useThemeSettings({
     });
     systemSettingsRef.current = nextSettings;
     setSystemSettings(nextSettings);
-    enqueueSkillSettingsAutosave(extractSkillSettingsSnapshot(nextSettings));
+    void enqueueSkillSettingsAutosave(extractSkillSettingsSnapshot(nextSettings));
   }, [enqueueSkillSettingsAutosave]);
 
   const setProjectSkillsEnabled = useCallback((enabled: boolean) => {
@@ -244,7 +287,7 @@ export function useThemeSettings({
     });
     systemSettingsRef.current = nextSettings;
     setSystemSettings(nextSettings);
-    enqueueSkillSettingsAutosave(extractSkillSettingsSnapshot(nextSettings));
+    void enqueueSkillSettingsAutosave(extractSkillSettingsSnapshot(nextSettings));
   }, [enqueueSkillSettingsAutosave]);
 
   const toggleSkillEnabled = useCallback((sourceScope, skillId) => {
@@ -267,7 +310,19 @@ export function useThemeSettings({
 
     systemSettingsRef.current = nextSettings;
     setSystemSettings(nextSettings);
-    enqueueSkillSettingsAutosave(extractSkillSettingsSnapshot(nextSettings));
+    void enqueueSkillSettingsAutosave(extractSkillSettingsSnapshot(nextSettings));
+  }, [enqueueSkillSettingsAutosave]);
+
+  const ensureSkillEnabled = useCallback(async (sourceScope: string, skillId: string) => {
+    const nextUpdate = deriveEnabledSkillSettingsUpdate(systemSettingsRef.current, sourceScope, skillId);
+    if (!nextUpdate.changed) {
+      return { changed: false, saved: true };
+    }
+
+    systemSettingsRef.current = nextUpdate.nextSettings;
+    setSystemSettings(nextUpdate.nextSettings);
+    const saved = await enqueueSkillSettingsAutosave(nextUpdate.nextSkillSettings);
+    return { changed: true, saved };
   }, [enqueueSkillSettingsAutosave]);
 
   const resetSystemSettings = useCallback(() => {
@@ -322,6 +377,7 @@ export function useThemeSettings({
     setGlobalSkillsEnabled,
     setProjectSkillsEnabled,
     toggleSkillEnabled,
+    ensureSkillEnabled,
     loadSystemSettings,
     resetSystemSettings,
     saveSystemSettings,

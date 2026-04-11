@@ -72,7 +72,7 @@ export default function SkillInstallBrowser({
   onRepoChange: (value: string) => void;
   onSearchQueryChange: (value: string) => void;
   onLoadGitHubOptions: () => void;
-  onLoadLocalOptions: () => void;
+  onLoadLocalOptions: (sourcePath?: string) => void;
   onPreviewSelection: (skillName?: string, localFolderPath?: string) => void;
 }) {
   const busy = loadingPreview || installing;
@@ -196,7 +196,7 @@ export default function SkillInstallBrowser({
                             return;
                           }
                           event.preventDefault();
-                          onLoadLocalOptions();
+                          onLoadLocalOptions(sourcePath);
                         }}
                         disabled={busy || loadingLocalOptions}
                         placeholder="/path/to/project-or-skill-root"
@@ -213,7 +213,7 @@ export default function SkillInstallBrowser({
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={onLoadLocalOptions}
+                        onClick={() => onLoadLocalOptions(sourcePath)}
                         disabled={!sourcePath.trim() || busy || loadingLocalOptions}
                       >
                         {loadingLocalOptions ? 'Scanning…' : 'Scan skills'}

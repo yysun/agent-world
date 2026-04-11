@@ -479,6 +479,21 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     }
   }
 
+  function resolveUserPath(rawPath: string): string {
+    const normalizedPath = String(rawPath || '').trim();
+    if (!normalizedPath) {
+      return '';
+    }
+
+    const expandedPath = normalizedPath === '~'
+      ? homedir()
+      : (normalizedPath.startsWith('~/') || normalizedPath.startsWith('~\\'))
+        ? path.join(homedir(), normalizedPath.slice(2))
+        : normalizedPath;
+
+    return path.resolve(path.normalize(expandedPath));
+  }
+
   function getWorldFolderValidationError(worldFolderPath: string): string | null {
     if (!isDirectoryOnDisk(worldFolderPath)) {
       return 'Selected path is not a folder';
@@ -778,7 +793,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
 
     try {
       let resolvedSkillFolder = selectedSkillFolder
-        ? path.resolve(path.normalize(selectedSkillFolder))
+        ? resolveUserPath(selectedSkillFolder)
         : '';
       let sourceMetadata: Record<string, unknown> | null = null;
 
@@ -1408,7 +1423,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     try {
       await ensureCoreReady();
 
-      let resolvedWorldFolder = path.resolve(path.normalize(selectedWorldFolder));
+      let resolvedWorldFolder = resolveUserPath(selectedWorldFolder);
       let sourceMetadata: Record<string, unknown> | null = null;
 
       const stagedGitHubImport = await stageGitHubImportFolder('world', payload);
@@ -1736,7 +1751,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
         };
       }
 
-      let resolvedAgentFolder = path.resolve(path.normalize(selectedAgentFolder || ''));
+      let resolvedAgentFolder = resolveUserPath(selectedAgentFolder || '');
       let sourceMetadata: Record<string, unknown> | null = null;
 
       const stagedGitHubImport = await stageGitHubImportFolder('agent', payload);
@@ -1953,7 +1968,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
         throw new Error('Local skill root is required.');
       }
 
-      const resolvedRootPath = path.resolve(path.normalize(source));
+      const resolvedRootPath = resolveUserPath(source);
       if (!isDirectoryOnDisk(resolvedRootPath)) {
         throw new Error('Selected path is not a folder');
       }

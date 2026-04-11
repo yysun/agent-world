@@ -164,6 +164,7 @@ describe('SkillInstallBrowser', () => {
     const onSourceTypeChange = vi.fn();
     const onSourcePathChange = vi.fn();
     const onBrowseSource = vi.fn();
+    const onLoadLocalOptions = vi.fn();
     const onPreviewSelection = vi.fn();
 
     const result: any = SkillInstallBrowser({
@@ -197,7 +198,7 @@ describe('SkillInstallBrowser', () => {
       onRepoChange: () => { },
       onSearchQueryChange: () => { },
       onLoadGitHubOptions: () => { },
-      onLoadLocalOptions: onBrowseSource,
+      onLoadLocalOptions,
       onPreviewSelection,
     });
 
@@ -222,11 +223,14 @@ describe('SkillInstallBrowser', () => {
     pathInput?.props?.onChange({ target: { value: '/tmp/skills/reviewer' } });
     browseButton?.props?.onClick();
     scanButton?.props?.onClick();
+    pathInput?.props?.onKeyDown({ key: 'Enter', preventDefault: vi.fn() });
     githubToggleButton?.props?.onClick();
     localCardButton?.props?.onClick();
 
     expect(onSourcePathChange).toHaveBeenCalledWith('/tmp/skills/reviewer');
-    expect(onBrowseSource).toHaveBeenCalledTimes(2);
+    expect(onBrowseSource).toHaveBeenCalledTimes(1);
+    expect(onLoadLocalOptions).toHaveBeenNthCalledWith(1, '/tmp/workspace');
+    expect(onLoadLocalOptions).toHaveBeenNthCalledWith(2, '/tmp/workspace');
     expect(onSourceTypeChange).toHaveBeenCalledWith('github');
     expect(onPreviewSelection).toHaveBeenCalledWith('planner', '/tmp/workspace/packages/tools/skills/planner');
   });

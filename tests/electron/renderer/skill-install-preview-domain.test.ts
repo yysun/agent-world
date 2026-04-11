@@ -9,6 +9,8 @@ import {
   filterLocalSkillOptions,
   isSkillInstallFileEditable,
   mergeSkillInstallDraftFiles,
+  resolveActiveLocalSkillLoadSourcePath,
+  resolveLocalSkillSearchQueryOnSourceChange,
   resolveLocalSkillPreviewSelection,
   resolveSkillInstallEditorStageOnPreview,
   resolveSelectedGitHubSkillName,
@@ -121,6 +123,17 @@ describe('skill install preview domain', () => {
       currentSourcePath: '/tmp/other-root',
       requestSourcePath: '/tmp/root',
     })).toBe(false);
+  });
+
+  it('prefers an explicit browse-picked local root over a stale existing source path', () => {
+    expect(resolveActiveLocalSkillLoadSourcePath('/tmp/old-root', '/tmp/new-root')).toBe('/tmp/new-root');
+    expect(resolveActiveLocalSkillLoadSourcePath('/tmp/current-root', '')).toBe('/tmp/current-root');
+  });
+
+  it('clears the local search query when the local root changes', () => {
+    expect(resolveLocalSkillSearchQueryOnSourceChange('reviewer', '/tmp/old-root', '/tmp/new-root')).toBe('');
+    expect(resolveLocalSkillSearchQueryOnSourceChange('reviewer', '/tmp/root', '/tmp/root')).toBe('reviewer');
+    expect(resolveLocalSkillSearchQueryOnSourceChange('reviewer', '/tmp/root', '')).toBe('reviewer');
   });
 
   it('keeps install preview open even if preview loading fails', () => {

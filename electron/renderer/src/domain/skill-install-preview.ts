@@ -15,6 +15,8 @@
  * - Preview files only include text-readable content; non-text files remain visible in the tree but non-editable.
  *
  * Recent Changes:
+ * - 2026-04-11: Added a helper to clear stale local search filters when the chosen local skill root changes.
+ * - 2026-04-11: Added a helper to preserve local scan results when a browse-picked root overrides an older typed path during the same load cycle.
  * - 2026-04-11: Added local-scan selection and filtering helpers so local install roots can list root skills and nested skills-directory candidates.
  * - 2026-04-11: Added a pure stage-transition helper so install preview opens immediately on click and stays open during preview-load failures.
  * - 2026-04-11: GitHub browse helpers now operate on summary entries so the install browser can show discovered skill descriptions.
@@ -165,6 +167,26 @@ export function shouldApplyGitHubSkillLoadResult({
   }
 
   return activeRequestId === requestId && normalizedCurrentRepo === normalizedRequestRepo;
+}
+
+export function resolveActiveLocalSkillLoadSourcePath(currentSourcePath: string, requestedSourcePath?: string): string {
+  const normalizedRequestedSourcePath = String(requestedSourcePath || '').trim();
+  if (normalizedRequestedSourcePath) {
+    return normalizedRequestedSourcePath;
+  }
+
+  return String(currentSourcePath || '').trim();
+}
+
+export function resolveLocalSkillSearchQueryOnSourceChange(currentSearchQuery: string, currentSourcePath: string, nextSourcePath: string): string {
+  const normalizedCurrentSourcePath = String(currentSourcePath || '').trim();
+  const normalizedNextSourcePath = String(nextSourcePath || '').trim();
+
+  if (!normalizedNextSourcePath || normalizedNextSourcePath === normalizedCurrentSourcePath) {
+    return String(currentSearchQuery || '');
+  }
+
+  return '';
 }
 
 export function shouldApplyLocalSkillLoadResult({

@@ -122,6 +122,8 @@ import {
   extractSkillDescriptionFromPreviewFiles,
   isSkillInstallFileEditable,
   mergeSkillInstallDraftFiles,
+  resolveActiveLocalSkillLoadSourcePath,
+  resolveLocalSkillSearchQueryOnSourceChange,
   resolveLocalSkillPreviewSelection,
   resolveSkillInstallEditorStageOnPreview,
   resolveSelectedGitHubSkillName,
@@ -931,6 +933,7 @@ function AppContent({ api }: { api: DesktopApi }) {
     setGlobalSkillsEnabled,
     setProjectSkillsEnabled,
     toggleSkillEnabled,
+    ensureSkillEnabled,
     loadSystemSettings,
     resetSystemSettings,
     saveSystemSettings,
@@ -1479,12 +1482,13 @@ function AppContent({ api }: { api: DesktopApi }) {
 
   const onChangeInstallSkillSourcePath = useCallback((value: string) => {
     installLocalSkillLoadRequestIdRef.current += 1;
+    setInstallSkillSearchQuery(resolveLocalSkillSearchQueryOnSourceChange(installSkillSearchQuery, installSkillSourcePath, value));
     setInstallSkillSourcePath(value);
     setInstallLocalSkillOptions([]);
     setLoadingInstallLocalSkills(false);
     resetInstallPreviewState();
     setInstallSkillItemName('');
-  }, [resetInstallPreviewState]);
+  }, [installSkillSearchQuery, installSkillSourcePath, resetInstallPreviewState]);
 
   const onChangeInstallSkillRepo = useCallback((value: string) => {
     installGitHubSkillLoadRequestIdRef.current += 1;
@@ -1498,6 +1502,7 @@ function AppContent({ api }: { api: DesktopApi }) {
 
   const onLoadInstallLocalSkills = useCallback(async (rootOverride?: string) => {
     const rootPath = String(rootOverride || installSkillSourcePath || '').trim();
+    const activeSourcePath = resolveActiveLocalSkillLoadSourcePath(installSkillSourcePath, rootOverride);
     if (!rootPath) {
       setStatusText('Local skill root is required.', 'error');
       return;
@@ -1511,7 +1516,7 @@ function AppContent({ api }: { api: DesktopApi }) {
       if (!shouldApplyLocalSkillLoadResult({
         activeRequestId: installLocalSkillLoadRequestIdRef.current,
         requestId,
-        currentSourcePath: installSkillSourcePath || rootPath,
+        currentSourcePath: activeSourcePath,
         requestSourcePath: rootPath,
       })) {
         return;
@@ -1546,7 +1551,7 @@ function AppContent({ api }: { api: DesktopApi }) {
       if (!shouldApplyLocalSkillLoadResult({
         activeRequestId: installLocalSkillLoadRequestIdRef.current,
         requestId,
-        currentSourcePath: installSkillSourcePath || rootPath,
+        currentSourcePath: activeSourcePath,
         requestSourcePath: rootPath,
       })) {
         return;
@@ -1681,16 +1686,13 @@ function AppContent({ api }: { api: DesktopApi }) {
         : await api.openWorkspace(installSkillSourcePath || workspace.workspacePath || undefined)) as DirectorySelectionResult | null;
       const directoryPath = result?.directoryPath ?? result?.workspacePath;
       if (!result?.canceled && directoryPath) {
-        setInstallSkillSourcePath(String(directoryPath));
-        setInstallLocalSkillOptions([]);
-        resetInstallPreviewState();
-        setInstallSkillItemName('');
+        onChangeInstallSkillSourcePath(String(directoryPath));
         void onLoadInstallLocalSkills(String(directoryPath));
       }
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to pick skill folder.'), 'error');
     }
-  }, [api, installSkillSourcePath, onLoadInstallLocalSkills, resetInstallPreviewState, setStatusText, workspace.workspacePath]);
+  }, [api, installSkillSourcePath, onChangeInstallSkillSourcePath, onLoadInstallLocalSkills, setStatusText, workspace.workspacePath]);
 
   const onLoadInstallGitHubSkills = useCallback(async () => {
     const repo = installSkillRepo.trim();
@@ -1856,19 +1858,31 @@ function AppContent({ api }: { api: DesktopApi }) {
           : {}),
         files: filesToInstall,
       });
-      try {
-        await refreshSkillRegistry();
-      } catch {
-        // Keep install successful even if the follow-up refresh fails.
+      const enableResult = await ensureSkillEnabled(installSkillTargetScope, skillName);
+      if (!enableResult.changed) {
+        try {
+          await refreshSkillRegistry();
+        } catch {
+          // Keep install successful even if the follow-up refresh fails.
+        }
+        setStatusText(`Installed skill: ${skillName}`, 'success');
+      } else if (enableResult.saved) {
+        setStatusText(`Installed and enabled skill: ${skillName}`, 'success');
+      } else {
+        try {
+          await refreshSkillRegistry();
+        } catch {
+          // Keep install successful even if the follow-up refresh fails.
+        }
+        setStatusText(`Installed skill: ${skillName}, but enabling it failed.`, 'error');
       }
-      setStatusText(`Installed skill: ${skillName}`, 'success');
       onCloseSkillEditor();
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to install skill.'), 'error');
     } finally {
       setInstallingSkillContent(false);
     }
-  }, [api, editingSkillFolderEntries.length, installResolvedSourcePath, installSkillDraftFiles, installSkillItemName, installSkillRepo, installSkillSourcePath, installSkillSourceType, installSkillTargetScope, onCloseSkillEditor, refreshSkillRegistry, selectedProjectPath, setStatusText]);
+  }, [api, editingSkillFolderEntries.length, ensureSkillEnabled, installResolvedSourcePath, installSkillDraftFiles, installSkillItemName, installSkillRepo, installSkillSourcePath, installSkillSourceType, installSkillTargetScope, onCloseSkillEditor, refreshSkillRegistry, selectedProjectPath, setStatusText]);
 
   const onDeleteSkillContent = useCallback(async () => {
     const skillId = String(editingSkillEntry?.skillId || '').trim();

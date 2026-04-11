@@ -26,9 +26,46 @@ vi.mock('react', () => ({
   useState: (value: unknown) => [value, () => undefined],
 }), { virtual: true });
 
-import { persistSkillSettingsAutosave } from '../../../electron/renderer/src/hooks/useThemeSettings';
+import {
+  deriveEnabledSkillSettingsUpdate,
+  persistSkillSettingsAutosave,
+} from '../../../electron/renderer/src/hooks/useThemeSettings';
 
 describe('electron/renderer theme settings skill autosave helper', () => {
+  it('enables a newly installed project skill and removes it from the disabled list', () => {
+    const result = deriveEnabledSkillSettingsUpdate({
+      enableGlobalSkills: true,
+      enableProjectSkills: false,
+      disabledGlobalSkillIds: [],
+      disabledProjectSkillIds: ['planner', 'reviewer'],
+    }, 'project', 'planner');
+
+    expect(result.changed).toBe(true);
+    expect(result.nextSkillSettings).toEqual({
+      enableGlobalSkills: true,
+      enableProjectSkills: true,
+      disabledGlobalSkillIds: [],
+      disabledProjectSkillIds: ['reviewer'],
+    });
+  });
+
+  it('keeps settings unchanged when the installed global skill is already enabled', () => {
+    const result = deriveEnabledSkillSettingsUpdate({
+      enableGlobalSkills: true,
+      enableProjectSkills: true,
+      disabledGlobalSkillIds: [],
+      disabledProjectSkillIds: [],
+    }, 'global', 'pdf');
+
+    expect(result.changed).toBe(false);
+    expect(result.nextSkillSettings).toEqual({
+      enableGlobalSkills: true,
+      enableProjectSkills: true,
+      disabledGlobalSkillIds: [],
+      disabledProjectSkillIds: [],
+    });
+  });
+
   it('persists skill toggles using saved baseline and refreshes registry', async () => {
     const saveSettings = vi.fn(async () => { });
     const refreshSkillRegistry = vi.fn(async () => { });
