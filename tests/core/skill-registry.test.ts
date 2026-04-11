@@ -12,6 +12,8 @@
  * - Exercises syncSkills through exported singleton helpers
  *
  * Recent Changes:
+ * - 2026-04-11: Added canonical-root coverage for `~/.agent-world/skills` and
+ *   canonical-only project/global default resolution.
  * - 2026-03-19: Added coverage for `worldVariablesText` project-root resolution and `~/` fallback without workspace/data env vars.
  * - 2026-02-28: Added regression coverage for discovering SKILL.md files under symlinked skill directories.
  * - 2026-02-27: Added regression coverage ensuring project-scope collisions override global scope even when file content hashes are identical.
@@ -26,6 +28,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fsModule from 'fs';
 import { homedir } from 'os';
+import * as path from 'path';
 import {
   clearSkillsForTests,
   getSkill,
@@ -430,7 +433,7 @@ describe('core/skill-registry', () => {
     expect(normalizePathKey(getSkillSourcePath('shared-skill') || '')).toContain('project-root/shared/SKILL.md');
   });
 
-  it('includes both .agents and .codex directories in default user roots', async () => {
+  it('includes only the canonical global directory in default user roots', async () => {
     setupFsScenario({}, {});
     await syncSkills({ projectSkillRoots: [] });
 
@@ -440,8 +443,9 @@ describe('core/skill-registry', () => {
       .calls
       .map((call: any[]) => normalizePathKey(String(call[0])));
 
-    expect(accessCalls.some((value) => value.includes('.agents/skills'))).toBe(true);
-    expect(accessCalls.some((value) => value.includes('.codex/skills'))).toBe(true);
+    expect(accessCalls.some((value) => value.endsWith(normalizePathKey(`${homedir()}/.agent-world/skills`)))).toBe(true);
+    expect(accessCalls.some((value) => value.includes('.agents/skills'))).toBe(false);
+    expect(accessCalls.some((value) => value.includes('.codex/skills'))).toBe(false);
   });
 
   it('uses working_directory from worldVariablesText for default project roots', async () => {
@@ -458,14 +462,14 @@ describe('core/skill-registry', () => {
       .calls
       .map((call: any[]) => normalizePathKey(String(call[0])));
 
-    expect(accessCalls.some((value) => value.endsWith('/workspace/test-agent-world/.agents/skills'))).toBe(true);
-    expect(accessCalls.some((value) => value.endsWith('/workspace/test-agent-world/skills'))).toBe(true);
+    expect(accessCalls.some((value) => value.endsWith('/workspace/test-agent-world/.agent-world/skills'))).toBe(true);
+    expect(accessCalls.some((value) => value.endsWith('/workspace/test-agent-world/.agents/skills'))).toBe(false);
   });
 
-  it('falls back to the user home directory when worldVariablesText has no working_directory', async () => {
+  it('does not derive a project root when worldVariablesText has no working_directory', async () => {
     setupFsScenario({}, {});
 
-    await syncSkills({ userSkillRoots: [] });
+    await syncSkills({});
 
     const accessCalls = vi
       .mocked((fs as any).access)
@@ -473,7 +477,38 @@ describe('core/skill-registry', () => {
       .calls
       .map((call: any[]) => normalizePathKey(String(call[0])));
 
-    expect(accessCalls.some((value) => value.endsWith(normalizePathKey(`${homedir()}/skills`)))).toBe(true);
+    expect(accessCalls.some((value) => value.endsWith(normalizePathKey(`${homedir()}/.agent-world/skills`)))).toBe(true);
+    expect(accessCalls.some((value) => value.includes('/.agent-world/skills') && !value.endsWith(normalizePathKey(`${homedir()}/.agent-world/skills`)))).toBe(false);
+  });
+
+  it('uses an explicitly provided canonical project root even without worldVariablesText', async () => {
+    const canonicalProjectRoot = '/workspace/test-agent-world/.agent-world/skills';
+    setupFsScenario(
+      {
+        [canonicalProjectRoot]: [{ name: 'shared', type: 'directory' }],
+        [`${canonicalProjectRoot}/shared`]: [{ name: 'SKILL.md', type: 'file' }],
+      },
+      {
+        [`${canonicalProjectRoot}/shared/SKILL.md`]: {
+          content: [
+            '---',
+            'name: shared-skill',
+            'description: From canonical project root',
+            '---',
+          ].join('\n'),
+          mtime: new Date('2026-04-11T09:05:00.000Z'),
+        },
+      },
+    );
+
+    await syncSkills({
+      userSkillRoots: [],
+      projectSkillRoots: [canonicalProjectRoot],
+    });
+
+    expect(getSkill('shared-skill')?.description).toBe('From canonical project root');
+    expect(normalizePathKey(getSkillSourcePath('shared-skill') || '')).toContain('.agent-world/skills/shared/SKILL.md');
+    expect(getSkillSourceScope('shared-skill')).toBe('project');
   });
 
   it('updates when file is newer and full SKILL.md content hash changes', async () => {

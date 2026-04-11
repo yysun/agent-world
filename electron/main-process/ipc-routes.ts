@@ -10,6 +10,7 @@
  * - Keeps channel naming and payload routing in one module.
  *
  * Recent Changes:
+ * - 2026-04-11: Added `skill:listLocalSkills` route wiring for local skill-root discovery in the install browser.
  * - 2026-03-22: Added `skill:previewImport` route wiring for the skill editor install-mode preview flow.
  * - 2026-03-22: Added `skill:readFolderStructure` route wiring for the skill editor right pane.
  * - 2026-03-22: Added `skill:delete` route wiring for confirmed skill removal from the renderer editor.
@@ -54,6 +55,7 @@ export interface MainIpcHandlers {
   importSkill: (payload?: unknown) => Promise<unknown> | unknown;
   previewSkillImport: (payload?: unknown) => Promise<unknown> | unknown;
   listGitHubSkills: (payload?: unknown) => Promise<unknown> | unknown;
+  listLocalSkills: (payload?: unknown) => Promise<unknown> | unknown;
   exportWorld: (payload: unknown) => Promise<unknown> | unknown;
   listWorkspaceWorlds: () => Promise<unknown> | unknown;
   listSkillRegistry: (payload?: unknown) => Promise<unknown> | unknown;
@@ -134,6 +136,10 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
     {
       channel: DESKTOP_INVOKE_CHANNELS.SKILL_LIST_GITHUB,
       handler: async (_event, payload) => handlers.listGitHubSkills(payload)
+    },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.SKILL_LIST_LOCAL,
+      handler: async (_event, payload) => handlers.listLocalSkills(payload)
     },
     {
       channel: DESKTOP_INVOKE_CHANNELS.WORLD_EXPORT,

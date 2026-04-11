@@ -14,6 +14,9 @@
  * - Uses mocked fs and mocked shell scope helpers only (no real filesystem access).
  *
  * Recent changes:
+ * - 2026-04-11: Added coverage for the canonical `.agent-world/skills/...`
+ *   project-path alias in read/list file tools and removed legacy `.agents`
+ *   alias support.
  * - 2026-03-03: Added tests for tightened tool limits: read_file 200-line cap, list_files maxDepth/maxEntries caps, grep maxResults cap and contextLines support.
  * - 2026-03-01: Added regression coverage for `read_file` when mocked `fs.readFile` resolves `undefined` (should return empty content, not error).
  * - 2026-03-01: Added read_file regression coverage for missing cwd script paths that should resolve under loaded skill roots.
@@ -245,7 +248,7 @@ describe('file-tools read_file', () => {
     const normalizePath = (value: string): string => value.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '').replace(/\/+/g, '/');
 
     const cwdCandidate = '/workspace/scripts/convert.py';
-    const skillCandidate = '/workspace/.agents/skills/music-to-svg/scripts/convert.py';
+    const skillCandidate = '/workspace/.agent-world/skills/music-to-svg/scripts/convert.py';
     const normalizedCwdCandidate = normalizePath(cwdCandidate);
     const normalizedSkillCandidate = normalizePath(skillCandidate);
 
@@ -272,7 +275,7 @@ describe('file-tools read_file', () => {
     ]);
     mockedGetSkillSourcePath.mockImplementation((skillId: string) => {
       if (skillId === 'music-to-svg') {
-        return '/workspace/.agents/skills/music-to-svg/SKILL.md';
+        return '/workspace/.agent-world/skills/music-to-svg/SKILL.md';
       }
       return undefined;
     });
@@ -329,26 +332,39 @@ describe('file-tools list_files', () => {
     vi.clearAllMocks();
   });
 
-  it('allows lexically in-scope skill alias paths under .agents/skills', async () => {
-    vi.mocked(fg).mockResolvedValue(['scripts/', 'scripts/convert.py']);
-
+  it('rejects legacy .agents skill alias paths', async () => {
     const listFilesTool = createListFilesToolDefinition();
     const result = await listFilesTool.execute(
       {
         path: '.agents/skills/music-to-svg',
         recursive: true,
-        includePattern: 'scripts/*,scripts/**/*.py',
       },
       undefined,
       undefined,
       { workingDirectory: '/workspace' }
     );
 
-    expect(String(result)).not.toContain('Error: list_files failed - Working directory mismatch');
+    expect(String(result)).toContain('Error: list_files failed - Working directory mismatch');
+  });
+
+  it('resolves the canonical project skill alias under the dot-prefixed project directory', async () => {
+    vi.mocked(fg).mockResolvedValue(['scripts/', 'scripts/convert.py']);
+
+    const listFilesTool = createListFilesToolDefinition();
+    const result = await listFilesTool.execute(
+      {
+        path: '.agent-world/skills/music-to-svg',
+        recursive: true,
+      },
+      undefined,
+      undefined,
+      { workingDirectory: '/workspace' }
+    );
+
+    expect(String(result)).not.toContain('Error: list_files failed -');
     const parsed = JSON.parse(String(result));
-    expect(String(parsed.path).replace(/\\/g, '/').replace(/\/+/g, '/')).toContain('/workspace/.agents/skills/music-to-svg');
-    expect(parsed.found).toBe(true);
-    expect(parsed.entries).toEqual(['scripts/', 'scripts/convert.py']);
+    expect(String(parsed.path).replace(/\\/g, '/').replace(/\/+/g, '/')).toContain('/workspace/.agent-world/skills/music-to-svg');
+    expect(vi.mocked(fg).mock.calls[0]?.[1]).toMatchObject({ cwd: '/workspace/.agent-world/skills/music-to-svg' });
   });
 
   it('caps maxDepth at 2 even when larger value requested', async () => {

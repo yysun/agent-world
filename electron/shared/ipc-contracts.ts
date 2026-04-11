@@ -15,6 +15,7 @@
  * - Runtime validation remains in main-process handlers for behavior parity.
  *
  * Recent Changes:
+ * - 2026-04-11: Added `skill:listLocalSkills` plus `LocalSkillSummary` for scanning a chosen local root for installable skills.
  * - 2026-03-22: Added `skill:previewImport` plus install-target payload fields so the skill editor can preview and install skills from local or GitHub sources.
  * - 2026-03-22: Extended skill content payloads with optional `relativePath` so the skill editor can open files from the folder tree.
  * - 2026-03-22: Added `skill:readFolderStructure` contracts and `SkillFolderEntry` so the skill editor can render the skill folder tree in its right pane.
@@ -51,6 +52,7 @@ export const DESKTOP_INVOKE_CHANNELS = {
   SKILL_IMPORT: 'skill:import',
   SKILL_PREVIEW_IMPORT: 'skill:previewImport',
   SKILL_LIST_GITHUB: 'skill:listGitHubSkills',
+  SKILL_LIST_LOCAL: 'skill:listLocalSkills',
   WORLD_EXPORT: 'world:export',
   WORLD_LIST: 'world:list',
   SKILL_LIST: 'skill:list',
@@ -134,6 +136,7 @@ export interface SkillImportPayload {
   repo?: string;
   itemName?: string;
   targetScope?: 'global' | 'project';
+  projectPath?: string;
   files?: Record<string, string>;
 }
 
@@ -144,8 +147,24 @@ export interface SkillImportPreviewResult {
   initialFilePath: string;
 }
 
+export interface GitHubSkillSummary {
+  skillId: string;
+  description: string;
+}
+
+export interface LocalSkillSummary {
+  skillId: string;
+  description: string;
+  folderPath: string;
+  relativePath: string;
+}
+
 export interface GitHubSkillListPayload {
   repo: string;
+}
+
+export interface LocalSkillListPayload {
+  source: string;
 }
 
 export interface WorldChatPayload extends WorldIdPayload {
@@ -311,7 +330,8 @@ export interface DesktopApi {
   importAgent: (payload: AgentImportPayload) => Promise<unknown>;
   importSkill: (payload?: SkillImportPayload) => Promise<unknown>;
   previewSkillImport: (payload?: SkillImportPayload) => Promise<SkillImportPreviewResult | null>;
-  listGitHubSkills: (repo: string) => Promise<string[]>;
+  listGitHubSkills: (repo: string) => Promise<GitHubSkillSummary[]>;
+  listLocalSkills: (source: string) => Promise<LocalSkillSummary[]>;
   exportWorld: (worldId: string) => Promise<unknown>;
   listWorlds: () => Promise<unknown>;
   listSkills: (filters?: SkillListFilterPayload) => Promise<SkillRegistrySummary[]>;

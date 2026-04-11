@@ -13,6 +13,19 @@
  * - Receives all mutation handlers and state via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-04-11: Removed the redundant "No ... skills discovered" empty-state
+ *   labels so empty scopes only show their canonical root hint and install
+ *   affordance.
+ * - 2026-04-11: Show canonical global/project skill-root guidance only when the
+ *   corresponding skill list is empty, so the fallback hint disappears once
+ *   real skills are discovered.
+ * - 2026-04-11: Switched system-settings skill-root guidance to
+ *   `~/.agent-world/skills` and `./.agent-world/skills`.
+ * - 2026-04-11: Removed stale legacy-root wording from system settings so the
+ *   desktop UI matches canonical-only Electron skill discovery.
+ * - 2026-04-11: Added canonical skill-root guidance in system settings so the
+ *   UI presents `~/.agent-world/skills` and `./.agent-world/skills` as the
+ *   standard locations.
  * - 2026-03-14: Removed the world-import form because import now renders in the left sidebar.
  * - 2026-02-28: Skill scope and per-skill switches now persist immediately (autosave) instead of waiting for footer Save.
  * - 2026-02-27: Hid per-skill rows for global/project sections when their parent section toggle is off.
@@ -85,6 +98,9 @@ function isNearBottom(container: HTMLDivElement, threshold = 24) {
   const remaining = container.scrollHeight - container.scrollTop - container.clientHeight;
   return remaining <= threshold;
 }
+
+const CANONICAL_GLOBAL_SKILL_ROOT_LABEL = '~/.agent-world/skills';
+const CANONICAL_PROJECT_SKILL_ROOT_LABEL = './.agent-world/skills';
 
 export default function RightPanelContent({
   panelMode,
@@ -159,6 +175,11 @@ export default function RightPanelContent({
     if (!container) return;
     shouldStickLogsToBottomRef.current = isNearBottom(container);
   };
+
+  const globalSkillsEnabled = systemSettings.enableGlobalSkills !== false;
+  const projectSkillsEnabled = systemSettings.enableProjectSkills !== false;
+  const hasGlobalSkillEntries = globalSkillEntries.length > 0;
+  const hasProjectSkillEntries = projectSkillEntries.length > 0;
 
   return (
     <div className="min-h-0 flex flex-1 flex-col overflow-y-auto">
@@ -270,98 +291,90 @@ export default function RightPanelContent({
               </div>
             </div>
 
-            <div className="border-t border-sidebar-border pt-4">
-              <div className="space-y-3">
-                <div className="mt-2 border-t border-sidebar-border pt-2">
-                  <SettingsSwitch
-                    label="Show tool messages"
-                    checked={systemSettings.showToolMessages !== false}
-                    onClick={() => setSystemSettings((settings) => ({ ...settings, showToolMessages: settings.showToolMessages === false }))}
-                  />
-                  <SettingsSwitch
-                    label="Enable Global Skills"
-                    checked={systemSettings.enableGlobalSkills !== false}
-                    onClick={() => setGlobalSkillsEnabled(systemSettings.enableGlobalSkills === false)}
-                    disabled={savingSystemSettings}
-                  />
-                  {systemSettings.enableGlobalSkills !== false ? (
-                    <div className="ml-1 space-y-0.5">
-                      {globalSkillEntries.length > 0 ? (
-                        globalSkillEntries.map((entry) => (
-                          <div key={`global-${entry.skillId}`} className="group flex items-center">
-                            {typeof onEditSkill === 'function' ? (
-                              <button
-                                type="button"
-                                aria-label={`Edit skill ${entry.skillId}`}
-                                onClick={() => onEditSkill(entry)}
-                                className="mr-1 flex-none rounded p-0.5 text-sidebar-foreground/30 opacity-0 transition-opacity hover:text-sidebar-foreground/80 group-hover:opacity-100"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
-                              </button>
-                            ) : null}
-                            <div className="flex-1 min-w-0">
-                              <SettingsSkillSwitch
-                                label={entry.skillId}
-                                checked={!disabledGlobalSkillIdSet.has(entry.skillId)}
-                                onClick={() => toggleSkillEnabled('global', entry.skillId)}
-                                disabled={savingSystemSettings}
-                              />
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="px-1 py-1 text-[11px] text-sidebar-foreground/50">No global skills discovered.</p>
-                      )}
-                    </div>
-                  ) : null}
-
-                  <SettingsSwitch
-                    label="Enable Project Skills"
-                    checked={systemSettings.enableProjectSkills !== false}
-                    onClick={() => setProjectSkillsEnabled(systemSettings.enableProjectSkills === false)}
-                    disabled={savingSystemSettings}
-                  />
-                  {systemSettings.enableProjectSkills !== false ? (
-                    <div className="ml-1 space-y-0.5">
-                      {projectSkillEntries.length > 0 ? (
-                        projectSkillEntries.map((entry) => (
-                          <div key={`project-${entry.skillId}`} className="group flex items-center">
-                            {typeof onEditSkill === 'function' ? (
-                              <button
-                                type="button"
-                                aria-label={`Edit skill ${entry.skillId}`}
-                                onClick={() => onEditSkill(entry)}
-                                className="mr-1 flex-none rounded p-0.5 text-sidebar-foreground/30 opacity-0 transition-opacity hover:text-sidebar-foreground/80 group-hover:opacity-100"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
-                              </button>
-                            ) : null}
-                            <div className="flex-1 min-w-0">
-                              <SettingsSkillSwitch
-                                label={entry.skillId}
-                                checked={!disabledProjectSkillIdSet.has(entry.skillId)}
-                                onClick={() => toggleSkillEnabled('project', entry.skillId)}
-                                disabled={savingSystemSettings}
-                              />
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="px-1 py-1 text-[11px] text-sidebar-foreground/50">No project skills discovered.</p>
-                      )}
-                      {typeof onInstallSkill === 'function' ? (
-                        <div className="flex justify-end px-1 pt-1">
+            <div className="space-y-3 pt-1">
+              <SettingsSwitch
+                label="Show tool messages"
+                checked={systemSettings.showToolMessages !== false}
+                onClick={() => setSystemSettings((settings) => ({ ...settings, showToolMessages: settings.showToolMessages === false }))}
+              />
+              <SettingsSwitch
+                label="Enable Global Skills"
+                checked={globalSkillsEnabled}
+                onClick={() => setGlobalSkillsEnabled(systemSettings.enableGlobalSkills === false)}
+                disabled={savingSystemSettings}
+              />
+              {globalSkillsEnabled && !hasGlobalSkillEntries ? (
+                <p className="px-1 pb-1 text-[10px] text-sidebar-foreground/45">
+                  Global skills default to {CANONICAL_GLOBAL_SKILL_ROOT_LABEL}.
+                </p>
+              ) : null}
+              {globalSkillsEnabled ? (
+                <div className="ml-1 space-y-0.5">
+                  {hasGlobalSkillEntries ? (
+                    globalSkillEntries.map((entry) => (
+                      <div key={`global-${entry.skillId}`} className="group flex items-center">
+                        {typeof onEditSkill === 'function' ? (
                           <button
                             type="button"
-                            onClick={onInstallSkill}
-                            className="cursor-pointer text-[11px] font-medium text-sidebar-primary transition-colors hover:text-sidebar-primary/80"
+                            aria-label={`Edit skill ${entry.skillId}`}
+                            onClick={() => onEditSkill(entry)}
+                            className="mr-1 flex-none rounded p-0.5 text-sidebar-foreground/30 opacity-0 transition-opacity hover:text-sidebar-foreground/80 group-hover:opacity-100"
                           >
-                            Install Skill ...
+                            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
                           </button>
+                        ) : null}
+                        <div className="flex-1 min-w-0">
+                          <SettingsSkillSwitch
+                            label={entry.skillId}
+                            checked={!disabledGlobalSkillIdSet.has(entry.skillId)}
+                            onClick={() => toggleSkillEnabled('global', entry.skillId)}
+                            disabled={savingSystemSettings}
+                          />
                         </div>
-                      ) : null}
-                    </div>
-                  ) : typeof onInstallSkill === 'function' ? (
+                      </div>
+                    ))
+                  ) : null}
+                </div>
+              ) : null}
+
+              <SettingsSwitch
+                label="Enable Project Skills"
+                checked={projectSkillsEnabled}
+                onClick={() => setProjectSkillsEnabled(systemSettings.enableProjectSkills === false)}
+                disabled={savingSystemSettings}
+              />
+              {projectSkillsEnabled && !hasProjectSkillEntries ? (
+                <p className="px-1 pb-1 text-[10px] text-sidebar-foreground/45">
+                  Project skills default to {CANONICAL_PROJECT_SKILL_ROOT_LABEL}.
+                </p>
+              ) : null}
+              {projectSkillsEnabled ? (
+                <div className="ml-1 space-y-0.5">
+                  {hasProjectSkillEntries ? (
+                    projectSkillEntries.map((entry) => (
+                      <div key={`project-${entry.skillId}`} className="group flex items-center">
+                        {typeof onEditSkill === 'function' ? (
+                          <button
+                            type="button"
+                            aria-label={`Edit skill ${entry.skillId}`}
+                            onClick={() => onEditSkill(entry)}
+                            className="mr-1 flex-none rounded p-0.5 text-sidebar-foreground/30 opacity-0 transition-opacity hover:text-sidebar-foreground/80 group-hover:opacity-100"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                          </button>
+                        ) : null}
+                        <div className="flex-1 min-w-0">
+                          <SettingsSkillSwitch
+                            label={entry.skillId}
+                            checked={!disabledProjectSkillIdSet.has(entry.skillId)}
+                            onClick={() => toggleSkillEnabled('project', entry.skillId)}
+                            disabled={savingSystemSettings}
+                          />
+                        </div>
+                      </div>
+                    ))
+                  ) : null}
+                  {typeof onInstallSkill === 'function' ? (
                     <div className="flex justify-end px-1 pt-1">
                       <button
                         type="button"
@@ -373,7 +386,17 @@ export default function RightPanelContent({
                     </div>
                   ) : null}
                 </div>
-              </div>
+              ) : typeof onInstallSkill === 'function' ? (
+                <div className="flex justify-end px-1 pt-1">
+                  <button
+                    type="button"
+                    onClick={onInstallSkill}
+                    className="cursor-pointer text-[11px] font-medium text-sidebar-primary transition-colors hover:text-sidebar-primary/80"
+                  >
+                    Install Skill ...
+                  </button>
+                </div>
+              ) : null}
             </div>
           </div>
 

@@ -11,6 +11,7 @@
  * - Tests route build + registration helpers together.
  *
  * Recent Changes:
+ * - 2026-04-11: Added channel/order/payload assertions for `skill:listLocalSkills` route wiring.
  * - 2026-03-22: Added relative-path payload coverage for `skill:readContent` and `skill:saveContent`.
  * - 2026-03-22: Added `skill:readFolderStructure` channel/order/payload coverage.
  * - 2026-03-22: Added `skill:delete` channel/order/payload coverage.
@@ -47,6 +48,7 @@ function createHandlerMocks() {
     importSkill: vi.fn(async () => ({})),
     previewSkillImport: vi.fn(async () => ({})),
     listGitHubSkills: vi.fn(async () => ([])),
+    listLocalSkills: vi.fn(async () => ([])),
     exportWorld: vi.fn(async () => ({})),
     listWorkspaceWorlds: vi.fn(async () => ([])),
     listSkillRegistry: vi.fn(async () => ([])),
@@ -115,6 +117,7 @@ describe('buildMainIpcRoutes', () => {
       'skill:import',
       'skill:previewImport',
       'skill:listGitHubSkills',
+      'skill:listLocalSkills',
       'world:export',
       'world:list',
       'skill:list',
@@ -180,6 +183,7 @@ describe('buildMainIpcRoutes', () => {
     await routes.find((route) => route.channel === 'skill:import')?.handler({}, { repo: 'yysun/agent-skills', itemName: 'reviewer' });
     await routes.find((route) => route.channel === 'skill:previewImport')?.handler({}, { repo: 'yysun/agent-skills', itemName: 'reviewer' });
     await routes.find((route) => route.channel === 'skill:listGitHubSkills')?.handler({}, { repo: 'yysun/awesome-agent-world' });
+    await routes.find((route) => route.channel === 'skill:listLocalSkills')?.handler({}, { source: '/tmp/workspace' });
     await routes.find((route) => route.channel === 'world:export')?.handler({}, { worldId: 'w-9' });
     await routes.find((route) => route.channel === 'skill:list')?.handler({});
     await routes.find((route) => route.channel === 'heartbeat:list')?.handler({});
@@ -221,6 +225,7 @@ describe('buildMainIpcRoutes', () => {
     expect(handlers.importSkill).toHaveBeenCalledWith({ repo: 'yysun/agent-skills', itemName: 'reviewer' });
     expect(handlers.previewSkillImport).toHaveBeenCalledWith({ repo: 'yysun/agent-skills', itemName: 'reviewer' });
     expect(handlers.listGitHubSkills).toHaveBeenCalledWith({ repo: 'yysun/awesome-agent-world' });
+    expect(handlers.listLocalSkills).toHaveBeenCalledWith({ source: '/tmp/workspace' });
     expect(handlers.exportWorld).toHaveBeenCalledWith({ worldId: 'w-9' });
     expect(handlers.listSkillRegistry).toHaveBeenCalledTimes(1);
     expect(handlers.listHeartbeatJobs).toHaveBeenCalledTimes(1);

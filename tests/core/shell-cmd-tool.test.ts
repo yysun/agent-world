@@ -10,6 +10,9 @@
  * - Output accumulation
  * 
  * Changes:
+ * - 2026-04-11: Added canonical `.agent-world/skills/...` project-path alias
+ *   coverage for skill-relative shell resolution and removed legacy `.agents`
+ *   alias support.
  * - 2026-03-23: Added a regression test that catastrophic blocked shell commands fail before cwd/path-scope validation.
  * - 2026-03-22: Added regression coverage so top-level JSON stdout with nested markdown markers does not get classified as directly displayable shell content.
  * - 2026-03-22: Added targeted coverage for both shell executable resolution paths: direct calls stay cwd-relative, skill-originated script calls resolve to `<skill_root>`.
@@ -1010,33 +1013,33 @@ describe('resolveSkillScriptParameters', () => {
     expect(skillRoots.map(normalizeForAssertion)).toEqual(['/home/user/.agents/skills/my-skill']);
   });
 
-  test('should resolve .agents/skills/<skill-id>/scripts/file.py prefix', () => {
+  test('should leave legacy .agents/skills prefixes unresolved', () => {
     mockedGetSkillSourcePath.mockReturnValue('/Users/tester/.agents/skills/music-to-svg/SKILL.md');
     const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
       '.agents/skills/music-to-svg/scripts/convert.py', '--file', 'tmp_input.musicxml'
     ]);
-    expect(normalizeForAssertion(resolvedParameters[0])).toBe('/Users/tester/.agents/skills/music-to-svg/scripts/convert.py');
+    expect(normalizeForAssertion(resolvedParameters[0])).toBe('.agents/skills/music-to-svg/scripts/convert.py');
     expect(resolvedParameters[1]).toBe('--file');
     expect(resolvedParameters[2]).toBe('tmp_input.musicxml');
-    expect(skillRoots.map(normalizeForAssertion)).toEqual(['/Users/tester/.agents/skills/music-to-svg']);
+    expect(skillRoots).toEqual([]);
   });
 
-  test('should resolve skills/<skill-id>/scripts/file.py prefix', () => {
-    mockedGetSkillSourcePath.mockReturnValue('/Users/tester/.agents/skills/pdf-extract/SKILL.md');
+  test('should resolve .agent-world/skills/<skill-id>/scripts/file.py prefix', () => {
+    mockedGetSkillSourcePath.mockReturnValue('/Users/tester/.agent-world/skills/pdf-extract/SKILL.md');
     const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
-      'skills/pdf-extract/scripts/run.sh'
+      '.agent-world/skills/pdf-extract/scripts/run.sh'
     ]);
-    expect(normalizeForAssertion(resolvedParameters[0])).toBe('/Users/tester/.agents/skills/pdf-extract/scripts/run.sh');
-    expect(skillRoots.map(normalizeForAssertion)).toEqual(['/Users/tester/.agents/skills/pdf-extract']);
+    expect(normalizeForAssertion(resolvedParameters[0])).toBe('/Users/tester/.agent-world/skills/pdf-extract/scripts/run.sh');
+    expect(skillRoots.map(normalizeForAssertion)).toEqual(['/Users/tester/.agent-world/skills/pdf-extract']);
   });
 
-  test('should resolve .agents/skills/<skill-id>/non-scripts paths', () => {
+  test('should leave legacy .agents/skills non-script paths unresolved', () => {
     mockedGetSkillSourcePath.mockReturnValue('/Users/tester/.agents/skills/my-tool/SKILL.md');
     const { resolvedParameters, skillRoots } = resolveSkillScriptParameters([
       '.agents/skills/my-tool/data/input.json'
     ]);
-    expect(normalizeForAssertion(resolvedParameters[0])).toBe('/Users/tester/.agents/skills/my-tool/data/input.json');
-    expect(skillRoots.map(normalizeForAssertion)).toEqual(['/Users/tester/.agents/skills/my-tool']);
+    expect(normalizeForAssertion(resolvedParameters[0])).toBe('.agents/skills/my-tool/data/input.json');
+    expect(skillRoots).toEqual([]);
   });
 
   test('should resolve bare relative path by scanning registered skills', () => {

@@ -135,13 +135,13 @@ For the full pattern catalog, see [docs/Agent World Patterns.md](docs/Agent%20Wo
 Agent Skills are reusable capability packs stored as `SKILL.md` files.
 
 - Skills are discovered from:
-  - project roots: `.agents/skills`, `skills`
-  - user roots: `~/.agents/skills`, `~/.codex/skills`
+  - canonical project root: `./.agent-world/skills`
+  - canonical user root: `~/.agent-world/skills`
 - The runtime injects compact skill summaries into the prompt
 - Agents call `load_skill` only when full instructions are needed
 - `load_skill` loads instructions and static skill context only; it does not execute skill scripts
 - If a task requires script execution, the agent must make a later explicit tool call such as `shell_cmd`
-- Project-based skills follow the active world's working folder
+- Project-based skills follow the active world's working folder and are only discovered from `./.agent-world/skills`
 - The Electron desktop app includes a skill editor with file browsing, preview/import flows, explicit `Project` vs `Global` install scope selection, and delete actions
 - Interactive skill activation is approval-gated
 - Skill-linked scripts are scope-validated and follow the same shell safety rules as built-in tool execution

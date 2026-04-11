@@ -16,9 +16,13 @@
  * - `skill_id` is sourced from front-matter `name`
  * - `description` is sourced from front-matter `description`
  * - `hash` is computed from full SKILL.md content (front matter + body)
- * - Project roots are scanned after user roots, so later collisions always override earlier ones
+ * - Collision precedence is explicit across canonical and legacy roots rather
+ *   than relying on discovery order
  *
  * Recent Changes:
+ * - 2026-04-11: Centralized canonical and legacy root handling in the shared
+ *   skill-root contract and made canonical roots outrank legacy roots within
+ *   the same scope.
  * - 2026-03-19: Switched project-skill root resolution to explicit world `variables` context with `~/` fallback and removed dependency on `AGENT_WORLD_WORKSPACE_PATH`/`AGENT_WORLD_DATA_PATH`.
  * - 2026-02-28: Added symlink-aware skill discovery so SKILL.md files inside symlinked directories are indexed.
  * - 2026-02-27: Made collision precedence explicit in candidate resolution so project-scope definitions always win over global-scope definitions even if discovery order changes.
@@ -37,8 +41,11 @@
 
 import { createHash } from 'crypto';
 import { promises as fs, type Dirent, type Stats } from 'fs';
-import { homedir } from 'os';
 import * as path from 'path';
+import {
+  resolveSkillRootDescriptors,
+  type SkillRootDescriptor,
+} from './skill-root-contract.js';
 
 export interface SkillRegistryEntry {
   skill_id: string;
@@ -72,6 +79,7 @@ export interface SkillScopeFilterOptions {
 }
 
 interface DiscoveredSkill {
+  precedence: number;
   skillFilePath: string;
   lastUpdated: string;
   sourceScope: SkillSourceScope;
@@ -86,59 +94,17 @@ interface ResolvedDiscoveredSkill {
   description: string;
   hash: string;
   lastUpdated: string;
+  precedence: number;
   skillFilePath: string;
   sourceScope: SkillSourceScope;
-}
-
-function buildDefaultUserSkillRoots(): string[] {
-  return [
-    path.join(homedir(), '.agents', 'skills'),
-    path.join(homedir(), '.codex', 'skills'),
-  ];
-}
-
-function getWorkingDirectoryFromWorldVariables(variablesText: string | undefined): string {
-  const lines = String(variablesText || '').split(/\r?\n/);
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) {
-      continue;
-    }
-
-    const separatorIndex = trimmed.indexOf('=');
-    if (separatorIndex <= 0) {
-      continue;
-    }
-
-    const key = trimmed.slice(0, separatorIndex).trim();
-    if (key !== 'working_directory') {
-      continue;
-    }
-
-    const value = trimmed.slice(separatorIndex + 1).trim();
-    if (value.length > 0) {
-      return value;
-    }
-  }
-
-  return '';
-}
-
-function buildDefaultProjectSkillRoots(worldVariablesText?: string): string[] {
-  const projectRoot = getWorkingDirectoryFromWorldVariables(worldVariablesText) || homedir();
-  return [path.join(projectRoot, '.agents', 'skills'), path.join(projectRoot, 'skills')];
 }
 
 function resolveSkillRoots(options: {
   userSkillRoots?: string[];
   projectSkillRoots?: string[];
   worldVariablesText?: string;
-}): { userRoots: string[]; projectRoots: string[] } {
-  const userRoots = normalizeRoots(options.userSkillRoots ?? buildDefaultUserSkillRoots());
-  const projectRoots = normalizeRoots(
-    options.projectSkillRoots ?? buildDefaultProjectSkillRoots(options.worldVariablesText),
-  ).filter((rootPath) => !userRoots.includes(rootPath));
-  return { userRoots, projectRoots };
+}): SkillRootDescriptor[] {
+  return resolveSkillRootDescriptors(options);
 }
 
 function normalizeRoots(roots: string[]): string[] {
@@ -170,13 +136,17 @@ function shouldReplaceResolvedSkill(
     return true;
   }
 
+  if (nextSkill.precedence !== existingSkill.precedence) {
+    return nextSkill.precedence > existingSkill.precedence;
+  }
+
   const existingScopePriority = getScopePriority(existingSkill.sourceScope);
   const nextScopePriority = getScopePriority(nextSkill.sourceScope);
   if (nextScopePriority !== existingScopePriority) {
     return nextScopePriority > existingScopePriority;
   }
 
-  // Keep deterministic "last discovered wins" behavior within the same source scope.
+  // Keep deterministic "last discovered wins" behavior within the same precedence band.
   return true;
 }
 
@@ -353,11 +323,11 @@ async function readSkillStats(skillFilePath: string): Promise<Stats | null> {
 }
 
 async function discoverSkills(
-  roots: Array<{ rootPath: string; sourceScope: SkillSourceScope }>,
+  roots: SkillRootDescriptor[],
 ): Promise<Map<string, DiscoveredSkill>> {
   const discovered = new Map<string, DiscoveredSkill>();
 
-  for (const { rootPath, sourceScope } of roots) {
+  for (const { precedence, rootPath, sourceScope } of roots) {
     const exists = await pathExists(rootPath);
     if (!exists) {
       continue;
@@ -371,6 +341,7 @@ async function discoverSkills(
       }
 
       discovered.set(skillFilePath, {
+        precedence,
         skillFilePath,
         lastUpdated: stats.mtime.toISOString(),
         sourceScope,
@@ -387,12 +358,7 @@ function createSkillRegistrySingleton() {
   const registryScopes = new Map<string, SkillSourceScope>();
 
   async function syncSkills(options: SyncSkillsOptions = {}): Promise<SyncSkillsResult> {
-    const { userRoots, projectRoots } = resolveSkillRoots(options);
-    const roots = [
-      ...userRoots.map((rootPath) => ({ rootPath, sourceScope: 'global' as const })),
-      ...projectRoots.map((rootPath) => ({ rootPath, sourceScope: 'project' as const })),
-    ];
-
+    const roots = resolveSkillRoots(options);
     const discovered = await discoverSkills(roots);
     const discoveredIds = new Set<string>();
 
@@ -420,6 +386,7 @@ function createSkillRegistrySingleton() {
         description,
         hash: createContentHash(content),
         lastUpdated: discoveredSkill.lastUpdated,
+        precedence: discoveredSkill.precedence,
         skillFilePath: discoveredSkill.skillFilePath,
         sourceScope: discoveredSkill.sourceScope,
       };
@@ -504,7 +471,17 @@ function createSkillRegistrySingleton() {
       return [];
     }
 
-    const { userRoots, projectRoots } = resolveSkillRoots(options);
+    const rootDescriptors = resolveSkillRoots(options);
+    const userRoots = normalizeRoots(
+      rootDescriptors
+        .filter((descriptor) => descriptor.sourceScope === 'global')
+        .map((descriptor) => descriptor.rootPath),
+    );
+    const projectRoots = normalizeRoots(
+      rootDescriptors
+        .filter((descriptor) => descriptor.sourceScope === 'project')
+        .map((descriptor) => descriptor.rootPath),
+    );
 
     return [...registry.values()]
       .filter((skill) => {

@@ -15,17 +15,10 @@
  * - Back button fires `onBack` without prompting (unsaved changes are parent's concern).
  *
  * Recent Changes:
+ * - 2026-04-11: Added install-preview loading/error placeholders so failed or pending preview fetches do not render as blank content and blank file trees.
+ * - 2026-04-11: Narrowed install mode to preview-only so search/discovery lives in `SkillInstallBrowser`.
  * - 2026-04-03: Added edit-mode Preview and Markdown radios for markdown files, defaulting to preview beside the save action.
  * - 2026-04-03: Render SKILL.md as formatted markdown in install preview while keeping raw text editing for normal edit mode and non-markdown preview files.
- * - 2026-04-03: Allow pressing Enter in the GitHub repo input to load the repo skill list without reaching for the refresh icon.
- * - 2026-04-03: Reworked install mode to match the denser desktop reference layout with a dedicated top control bar and file-header action row.
- * - 2026-03-29: Reworked the GitHub primary-row sizing so the repo field can shrink inside a shared flex group instead of clipping the left side.
- * - 2026-03-29: Tightened the GitHub repo and skill widths so the primary row fits without shoving the toolbar left.
- * - 2026-03-29: Kept the GitHub skill select on the primary row by giving the repo field more width and disabling row wrap for that source mode.
- * - 2026-03-29: Replaced the install-scope select with inline radios beside Preview and Install so scope stays attached to the action buttons.
- * - 2026-03-29: Lowered the install-mode back button slightly so it aligns better with the denser two-row toolbar.
- * - 2026-03-29: Reorganized install mode into a single primary repo row that keeps the install label, skill picker, and scope selector aligned for faster scanning.
- * - 2026-03-23: Rewired install-form controls and the main editor textarea onto shared design-system primitives.
  * - 2026-03-23: Reserve extra left toolbar space when the main sidebar is collapsed so the back button clears the macOS traffic lights.
  * - 2026-03-22: Propagated busy state into the file tree so save/delete/load work disables file switching consistently.
  * - 2026-03-22: Restored the back button, removed the close button, and changed Save to an icon button that stays disabled until the file is dirty.
@@ -38,13 +31,12 @@
 
 import React from 'react';
 import BaseEditor from '../../../design-system/patterns/BaseEditor';
-import { Button, IconButton, Input, Radio, Select, Textarea } from '../../../design-system/primitives';
+import { Button, Radio, Textarea } from '../../../design-system/primitives';
 import type { SkillFolderEntry } from '../../../types/desktop-api';
 import { renderMarkdown } from '../../../utils/markdown';
 import SkillFolderPane from './SkillFolderPane';
 
 type SkillEditorMode = 'edit' | 'install';
-type SkillInstallSourceType = 'local' | 'github';
 type SkillMarkdownViewMode = 'preview' | 'markdown';
 
 export default function SkillEditor({
@@ -65,26 +57,15 @@ export default function SkillEditor({
   loadingFile,
   saving,
   deleting,
-  installSourceType = 'github',
-  installSourcePath = '',
-  installRepo = '',
   installItemName = '',
-  installOptions = [],
   installDescription = '',
   installTargetScope = 'project',
-  loadingInstallOptions = false,
-  onInstallSourceTypeChange,
-  onInstallSourcePathChange,
-  onInstallRepoChange,
-  onInstallItemNameChange,
   onInstallTargetScopeChange,
-  onBrowseInstallSource,
-  onLoadInstallOptions,
-  onPreviewInstall,
   onInstall,
   installing = false,
-  hasInstallPreview = false,
   currentFileEditable = true,
+  emptyContentMessage = '',
+  folderEmptyStateText = '',
   leftSidebarCollapsed = false,
 }: {
   mode?: SkillEditorMode;
@@ -104,43 +85,27 @@ export default function SkillEditor({
   loadingFile: boolean;
   saving: boolean;
   deleting: boolean;
-  installSourceType?: SkillInstallSourceType;
-  installSourcePath?: string;
-  installRepo?: string;
   installItemName?: string;
-  installOptions?: string[];
   installDescription?: string;
   installTargetScope?: 'global' | 'project';
-  loadingInstallOptions?: boolean;
-  onInstallSourceTypeChange?: (value: SkillInstallSourceType) => void;
-  onInstallSourcePathChange?: (value: string) => void;
-  onInstallRepoChange?: (value: string) => void;
-  onInstallItemNameChange?: (value: string) => void;
   onInstallTargetScopeChange?: (value: 'global' | 'project') => void;
-  onBrowseInstallSource?: () => void;
-  onLoadInstallOptions?: () => void;
-  onPreviewInstall?: () => void;
   onInstall?: () => void;
   installing?: boolean;
-  hasInstallPreview?: boolean;
   currentFileEditable?: boolean;
+  emptyContentMessage?: string;
+  folderEmptyStateText?: string;
   leftSidebarCollapsed?: boolean;
 }) {
   const isInstallMode = mode === 'install';
   const busy = saving || deleting || loadingFile || installing;
   const backButtonClassName = 'flex self-start items-center gap-1.5 rounded-md px-2 py-1 text-xs text-foreground/70 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50';
-  const toolbarClassName = isInstallMode ? 'flex min-w-0 flex-col gap-3' : 'flex items-center gap-3';
+  const toolbarClassName = 'flex items-center gap-3';
   const canSave = !busy && hasUnsavedChanges;
-  const canPreview = isInstallMode
-    ? (installSourceType === 'github'
-      ? Boolean(installRepo.trim()) && Boolean(installItemName.trim())
-      : Boolean(installSourcePath.trim()))
-    : false;
-  const canInstall = !busy && hasInstallPreview && Boolean(installItemName.trim());
+  const canInstall = !busy && folderEntries.length > 0 && Boolean(installItemName.trim());
   const scopeLabel = isInstallMode
     ? 'INSTALL SKILL'
     : (sourceScope === 'project' ? 'Project skill' : 'Global skill');
-  const titleText = skillId;
+  const titleText = skillId || (isInstallMode ? 'Skill preview' : '');
   const textareaDisabled = busy || (isInstallMode && !currentFileEditable);
   const isMarkdownFile = /(^|\/)[^/]+\.(?:md|markdown)$/i.test(String(selectedFilePath || '').trim() || 'SKILL.md');
   const showRenderedMarkdown = (isInstallMode && /(^|\/)SKILL\.md$/i.test(String(selectedFilePath || '').trim() || 'SKILL.md'))
@@ -149,16 +114,11 @@ export default function SkillEditor({
   const textareaPlaceholder = isInstallMode && !currentFileEditable
     ? `${selectedFilePath || 'SKILL.md'} cannot be edited in preview.`
     : `Contents of ${selectedFilePath || 'SKILL.md'}…`;
-  const installHint = installSourceType === 'github'
-    ? (String(installDescription || '').trim() || 'Choose a repo and skill, then confirm the install scope.')
-    : 'Choose a local skill folder, then confirm the install scope.';
-  const installPrimaryRowClassName = installSourceType === 'github'
-    ? 'install-toolbar-primary-row flex min-w-0 flex-nowrap items-center gap-3'
-    : 'install-toolbar-primary-row flex min-w-0 flex-wrap items-center gap-3';
-  const canLoadGitHubSkills = Boolean(installRepo.trim()) && !loadingInstallOptions && !busy;
-  const shouldAutoLoadGitHubSkills = installSourceType === 'github'
-    && canLoadGitHubSkills
-    && installOptions.length === 0;
+  const hasInstallDescription = Boolean(String(installDescription || '').trim());
+  const showInstallEmptyState = isInstallMode && folderEntries.length === 0 && !String(content || '').trim();
+  const resolvedInstallEmptyContentMessage = String(emptyContentMessage || (loadingFile
+    ? 'Loading preview files…'
+    : 'Preview files are unavailable for this skill.')).trim() || 'Preview files are unavailable for this skill.';
 
   const installScopeOptions: Array<{ label: 'Project' | 'Global'; value: 'project' | 'global' }> = [
     { label: 'Project', value: 'project' },
@@ -173,139 +133,32 @@ export default function SkillEditor({
     <div className={toolbarClassName}>
       {isInstallMode ? (
         <>
-          <div className={installPrimaryRowClassName}>
-            <div className="flex shrink-0 items-center gap-4">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onBack}
-                disabled={busy}
-                aria-label="Back"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <polyline points="15 18 9 12 15 6" />
-                </svg>
-                Back
-              </Button>
-              <div className="h-9 w-px bg-border" aria-hidden="true" />
-              <p className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.22em] text-foreground/60">{scopeLabel}</p>
-            </div>
-            <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-3">
-              <div className="inline-flex shrink-0 items-center gap-1">
-                {(['local', 'github'] as SkillInstallSourceType[]).map((option) => (
-                  <Button
-                    key={option}
-                    variant={installSourceType === option ? 'secondary' : 'ghost'}
-                    size="sm"
-                    onClick={() => onInstallSourceTypeChange?.(option)}
-                    disabled={busy}
-                    className="min-w-[72px]"
-                  >
-                    {option === 'local' ? 'Local' : 'GitHub'}
-                  </Button>
-                ))}
-              </div>
-              {installSourceType === 'local' ? (
-                <div className="flex min-w-[320px] flex-[0_1_560px] items-center gap-2">
-                  <Input
-                    size="sm"
-                    value={installSourcePath}
-                    onChange={(event) => onInstallSourcePathChange?.(event.target.value)}
-                    disabled={busy}
-                    placeholder="Skill folder path"
-                    className="min-w-0 flex-1"
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={onBrowseInstallSource}
-                    disabled={busy}
-                  >
-                    Browse
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex min-w-0 flex-[0_1_720px] items-center gap-3">
-                  <div className="relative min-w-0 flex-1">
-                    <Input
-                      size="sm"
-                      value={installRepo}
-                      onChange={(event) => onInstallRepoChange?.(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key !== 'Enter' || !canLoadGitHubSkills) {
-                          return;
-                        }
-                        event.preventDefault();
-                        onLoadInstallOptions?.();
-                      }}
-                      disabled={busy}
-                      placeholder="owner/repo"
-                      className="pr-10"
-                    />
-                    <IconButton
-                      label={loadingInstallOptions ? 'Loading skills from repo' : 'Load skills from repo'}
-                      variant="ghost"
-                      onClick={onLoadInstallOptions}
-                      disabled={!canLoadGitHubSkills}
-                      title={loadingInstallOptions ? 'Loading skills from repo' : 'Load skills from repo'}
-                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                      >
-                        <path d="M21 12a9 9 0 0 1-15.5 6.36" />
-                        <path d="M3 12A9 9 0 0 1 18.5 5.64" />
-                        <path d="M3 16v-4h4" />
-                        <path d="M21 8v4h-4" />
-                      </svg>
-                    </IconButton>
-                  </div>
-                  <Select
-                    size="sm"
-                    value={installItemName}
-                    onChange={(event) => onInstallItemNameChange?.(event.target.value)}
-                    onFocus={() => {
-                      if (shouldAutoLoadGitHubSkills) {
-                        onLoadInstallOptions?.();
-                      }
-                    }}
-                    disabled={busy || loadingInstallOptions || !installRepo.trim()}
-                    className="min-w-[220px] max-w-[220px] shrink-0"
-                    aria-label="GitHub skill"
-                  >
-                    <option value="">
-                      {loadingInstallOptions ? 'Loading skills...' : (installOptions.length > 0 ? 'Select skill' : 'Load repo skills first')}
-                    </option>
-                    {installOptions.map((option) => (
-                      <option key={option} value={option}>{option}</option>
-                    ))}
-                  </Select>
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="install-toolbar-hint-row flex min-w-0 items-center">
-            <p className="text-xs text-muted-foreground">{installHint}</p>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onBack}
+            disabled={busy}
+            aria-label="Back"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+            Back
+          </Button>
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{scopeLabel}</p>
+            <p className="truncate text-sm font-medium text-foreground">{titleText}</p>
           </div>
         </>
       ) : (
@@ -365,10 +218,17 @@ export default function SkillEditor({
           selectedPath={selectedFilePath}
           onSelectFile={onSelectFile}
           disabled={busy}
+          emptyStateText={folderEmptyStateText}
         />
       )}
     >
       <div className="flex h-full min-h-0 flex-col">
+        {isInstallMode && hasInstallDescription ? (
+          <div className="border-b border-border bg-muted/20 px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/65">Preview Summary</p>
+            <p className="mt-1 text-sm text-foreground">{installDescription}</p>
+          </div>
+        ) : null}
         <div className="border-b border-border px-4 py-2">
           {isInstallMode ? (
             <div className="install-editor-action-row flex items-center justify-between gap-3 py-0.5">
@@ -401,16 +261,6 @@ export default function SkillEditor({
                     </label>
                   ))}
                 </div>
-                {installSourceType === 'local' ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={onPreviewInstall}
-                    disabled={busy || !canPreview}
-                  >
-                    {loadingFile ? 'Previewing…' : 'Preview'}
-                  </Button>
-                ) : null}
                 <Button
                   variant="primary"
                   size="sm"
@@ -482,7 +332,14 @@ export default function SkillEditor({
             </div>
           )}
         </div>
-        {showRenderedMarkdown ? (
+        {showInstallEmptyState ? (
+          <div
+            className="flex flex-1 items-center justify-center px-6 py-8 text-center text-sm text-muted-foreground"
+            aria-label="Install preview empty state"
+          >
+            {resolvedInstallEmptyContentMessage}
+          </div>
+        ) : showRenderedMarkdown ? (
           <div
             className="prose max-w-none flex-1 overflow-y-auto p-4 text-foreground"
             aria-label={`Preview ${selectedFilePath || 'SKILL.md'} for ${skillId}`}

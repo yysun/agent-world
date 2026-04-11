@@ -19,6 +19,8 @@
  * - Defaults to SQLite storage and workspace path if env vars not set
  *
  * Recent Changes:
+ * - 2026-04-11: Canonical skill-root defaults are now shared directly by core,
+ *   so Electron no longer needs a desktop-only environment override.
  * - 2026-03-10: Added an E2E-only user-data override and optional single-instance-lock bypass so the real Playwright Electron harness can launch without colliding with another generic Electron process.
  * - 2026-02-28: Added resilient realtime runtime module export resolution (named/default interop) to prevent startup failure from compiled export-shape drift.
  * - 2026-02-26: Added categorized Electron main loggers and renderer logging-config IPC bridge wiring for env-controlled main/renderer log behavior.
@@ -129,7 +131,6 @@ if (!hasSingleInstanceLock) {
 // Load env before importing core so logger/category levels honor LOG_* from .env.
 loadEnvironmentVariables(__dirname);
 applySystemSettings(readSystemSettings(app));
-
 const {
   createAgent,
   createWorld,
@@ -341,6 +342,7 @@ function registerIpcHandlers() {
     importSkill: ipcHandlers.importSkill,
     previewSkillImport: ipcHandlers.previewSkillImport,
     listGitHubSkills: ipcHandlers.listGitHubSkills,
+    listLocalSkills: ipcHandlers.listLocalSkills,
     exportWorld: ipcHandlers.exportWorld,
     listWorkspaceWorlds: ipcHandlers.listWorkspaceWorlds,
     listSkillRegistry: ipcHandlers.listSkillRegistry,

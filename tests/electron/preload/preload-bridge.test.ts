@@ -68,6 +68,7 @@ describe('electron preload bridge', () => {
       listSkills: expect.any(Function),
       previewSkillImport: expect.any(Function),
       listGitHubSkills: expect.any(Function),
+      listLocalSkills: expect.any(Function),
       readSkillContent: expect.any(Function),
       readSkillFolderStructure: expect.any(Function),
       saveSkillContent: expect.any(Function),
@@ -110,6 +111,7 @@ describe('electron preload bridge', () => {
     api.listSkills({ worldId: 'world-1' });
     api.previewSkillImport({ repo: 'yysun/agent-skills', itemName: 'reviewer' });
     api.listGitHubSkills('yysun/awesome-agent-world');
+    api.listLocalSkills('/tmp/workspace');
     api.branchSessionFromMessage('world-1', 'chat-1', 'msg-1');
     api.editMessage('world-1', 'msg-1', 'Updated', 'chat-1');
     api.respondHitlOption('world-1', 'req-1', 'yes_once', 'chat-1');
@@ -145,43 +147,46 @@ describe('electron preload bridge', () => {
     expect(mocks.invoke).toHaveBeenNthCalledWith(13, 'skill:listGitHubSkills', {
       repo: 'yysun/awesome-agent-world'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(14, 'session:branchFromMessage', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(14, 'skill:listLocalSkills', {
+      source: '/tmp/workspace'
+    });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(15, 'session:branchFromMessage', {
       worldId: 'world-1',
       chatId: 'chat-1',
       messageId: 'msg-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(15, 'message:edit', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(16, 'message:edit', {
       worldId: 'world-1',
       messageId: 'msg-1',
       newContent: 'Updated',
       chatId: 'chat-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(16, 'hitl:respond', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(17, 'hitl:respond', {
       worldId: 'world-1',
       requestId: 'req-1',
       optionId: 'yes_once',
       chatId: 'chat-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(17, 'chat:stopMessage', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(18, 'chat:stopMessage', {
       worldId: 'world-1',
       chatId: 'chat-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(18, 'chat:subscribeEvents', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(19, 'chat:subscribeEvents', {
       worldId: 'world-1',
       chatId: 'chat-1',
       subscriptionId: 'sub-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(19, 'chat:unsubscribeEvents', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(20, 'chat:unsubscribeEvents', {
       subscriptionId: 'sub-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(20, 'update:getState');
-    expect(mocks.invoke).toHaveBeenNthCalledWith(21, 'update:check');
-    expect(mocks.invoke).toHaveBeenNthCalledWith(22, 'update:installAndRestart');
-    expect(mocks.invoke).toHaveBeenNthCalledWith(23, 'logging:getConfig');
-    expect(mocks.invoke).toHaveBeenNthCalledWith(24, 'skill:readContent', { skillId: 'skill-1', relativePath: 'notes/guide.md' });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(25, 'skill:readFolderStructure', { skillId: 'skill-1' });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(26, 'skill:saveContent', { skillId: 'skill-1', content: '# Updated', relativePath: 'notes/guide.md' });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(27, 'skill:delete', { skillId: 'skill-1' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(21, 'update:getState');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(22, 'update:check');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(23, 'update:installAndRestart');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(24, 'logging:getConfig');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(25, 'skill:readContent', { skillId: 'skill-1', relativePath: 'notes/guide.md' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(26, 'skill:readFolderStructure', { skillId: 'skill-1' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(27, 'skill:saveContent', { skillId: 'skill-1', content: '# Updated', relativePath: 'notes/guide.md' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(28, 'skill:delete', { skillId: 'skill-1' });
   });
 
   it('wires chat event listener callback and cleanup correctly', () => {

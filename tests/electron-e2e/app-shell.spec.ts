@@ -19,6 +19,8 @@
  * - 2026-03-10: Added initial Electron shell smoke coverage for the Playwright harness.
  * - 2026-03-10: Added world management and session management smoke describe blocks to
  *   match parity with the web world-smoke.spec.ts coverage.
+ * - 2026-04-11: Added settings-panel assertions covering canonical skill-root labels in
+ *   the real Electron shell.
  */
 
 import { test, expect } from './support/fixtures.js';
@@ -48,6 +50,10 @@ test('launches the real Electron app and exposes the desktop shell controls', as
   await page.getByLabel('Close panel').click();
 
   await page.getByLabel('Settings').click();
+  await expect(page.getByText('~/.agent-world/skills', { exact: false })).toBeVisible();
+  await expect(page.getByText('./.agent-world/skills', { exact: false })).toBeVisible();
+  await expect(page.getByText('~/.agents/skills', { exact: false })).toHaveCount(0);
+  await expect(page.getByText('./agents/skills', { exact: false })).toHaveCount(0);
   await expect(page.getByLabel('Close panel')).toBeVisible();
   await page.getByLabel('Close panel').click();
 });

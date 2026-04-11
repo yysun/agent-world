@@ -40,6 +40,7 @@ describe('renderer feature entry points', () => {
     expect(typeof queue.MessageQueuePanel).toBe('function');
     expect(typeof skills.SkillEditor).toBe('function');
     expect(typeof skills.SkillFolderPane).toBe('function');
+    expect(typeof skills.SkillInstallBrowser).toBe('function');
     expect(typeof settings.SettingsSwitch).toBe('function');
     expect(typeof settings.SettingsSkillSwitch).toBe('function');
     expect(typeof worlds.WorldTextEditor).toBe('function');
@@ -69,6 +70,7 @@ describe('renderer feature entry points', () => {
     expect((components as Record<string, unknown>).MessageListPanel).toBeUndefined();
     expect((components as Record<string, unknown>).SkillEditor).toBeUndefined();
     expect((components as Record<string, unknown>).SkillFolderPane).toBeUndefined();
+    expect((components as Record<string, unknown>).SkillInstallBrowser).toBeUndefined();
     expect((components as Record<string, unknown>).SettingsSkillSwitch).toBeUndefined();
     expect((components as Record<string, unknown>).MessageQueuePanel).toBeUndefined();
     expect((components as Record<string, unknown>).MainContentArea).toBeUndefined();

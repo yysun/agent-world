@@ -15,6 +15,8 @@
  * - Errors are returned as tool-friendly `Error:` strings
  *
  * Recent Changes:
+ * - 2026-04-11: Added canonical `.agent-world/skills/...` project-path alias
+ *   support for canonical-only skill paths.
  * - 2026-03-12: Added `read` permission level guard to `write_file` — returns a blocked-tool error when world toolPermission is 'read'.
  * - 2026-03-03: Tightened tool output limits: read_file hard-capped at 200 lines, list_files capped at depth 2 and 200 entries, grep capped at 50 hits with configurable context_lines (2–5).
  * - 2026-03-01: Hardened `read_file` against undefined read payloads from mocked fs implementations by coercing to empty content instead of hard-failing.
@@ -39,6 +41,9 @@ import {
   validateShellDirectoryRequest,
 } from './shell-cmd-tool.js';
 import { getSkillSourcePath, getSkills } from './skill-registry.js';
+import {
+  resolveCanonicalProjectSkillAliasPath,
+} from './skill-root-contract.js';
 import { getEnvValueFromText } from './utils.js';
 import { requestToolApproval } from './tool-approval.js';
 
@@ -85,6 +90,13 @@ function resolveTargetPath(inputPath: string, trustedWorkingDirectory: string): 
   }
   const baseDirectory = trustedWorkingDirectory;
   return path.resolve(baseDirectory, inputPath);
+}
+
+function remapCanonicalProjectSkillAlias(
+  resolvedPath: string,
+  trustedWorkingDirectory: string,
+): string {
+  return resolveCanonicalProjectSkillAliasPath(resolvedPath, trustedWorkingDirectory) || resolvedPath;
 }
 
 function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
@@ -166,13 +178,13 @@ function ensurePathWithinTrustedDirectory(
 function isWithinSkillAliasPath(resolvedPath: string, trustedWorkingDirectory: string): boolean {
   const candidate = path.resolve(String(resolvedPath || '').trim());
   const trusted = path.resolve(String(trustedWorkingDirectory || '').trim());
-  const skillRoot = path.resolve(trusted, '.agents', 'skills');
+  const canonicalProjectAliasRoot = path.resolve(trusted, '.agent-world', 'skills');
 
   const normalizedCandidate = normalizePath(candidate).replace(/\/+/g, '/');
-  const normalizedSkillRoot = normalizePath(skillRoot).replace(/\/+/g, '/');
+  const normalizedCanonicalProjectAliasRoot = normalizePath(canonicalProjectAliasRoot).replace(/\/+/g, '/');
 
-  return normalizedCandidate === normalizedSkillRoot
-    || normalizedCandidate.startsWith(`${normalizedSkillRoot}/`);
+  return normalizedCandidate === normalizedCanonicalProjectAliasRoot
+    || normalizedCandidate.startsWith(`${normalizedCanonicalProjectAliasRoot}/`);
 }
 
 function escapeRegExp(value: string): string {
@@ -379,6 +391,7 @@ export function createReadFileToolDefinition() {
         }
         let resolvedPath = resolveTargetPath(requestedFilePath, trustedWorkingDirectory);
         ensurePathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory, { allowSkillPathAlias: true });
+        resolvedPath = remapCanonicalProjectSkillAlias(resolvedPath, trustedWorkingDirectory);
 
         let rawContent: string | Buffer | undefined;
         try {
@@ -636,8 +649,9 @@ export function createListFilesToolDefinition() {
       try {
         const trustedWorkingDirectory = getTrustedWorkingDirectory(context);
         const requestedPath = String(args.path ?? '.');
-        const resolvedPath = resolveTargetPath(requestedPath, trustedWorkingDirectory);
+        let resolvedPath = resolveTargetPath(requestedPath, trustedWorkingDirectory);
         ensurePathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory, { allowSkillPathAlias: true });
+        resolvedPath = remapCanonicalProjectSkillAlias(resolvedPath, trustedWorkingDirectory);
         const includeHidden = Boolean(args.includeHidden ?? true);
         const recursive = Boolean(args.recursive ?? false);
         const includePattern = String(args.includePattern ?? '').trim();
@@ -748,10 +762,11 @@ export function createGrepToolDefinition() {
 
         const trustedWorkingDirectory = getTrustedWorkingDirectory(context);
         const isRegexp = Boolean(args.isRegexp ?? false);
-        const directoryPath = args.directoryPath
+        let directoryPath = args.directoryPath
           ? resolveTargetPath(String(args.directoryPath), trustedWorkingDirectory)
           : trustedWorkingDirectory;
         ensurePathWithinTrustedDirectory(directoryPath, trustedWorkingDirectory, { allowSkillPathAlias: true });
+        directoryPath = remapCanonicalProjectSkillAlias(directoryPath, trustedWorkingDirectory);
         const includePattern = typeof args.includePattern === 'string' ? args.includePattern : undefined;
         const maxResults = clamp(Number(args.maxResults ?? DEFAULT_GREP_MAX_RESULTS), 1, MAX_GREP_MAX_RESULTS);
         const contextLines = clamp(Number(args.contextLines ?? DEFAULT_GREP_CONTEXT_LINES), 0, MAX_GREP_CONTEXT_LINES);

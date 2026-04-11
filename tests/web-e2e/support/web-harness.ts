@@ -133,7 +133,7 @@ function ensureWorkspaceArtifacts(): void {
     'utf8',
   );
 
-  const skillRoot = path.join(TEST_WORKSPACE_PATH, 'skills', TOOL_PERMISSION_SKILL_ID);
+  const skillRoot = path.join(TEST_WORKSPACE_PATH, '.agent-world', 'skills', TOOL_PERMISSION_SKILL_ID);
   fs.mkdirSync(path.join(skillRoot, 'scripts'), { recursive: true });
   fs.writeFileSync(
     path.join(skillRoot, 'SKILL.md'),

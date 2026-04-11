@@ -19,6 +19,8 @@ export type {
   AppUpdateState,
   ChatEventPayload,
   DesktopApi,
+  GitHubSkillSummary,
+  LocalSkillSummary,
   LogLevel,
   RendererLoggingConfig,
   SkillFolderEntry

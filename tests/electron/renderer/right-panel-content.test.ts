@@ -2,6 +2,7 @@
  * RightPanelContent Settings Tests
  * Purpose:
  * - Verify the settings panel exposes the Project Skills install entry point.
+ * - Verify system settings present canonical skill roots to the user.
  * - Verify world-form field interactions continue to update parent state.
  * - Verify selection-control primitives still drive parent state updates.
  */
@@ -54,6 +55,243 @@ function allDescendants(node: any): any[] {
 }
 
 describe('RightPanelContent', () => {
+  it('renders canonical skill-root guidance in the settings panel', () => {
+    const result: any = RightPanelContent({
+      panelMode: 'settings',
+      loadedWorld: null,
+      selectedAgentForPanel: null,
+      themePreference: 'system',
+      setThemePreference: () => { },
+      systemSettings: { enableGlobalSkills: true, enableProjectSkills: true, storageType: 'sqlite', sqliteDatabase: '', dataPath: '' },
+      setSystemSettings: () => { },
+      workspace: { workspacePath: null },
+      api: { pickFile: async () => ({ canceled: true }), pickDirectory: async () => ({ canceled: true }) },
+      globalSkillEntries: [],
+      disabledGlobalSkillIdSet: new Set(),
+      setGlobalSkillsEnabled: () => { },
+      toggleSkillEnabled: () => { },
+      projectSkillEntries: [],
+      disabledProjectSkillIdSet: new Set(),
+      setProjectSkillsEnabled: () => { },
+      onCancelSettings: () => { },
+      savingSystemSettings: false,
+      onSaveSettings: () => { },
+      settingsNeedRestart: false,
+      onUpdateWorld: () => { },
+      editingWorld: {},
+      setEditingWorld: () => { },
+      updatingWorld: false,
+      deletingWorld: false,
+      setWorldConfigEditorField: () => { },
+      setWorldConfigEditorValue: () => { },
+      setWorldConfigEditorTarget: () => { },
+      setWorldConfigEditorOpen: () => { },
+      onDeleteWorld: () => { },
+      closePanel: () => { },
+      onCreateAgent: () => { },
+      creatingAgent: {},
+      setCreatingAgent: () => { },
+      setPromptEditorValue: () => { },
+      setPromptEditorTarget: () => { },
+      setPromptEditorOpen: () => { },
+      savingAgent: false,
+      onUpdateAgent: () => { },
+      editingAgent: {},
+      setEditingAgent: () => { },
+      deletingAgent: false,
+      onDeleteAgent: () => { },
+      onCreateWorld: () => { },
+      creatingWorld: {},
+      setCreatingWorld: () => { },
+      panelLogs: [],
+      onClearPanelLogs: () => { },
+      onEditSkill: () => { },
+      onInstallSkill: () => { },
+    });
+
+    const renderedTree = JSON.stringify(result);
+    expect(renderedTree).toContain('~/.agent-world/skills');
+    expect(renderedTree).toContain('./.agent-world/skills');
+    expect(renderedTree).not.toContain('Legacy global roots remain readable during transition.');
+    expect(renderedTree).not.toContain('legacy project roots remain readable');
+    expect(renderedTree).not.toContain('workspace skills directory');
+    expect(renderedTree).not.toContain('~/.agents/skills');
+    expect(renderedTree).not.toContain('./agents/skills');
+  });
+
+  it('shows canonical skill-root guidance only for scopes with no discovered skills', () => {
+    const result: any = RightPanelContent({
+      panelMode: 'settings',
+      loadedWorld: null,
+      selectedAgentForPanel: null,
+      themePreference: 'system',
+      setThemePreference: () => { },
+      systemSettings: { enableGlobalSkills: true, enableProjectSkills: true, storageType: 'sqlite', sqliteDatabase: '', dataPath: '' },
+      setSystemSettings: () => { },
+      workspace: { workspacePath: null },
+      api: { pickFile: async () => ({ canceled: true }), pickDirectory: async () => ({ canceled: true }) },
+      globalSkillEntries: [{ skillId: 'reviewer', description: 'Reviews plans', sourceScope: 'global' }],
+      disabledGlobalSkillIdSet: new Set(),
+      setGlobalSkillsEnabled: () => { },
+      toggleSkillEnabled: () => { },
+      projectSkillEntries: [],
+      disabledProjectSkillIdSet: new Set(),
+      setProjectSkillsEnabled: () => { },
+      onCancelSettings: () => { },
+      savingSystemSettings: false,
+      onSaveSettings: () => { },
+      settingsNeedRestart: false,
+      onUpdateWorld: () => { },
+      editingWorld: {},
+      setEditingWorld: () => { },
+      updatingWorld: false,
+      deletingWorld: false,
+      onOpenWorldTextEditor: () => { },
+      onDeleteWorld: () => { },
+      closePanel: () => { },
+      onCreateAgent: () => { },
+      creatingAgent: {},
+      setCreatingAgent: () => { },
+      onOpenAgentPromptEditor: () => { },
+      savingAgent: false,
+      onUpdateAgent: () => { },
+      editingAgent: {},
+      setEditingAgent: () => { },
+      deletingAgent: false,
+      onDeleteAgent: () => { },
+      onCreateWorld: () => { },
+      creatingWorld: {},
+      setCreatingWorld: () => { },
+      panelLogs: [],
+      onClearPanelLogs: () => { },
+      onEditSkill: () => { },
+      onInstallSkill: () => { },
+    });
+
+    const renderedTree = JSON.stringify(result);
+
+    expect(renderedTree).not.toContain('Global skills default to ~/.agent-world/skills.');
+    expect(renderedTree).toContain('Project skills default to ');
+    expect(renderedTree).toContain('./.agent-world/skills');
+    expect(renderedTree).toContain('reviewer');
+  });
+
+  it('hides canonical skill-root guidance when the corresponding scope is disabled', () => {
+    const result: any = RightPanelContent({
+      panelMode: 'settings',
+      loadedWorld: null,
+      selectedAgentForPanel: null,
+      themePreference: 'system',
+      setThemePreference: () => { },
+      systemSettings: { enableGlobalSkills: false, enableProjectSkills: false, storageType: 'sqlite', sqliteDatabase: '', dataPath: '' },
+      setSystemSettings: () => { },
+      workspace: { workspacePath: null },
+      api: { pickFile: async () => ({ canceled: true }), pickDirectory: async () => ({ canceled: true }) },
+      globalSkillEntries: [],
+      disabledGlobalSkillIdSet: new Set(),
+      setGlobalSkillsEnabled: () => { },
+      toggleSkillEnabled: () => { },
+      projectSkillEntries: [],
+      disabledProjectSkillIdSet: new Set(),
+      setProjectSkillsEnabled: () => { },
+      onCancelSettings: () => { },
+      savingSystemSettings: false,
+      onSaveSettings: () => { },
+      settingsNeedRestart: false,
+      onUpdateWorld: () => { },
+      editingWorld: {},
+      setEditingWorld: () => { },
+      updatingWorld: false,
+      deletingWorld: false,
+      onOpenWorldTextEditor: () => { },
+      onDeleteWorld: () => { },
+      closePanel: () => { },
+      onCreateAgent: () => { },
+      creatingAgent: {},
+      setCreatingAgent: () => { },
+      onOpenAgentPromptEditor: () => { },
+      savingAgent: false,
+      onUpdateAgent: () => { },
+      editingAgent: {},
+      setEditingAgent: () => { },
+      deletingAgent: false,
+      onDeleteAgent: () => { },
+      onCreateWorld: () => { },
+      creatingWorld: {},
+      setCreatingWorld: () => { },
+      panelLogs: [],
+      onClearPanelLogs: () => { },
+      onEditSkill: () => { },
+      onInstallSkill: () => { },
+    });
+
+    const renderedTree = JSON.stringify(result);
+
+    expect(renderedTree).not.toContain('Global skills default to ');
+    expect(renderedTree).not.toContain('Project skills default to ');
+  });
+
+  it('does not render top border separators above the tool-message settings row', () => {
+    const result: any = RightPanelContent({
+      panelMode: 'settings',
+      loadedWorld: null,
+      selectedAgentForPanel: null,
+      themePreference: 'system',
+      setThemePreference: () => { },
+      systemSettings: { showToolMessages: true, enableGlobalSkills: true, enableProjectSkills: true, storageType: 'sqlite', sqliteDatabase: '', dataPath: '' },
+      setSystemSettings: () => { },
+      workspace: { workspacePath: null },
+      api: { pickFile: async () => ({ canceled: true }), pickDirectory: async () => ({ canceled: true }) },
+      globalSkillEntries: [],
+      disabledGlobalSkillIdSet: new Set(),
+      setGlobalSkillsEnabled: () => { },
+      toggleSkillEnabled: () => { },
+      projectSkillEntries: [],
+      disabledProjectSkillIdSet: new Set(),
+      setProjectSkillsEnabled: () => { },
+      onCancelSettings: () => { },
+      savingSystemSettings: false,
+      onSaveSettings: () => { },
+      settingsNeedRestart: false,
+      onUpdateWorld: () => { },
+      editingWorld: {},
+      setEditingWorld: () => { },
+      updatingWorld: false,
+      deletingWorld: false,
+      setWorldConfigEditorField: () => { },
+      setWorldConfigEditorValue: () => { },
+      setWorldConfigEditorTarget: () => { },
+      setWorldConfigEditorOpen: () => { },
+      onDeleteWorld: () => { },
+      closePanel: () => { },
+      onCreateAgent: () => { },
+      creatingAgent: {},
+      setCreatingAgent: () => { },
+      setPromptEditorValue: () => { },
+      setPromptEditorTarget: () => { },
+      setPromptEditorOpen: () => { },
+      savingAgent: false,
+      onUpdateAgent: () => { },
+      editingAgent: {},
+      setEditingAgent: () => { },
+      deletingAgent: false,
+      onDeleteAgent: () => { },
+      onCreateWorld: () => { },
+      creatingWorld: {},
+      setCreatingWorld: () => { },
+      panelLogs: [],
+      onClearPanelLogs: () => { },
+      onEditSkill: () => { },
+      onInstallSkill: () => { },
+    });
+
+    const renderedTree = JSON.stringify(result);
+
+    expect(renderedTree).toContain('Show tool messages');
+    expect(renderedTree).not.toContain('border-t border-sidebar-border pt-4');
+    expect(renderedTree).not.toContain('mt-2 border-t border-sidebar-border pt-2');
+  });
+
   it('renders the settings install-skill link below the project skill list with pointer cursor styling', () => {
     const onInstallSkill = vi.fn();
 
@@ -112,7 +350,9 @@ describe('RightPanelContent', () => {
     expect(installButton).toBeDefined();
     expect(JSON.stringify(installButton)).toContain('Install Skill ...');
     expect(String(installButton.props.className || '')).toContain('cursor-pointer');
-    expect(renderedTree.indexOf('No project skills discovered.')).toBeLessThan(renderedTree.indexOf('Install Skill ...'));
+    expect(renderedTree.indexOf('Project skills default to ')).toBeLessThan(renderedTree.indexOf('Install Skill ...'));
+    expect(renderedTree).not.toContain('No global skills discovered.');
+    expect(renderedTree).not.toContain('No project skills discovered.');
 
     installButton.props.onClick();
     expect(onInstallSkill).toHaveBeenCalledTimes(1);
@@ -328,7 +568,6 @@ describe('RightPanelContent', () => {
     const updater = setEditingWorld.mock.calls[0][0];
     expect(updater({ heartbeatEnabled: false })).toEqual({ heartbeatEnabled: true });
   });
-
   it('routes world long-text expand buttons through the workspace editor callback', () => {
     const onOpenWorldTextEditor = vi.fn();
 

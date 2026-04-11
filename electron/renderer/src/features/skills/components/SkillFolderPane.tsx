@@ -15,6 +15,7 @@
  * - Uses native `details/summary` rows for a simple deterministic tree view.
  *
  * Recent Changes:
+ * - 2026-04-11: Added configurable empty-state copy so install preview can explain loading and error states instead of showing a misleading blank tree.
  * - 2026-04-03: Switched the install-preview file pane onto the main editor surface styling so it matches the updated install screen.
  * - 2026-03-22: Added a disabled state so busy save/delete/load work can block file switching from the tree.
  * - 2026-03-22: Replaced raw DIR/FILE labels with icon-based tree rows.
@@ -144,13 +145,17 @@ export default function SkillFolderPane({
   selectedPath,
   onSelectFile,
   disabled,
+  emptyStateText,
 }: {
   skillId: string;
   entries: SkillFolderEntry[];
   selectedPath: string;
   onSelectFile: (relativePath: string) => void;
   disabled?: boolean;
+  emptyStateText?: string;
 }) {
+  const resolvedEmptyStateText = String(emptyStateText || 'This skill folder only contains SKILL.md.').trim() || 'This skill folder only contains SKILL.md.';
+
   return (
     <div className="flex h-full flex-col border-l border-border bg-background">
       <div className="border-b border-border px-5 py-4">
@@ -163,7 +168,7 @@ export default function SkillFolderPane({
         {entries.length > 0 ? (
           <div className="space-y-0.5">{renderSkillFolderNodes(entries, selectedPath, onSelectFile, Boolean(disabled))}</div>
         ) : (
-          <p className="px-2 text-xs text-foreground/40">This skill folder only contains SKILL.md.</p>
+          <p className="px-2 text-xs text-foreground/40">{resolvedEmptyStateText}</p>
         )}
       </div>
     </div>

@@ -12,6 +12,20 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-04-11: Extracted skill markdown parsing, local discovery, and file traversal helpers into dedicated main-process modules.
+ * - 2026-04-11: Added local skill-root discovery so the install browser can scan a chosen root for SKILL.md and nested skills directories.
+ * - 2026-04-11: GitHub skill discovery now reads SKILL.md descriptions so the renderer can render found skills with the same card content as local skills.
+ * - 2026-04-11: Project-scope skill installs now resolve against the selected
+ *   project folder so Electron writes to `<project folder>/.agent-world/skills`
+ *   instead of the workspace root when an explicit project path is available.
+ * - 2026-04-11: Switched Electron canonical skill roots to
+ *   `~/.agent-world/skills` and `./.agent-world/skills`, and removed legacy
+ *   skill-root compatibility from desktop settings/runtime.
+ * - 2026-04-11: Removed Electron-only legacy default skill-root discovery and
+ *   GitHub probing for old skill-root layouts.
+ * - 2026-04-11: Switched skill import/list defaults to the shared canonical
+ *   skill-root contract while keeping legacy skill roots readable for
+ *   compatibility.
  * - 2026-04-03: Repo-root GitHub skill discovery now reads the SKILL.md `name` front-matter field and uses it for both listing and import resolution.
  * - 2026-04-03: Skill GitHub install flows now surface repo-root SKILL.md files and fall back to them when the selected skill matches the repo name.
  * - 2026-03-22: Extended skill content read/save handling with optional relative paths so the editor can open files from the folder tree.
@@ -70,6 +84,16 @@ import {
   serializeWorldInfo,
   toIsoTimestamp
 } from './message-serialization.js';
+import { discoverLocalSkillFolders } from './local-skill-discovery.js';
+import {
+  getInitialSkillPreviewFilePath,
+  getSkillRootPath,
+  readSkillFolderEntries,
+  readSkillFolderFiles,
+  resolveSkillFilePath,
+  writeSkillFilesToTarget,
+} from './skill-file-helpers.js';
+import { parseSkillDescriptionFromMarkdown, parseSkillNameFromMarkdown } from './skill-markdown.js';
 
 interface BrowserWindowLike {
   isDestroyed?: () => boolean;
@@ -95,13 +119,6 @@ const NOOP_LOGGER: LoggerLike = {
   info: () => undefined,
   warn: () => undefined,
   error: () => undefined
-};
-
-type SkillFolderEntry = {
-  name: string;
-  relativePath: string;
-  type: 'file' | 'directory';
-  children?: SkillFolderEntry[];
 };
 
 type ResolvedSkillImportSource = {
@@ -171,168 +188,24 @@ function normalizeExternalUrl(rawUrl: unknown): string {
   return parsedUrl.toString();
 }
 
-async function readSkillFolderEntries(rootPath: string, currentPath: string = rootPath): Promise<SkillFolderEntry[]> {
-  const rootDir = String(rootPath || currentPath || '');
-  const activeDir = String(currentPath || rootDir);
-  const dirEntries = await fs.promises.readdir(activeDir, { withFileTypes: true });
-  const orderedEntries = [...dirEntries].sort((left, right) => {
-    const leftRank = left.isDirectory() ? 0 : 1;
-    const rightRank = right.isDirectory() ? 0 : 1;
-    if (leftRank !== rightRank) {
-      return leftRank - rightRank;
-    }
-    return left.name.localeCompare(right.name);
-  });
-
-  const results: SkillFolderEntry[] = [];
-  for (const dirEntry of orderedEntries) {
-    const entryName = String(dirEntry?.name || '');
-    const nextPath = path.join(activeDir, entryName);
-    const relativePath = path.relative(rootDir, nextPath).replace(/\\/g, '/');
-    if (dirEntry.isDirectory()) {
-      results.push({
-        name: entryName,
-        relativePath,
-        type: 'directory',
-        children: await readSkillFolderEntries(rootDir, nextPath),
-      });
-      continue;
-    }
-
-    results.push({
-      name: entryName,
-      relativePath,
-      type: 'file',
-    });
-  }
-
-  return results;
-}
-
-async function readSkillFolderFiles(rootPath: string, currentPath: string = rootPath): Promise<Record<string, string>> {
-  const rootDir = String(rootPath || currentPath || '');
-  const activeDir = String(currentPath || rootDir);
-  const dirEntries = await fs.promises.readdir(activeDir, { withFileTypes: true });
-  const results: Record<string, string> = {};
-
-  for (const dirEntry of dirEntries) {
-    const entryName = String(dirEntry?.name || '');
-    const nextPath = path.join(activeDir, entryName);
-    if (dirEntry.isDirectory()) {
-      Object.assign(results, await readSkillFolderFiles(rootDir, nextPath));
-      continue;
-    }
-
-    const relativePath = path.relative(rootDir, nextPath).replace(/\\/g, '/');
-    const fileBytes = await fs.promises.readFile(nextPath);
-    if (isProbablyBinaryFile(fileBytes)) {
-      continue;
-    }
-    results[relativePath] = fileBytes.toString('utf8');
-  }
-
-  return results;
-}
-
-function isProbablyBinaryFile(fileBytes: Buffer | Uint8Array | string): boolean {
-  if (typeof fileBytes === 'string') {
-    return false;
-  }
-
-  const sample = fileBytes.subarray(0, Math.min(fileBytes.length, 1024));
-  if (sample.length === 0) {
-    return false;
-  }
-
-  let suspiciousByteCount = 0;
-  for (const value of sample) {
-    if (value === 0) {
-      return true;
-    }
-    if (value < 7 || (value > 14 && value < 32)) {
-      suspiciousByteCount += 1;
-    }
-  }
-
-  return suspiciousByteCount / sample.length > 0.3;
-}
-
-function findFirstSkillFilePath(entries: SkillFolderEntry[]): string {
-  for (const entry of entries) {
-    if (entry.type === 'file') {
-      return entry.relativePath;
-    }
-    if (entry.type === 'directory' && Array.isArray(entry.children) && entry.children.length > 0) {
-      const nestedFilePath = findFirstSkillFilePath(entry.children);
-      if (nestedFilePath) {
-        return nestedFilePath;
-      }
-    }
-  }
-
-  return '';
-}
-
-function getInitialSkillPreviewFilePath(entries: SkillFolderEntry[]): string {
-  const defaultSkillFile = entries.find((entry) => entry.type === 'file' && entry.relativePath === 'SKILL.md');
-  return defaultSkillFile?.relativePath || findFirstSkillFilePath(entries) || 'SKILL.md';
-}
-
-function getSkillRootPath(skillPath: string): string {
-  const normalizedSkillPath = String(skillPath || '').trim();
-  return path.basename(normalizedSkillPath).toLowerCase() === 'skill.md'
-    ? path.dirname(normalizedSkillPath)
-    : normalizedSkillPath;
-}
-
-function getDefaultSkillFilePath(skillPath: string): string {
-  const normalizedSkillPath = String(skillPath || '').trim();
-  return path.basename(normalizedSkillPath).toLowerCase() === 'skill.md'
-    ? normalizedSkillPath
-    : path.join(getSkillRootPath(normalizedSkillPath), 'SKILL.md');
-}
-
-function resolveSkillFilePath(skillPath: string, relativePath?: unknown): string {
-  const normalizedRelativePath = String(relativePath || '').trim();
-  if (!normalizedRelativePath) {
-    return getDefaultSkillFilePath(skillPath);
-  }
-
-  if (path.isAbsolute(normalizedRelativePath)) {
-    throw new Error('Skill file path must be relative.');
-  }
-
-  const skillRootPath = getSkillRootPath(skillPath);
-  const resolvedPath = path.resolve(skillRootPath, normalizedRelativePath);
-  const relativeToRoot = path.relative(skillRootPath, resolvedPath);
-  if (!relativeToRoot || relativeToRoot.startsWith('..') || path.isAbsolute(relativeToRoot)) {
-    throw new Error('Skill file path must stay within the skill folder.');
-  }
-
-  return resolvedPath;
-}
-
-function getDefaultGlobalSkillRoot(): string {
-  return path.join(homedir(), '.agents', 'skills');
+function getCanonicalGlobalSkillRoot(): string {
+  return path.join(homedir(), '.agent-world', 'skills');
 }
 
 function getDefaultGlobalSkillRoots(): string[] {
   return [
-    getDefaultGlobalSkillRoot(),
-    path.join(homedir(), '.codex', 'skills'),
+    getCanonicalGlobalSkillRoot(),
   ];
 }
 
-async function writeSkillFilesToTarget(targetSkillPath: string, files: Record<string, string>): Promise<void> {
-  const normalizedEntries = Object.entries(files)
-    .map(([relativePath, content]) => [String(relativePath || '').trim(), String(content ?? '')] as const)
-    .filter(([relativePath]) => relativePath.length > 0);
+function getCanonicalProjectSkillRoot(projectPath: string): string {
+  return path.join(path.resolve(projectPath), '.agent-world', 'skills');
+}
 
-  for (const [relativePath, content] of normalizedEntries) {
-    const targetFilePath = resolveSkillFilePath(targetSkillPath, relativePath);
-    await fs.promises.mkdir(path.dirname(targetFilePath), { recursive: true });
-    await fs.promises.writeFile(targetFilePath, content, 'utf8');
-  }
+function getDefaultProjectSkillRoots(projectPath: string): string[] {
+  return [
+    getCanonicalProjectSkillRoot(projectPath),
+  ];
 }
 
 async function defaultOpenExternalUrl(url: string) {
@@ -503,6 +376,7 @@ interface GitHubWorldImportStagedResult {
 }
 
 interface GitHubWorldImportErrorLike extends Error {
+  code?: string;
   details?: Record<string, unknown>;
 }
 
@@ -669,43 +543,11 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       return [`agents/${itemName}`, `data/agents/${itemName}`, itemName];
     }
 
-    return [`skills/${itemName}`, `.agents/skills/${itemName}`, itemName];
-  }
-
-  function normalizeSkillFrontMatterValue(value: string): string {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      return '';
-    }
-
-    const hasMatchingQuotes =
-      (trimmed.startsWith('"') && trimmed.endsWith('"'))
-      || (trimmed.startsWith("'") && trimmed.endsWith("'"));
-
-    if (hasMatchingQuotes && trimmed.length >= 2) {
-      return trimmed.slice(1, -1).trim();
-    }
-
-    return trimmed;
-  }
-
-  function parseSkillNameFromMarkdown(markdown: string): string {
-    const normalizedMarkdown = String(markdown || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
-    const frontMatterMatch = normalizedMarkdown.match(/^---\s*\n([\s\S]*?)\n---\s*(?:\n|$)/);
-    if (!frontMatterMatch || !frontMatterMatch[1]) {
-      return '';
-    }
-
-    for (const rawLine of frontMatterMatch[1].split(/\r?\n/)) {
-      const keyValueMatch = rawLine.match(/^\s*name\s*:\s*(.*)$/i);
-      if (!keyValueMatch) {
-        continue;
-      }
-
-      return normalizeSkillFrontMatterValue(String(keyValueMatch[1] || ''));
-    }
-
-    return '';
+    return [
+      `.agent-world/skills/${itemName}`,
+      `skills/${itemName}`,
+      itemName,
+    ];
   }
 
   async function stageGitHubRootSkill(repoInput: string, folderName: string): Promise<GitHubFolderImportStagedResult | null> {
@@ -724,6 +566,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
 
   async function readGitHubRootSkillMetadata(repoInput: string, folderName?: string): Promise<{
     skillName: string;
+    description: string;
     repoName: string;
     stagedSkill: GitHubFolderImportStagedResult;
   } | null> {
@@ -737,15 +580,45 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       const skillFilePath = path.join(stagedSkill.folderPath, 'SKILL.md');
       const markdown = await fs.promises.readFile(skillFilePath, 'utf8');
       const skillName = parseSkillNameFromMarkdown(markdown) || getGitHubRepoName(repoInput);
+      const description = parseSkillDescriptionFromMarkdown(markdown);
 
       return {
         skillName: String(skillName || '').trim(),
+        description: String(description || '').trim(),
         repoName: String(getGitHubRepoName(repoInput) || '').trim(),
         stagedSkill,
       };
     } catch (error) {
       await stagedSkill.cleanup();
       throw error;
+    }
+  }
+
+  async function listGitHubSkillDirectoryNamesIfPresent(repo: string, directoryPath: string): Promise<string[]> {
+    try {
+      const result = await listGitHubDirectoryNames(repo, directoryPath);
+      return Array.isArray(result.directoryNames)
+        ? result.directoryNames.map((value) => String(value || '').trim()).filter(Boolean)
+        : [];
+    } catch (error) {
+      if (error instanceof GitHubWorldImportError && (error as GitHubWorldImportErrorLike).code === 'source-not-found') {
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  async function readGitHubSkillDescription(repoInput: string, folderPath: string, folderName: string): Promise<string> {
+    const stagedSkill = await stageGitHubFolderFromRepo(repoInput, folderPath, { folderName });
+
+    try {
+      const skillFilePath = path.join(stagedSkill.folderPath, 'SKILL.md');
+      const markdown = await fs.promises.readFile(skillFilePath, 'utf8');
+      return String(parseSkillDescriptionFromMarkdown(markdown) || '').trim();
+    } catch {
+      return '';
+    } finally {
+      await stagedSkill.cleanup();
     }
   }
 
@@ -2010,35 +1883,85 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       }
 
       const rootEntries = await listGitHubDirectoryNames(repo, '.');
-      const skillDirectoryNames = rootEntries.directoryNames.includes('skills')
-        ? await listGitHubDirectoryNames(repo, 'skills')
-        : { directoryNames: [] as string[] };
+      const canonicalSkillDirectoryNames = rootEntries.directoryNames.includes('.agent-world')
+        ? await listGitHubSkillDirectoryNamesIfPresent(repo, '.agent-world/skills')
+        : [];
+      const topLevelSkillDirectoryNames = rootEntries.directoryNames.includes('skills')
+        ? await listGitHubSkillDirectoryNamesIfPresent(repo, 'skills')
+        : [];
       const hasRootSkillFile = Array.isArray(rootEntries.fileNames)
         && rootEntries.fileNames.some((fileName) => String(fileName || '').trim().toLowerCase() === 'skill.md');
-      let rootSkillName = '';
+      const discoveredSkills = new Map<string, { skillId: string; description: string }>();
+
+      for (const directoryName of canonicalSkillDirectoryNames.map((value) => String(value || '').trim()).filter(Boolean)) {
+        if (discoveredSkills.has(directoryName)) {
+          continue;
+        }
+
+        const description = await readGitHubSkillDescription(repo, `.agent-world/skills/${directoryName}`, directoryName);
+        discoveredSkills.set(directoryName, {
+          skillId: directoryName,
+          description,
+        });
+      }
+
+      for (const directoryName of topLevelSkillDirectoryNames.map((value) => String(value || '').trim()).filter(Boolean)) {
+        if (discoveredSkills.has(directoryName)) {
+          continue;
+        }
+
+        const description = await readGitHubSkillDescription(repo, `skills/${directoryName}`, directoryName);
+        discoveredSkills.set(directoryName, {
+          skillId: directoryName,
+          description,
+        });
+      }
 
       if (hasRootSkillFile) {
         const rootSkillMetadata = await readGitHubRootSkillMetadata(repo);
         if (rootSkillMetadata) {
-          rootSkillName = rootSkillMetadata.skillName;
+          discoveredSkills.set(rootSkillMetadata.skillName, {
+            skillId: rootSkillMetadata.skillName,
+            description: rootSkillMetadata.description,
+          });
+          if (rootSkillMetadata.repoName) {
+            discoveredSkills.set(rootSkillMetadata.repoName, {
+              skillId: rootSkillMetadata.repoName,
+              description: rootSkillMetadata.description,
+            });
+          }
           await rootSkillMetadata.stagedSkill.cleanup();
         }
       }
 
-      const discoveredSkillNames = [
-        ...((Array.isArray(skillDirectoryNames.directoryNames) ? skillDirectoryNames.directoryNames : []).map((value) => String(value || '').trim()).filter(Boolean)),
-        ...(rootSkillName ? [rootSkillName] : []),
-        ...((hasRootSkillFile ? [getGitHubRepoName(repo)] : []).map((value) => String(value || '').trim()).filter(Boolean)),
-      ];
-
-      return Array.from(new Set(discoveredSkillNames))
-        .sort((left, right) => left.localeCompare(right));
+      return Array.from(discoveredSkills.values())
+        .sort((left, right) => left.skillId.localeCompare(right.skillId));
     } catch (error) {
       if (error instanceof GitHubWorldImportError) {
         throw new Error(`Failed to list GitHub skills: ${error.message}`);
       }
       const err = error as Error;
       throw new Error(`Failed to list GitHub skills: ${err.message || 'Unknown error occurred'}`);
+    }
+  }
+
+  async function listLocalSkills(payload?: any) {
+    try {
+      await ensureCoreReady();
+      const source = String(payload?.source || '').trim();
+      if (!source) {
+        throw new Error('Local skill root is required.');
+      }
+
+      const resolvedRootPath = path.resolve(path.normalize(source));
+      if (!isDirectoryOnDisk(resolvedRootPath)) {
+        throw new Error('Selected path is not a folder');
+      }
+
+      return await discoverLocalSkillFolders(resolvedRootPath);
+    } catch (error) {
+      const err = error as Error;
+      throw new Error(`Failed to list local skills: ${err.message || 'Unknown error occurred'}`);
     }
   }
 
@@ -2058,11 +1981,12 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
         ? payload.files as Record<string, string>
         : null;
       const workspacePath = String(getWorkspaceState()?.workspacePath || '').trim();
+      const projectPath = String(payload?.projectPath || '').trim() || workspacePath;
       const targetSkillsRoot = targetScope === 'global'
-        ? getDefaultGlobalSkillRoot()
-        : path.join(workspacePath, 'skills');
+        ? getCanonicalGlobalSkillRoot()
+        : getCanonicalProjectSkillRoot(projectPath);
 
-      if (targetScope === 'project' && !workspacePath) {
+      if (targetScope === 'project' && !projectPath) {
         return {
           success: false,
           error: 'Workspace unavailable',
@@ -2124,10 +2048,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
         await syncSkills({ userSkillRoots: getDefaultGlobalSkillRoots() });
       } else {
         await syncSkills({
-          projectSkillRoots: [
-            path.join(workspacePath, '.agents', 'skills'),
-            targetSkillsRoot,
-          ],
+          projectSkillRoots: getDefaultProjectSkillRoots(projectPath),
         });
       }
 
@@ -2614,6 +2535,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     importAgent,
     previewSkillImport,
     listGitHubSkills,
+    listLocalSkills,
     importSkill,
     exportWorld,
     listWorldSessions,

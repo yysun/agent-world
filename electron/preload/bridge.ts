@@ -14,6 +14,7 @@
  * - Payload normalization helpers preserve existing invoke payload formats.
  *
  * Recent Changes:
+ * - 2026-04-11: Added `listLocalSkills()` bridge wiring for scanning a chosen local root for installable skills.
  * - 2026-03-22: Added `previewSkillImport()` bridge wiring for the skill editor install-mode preview flow.
  * - 2026-03-22: Extended `readSkillContent` and `saveSkillContent` bridge wiring with optional relative paths for tree-selected files.
  * - 2026-03-22: Added `readSkillFolderStructure(skillId)` bridge wiring for the skill editor right-pane folder tree.
@@ -44,6 +45,8 @@ import {
   type AppUpdateState,
   type ChatEventPayload,
   type DesktopApi,
+  type GitHubSkillSummary,
+  type LocalSkillSummary,
   type HeartbeatJobStatus,
   type RendererLoggingConfig,
   type SkillImportPreviewResult,
@@ -143,7 +146,8 @@ export function createDesktopApi(ipcRendererLike?: IpcRendererLike): DesktopApi 
     importWorld: (payload) => invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.WORLD_IMPORT, payload),
     importAgent: (payload) => invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.AGENT_IMPORT, payload),
     importSkill: (payload) => invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_IMPORT, payload),
-    listGitHubSkills: (repo) => invokeDesktopChannel<string[]>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_LIST_GITHUB, { repo }),
+    listGitHubSkills: (repo) => invokeDesktopChannel<GitHubSkillSummary[]>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_LIST_GITHUB, { repo }),
+    listLocalSkills: (source) => invokeDesktopChannel<LocalSkillSummary[]>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_LIST_LOCAL, { source }),
     exportWorld: (worldId) =>
       invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.WORLD_EXPORT, toWorldPayload(worldId)),
     listWorlds: () => invokeDesktopChannel(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.WORLD_LIST),

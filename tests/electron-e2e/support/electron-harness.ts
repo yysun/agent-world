@@ -14,6 +14,8 @@
  * - Assertions still target visible desktop behavior in the actual Electron window.
  *
  * Recent Changes:
+ * - 2026-04-11: Route Playwright launches through a CommonJS shim so the Electron E2E
+ *   harness can load the compiled ESM desktop main entry with top-level `await`.
  * - 2026-03-24: Added `waitForAssistantTokenOrHitlPrompt` so Electron E2E flows can
  *   wait for either a resumed assistant reply or a chained follow-up approval prompt.
  * - 2026-03-24: Made `waitForAssistantToken` require a persisted non-user message in the active chat so tests do not mistake the user's own text for an assistant reply.
@@ -176,11 +178,15 @@ export function getElectronLaunchOptions(): {
   requireGoogleApiKey();
   const workspacePath = requireActiveWorkspacePath();
   const electronUserDataPath = path.join(workspacePath, '.electron-user-data');
+  const electronLauncherEntryPath = path.resolve(
+    process.cwd(),
+    'tests/electron-e2e/support/electron-main-launcher.cjs',
+  );
 
   return {
     executablePath: electronWorkspaceRequire('electron'),
     args: [
-      path.resolve(process.cwd(), 'electron'),
+      electronLauncherEntryPath,
       `--workspace=${workspacePath}`,
     ],
     env: {

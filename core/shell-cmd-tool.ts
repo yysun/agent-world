@@ -27,6 +27,9 @@
  * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - 2026-04-11: Added canonical `.agent-world/skills/...` project-path alias
+ *   support and switched runtime project-skill fallback root selection to the
+ *   canonical project skills directory contract.
  * - 2026-03-23: Reject catastrophic blocked shell commands before cwd/path-scope validation so they never degrade into less-specific working-directory mismatch errors.
  * - 2026-03-22: Increased the bounded LLM continuation preview cap from 1200 to 4096 characters so structured shell outputs keep more complete result sets before truncation.
  * - 2026-03-22: Resolved skill-relative executable paths like `./scripts/foo.sh` against the active skill root before shell execution, so skill scripts no longer depend on the repo working directory.
@@ -93,6 +96,11 @@ import { requestToolApproval } from './tool-approval.js';
 import { publishSSE } from './events/publishers.js';
 import { getDefaultWorkingDirectory, getEnvValueFromText } from './utils.js';
 import { getSkillSourcePath, getSkills } from './skill-registry.js';
+import {
+  getCanonicalProjectSkillRoot,
+  remapCanonicalProjectSkillPrefix,
+  SUPPORTED_PROJECT_SKILL_PATH_PREFIXES,
+} from './skill-root-contract.js';
 import {
   buildToolArtifactPreviewUrl,
   classifyDirectDisplayContent,
@@ -924,12 +932,13 @@ export function validateShellCommandScope(
   return { valid: true };
 }
 
-const SKILL_DIR_PREFIXES = ['.agents/skills/', 'skills/'];
+const SKILL_DIR_PREFIXES = SUPPORTED_PROJECT_SKILL_PATH_PREFIXES;
 
 function extractSkillIdAndRemainder(param: string): { skillId: string; remainder: string } | null {
+  const normalizedParam = remapCanonicalProjectSkillPrefix(param);
   for (const prefix of SKILL_DIR_PREFIXES) {
-    if (param.startsWith(prefix)) {
-      const afterPrefix = param.slice(prefix.length);
+    if (normalizedParam.startsWith(prefix)) {
+      const afterPrefix = normalizedParam.slice(prefix.length);
       const slashIndex = afterPrefix.indexOf('/');
       if (slashIndex <= 0) continue;
       const skillId = afterPrefix.slice(0, slashIndex);
@@ -938,13 +947,13 @@ function extractSkillIdAndRemainder(param: string): { skillId: string; remainder
     }
   }
 
-  const slashIndex = param.indexOf('/');
+  const slashIndex = normalizedParam.indexOf('/');
   if (slashIndex <= 0) return null;
-  const skillId = param.slice(0, slashIndex);
+  const skillId = normalizedParam.slice(0, slashIndex);
   if (skillId === '.' || skillId === '..' || skillId.startsWith('.') || skillId.startsWith('-')) {
     return null;
   }
-  const remainder = param.slice(slashIndex + 1);
+  const remainder = normalizedParam.slice(slashIndex + 1);
   if (!remainder) return null;
   return { skillId, remainder };
 }
@@ -1149,7 +1158,9 @@ function hasParentDirectorySegments(pathValue: string): boolean {
 }
 
 function shouldAttemptSkillRelativeCommandResolution(command: string): boolean {
-  const normalized = stripWrappingQuotes(command).trim().replace(/\\/g, '/');
+  const normalized = remapCanonicalProjectSkillPrefix(
+    stripWrappingQuotes(command).trim().replace(/\\/g, '/'),
+  );
   if (!normalized || normalized === '.' || normalized === '..') {
     return false;
   }
@@ -1166,8 +1177,7 @@ function shouldAttemptSkillRelativeCommandResolution(command: string): boolean {
   }
 
   return normalized.startsWith('./')
-    || normalized.startsWith('.agents/skills/')
-    || normalized.startsWith('skills/')
+    || normalized.startsWith('.agent-world/skills/')
     || normalized.includes('/');
 }
 
@@ -1210,9 +1220,10 @@ export function resolveSkillScriptParameters(
     })
     : [];
   const resolvedParameters = parameters.map((param) => {
+    const normalizedParam = remapCanonicalProjectSkillPrefix(param);
     const parsed = extractSkillIdAndRemainder(param);
     if (parsed) {
-      const hasExplicitSkillPrefix = SKILL_DIR_PREFIXES.some((prefix) => param.startsWith(prefix));
+      const hasExplicitSkillPrefix = SKILL_DIR_PREFIXES.some((prefix) => normalizedParam.startsWith(prefix));
       const activeSkillRoot = activeSkillContexts.find((context) => context.skillId === parsed.skillId)?.skillRoot;
       const sourcePath = getSkillSourcePath(parsed.skillId);
       const hasRuntimeSkillDir = Boolean(runtimeSkillsRoot)
@@ -1247,20 +1258,20 @@ export function resolveSkillScriptParameters(
         }
 
         if (hasExplicitSkillPrefix) {
-          return param;
+          return normalizedParam;
         }
       }
     }
     if (!allowBareScriptsResolution) {
-      return param;
+      return normalizedParam;
     }
 
-    const bareMatch = resolveBareSkillPath(param, runtimeSkillsRoot, activeSkillContexts);
+    const bareMatch = resolveBareSkillPath(normalizedParam, runtimeSkillsRoot, activeSkillContexts);
     if (bareMatch) {
       skillRootsSet.add(bareMatch.skillRoot);
       return bareMatch.absolutePath;
     }
-    return param;
+    return normalizedParam;
   });
   return { resolvedParameters, skillRoots: [...skillRootsSet] };
 }
@@ -2481,7 +2492,7 @@ export function createShellCmdToolDefinition() {
 
       // Resolve skill-relative script paths in both the executable and argv.
       const resolvedDirectory = resolveTrustedShellWorkingDirectory(context);
-      const runtimeSkillsRoot = join(resolveDirectory(resolvedDirectory), '.agents', 'skills');
+      const runtimeSkillsRoot = getCanonicalProjectSkillRoot(resolveDirectory(resolvedDirectory));
       const activeSkillContexts = getActiveSkillContexts(context?.messages, chatId);
       const skillOriginatedRequest = activeSkillContexts.length > 0;
       const skillResolutionOptions = {

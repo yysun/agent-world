@@ -5,7 +5,7 @@
  * - Expose skill-management business UI owned by the renderer skills feature.
  *
  * Key Features:
- * - Groups the skill editor surface and its folder tree pane.
+ * - Groups the skill editor surface, install browser surface, and folder tree pane.
  * - Provides a stable feature-scoped import surface for app orchestration and tests.
  *
  * Implementation Notes:
@@ -17,3 +17,4 @@
 
 export { default as SkillEditor } from './SkillEditor';
 export { default as SkillFolderPane } from './SkillFolderPane';
+export { default as SkillInstallBrowser } from './SkillInstallBrowser';

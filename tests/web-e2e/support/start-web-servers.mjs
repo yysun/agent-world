@@ -24,7 +24,7 @@ let shuttingDown = false;
 const workspacePath = path.resolve(process.cwd(), '.tmp', 'web-playwright-workspace');
 
 function seedWorkspaceArtifacts() {
-  const skillRoot = path.join(workspacePath, 'skills', 'e2e-matrix-skill');
+  const skillRoot = path.join(workspacePath, '.agent-world', 'skills', 'e2e-matrix-skill');
   fs.mkdirSync(path.join(skillRoot, 'scripts'), { recursive: true });
   fs.writeFileSync(
     path.join(skillRoot, 'SKILL.md'),

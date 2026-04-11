@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-04-11: Local install mode now scans the chosen root for SKILL.md plus nested skills directories before preview/install.
  * - 2026-04-03: Added edit-mode markdown preview state for the skill editor and reset it to preview when opening or switching skill files.
  * - 2026-03-23: Passed the collapsed-sidebar state into the full-area skill editor so its toolbar clears the macOS traffic lights.
  * - 2026-03-22: Guarded skill file selection against overlapping busy-state requests so stale file loads cannot overwrite the active editor view.
@@ -66,7 +67,7 @@ import { LeftSidebarPanel, MainWorkspaceLayout, WorkingStatusBar } from './app/s
 import { AppFrameLayout } from './design-system/patterns';
 import { AgentPromptEditor } from './features/agents';
 import { MessageQueuePanel } from './features/queue';
-import { SkillEditor } from './features/skills';
+import { SkillEditor, SkillInstallBrowser } from './features/skills';
 import { WorldTextEditor, type WorldTextEditorField } from './features/worlds';
 import { useWorkingStatus } from './hooks/useWorkingStatus';
 import { readDesktopApi, safeMessage } from './domain/desktop-api';
@@ -121,7 +122,12 @@ import {
   extractSkillDescriptionFromPreviewFiles,
   isSkillInstallFileEditable,
   mergeSkillInstallDraftFiles,
+  resolveLocalSkillPreviewSelection,
+  resolveSkillInstallEditorStageOnPreview,
   resolveSelectedGitHubSkillName,
+  resolveSelectedLocalSkillName,
+  shouldApplyGitHubSkillLoadResult,
+  shouldApplyLocalSkillLoadResult,
 } from './domain/skill-install-preview';
 import { formatFullSkillDescription } from './utils/formatting';
 import {
@@ -157,7 +163,7 @@ import {
   normalizeUnifiedLogEntry,
   type UnifiedLogEntry,
 } from './domain/panel-log-scope';
-import type { DesktopApi, SkillFolderEntry } from './types/desktop-api';
+import type { DesktopApi, GitHubSkillSummary, LocalSkillSummary, SkillFolderEntry } from './types/desktop-api';
 
 type WorkspaceState = {
   workspacePath: string | null;
@@ -196,10 +202,11 @@ type HitlPrompt = {
 
 type SkillEditorEntry = { skillId: string; description: string; sourceScope: string };
 type SkillInstallSourceType = 'local' | 'github';
+type SkillInstallEditorStage = 'browse' | 'preview';
 type WorkspaceEditorState =
   | { kind: 'none' }
   | { kind: 'skill-edit' }
-  | { kind: 'skill-install' }
+  | { kind: 'skill-install'; stage: SkillInstallEditorStage }
   | { kind: 'agent-system-prompt'; target: 'create' | 'edit' }
   | { kind: 'world-text-field'; target: 'edit'; field: WorldTextEditorField };
 
@@ -324,17 +331,24 @@ function AppContent({ api }: { api: DesktopApi }) {
   const [installSkillSourcePath, setInstallSkillSourcePath] = useState('');
   const [installSkillRepo, setInstallSkillRepo] = useState(DEFAULT_INSTALL_GITHUB_SKILL_REPO);
   const [installSkillItemName, setInstallSkillItemName] = useState('');
+  const [installSkillSearchQuery, setInstallSkillSearchQuery] = useState('');
   const [installSkillTargetScope, setInstallSkillTargetScope] = useState<'global' | 'project'>('project');
   const [installSkillDescription, setInstallSkillDescription] = useState('');
+  const [installSkillPreviewStatusMessage, setInstallSkillPreviewStatusMessage] = useState('');
   const [installSkillPreviewFiles, setInstallSkillPreviewFiles] = useState<Record<string, string>>({});
   const [installSkillDraftFiles, setInstallSkillDraftFiles] = useState<Record<string, string>>({});
-  const [installGitHubSkillOptions, setInstallGitHubSkillOptions] = useState<string[]>([]);
+  const [installGitHubSkillOptions, setInstallGitHubSkillOptions] = useState<GitHubSkillSummary[]>([]);
+  const [installLocalSkillOptions, setInstallLocalSkillOptions] = useState<LocalSkillSummary[]>([]);
+  const [installResolvedSourcePath, setInstallResolvedSourcePath] = useState('');
   const [loadingSkillFileContent, setLoadingSkillFileContent] = useState(false);
   const [loadingInstallGitHubSkills, setLoadingInstallGitHubSkills] = useState(false);
+  const [loadingInstallLocalSkills, setLoadingInstallLocalSkills] = useState(false);
   const [savingSkillContent, setSavingSkillContent] = useState(false);
   const [deletingSkillContent, setDeletingSkillContent] = useState(false);
   const [installingSkillContent, setInstallingSkillContent] = useState(false);
   const skillFileRequestIdRef = useRef(0);
+  const installGitHubSkillLoadRequestIdRef = useRef(0);
+  const installLocalSkillLoadRequestIdRef = useRef(0);
 
   const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [notification, setNotification] = useState<{ text: string; kind: 'error' | 'success' | 'info' } | null>(null);
@@ -350,6 +364,21 @@ function AppContent({ api }: { api: DesktopApi }) {
     setEditingSkillFolderEntries(emptyPreviewState.folderEntries);
     setInstallSkillPreviewFiles(emptyPreviewState.previewFiles);
     setInstallSkillDraftFiles(emptyPreviewState.draftFiles);
+    setInstallSkillDescription('');
+    setInstallSkillPreviewStatusMessage('');
+    setInstallResolvedSourcePath('');
+  }, []);
+
+  const resetInstallBrowseState = useCallback(() => {
+    installGitHubSkillLoadRequestIdRef.current += 1;
+    setInstallSkillSourceType('github');
+    setInstallSkillSourcePath('');
+    setInstallSkillRepo(DEFAULT_INSTALL_GITHUB_SKILL_REPO);
+    setInstallSkillItemName('');
+    setInstallSkillSearchQuery('');
+    setInstallGitHubSkillOptions([]);
+    setInstallLocalSkillOptions([]);
+    setInstallSkillTargetScope('project');
   }, []);
 
   useEffect(() => {
@@ -1309,14 +1338,8 @@ function AppContent({ api }: { api: DesktopApi }) {
       const normalizedFolderEntries = Array.isArray(folderEntries) ? folderEntries : [];
       const initialFilePath = getInitialSkillFilePath(normalizedFolderEntries);
       const content = await api.readSkillContent(skillId, initialFilePath);
+      resetInstallBrowseState();
       resetInstallPreviewState();
-      setInstallSkillDescription('');
-      setInstallSkillItemName('');
-      setInstallSkillRepo(DEFAULT_INSTALL_GITHUB_SKILL_REPO);
-      setInstallSkillSourcePath('');
-      setInstallSkillSourceType('github');
-      setInstallGitHubSkillOptions([]);
-      setInstallSkillTargetScope('project');
       setEditingSkillEntry(entry);
       setEditingSkillFilePath(initialFilePath);
       setEditingSkillMarkdownView('preview');
@@ -1327,45 +1350,41 @@ function AppContent({ api }: { api: DesktopApi }) {
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to load skill content.'), 'error');
     }
-  }, [api, resetInstallPreviewState, setStatusText]);
+  }, [api, resetInstallBrowseState, resetInstallPreviewState, setStatusText]);
 
   const onOpenSkillInstallEditor = useCallback(() => {
     skillFileRequestIdRef.current += 1;
-    setWorkspaceEditor({ kind: 'skill-install' });
+    setWorkspaceEditor({ kind: 'skill-install', stage: 'browse' });
     setEditingSkillEntry(null);
+    resetInstallBrowseState();
     resetInstallPreviewState();
-    setInstallSkillDescription('');
-    setInstallSkillSourceType('github');
-    setInstallSkillSourcePath('');
-    setInstallSkillRepo(DEFAULT_INSTALL_GITHUB_SKILL_REPO);
-    setInstallSkillItemName('');
-    setInstallGitHubSkillOptions([]);
-    setInstallSkillTargetScope('project');
     setLoadingSkillFileContent(false);
     setLoadingInstallGitHubSkills(false);
     setSavingSkillContent(false);
     setDeletingSkillContent(false);
     setInstallingSkillContent(false);
-  }, [resetInstallPreviewState]);
+  }, [resetInstallBrowseState, resetInstallPreviewState]);
 
   const onCloseSkillEditor = useCallback(() => {
     skillFileRequestIdRef.current += 1;
     setWorkspaceEditor({ kind: 'none' });
     setEditingSkillEntry(null);
+    resetInstallBrowseState();
     resetInstallPreviewState();
-    setInstallSkillDescription('');
-    setInstallSkillSourceType('github');
-    setInstallSkillSourcePath('');
-    setInstallSkillRepo(DEFAULT_INSTALL_GITHUB_SKILL_REPO);
-    setInstallSkillItemName('');
-    setInstallGitHubSkillOptions([]);
-    setInstallSkillTargetScope('project');
     setLoadingSkillFileContent(false);
     setLoadingInstallGitHubSkills(false);
     setSavingSkillContent(false);
     setDeletingSkillContent(false);
     setInstallingSkillContent(false);
-  }, [resetInstallPreviewState]);
+  }, [resetInstallBrowseState, resetInstallPreviewState]);
+
+  const onBackFromInstallPreview = useCallback(() => {
+    if (workspaceEditor.kind !== 'skill-install' || workspaceEditor.stage !== 'preview') {
+      return;
+    }
+
+    setWorkspaceEditor({ kind: 'skill-install', stage: 'browse' });
+  }, [workspaceEditor]);
 
   const onOpenAgentPromptEditor = useCallback((target: 'create' | 'edit') => {
     const sourceValue = target === 'create'
@@ -1443,29 +1462,106 @@ function AppContent({ api }: { api: DesktopApi }) {
   }, [onCloseWorldTextEditor, setEditingWorld, workspaceEditor, worldTextEditorDraft]);
 
   const onChangeInstallSkillSourceType = useCallback((value: SkillInstallSourceType) => {
+    installGitHubSkillLoadRequestIdRef.current += 1;
+    installLocalSkillLoadRequestIdRef.current += 1;
     setInstallSkillSourceType(value);
+    setInstallSkillSearchQuery('');
+    setLoadingInstallGitHubSkills(false);
+    setLoadingInstallLocalSkills(false);
     resetInstallPreviewState();
-    setInstallSkillDescription('');
     setInstallSkillItemName('');
     if (value === 'local') {
       setInstallGitHubSkillOptions([]);
+    } else {
+      setInstallLocalSkillOptions([]);
     }
   }, [resetInstallPreviewState]);
 
   const onChangeInstallSkillSourcePath = useCallback((value: string) => {
+    installLocalSkillLoadRequestIdRef.current += 1;
     setInstallSkillSourcePath(value);
+    setInstallLocalSkillOptions([]);
+    setLoadingInstallLocalSkills(false);
     resetInstallPreviewState();
-    setInstallSkillDescription('');
     setInstallSkillItemName('');
   }, [resetInstallPreviewState]);
 
   const onChangeInstallSkillRepo = useCallback((value: string) => {
+    installGitHubSkillLoadRequestIdRef.current += 1;
     setInstallSkillRepo(value);
+    setInstallSkillSearchQuery('');
+    setLoadingInstallGitHubSkills(false);
     setInstallGitHubSkillOptions([]);
     setInstallSkillItemName('');
     resetInstallPreviewState();
-    setInstallSkillDescription('');
   }, [resetInstallPreviewState]);
+
+  const onLoadInstallLocalSkills = useCallback(async (rootOverride?: string) => {
+    const rootPath = String(rootOverride || installSkillSourcePath || '').trim();
+    if (!rootPath) {
+      setStatusText('Local skill root is required.', 'error');
+      return;
+    }
+
+    const requestId = installLocalSkillLoadRequestIdRef.current + 1;
+    installLocalSkillLoadRequestIdRef.current = requestId;
+    setLoadingInstallLocalSkills(true);
+    try {
+      const skills = await api.listLocalSkills(rootPath);
+      if (!shouldApplyLocalSkillLoadResult({
+        activeRequestId: installLocalSkillLoadRequestIdRef.current,
+        requestId,
+        currentSourcePath: installSkillSourcePath || rootPath,
+        requestSourcePath: rootPath,
+      })) {
+        return;
+      }
+
+      const normalizedSkills = Array.isArray(skills)
+        ? skills.map((skill) => ({
+          skillId: String(skill?.skillId || '').trim(),
+          description: String(skill?.description || '').trim(),
+          folderPath: String(skill?.folderPath || '').trim(),
+          relativePath: String(skill?.relativePath || '').trim(),
+        })).filter((skill) => Boolean(skill.skillId) && Boolean(skill.folderPath))
+        : [];
+      const preservedResolvedSourcePath = normalizedSkills.some((skill) => skill.folderPath === installResolvedSourcePath)
+        ? installResolvedSourcePath
+        : '';
+      const nextSkillName = resolveSelectedLocalSkillName(installSkillItemName, normalizedSkills);
+      if (nextSkillName !== installSkillItemName || preservedResolvedSourcePath !== installResolvedSourcePath) {
+        resetInstallPreviewState();
+      }
+
+      setInstallSkillSourcePath(rootPath);
+      setInstallLocalSkillOptions(normalizedSkills);
+      setInstallSkillItemName(nextSkillName);
+      setInstallResolvedSourcePath(preservedResolvedSourcePath);
+      if (normalizedSkills.length > 0) {
+        setStatusText(`Loaded ${normalizedSkills.length} local skill${normalizedSkills.length === 1 ? '' : 's'} from ${rootPath}.`, 'success');
+      } else {
+        setStatusText(`No local skills found in ${rootPath}.`, 'info');
+      }
+    } catch (error) {
+      if (!shouldApplyLocalSkillLoadResult({
+        activeRequestId: installLocalSkillLoadRequestIdRef.current,
+        requestId,
+        currentSourcePath: installSkillSourcePath || rootPath,
+        requestSourcePath: rootPath,
+      })) {
+        return;
+      }
+
+      setInstallLocalSkillOptions([]);
+      setInstallSkillItemName('');
+      resetInstallPreviewState();
+      setStatusText(safeMessage(error, 'Failed to list local skills.'), 'error');
+    } finally {
+      if (installLocalSkillLoadRequestIdRef.current === requestId) {
+        setLoadingInstallLocalSkills(false);
+      }
+    }
+  }, [api, installResolvedSourcePath, installSkillItemName, installSkillSourcePath, resetInstallPreviewState, setStatusText]);
 
   const loadInstallSkillPreview = useCallback(async (previewPayload?: {
     source?: string;
@@ -1476,14 +1572,22 @@ function AppContent({ api }: { api: DesktopApi }) {
       return false;
     }
 
+    setInstallSkillPreviewStatusMessage('Loading preview files…');
     setLoadingSkillFileContent(true);
     try {
       const preview = await api.previewSkillImport(previewPayload);
       if (!preview) {
+        resetInstallPreviewState();
+        setInstallSkillPreviewStatusMessage('Preview files are unavailable for this skill.');
         return false;
       }
       const normalizedEntries = Array.isArray(preview.entries) ? preview.entries : [];
       const normalizedFiles = preview.files && typeof preview.files === 'object' ? preview.files : {};
+      if (normalizedEntries.length === 0 && Object.keys(normalizedFiles).length === 0) {
+        resetInstallPreviewState();
+        setInstallSkillPreviewStatusMessage('Preview files are unavailable for this skill.');
+        return false;
+      }
       const initialFilePath = String(preview.initialFilePath || getInitialSkillFilePath(normalizedEntries) || 'SKILL.md').trim();
       const initialContent = typeof normalizedFiles[initialFilePath] === 'string' ? normalizedFiles[initialFilePath] : '';
       const rawDescription = extractSkillDescriptionFromPreviewFiles(normalizedFiles);
@@ -1497,32 +1601,23 @@ function AppContent({ api }: { api: DesktopApi }) {
       setEditingSkillMarkdownView('preview');
       setEditingSkillContent(initialContent);
       setSavedSkillContent(initialContent);
+      setInstallSkillPreviewStatusMessage('');
       setStatusText(`Loaded skill preview: ${String(preview.rootName || 'skill')}`, 'success');
       return true;
     } catch (error) {
+      const errorMessage = safeMessage(error, 'Failed to preview skill import.');
       resetInstallPreviewState();
-      setInstallSkillDescription('');
-      setStatusText(safeMessage(error, 'Failed to preview skill import.'), 'error');
+      setInstallSkillPreviewStatusMessage(errorMessage);
+      setStatusText(errorMessage, 'error');
       return false;
     } finally {
       setLoadingSkillFileContent(false);
     }
   }, [api, resetInstallPreviewState, setStatusText]);
 
-  const onChangeInstallSkillItemName = useCallback((value: string) => {
-    setInstallSkillItemName(value);
-    resetInstallPreviewState();
-    setInstallSkillDescription('');
-    const nextValue = String(value || '').trim();
-    if (!nextValue || installSkillSourceType !== 'github' || !installSkillRepo.trim()) {
-      return;
-    }
-
-    void loadInstallSkillPreview({
-      repo: installSkillRepo.trim(),
-      itemName: nextValue,
-    });
-  }, [installSkillRepo, installSkillSourceType, loadInstallSkillPreview, resetInstallPreviewState]);
+  const onChangeInstallSkillSearchQuery = useCallback((value: string) => {
+    setInstallSkillSearchQuery(value);
+  }, []);
 
   const onChangeSkillEditorContent = useCallback((value: string) => {
     setEditingSkillContent(value);
@@ -1587,13 +1682,15 @@ function AppContent({ api }: { api: DesktopApi }) {
       const directoryPath = result?.directoryPath ?? result?.workspacePath;
       if (!result?.canceled && directoryPath) {
         setInstallSkillSourcePath(String(directoryPath));
+        setInstallLocalSkillOptions([]);
         resetInstallPreviewState();
         setInstallSkillItemName('');
+        void onLoadInstallLocalSkills(String(directoryPath));
       }
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to pick skill folder.'), 'error');
     }
-  }, [api, installSkillSourcePath, resetInstallPreviewState, setStatusText, workspace.workspacePath]);
+  }, [api, installSkillSourcePath, onLoadInstallLocalSkills, resetInstallPreviewState, setStatusText, workspace.workspacePath]);
 
   const onLoadInstallGitHubSkills = useCallback(async () => {
     const repo = installSkillRepo.trim();
@@ -1602,49 +1699,120 @@ function AppContent({ api }: { api: DesktopApi }) {
       return;
     }
 
+    const requestId = installGitHubSkillLoadRequestIdRef.current + 1;
+    installGitHubSkillLoadRequestIdRef.current = requestId;
     setLoadingInstallGitHubSkills(true);
     try {
       const skills = await api.listGitHubSkills(repo);
+      if (!shouldApplyGitHubSkillLoadResult({
+        activeRequestId: installGitHubSkillLoadRequestIdRef.current,
+        requestId,
+        currentRepo: installSkillRepo,
+        requestRepo: repo,
+      })) {
+        return;
+      }
+
       const normalizedSkills = Array.isArray(skills)
-        ? skills.map((value) => String(value || '').trim()).filter(Boolean)
+        ? skills
+          .map((value) => {
+            if (typeof value === 'string') {
+              return {
+                skillId: String(value || '').trim(),
+                description: '',
+              };
+            }
+
+            return {
+              skillId: String(value?.skillId || '').trim(),
+              description: String(value?.description || '').trim(),
+            };
+          })
+          .filter((skill) => Boolean(skill.skillId))
         : [];
       const nextSkillName = resolveSelectedGitHubSkillName(installSkillItemName, normalizedSkills);
       if (nextSkillName !== installSkillItemName) {
         resetInstallPreviewState();
-        setInstallSkillDescription('');
       }
       setInstallGitHubSkillOptions(normalizedSkills);
       setInstallSkillItemName(nextSkillName);
-      if (nextSkillName) {
-        await loadInstallSkillPreview({ repo, itemName: nextSkillName });
+      if (normalizedSkills.length > 0) {
+        setStatusText(`Loaded ${normalizedSkills.length} skill${normalizedSkills.length === 1 ? '' : 's'} from ${repo}.`, 'success');
       } else {
         setStatusText(`No skills found in ${repo}.`, 'info');
       }
     } catch (error) {
+      if (!shouldApplyGitHubSkillLoadResult({
+        activeRequestId: installGitHubSkillLoadRequestIdRef.current,
+        requestId,
+        currentRepo: installSkillRepo,
+        requestRepo: repo,
+      })) {
+        return;
+      }
+
       setInstallGitHubSkillOptions([]);
       setInstallSkillItemName('');
       resetInstallPreviewState();
-      setInstallSkillDescription('');
       setStatusText(safeMessage(error, 'Failed to list GitHub skills.'), 'error');
     } finally {
-      setLoadingInstallGitHubSkills(false);
+      if (installGitHubSkillLoadRequestIdRef.current === requestId) {
+        setLoadingInstallGitHubSkills(false);
+      }
     }
-  }, [api, installSkillItemName, installSkillRepo, loadInstallSkillPreview, resetInstallPreviewState, setStatusText]);
+  }, [api, installSkillItemName, installSkillRepo, resetInstallPreviewState, setStatusText]);
 
-  const onPreviewInstallSkill = useCallback(async () => {
+  const onPreviewInstallSkill = useCallback(async (nextSkillName?: string, nextLocalFolderPath?: string) => {
+    const normalizedSkillName = String(nextSkillName || installSkillItemName || '').trim();
+    if (installSkillSourceType === 'github' && !normalizedSkillName) {
+      setStatusText('Select a skill to preview.', 'error');
+      return;
+    }
+
+    if (nextSkillName) {
+      setInstallSkillItemName(normalizedSkillName);
+    }
+
+    const localSelection = installSkillSourceType === 'local'
+      ? resolveLocalSkillPreviewSelection(
+        installLocalSkillOptions,
+        normalizedSkillName,
+        nextLocalFolderPath || installResolvedSourcePath,
+      )
+      : null;
+    const localSourcePath = installSkillSourceType === 'local'
+      ? (localSelection?.folderPath || installSkillSourcePath.trim())
+      : '';
     const previewPayload = installSkillSourceType === 'github'
       ? {
         repo: installSkillRepo.trim(),
-        itemName: installSkillItemName.trim(),
+        itemName: normalizedSkillName,
       }
-      : (installSkillSourcePath.trim()
+      : (localSourcePath
         ? {
-          source: installSkillSourcePath.trim(),
-          ...(installSkillItemName.trim() ? { itemName: installSkillItemName.trim() } : {}),
+          source: localSourcePath,
+          ...(localSelection?.skillName ? { itemName: localSelection.skillName } : {}),
         }
         : undefined);
-    await loadInstallSkillPreview(previewPayload);
-  }, [installSkillItemName, installSkillRepo, installSkillSourcePath, installSkillSourceType, loadInstallSkillPreview]);
+    setWorkspaceEditor((current) => (current.kind === 'skill-install'
+      ? { kind: 'skill-install', stage: resolveSkillInstallEditorStageOnPreview() }
+      : current));
+    const loaded = await loadInstallSkillPreview(previewPayload);
+    if (!loaded) {
+      return;
+    }
+
+    if (installSkillSourceType === 'local') {
+      setInstallResolvedSourcePath(localSourcePath);
+      if (localSelection?.skillName) {
+        setInstallSkillItemName(localSelection.skillName);
+      }
+    }
+
+    setWorkspaceEditor((current) => (current.kind === 'skill-install'
+      ? { kind: 'skill-install', stage: resolveSkillInstallEditorStageOnPreview(true) }
+      : current));
+  }, [installLocalSkillOptions, installResolvedSourcePath, installSkillItemName, installSkillRepo, installSkillSourcePath, installSkillSourceType, loadInstallSkillPreview, setStatusText]);
 
   const onSaveSkillContent = useCallback(async () => {
     const skillId = String(editingSkillEntry?.skillId || '').trim();
@@ -1680,9 +1848,12 @@ function AppContent({ api }: { api: DesktopApi }) {
       await api.importSkill({
         ...(installSkillSourceType === 'github'
           ? { repo: installSkillRepo.trim() }
-          : (installSkillSourcePath.trim() ? { source: installSkillSourcePath.trim() } : {})),
+          : ((installResolvedSourcePath || installSkillSourcePath.trim()) ? { source: installResolvedSourcePath || installSkillSourcePath.trim() } : {})),
         itemName: skillName,
         targetScope: installSkillTargetScope,
+        ...(installSkillTargetScope === 'project' && selectedProjectPath
+          ? { projectPath: selectedProjectPath }
+          : {}),
         files: filesToInstall,
       });
       try {
@@ -1697,7 +1868,7 @@ function AppContent({ api }: { api: DesktopApi }) {
     } finally {
       setInstallingSkillContent(false);
     }
-  }, [api, editingSkillFolderEntries.length, installSkillDraftFiles, installSkillItemName, installSkillRepo, installSkillSourcePath, installSkillSourceType, installSkillTargetScope, onCloseSkillEditor, refreshSkillRegistry, setStatusText]);
+  }, [api, editingSkillFolderEntries.length, installResolvedSourcePath, installSkillDraftFiles, installSkillItemName, installSkillRepo, installSkillSourcePath, installSkillSourceType, installSkillTargetScope, onCloseSkillEditor, refreshSkillRegistry, selectedProjectPath, setStatusText]);
 
   const onDeleteSkillContent = useCallback(async () => {
     const skillId = String(editingSkillEntry?.skillId || '').trim();
@@ -2049,7 +2220,34 @@ function AppContent({ api }: { api: DesktopApi }) {
   });
 
   const workspaceEditorContent = (() => {
-    if (workspaceEditor.kind === 'skill-edit' || workspaceEditor.kind === 'skill-install') {
+    if (workspaceEditor.kind === 'skill-install' && workspaceEditor.stage === 'browse') {
+      return (
+        <SkillInstallBrowser
+          sourceType={installSkillSourceType}
+          sourcePath={installSkillSourcePath}
+          repo={installSkillRepo}
+          availableGitHubSkills={installGitHubSkillOptions}
+          availableLocalSkills={installLocalSkillOptions}
+          searchQuery={installSkillSearchQuery}
+          loadingGitHubOptions={loadingInstallGitHubSkills}
+          loadingLocalOptions={loadingInstallLocalSkills}
+          loadingPreview={loadingSkillFileContent}
+          installing={installingSkillContent}
+          leftSidebarCollapsed={leftSidebarCollapsed}
+          onBack={onCloseSkillEditor}
+          onSourceTypeChange={onChangeInstallSkillSourceType}
+          onSourcePathChange={onChangeInstallSkillSourcePath}
+          onBrowseSource={onBrowseInstallSkillSource}
+          onRepoChange={onChangeInstallSkillRepo}
+          onSearchQueryChange={onChangeInstallSkillSearchQuery}
+          onLoadGitHubOptions={onLoadInstallGitHubSkills}
+          onLoadLocalOptions={onLoadInstallLocalSkills}
+          onPreviewSelection={onPreviewInstallSkill}
+        />
+      );
+    }
+
+    if (workspaceEditor.kind === 'skill-edit' || (workspaceEditor.kind === 'skill-install' && workspaceEditor.stage === 'preview')) {
       return (
         <SkillEditor
           mode={workspaceEditor.kind === 'skill-install' ? 'install' : 'edit'}
@@ -2061,7 +2259,7 @@ function AppContent({ api }: { api: DesktopApi }) {
           content={editingSkillContent}
           onContentChange={onChangeSkillEditorContent}
           onMarkdownViewModeChange={setEditingSkillMarkdownView}
-          onBack={onCloseSkillEditor}
+          onBack={workspaceEditor.kind === 'skill-install' ? onBackFromInstallPreview : onCloseSkillEditor}
           onSave={onSaveSkillContent}
           onDelete={onDeleteSkillContent}
           onSelectFile={onSelectSkillFile}
@@ -2070,26 +2268,23 @@ function AppContent({ api }: { api: DesktopApi }) {
           loadingFile={loadingSkillFileContent}
           saving={savingSkillContent}
           deleting={deletingSkillContent}
-          installSourceType={installSkillSourceType}
-          installSourcePath={installSkillSourcePath}
-          installRepo={installSkillRepo}
           installItemName={installSkillItemName}
-          installOptions={installGitHubSkillOptions}
           installDescription={installSkillDescription}
           installTargetScope={installSkillTargetScope}
-          loadingInstallOptions={loadingInstallGitHubSkills}
-          onInstallSourceTypeChange={onChangeInstallSkillSourceType}
-          onInstallSourcePathChange={onChangeInstallSkillSourcePath}
-          onInstallRepoChange={onChangeInstallSkillRepo}
-          onInstallItemNameChange={onChangeInstallSkillItemName}
           onInstallTargetScopeChange={setInstallSkillTargetScope}
-          onBrowseInstallSource={onBrowseInstallSkillSource}
-          onLoadInstallOptions={onLoadInstallGitHubSkills}
-          onPreviewInstall={onPreviewInstallSkill}
           onInstall={onInstallSkillContent}
           installing={installingSkillContent}
-          hasInstallPreview={editingSkillFolderEntries.length > 0}
           currentFileEditable={workspaceEditor.kind !== 'skill-install' || isSkillInstallFileEditable(installSkillPreviewFiles, editingSkillFilePath)}
+          emptyContentMessage={workspaceEditor.kind === 'skill-install'
+            ? (loadingSkillFileContent
+              ? 'Loading preview files…'
+              : (installSkillPreviewStatusMessage || `Preview files are unavailable for ${installSkillItemName || 'this skill'}.`))
+            : ''}
+          folderEmptyStateText={workspaceEditor.kind === 'skill-install'
+            ? (loadingSkillFileContent
+              ? 'Loading preview files…'
+              : (installSkillPreviewStatusMessage || `Preview files are unavailable for ${installSkillItemName || 'this skill'}.`))
+            : ''}
         />
       );
     }
