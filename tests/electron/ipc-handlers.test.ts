@@ -171,6 +171,7 @@ describe('createMainIpcHandlers — readSkillContent / readSkillFolderStructure 
       getSkillSourceScope: () => undefined,
       getSkillSourcePath: getSkillSourcePathImpl,
       getSkillsForSystemPrompt: () => [],
+      getScopedSkillsForDisplay: async () => [],
       syncSkills: async () => { },
       newChat: async () => ({}),
       branchChatFromMessage: async () => ({}),
@@ -559,6 +560,50 @@ describe('createMainIpcHandlers — readSkillContent / readSkillFolderStructure 
         description: 'Real reviewer skill.',
         folderPath: absoluteTestPath('workspace', 'scan-root', 'packages', 'app', 'skills', 'reviewer'),
         relativePath: 'packages/app/skills/reviewer',
+      },
+    ]);
+  });
+
+  it('listSkillRegistry can preserve per-scope duplicates for settings display', async () => {
+    const handlers = createMainIpcHandlers({
+      ...makeDeps(() => undefined),
+      getSkillSourceScope: () => 'project',
+      getScopedSkillsForDisplay: async () => ([
+        {
+          skill_id: 'shared-skill',
+          description: 'Global copy',
+          hash: 'global123',
+          lastUpdated: '2026-04-11T18:00:00.000Z',
+          sourceScope: 'global',
+        },
+        {
+          skill_id: 'shared-skill',
+          description: 'Project copy',
+          hash: 'project123',
+          lastUpdated: '2026-04-11T18:10:00.000Z',
+          sourceScope: 'project',
+        },
+      ]),
+    });
+
+    await expect((handlers as any).listSkillRegistry({
+      includeGlobalSkills: true,
+      includeProjectSkills: true,
+      preserveScopes: true,
+    })).resolves.toEqual([
+      {
+        skill_id: 'shared-skill',
+        description: 'Global copy',
+        hash: 'global123',
+        lastUpdated: '2026-04-11T18:00:00.000Z',
+        sourceScope: 'global',
+      },
+      {
+        skill_id: 'shared-skill',
+        description: 'Project copy',
+        hash: 'project123',
+        lastUpdated: '2026-04-11T18:10:00.000Z',
+        sourceScope: 'project',
       },
     ]);
   });

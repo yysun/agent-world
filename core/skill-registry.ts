@@ -54,6 +54,10 @@ export interface SkillRegistryEntry {
   lastUpdated: string;
 }
 
+export interface ScopedSkillRegistryEntry extends SkillRegistryEntry {
+  sourceScope: SkillSourceScope;
+}
+
 export type SkillSourceScope = 'global' | 'project';
 
 export interface SyncSkillsOptions {
@@ -352,6 +356,47 @@ async function discoverSkills(
   return discovered;
 }
 
+async function resolveDiscoveredSkillsByKey(
+  discovered: Map<string, DiscoveredSkill>,
+  keyResolver: (skillId: string, discoveredSkill: DiscoveredSkill) => string,
+): Promise<Map<string, ResolvedDiscoveredSkill>> {
+  const resolvedDiscovered = new Map<string, ResolvedDiscoveredSkill>();
+
+  for (const discoveredSkill of discovered.values()) {
+    let content: string;
+    try {
+      content = await fs.readFile(discoveredSkill.skillFilePath, 'utf8');
+    } catch {
+      continue;
+    }
+
+    const metadata = parseSkillFrontMatter(content);
+    const skillId = (metadata.name ?? '').trim();
+    if (!skillId) {
+      continue;
+    }
+
+    const description = (metadata.description ?? '').trim();
+    const nextResolvedSkill: ResolvedDiscoveredSkill = {
+      description,
+      hash: createContentHash(content),
+      lastUpdated: discoveredSkill.lastUpdated,
+      precedence: discoveredSkill.precedence,
+      skillFilePath: discoveredSkill.skillFilePath,
+      sourceScope: discoveredSkill.sourceScope,
+    };
+    const resolvedKey = keyResolver(skillId, discoveredSkill);
+    const existingResolvedSkill = resolvedDiscovered.get(resolvedKey);
+    if (!shouldReplaceResolvedSkill(existingResolvedSkill, nextResolvedSkill)) {
+      continue;
+    }
+
+    resolvedDiscovered.set(resolvedKey, nextResolvedSkill);
+  }
+
+  return resolvedDiscovered;
+}
+
 function createSkillRegistrySingleton() {
   const registry = new Map<string, SkillRegistryEntry>();
   const registrySourcePaths = new Map<string, string>();
@@ -366,37 +411,7 @@ function createSkillRegistrySingleton() {
     let updated = 0;
     let unchanged = 0;
 
-    const resolvedDiscovered = new Map<string, ResolvedDiscoveredSkill>();
-    for (const discoveredSkill of discovered.values()) {
-      let content: string;
-      try {
-        content = await fs.readFile(discoveredSkill.skillFilePath, 'utf8');
-      } catch {
-        continue;
-      }
-
-      const metadata = parseSkillFrontMatter(content);
-      const skillId = (metadata.name ?? '').trim();
-      if (!skillId) {
-        continue;
-      }
-
-      const description = (metadata.description ?? '').trim();
-      const nextResolvedSkill: ResolvedDiscoveredSkill = {
-        description,
-        hash: createContentHash(content),
-        lastUpdated: discoveredSkill.lastUpdated,
-        precedence: discoveredSkill.precedence,
-        skillFilePath: discoveredSkill.skillFilePath,
-        sourceScope: discoveredSkill.sourceScope,
-      };
-      const existingResolvedSkill = resolvedDiscovered.get(skillId);
-      if (!shouldReplaceResolvedSkill(existingResolvedSkill, nextResolvedSkill)) {
-        continue;
-      }
-
-      resolvedDiscovered.set(skillId, nextResolvedSkill);
-    }
+    const resolvedDiscovered = await resolveDiscoveredSkillsByKey(discovered, (skillId) => skillId);
 
     for (const [skillId, discoveredSkill] of [...resolvedDiscovered.entries()].sort(([leftId], [rightId]) =>
       leftId.localeCompare(rightId),
@@ -463,6 +478,42 @@ function createSkillRegistrySingleton() {
     return registryScopes.get(skillId);
   }
 
+  async function getScopedSkillsForDisplay(options: SkillScopeFilterOptions = {}): Promise<ScopedSkillRegistryEntry[]> {
+    const includeGlobal = options.includeGlobal !== false;
+    const includeProject = options.includeProject !== false;
+    if (!includeGlobal && !includeProject) {
+      return [];
+    }
+
+    const roots = resolveSkillRoots(options);
+    const discovered = await discoverSkills(roots);
+    const resolvedDiscovered = await resolveDiscoveredSkillsByKey(
+      discovered,
+      (skillId, discoveredSkill) => `${discoveredSkill.sourceScope}:${skillId}`,
+    );
+
+    return [...resolvedDiscovered.entries()]
+      .map(([resolvedKey, discoveredSkill]) => {
+        const separatorIndex = resolvedKey.indexOf(':');
+        const skillId = separatorIndex >= 0 ? resolvedKey.slice(separatorIndex + 1) : resolvedKey;
+        return {
+          skill_id: skillId,
+          description: discoveredSkill.description,
+          hash: discoveredSkill.hash,
+          lastUpdated: discoveredSkill.lastUpdated,
+          sourceScope: discoveredSkill.sourceScope,
+        };
+      })
+      .filter((skill) => (skill.sourceScope === 'project' ? includeProject : includeGlobal))
+      .sort((left, right) => {
+        const scopeComparison = left.sourceScope.localeCompare(right.sourceScope);
+        if (scopeComparison !== 0) {
+          return scopeComparison;
+        }
+        return left.skill_id.localeCompare(right.skill_id);
+      });
+  }
+
   function getSkillsForSystemPrompt(options: SkillScopeFilterOptions = {}): SkillRegistryEntry[] {
     const includeGlobal = options.includeGlobal !== false;
     const includeProject = options.includeProject !== false;
@@ -520,7 +571,7 @@ function createSkillRegistrySingleton() {
     registryScopes.clear();
   }
 
-  return { syncSkills, getSkills, getSkill, getSkillSourcePath, getSkillSourceScope, getSkillsForSystemPrompt, clearSkillsForTests };
+  return { syncSkills, getSkills, getSkill, getSkillSourcePath, getSkillSourceScope, getScopedSkillsForDisplay, getSkillsForSystemPrompt, clearSkillsForTests };
 }
 
 export const skillRegistry = createSkillRegistrySingleton();
@@ -529,6 +580,7 @@ export const getSkills = skillRegistry.getSkills;
 export const getSkill = skillRegistry.getSkill;
 export const getSkillSourcePath = skillRegistry.getSkillSourcePath;
 export const getSkillSourceScope = skillRegistry.getSkillSourceScope;
+export const getScopedSkillsForDisplay = skillRegistry.getScopedSkillsForDisplay;
 export const getSkillsForSystemPrompt = skillRegistry.getSkillsForSystemPrompt;
 export const clearSkillsForTests = skillRegistry.clearSkillsForTests;
 

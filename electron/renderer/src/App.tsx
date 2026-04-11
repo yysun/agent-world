@@ -909,6 +909,7 @@ function AppContent({ api }: { api: DesktopApi }) {
 
   const {
     skillRegistryEntries,
+    scopedSkillRegistryEntries,
     loadingSkillRegistry,
     skillRegistryError,
     refreshSkillRegistry,
@@ -941,6 +942,7 @@ function AppContent({ api }: { api: DesktopApi }) {
     api,
     panelMode,
     skillRegistryEntries,
+    scopedSkillRegistryEntries,
     refreshSkillRegistry,
     setStatusText,
   });

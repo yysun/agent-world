@@ -32,6 +32,7 @@ import * as path from 'path';
 import {
   clearSkillsForTests,
   getSkill,
+  getScopedSkillsForDisplay,
   getSkillSourceScope,
   getSkillsForSystemPrompt,
   getSkillSourcePath,
@@ -431,6 +432,60 @@ describe('core/skill-registry', () => {
     });
     expect(getSkillSourceScope('shared-skill')).toBe('project');
     expect(normalizePathKey(getSkillSourcePath('shared-skill') || '')).toContain('project-root/shared/SKILL.md');
+  });
+
+  it('returns both global and project entries for settings display when the same skill exists in both scopes', async () => {
+    const sharedContent = [
+      '---',
+      'name: shared-skill',
+      'description: Shared instructions',
+      '---',
+      '',
+      'same body',
+    ].join('\n');
+
+    setupFsScenario(
+      {
+        'user-root': [{ name: 'shared', type: 'directory' }],
+        'user-root/shared': [{ name: 'SKILL.md', type: 'file' }],
+        'project-root': [{ name: 'shared', type: 'directory' }],
+        'project-root/shared': [{ name: 'SKILL.md', type: 'file' }],
+      },
+      {
+        'user-root/shared/SKILL.md': {
+          content: sharedContent,
+          mtime: new Date('2026-02-14T08:10:00.000Z'),
+        },
+        'project-root/shared/SKILL.md': {
+          content: sharedContent,
+          mtime: new Date('2026-02-14T08:00:00.000Z'),
+        },
+      },
+    );
+
+    const scopedEntries = await getScopedSkillsForDisplay({
+      includeGlobal: true,
+      includeProject: true,
+      userSkillRoots: ['user-root'],
+      projectSkillRoots: ['project-root'],
+    });
+
+    expect(scopedEntries).toEqual([
+      {
+        skill_id: 'shared-skill',
+        description: 'Shared instructions',
+        hash: expect.any(String),
+        lastUpdated: '2026-02-14T08:10:00.000Z',
+        sourceScope: 'global',
+      },
+      {
+        skill_id: 'shared-skill',
+        description: 'Shared instructions',
+        hash: expect.any(String),
+        lastUpdated: '2026-02-14T08:00:00.000Z',
+        sourceScope: 'project',
+      },
+    ]);
   });
 
   it('includes only the canonical global directory in default user roots', async () => {

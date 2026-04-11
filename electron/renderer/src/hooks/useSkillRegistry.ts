@@ -39,12 +39,14 @@ function normalizeSkillSummaryEntries(rawEntries) {
 
 export function useSkillRegistry({ api, loadedWorldId }) {
   const [skillRegistryEntries, setSkillRegistryEntries] = useState([]);
+  const [scopedSkillRegistryEntries, setScopedSkillRegistryEntries] = useState([]);
   const [loadingSkillRegistry, setLoadingSkillRegistry] = useState(false);
   const [skillRegistryError, setSkillRegistryError] = useState('');
 
   const refreshSkillRegistry = useCallback(async () => {
     if (typeof api?.listSkills !== 'function') {
       setSkillRegistryEntries([]);
+      setScopedSkillRegistryEntries([]);
       setSkillRegistryError('Skills are not available in this desktop build.');
       return;
     }
@@ -52,14 +54,23 @@ export function useSkillRegistry({ api, loadedWorldId }) {
     setLoadingSkillRegistry(true);
     setSkillRegistryError('');
     try {
-      const rawEntries = await api.listSkills({
+      const payload = {
         includeGlobalSkills: true,
         includeProjectSkills: true,
         worldId: loadedWorldId || undefined,
-      });
+      };
+      const [rawEntries, scopedRawEntries] = await Promise.all([
+        api.listSkills(payload),
+        api.listSkills({
+          ...payload,
+          preserveScopes: true,
+        }),
+      ]);
       setSkillRegistryEntries(normalizeSkillSummaryEntries(rawEntries));
+      setScopedSkillRegistryEntries(normalizeSkillSummaryEntries(scopedRawEntries));
     } catch (error) {
       setSkillRegistryEntries([]);
+      setScopedSkillRegistryEntries([]);
       setSkillRegistryError(safeMessage(error, 'Failed to load skill registry.'));
     } finally {
       setLoadingSkillRegistry(false);
@@ -72,6 +83,7 @@ export function useSkillRegistry({ api, loadedWorldId }) {
 
   return {
     skillRegistryEntries,
+    scopedSkillRegistryEntries,
     loadingSkillRegistry,
     skillRegistryError,
     refreshSkillRegistry,

@@ -261,6 +261,7 @@ export interface SkillListFilterPayload {
   includeGlobalSkills?: boolean;
   includeProjectSkills?: boolean;
   worldId?: string;
+  preserveScopes?: boolean;
 }
 
 export interface SkillContentPayload {

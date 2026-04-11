@@ -281,6 +281,13 @@ interface MainIpcHandlerFactoryDependencies {
     projectSkillRoots?: string[];
     worldVariablesText?: string;
   }) => any[];
+  getScopedSkillsForDisplay: (options?: {
+    includeGlobal?: boolean;
+    includeProject?: boolean;
+    userSkillRoots?: string[];
+    projectSkillRoots?: string[];
+    worldVariablesText?: string;
+  }) => Promise<any[]> | any[];
   syncSkills: (options?: {
     userSkillRoots?: string[];
     projectSkillRoots?: string[];
@@ -421,6 +428,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     getSkillSourceScope,
     getSkillSourcePath,
     getSkillsForSystemPrompt,
+    getScopedSkillsForDisplay,
     syncSkills,
     newChat,
     branchChatFromMessage,
@@ -1024,7 +1032,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
   async function listSkillRegistry(payload?: unknown) {
     await ensureCoreReady();
     const normalizedPayload = payload && typeof payload === 'object' && !Array.isArray(payload)
-      ? payload as { includeGlobalSkills?: unknown; includeProjectSkills?: unknown; worldId?: unknown }
+      ? payload as { includeGlobalSkills?: unknown; includeProjectSkills?: unknown; worldId?: unknown; preserveScopes?: unknown }
       : null;
 
     const includeGlobalSkills = typeof normalizedPayload?.includeGlobalSkills === 'boolean'
@@ -1033,6 +1041,9 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     const includeProjectSkills = typeof normalizedPayload?.includeProjectSkills === 'boolean'
       ? normalizedPayload.includeProjectSkills
       : String(process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS ?? 'true').toLowerCase() !== 'false';
+    const preserveScopes = typeof normalizedPayload?.preserveScopes === 'boolean'
+      ? normalizedPayload.preserveScopes
+      : false;
 
     const requestedWorldId = typeof normalizedPayload?.worldId === 'string'
       ? normalizedPayload.worldId.trim()
@@ -1049,20 +1060,32 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
 
     await syncSkills({ worldVariablesText });
 
-    const scopedSkills = getSkillsForSystemPrompt({
-      includeGlobal: includeGlobalSkills,
-      includeProject: includeProjectSkills,
-      worldVariablesText,
-    });
+    const scopedSkills = preserveScopes
+      ? await getScopedSkillsForDisplay({
+        includeGlobal: includeGlobalSkills,
+        includeProject: includeProjectSkills,
+        worldVariablesText,
+      })
+      : getSkillsForSystemPrompt({
+        includeGlobal: includeGlobalSkills,
+        includeProject: includeProjectSkills,
+        worldVariablesText,
+      });
     const skills = Array.isArray(scopedSkills) ? scopedSkills : [];
     return skills
-      .map((skill) => ({
-        skill_id: String(skill?.skill_id || '').trim(),
-        description: String(skill?.description || '').trim(),
-        hash: String(skill?.hash || '').trim(),
-        lastUpdated: String(skill?.lastUpdated || '').trim(),
-        sourceScope: getSkillSourceScope(String(skill?.skill_id || '').trim()) || 'global'
-      }))
+      .map((skill) => {
+        const skillId = String(skill?.skill_id || '').trim();
+        const declaredSourceScope = String(skill?.sourceScope || '').trim();
+        return {
+          skill_id: skillId,
+          description: String(skill?.description || '').trim(),
+          hash: String(skill?.hash || '').trim(),
+          lastUpdated: String(skill?.lastUpdated || '').trim(),
+          sourceScope: declaredSourceScope === 'project' || declaredSourceScope === 'global'
+            ? declaredSourceScope
+            : (getSkillSourceScope(skillId) || 'global')
+        };
+      })
       .filter((skill) => skill.skill_id.length > 0);
   }
 

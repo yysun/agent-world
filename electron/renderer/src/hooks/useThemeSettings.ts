@@ -129,6 +129,7 @@ export function useThemeSettings({
   api,
   panelMode,
   skillRegistryEntries,
+  scopedSkillRegistryEntries,
   refreshSkillRegistry,
   setStatusText,
 }) {
@@ -225,13 +226,13 @@ export function useThemeSettings({
   }, [disabledGlobalSkillIdSet, disabledProjectSkillIdSet, skillRegistryEntries, systemSettings.enableGlobalSkills, systemSettings.enableProjectSkills]);
 
   const globalSkillEntries = useMemo(
-    () => skillRegistryEntries.filter((entry) => entry.sourceScope !== 'project'),
-    [skillRegistryEntries],
+    () => scopedSkillRegistryEntries.filter((entry) => entry.sourceScope !== 'project'),
+    [scopedSkillRegistryEntries],
   );
 
   const projectSkillEntries = useMemo(
-    () => skillRegistryEntries.filter((entry) => entry.sourceScope === 'project'),
-    [skillRegistryEntries],
+    () => scopedSkillRegistryEntries.filter((entry) => entry.sourceScope === 'project'),
+    [scopedSkillRegistryEntries],
   );
 
   const enqueueSkillSettingsAutosave = useCallback((nextSkillSettings: SkillSettingsSnapshot): Promise<boolean> => {

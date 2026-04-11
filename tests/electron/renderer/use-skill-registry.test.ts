@@ -39,7 +39,7 @@ import { useSkillRegistry } from '../../../electron/renderer/src/hooks/useSkillR
 
 function resetHookState(): void {
   hookState.stateIndex = 0;
-  hookState.setters = [vi.fn(), vi.fn(), vi.fn()];
+  hookState.setters = [vi.fn(), vi.fn(), vi.fn(), vi.fn()];
 }
 
 describe('electron/renderer useSkillRegistry', () => {
@@ -53,10 +53,16 @@ describe('electron/renderer useSkillRegistry', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(api.listSkills).toHaveBeenCalledWith({
+    expect(api.listSkills).toHaveBeenNthCalledWith(1, {
       includeGlobalSkills: true,
       includeProjectSkills: true,
       worldId: 'world-1',
+    });
+    expect(api.listSkills).toHaveBeenNthCalledWith(2, {
+      includeGlobalSkills: true,
+      includeProjectSkills: true,
+      worldId: 'world-1',
+      preserveScopes: true,
     });
   });
 
@@ -80,7 +86,19 @@ describe('electron/renderer useSkillRegistry', () => {
     expect(api.listSkills).toHaveBeenNthCalledWith(2, {
       includeGlobalSkills: true,
       includeProjectSkills: true,
+      worldId: 'world-1',
+      preserveScopes: true,
+    });
+    expect(api.listSkills).toHaveBeenNthCalledWith(3, {
+      includeGlobalSkills: true,
+      includeProjectSkills: true,
       worldId: 'world-2',
+    });
+    expect(api.listSkills).toHaveBeenNthCalledWith(4, {
+      includeGlobalSkills: true,
+      includeProjectSkills: true,
+      worldId: 'world-2',
+      preserveScopes: true,
     });
   });
 });
