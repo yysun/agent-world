@@ -21,15 +21,18 @@
 import { describe, expect, it } from 'vitest';
 
 import * as shell from '../../../electron/renderer/src/app/shell';
+import * as agents from '../../../electron/renderer/src/features/agents';
 import * as chat from '../../../electron/renderer/src/features/chat';
 import * as queue from '../../../electron/renderer/src/features/queue';
 import * as settings from '../../../electron/renderer/src/features/settings';
 import * as skills from '../../../electron/renderer/src/features/skills';
+import * as worlds from '../../../electron/renderer/src/features/worlds';
 import * as components from '../../../electron/renderer/src/components';
 import * as designSystem from '../../../electron/renderer/src/design-system';
 
 describe('renderer feature entry points', () => {
   it('exposes migrated business UI through dedicated feature barrels', () => {
+    expect(typeof agents.AgentPromptEditor).toBe('function');
     expect(typeof chat.ComposerBar).toBe('function');
     expect(typeof chat.EditorChatPane).toBe('function');
     expect(typeof chat.MessageListPanel).toBe('function');
@@ -39,10 +42,10 @@ describe('renderer feature entry points', () => {
     expect(typeof skills.SkillFolderPane).toBe('function');
     expect(typeof settings.SettingsSwitch).toBe('function');
     expect(typeof settings.SettingsSkillSwitch).toBe('function');
+    expect(typeof worlds.WorldTextEditor).toBe('function');
   });
 
   it('exposes app-owned shell composition through the app-shell barrel', () => {
-    expect(typeof shell.AppOverlaysHost).toBe('function');
     expect(typeof shell.LeftSidebarPanel).toBe('function');
     expect(typeof shell.MainContentArea).toBe('function');
     expect(typeof shell.MainHeaderBar).toBe('function');

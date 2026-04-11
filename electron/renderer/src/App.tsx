@@ -62,10 +62,12 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppOverlaysHost, LeftSidebarPanel, MainWorkspaceLayout, WorkingStatusBar } from './app/shell';
+import { LeftSidebarPanel, MainWorkspaceLayout, WorkingStatusBar } from './app/shell';
 import { AppFrameLayout } from './design-system/patterns';
+import { AgentPromptEditor } from './features/agents';
 import { MessageQueuePanel } from './features/queue';
 import { SkillEditor } from './features/skills';
+import { WorldTextEditor, type WorldTextEditorField } from './features/worlds';
 import { useWorkingStatus } from './hooks/useWorkingStatus';
 import { readDesktopApi, safeMessage } from './domain/desktop-api';
 import { useSkillRegistry } from './hooks/useSkillRegistry';
@@ -192,9 +194,14 @@ type HitlPrompt = {
   };
 };
 
-type SkillEditorMode = 'none' | 'edit' | 'install';
 type SkillEditorEntry = { skillId: string; description: string; sourceScope: string };
 type SkillInstallSourceType = 'local' | 'github';
+type WorkspaceEditorState =
+  | { kind: 'none' }
+  | { kind: 'skill-edit' }
+  | { kind: 'skill-install' }
+  | { kind: 'agent-system-prompt'; target: 'create' | 'edit' }
+  | { kind: 'world-text-field'; target: 'edit'; field: WorldTextEditorField };
 
 const MAX_LOG_PANEL_ENTRIES = 600;
 const DESKTOP_API_BOOTSTRAP_RETRY_LIMIT = 20;
@@ -224,6 +231,14 @@ function findFirstSkillFile(entries: SkillFolderEntry[]): string {
 function getInitialSkillFilePath(entries: SkillFolderEntry[]): string {
   const defaultSkillFile = entries.find((entry) => entry.type === 'file' && entry.relativePath === 'SKILL.md');
   return defaultSkillFile?.relativePath || findFirstSkillFile(entries) || 'SKILL.md';
+}
+
+function confirmWorkspaceEditorDiscard(message: string): boolean {
+  if (typeof window === 'undefined' || typeof window.confirm !== 'function') {
+    return true;
+  }
+
+  return window.confirm(message);
 }
 
 function BridgeUnavailableScreen({ timedOut }: { timedOut: boolean }) {
@@ -285,15 +300,6 @@ function AppContent({ api }: { api: DesktopApi }) {
     sessions: false,
     messages: false
   });
-  // Prompt editor modal state
-  const [promptEditorOpen, setPromptEditorOpen] = useState(false);
-  const [promptEditorValue, setPromptEditorValue] = useState('');
-  const [promptEditorTarget, setPromptEditorTarget] = useState<string | null>(null); // 'create' or 'edit'
-  // World config editor modal state (edit-world only: variables | mcpConfig)
-  const [worldConfigEditorOpen, setWorldConfigEditorOpen] = useState(false);
-  const [worldConfigEditorValue, setWorldConfigEditorValue] = useState('');
-  const [worldConfigEditorField, setWorldConfigEditorField] = useState('mcpConfig');
-  const [worldConfigEditorTarget, setWorldConfigEditorTarget] = useState<string | null>(null); // 'edit'
   // HITL option prompt queue (generic world option requests)
   const [hitlPromptQueue, setHitlPromptQueue] = useState<HitlPrompt[]>([]);
   const [submittingHitlRequestId, setSubmittingHitlRequestId] = useState<string | null>(null);
@@ -304,8 +310,10 @@ function AppContent({ api }: { api: DesktopApi }) {
   const [heartbeatJobs, setHeartbeatJobs] = useState<any[]>([]);
   const [heartbeatAction, setHeartbeatAction] = useState<'start' | 'pause' | 'stop' | null>(null);
 
-  // Skill editor state
-  const [editorMode, setEditorMode] = useState<SkillEditorMode>('none');
+  // Workspace editor state
+  const [workspaceEditor, setWorkspaceEditor] = useState<WorkspaceEditorState>({ kind: 'none' });
+  const [agentPromptEditorDraft, setAgentPromptEditorDraft] = useState('');
+  const [worldTextEditorDraft, setWorldTextEditorDraft] = useState('');
   const [editingSkillEntry, setEditingSkillEntry] = useState<SkillEditorEntry | null>(null);
   const [editingSkillFilePath, setEditingSkillFilePath] = useState('SKILL.md');
   const [editingSkillMarkdownView, setEditingSkillMarkdownView] = useState<'preview' | 'markdown'>('preview');
@@ -1315,7 +1323,7 @@ function AppContent({ api }: { api: DesktopApi }) {
       setEditingSkillContent(typeof content === 'string' ? content : '');
       setSavedSkillContent(typeof content === 'string' ? content : '');
       setEditingSkillFolderEntries(normalizedFolderEntries);
-      setEditorMode('edit');
+      setWorkspaceEditor({ kind: 'skill-edit' });
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to load skill content.'), 'error');
     }
@@ -1323,7 +1331,7 @@ function AppContent({ api }: { api: DesktopApi }) {
 
   const onOpenSkillInstallEditor = useCallback(() => {
     skillFileRequestIdRef.current += 1;
-    setEditorMode('install');
+    setWorkspaceEditor({ kind: 'skill-install' });
     setEditingSkillEntry(null);
     resetInstallPreviewState();
     setInstallSkillDescription('');
@@ -1342,7 +1350,7 @@ function AppContent({ api }: { api: DesktopApi }) {
 
   const onCloseSkillEditor = useCallback(() => {
     skillFileRequestIdRef.current += 1;
-    setEditorMode('none');
+    setWorkspaceEditor({ kind: 'none' });
     setEditingSkillEntry(null);
     resetInstallPreviewState();
     setInstallSkillDescription('');
@@ -1358,6 +1366,81 @@ function AppContent({ api }: { api: DesktopApi }) {
     setDeletingSkillContent(false);
     setInstallingSkillContent(false);
   }, [resetInstallPreviewState]);
+
+  const onOpenAgentPromptEditor = useCallback((target: 'create' | 'edit') => {
+    const sourceValue = target === 'create'
+      ? String(creatingAgent?.systemPrompt || '')
+      : String(editingAgent?.systemPrompt || '');
+
+    setAgentPromptEditorDraft(sourceValue);
+    setWorkspaceEditor({ kind: 'agent-system-prompt', target });
+  }, [creatingAgent?.systemPrompt, editingAgent?.systemPrompt]);
+
+  const onCloseAgentPromptEditor = useCallback(() => {
+    setWorkspaceEditor({ kind: 'none' });
+    setAgentPromptEditorDraft('');
+  }, []);
+
+  const onBackAgentPromptEditor = useCallback(() => {
+    if (workspaceEditor.kind !== 'agent-system-prompt') {
+      return;
+    }
+
+    const sourceValue = workspaceEditor.target === 'create'
+      ? String(creatingAgent?.systemPrompt || '')
+      : String(editingAgent?.systemPrompt || '');
+
+    if (agentPromptEditorDraft === sourceValue || confirmWorkspaceEditorDiscard('Discard unapplied system prompt changes?')) {
+      onCloseAgentPromptEditor();
+    }
+  }, [agentPromptEditorDraft, creatingAgent?.systemPrompt, editingAgent?.systemPrompt, onCloseAgentPromptEditor, workspaceEditor]);
+
+  const onApplyAgentPromptEditor = useCallback(() => {
+    if (workspaceEditor.kind !== 'agent-system-prompt') {
+      return;
+    }
+
+    if (workspaceEditor.target === 'create') {
+      setCreatingAgent((value: any) => ({ ...value, systemPrompt: agentPromptEditorDraft }));
+    } else {
+      setEditingAgent((value: any) => ({ ...value, systemPrompt: agentPromptEditorDraft }));
+    }
+
+    onCloseAgentPromptEditor();
+  }, [agentPromptEditorDraft, onCloseAgentPromptEditor, setCreatingAgent, setEditingAgent, workspaceEditor]);
+
+  const onOpenWorldTextEditor = useCallback((field: WorldTextEditorField) => {
+    setWorldTextEditorDraft(String(editingWorld?.[field] || ''));
+    setWorkspaceEditor({ kind: 'world-text-field', target: 'edit', field });
+  }, [editingWorld]);
+
+  const onCloseWorldTextEditor = useCallback(() => {
+    setWorkspaceEditor({ kind: 'none' });
+    setWorldTextEditorDraft('');
+  }, []);
+
+  const onBackWorldTextEditor = useCallback(() => {
+    if (workspaceEditor.kind !== 'world-text-field') {
+      return;
+    }
+
+    const sourceValue = String(editingWorld?.[workspaceEditor.field] || '');
+    if (worldTextEditorDraft === sourceValue || confirmWorkspaceEditorDiscard('Discard unapplied world draft changes?')) {
+      onCloseWorldTextEditor();
+    }
+  }, [editingWorld, onCloseWorldTextEditor, workspaceEditor, worldTextEditorDraft]);
+
+  const onApplyWorldTextEditor = useCallback(() => {
+    if (workspaceEditor.kind !== 'world-text-field') {
+      return;
+    }
+
+    setEditingWorld((value: any) => ({
+      ...value,
+      [workspaceEditor.field]: worldTextEditorDraft,
+    }));
+    onCloseWorldTextEditor();
+  }, [onCloseWorldTextEditor, setEditingWorld, workspaceEditor, worldTextEditorDraft]);
 
   const onChangeInstallSkillSourceType = useCallback((value: SkillInstallSourceType) => {
     setInstallSkillSourceType(value);
@@ -1443,7 +1526,7 @@ function AppContent({ api }: { api: DesktopApi }) {
 
   const onChangeSkillEditorContent = useCallback((value: string) => {
     setEditingSkillContent(value);
-    if (editorMode !== 'install') {
+    if (workspaceEditor.kind !== 'skill-install') {
       return;
     }
     const activeFilePath = String(editingSkillFilePath || '').trim();
@@ -1451,13 +1534,13 @@ function AppContent({ api }: { api: DesktopApi }) {
       return;
     }
     setInstallSkillDraftFiles((current) => mergeSkillInstallDraftFiles(current, installSkillPreviewFiles, activeFilePath, value));
-  }, [editorMode, editingSkillFilePath, installSkillPreviewFiles]);
+  }, [editingSkillFilePath, installSkillPreviewFiles, workspaceEditor.kind]);
 
   const onSelectSkillFile = useCallback(async (relativePath: string) => {
     const nextFilePath = String(relativePath || '').trim();
     if (!nextFilePath || nextFilePath === editingSkillFilePath || savingSkillContent || deletingSkillContent || loadingSkillFileContent || installingSkillContent) return;
 
-    if (editorMode === 'install') {
+    if (workspaceEditor.kind === 'skill-install') {
       const nextContent = Object.prototype.hasOwnProperty.call(installSkillDraftFiles, nextFilePath)
         ? installSkillDraftFiles[nextFilePath]
         : (installSkillPreviewFiles[nextFilePath] ?? '');
@@ -1494,7 +1577,7 @@ function AppContent({ api }: { api: DesktopApi }) {
         setLoadingSkillFileContent(false);
       }
     }
-  }, [api, deletingSkillContent, editingSkillEntry, editingSkillFilePath, editorMode, installSkillDraftFiles, installSkillPreviewFiles, installingSkillContent, loadingSkillFileContent, savingSkillContent, setStatusText]);
+  }, [api, deletingSkillContent, editingSkillEntry, editingSkillFilePath, installSkillDraftFiles, installSkillPreviewFiles, installingSkillContent, loadingSkillFileContent, savingSkillContent, setStatusText, workspaceEditor.kind]);
 
   const onBrowseInstallSkillSource = useCallback(async () => {
     try {
@@ -1865,18 +1948,13 @@ function AppContent({ api }: { api: DesktopApi }) {
     setEditingWorld,
     updatingWorld,
     deletingWorld,
-    setWorldConfigEditorField,
-    setWorldConfigEditorValue,
-    setWorldConfigEditorTarget,
-    setWorldConfigEditorOpen,
+    onOpenWorldTextEditor,
     onDeleteWorld,
     closePanel,
     onCreateAgent,
     creatingAgent,
     setCreatingAgent,
-    setPromptEditorValue,
-    setPromptEditorTarget,
-    setPromptEditorOpen,
+    onOpenAgentPromptEditor,
     savingAgent,
     onUpdateAgent,
     editingAgent,
@@ -1970,6 +2048,90 @@ function AppContent({ api }: { api: DesktopApi }) {
     NO_DRAG_REGION_STYLE,
   });
 
+  const workspaceEditorContent = (() => {
+    if (workspaceEditor.kind === 'skill-edit' || workspaceEditor.kind === 'skill-install') {
+      return (
+        <SkillEditor
+          mode={workspaceEditor.kind === 'skill-install' ? 'install' : 'edit'}
+          skillId={workspaceEditor.kind === 'skill-edit' ? String(editingSkillEntry?.skillId || '') : installSkillItemName}
+          sourceScope={workspaceEditor.kind === 'skill-edit' ? String(editingSkillEntry?.sourceScope || 'project') : installSkillTargetScope}
+          leftSidebarCollapsed={leftSidebarCollapsed}
+          selectedFilePath={editingSkillFilePath}
+          markdownViewMode={editingSkillMarkdownView}
+          content={editingSkillContent}
+          onContentChange={onChangeSkillEditorContent}
+          onMarkdownViewModeChange={setEditingSkillMarkdownView}
+          onBack={onCloseSkillEditor}
+          onSave={onSaveSkillContent}
+          onDelete={onDeleteSkillContent}
+          onSelectFile={onSelectSkillFile}
+          folderEntries={editingSkillFolderEntries}
+          hasUnsavedChanges={workspaceEditor.kind === 'skill-edit' && editingSkillContent !== savedSkillContent}
+          loadingFile={loadingSkillFileContent}
+          saving={savingSkillContent}
+          deleting={deletingSkillContent}
+          installSourceType={installSkillSourceType}
+          installSourcePath={installSkillSourcePath}
+          installRepo={installSkillRepo}
+          installItemName={installSkillItemName}
+          installOptions={installGitHubSkillOptions}
+          installDescription={installSkillDescription}
+          installTargetScope={installSkillTargetScope}
+          loadingInstallOptions={loadingInstallGitHubSkills}
+          onInstallSourceTypeChange={onChangeInstallSkillSourceType}
+          onInstallSourcePathChange={onChangeInstallSkillSourcePath}
+          onInstallRepoChange={onChangeInstallSkillRepo}
+          onInstallItemNameChange={onChangeInstallSkillItemName}
+          onInstallTargetScopeChange={setInstallSkillTargetScope}
+          onBrowseInstallSource={onBrowseInstallSkillSource}
+          onLoadInstallOptions={onLoadInstallGitHubSkills}
+          onPreviewInstall={onPreviewInstallSkill}
+          onInstall={onInstallSkillContent}
+          installing={installingSkillContent}
+          hasInstallPreview={editingSkillFolderEntries.length > 0}
+          currentFileEditable={workspaceEditor.kind !== 'skill-install' || isSkillInstallFileEditable(installSkillPreviewFiles, editingSkillFilePath)}
+        />
+      );
+    }
+
+    if (workspaceEditor.kind === 'agent-system-prompt') {
+      const sourceAgent = workspaceEditor.target === 'create' ? creatingAgent : editingAgent;
+      const sourceValue = String(sourceAgent?.systemPrompt || '');
+
+      return (
+        <AgentPromptEditor
+          draftContextLabel={workspaceEditor.target === 'create' ? 'Create Agent Draft' : 'Edit Agent Draft'}
+          agentName={String(sourceAgent?.name || '').trim() || (workspaceEditor.target === 'create' ? 'New Agent' : 'Untitled Agent')}
+          value={agentPromptEditorDraft}
+          onChange={setAgentPromptEditorDraft}
+          onBack={onBackAgentPromptEditor}
+          onApply={onApplyAgentPromptEditor}
+          hasUnappliedChanges={agentPromptEditorDraft !== sourceValue}
+          leftSidebarCollapsed={leftSidebarCollapsed}
+        />
+      );
+    }
+
+    if (workspaceEditor.kind === 'world-text-field') {
+      const sourceValue = String(editingWorld?.[workspaceEditor.field] || '');
+
+      return (
+        <WorldTextEditor
+          worldName={String(editingWorld?.name || loadedWorld?.name || '').trim() || 'Untitled World'}
+          field={workspaceEditor.field}
+          value={worldTextEditorDraft}
+          onChange={setWorldTextEditorDraft}
+          onBack={onBackWorldTextEditor}
+          onApply={onApplyWorldTextEditor}
+          hasUnappliedChanges={worldTextEditorDraft !== sourceValue}
+          leftSidebarCollapsed={leftSidebarCollapsed}
+        />
+      );
+    }
+
+    return undefined;
+  })();
+
   return (
     <AppFrameLayout
       sidebar={<LeftSidebarPanel {...leftSidebarProps} />}
@@ -1982,50 +2144,7 @@ function AppContent({ api }: { api: DesktopApi }) {
             rightPanelShellProps: mainContentRightPanelShellProps,
             rightPanelContentProps: mainContentRightPanelContentProps,
           }}
-          editorContent={
-            editorMode !== 'none' ? (
-              <SkillEditor
-                mode={editorMode === 'install' ? 'install' : 'edit'}
-                skillId={editorMode === 'edit' ? String(editingSkillEntry?.skillId || '') : installSkillItemName}
-                sourceScope={editorMode === 'edit' ? String(editingSkillEntry?.sourceScope || 'project') : installSkillTargetScope}
-                leftSidebarCollapsed={leftSidebarCollapsed}
-                selectedFilePath={editingSkillFilePath}
-                markdownViewMode={editingSkillMarkdownView}
-                content={editingSkillContent}
-                onContentChange={onChangeSkillEditorContent}
-                onMarkdownViewModeChange={setEditingSkillMarkdownView}
-                onBack={onCloseSkillEditor}
-                onSave={onSaveSkillContent}
-                onDelete={onDeleteSkillContent}
-                onSelectFile={onSelectSkillFile}
-                folderEntries={editingSkillFolderEntries}
-                hasUnsavedChanges={editorMode === 'edit' && editingSkillContent !== savedSkillContent}
-                loadingFile={loadingSkillFileContent}
-                saving={savingSkillContent}
-                deleting={deletingSkillContent}
-                installSourceType={installSkillSourceType}
-                installSourcePath={installSkillSourcePath}
-                installRepo={installSkillRepo}
-                installItemName={installSkillItemName}
-                installOptions={installGitHubSkillOptions}
-                installDescription={installSkillDescription}
-                installTargetScope={installSkillTargetScope}
-                loadingInstallOptions={loadingInstallGitHubSkills}
-                onInstallSourceTypeChange={onChangeInstallSkillSourceType}
-                onInstallSourcePathChange={onChangeInstallSkillSourcePath}
-                onInstallRepoChange={onChangeInstallSkillRepo}
-                onInstallItemNameChange={onChangeInstallSkillItemName}
-                onInstallTargetScopeChange={setInstallSkillTargetScope}
-                onBrowseInstallSource={onBrowseInstallSkillSource}
-                onLoadInstallOptions={onLoadInstallGitHubSkills}
-                onPreviewInstall={onPreviewInstallSkill}
-                onInstall={onInstallSkillContent}
-                installing={installingSkillContent}
-                hasInstallPreview={editingSkillFolderEntries.length > 0}
-                currentFileEditable={editorMode !== 'install' || isSkillInstallFileEditable(installSkillPreviewFiles, editingSkillFilePath)}
-              />
-            ) : undefined
-          }
+          editorContent={workspaceEditorContent}
           queuePanel={(
             shouldShowQueuePanel(queuedMessages.length, Boolean(activeHitlPrompt)) ? (
               <MessageQueuePanel
@@ -2042,26 +2161,6 @@ function AppContent({ api }: { api: DesktopApi }) {
           statusBar={(
             <WorkingStatusBar chatStatus={chatStatus} agentStatuses={agentStatuses} notification={notification} systemStatus={systemStatus} />
           )}
-        />
-      )}
-      overlays={(
-        <AppOverlaysHost
-          editorModalsProps={{
-            promptEditorOpen,
-            promptEditorValue,
-            setPromptEditorValue,
-            setPromptEditorOpen,
-            promptEditorTarget,
-            setCreatingAgent,
-            setEditingAgent,
-            worldConfigEditorOpen,
-            worldConfigEditorField,
-            worldConfigEditorValue,
-            setWorldConfigEditorValue,
-            setWorldConfigEditorOpen,
-            worldConfigEditorTarget,
-            setEditingWorld,
-          }}
         />
       )}
     />

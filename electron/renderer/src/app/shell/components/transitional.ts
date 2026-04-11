@@ -15,7 +15,6 @@
  * - 2026-03-24: Added to isolate app-shell access to the shrinking renderer `components/` compatibility layer.
  */
 
-export { default as EditorModalsHost } from '../../../components/EditorModalsHost';
 export { default as RightPanelContent } from '../../../components/RightPanelContent';
 export { default as WorkingStatusBar } from '../../../components/WorkingStatusBar';
 export { default as WorldInfoCard } from '../../../components/WorldInfoCard';

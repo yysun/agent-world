@@ -112,18 +112,13 @@ export default function RightPanelContent({
   setEditingWorld,
   updatingWorld,
   deletingWorld,
-  setWorldConfigEditorField,
-  setWorldConfigEditorValue,
-  setWorldConfigEditorTarget,
-  setWorldConfigEditorOpen,
+  onOpenWorldTextEditor,
   onDeleteWorld,
   closePanel,
   onCreateAgent,
   creatingAgent,
   setCreatingAgent,
-  setPromptEditorValue,
-  setPromptEditorTarget,
-  setPromptEditorOpen,
+  onOpenAgentPromptEditor,
   savingAgent,
   onUpdateAgent,
   editingAgent,
@@ -586,12 +581,7 @@ export default function RightPanelContent({
                 <span>Variables (.env): {String(editingWorld.variables || '').trim() ? 'Configured' : 'Not configured'}</span>
                 <button
                   type="button"
-                  onClick={() => {
-                    setWorldConfigEditorField('variables');
-                    setWorldConfigEditorValue(editingWorld.variables || '');
-                    setWorldConfigEditorTarget('edit');
-                    setWorldConfigEditorOpen(true);
-                  }}
+                  onClick={() => onOpenWorldTextEditor('variables')}
                   className="rounded p-1 text-sidebar-foreground/50 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground"
                   title="Expand variables editor"
                   disabled={updatingWorld || deletingWorld}
@@ -605,12 +595,7 @@ export default function RightPanelContent({
                 <span>MCP Config: {String(editingWorld.mcpConfig || '').trim() ? 'Configured' : 'Not configured'}</span>
                 <button
                   type="button"
-                  onClick={() => {
-                    setWorldConfigEditorField('mcpConfig');
-                    setWorldConfigEditorValue(editingWorld.mcpConfig || '');
-                    setWorldConfigEditorTarget('edit');
-                    setWorldConfigEditorOpen(true);
-                  }}
+                  onClick={() => onOpenWorldTextEditor('mcpConfig')}
                   className="rounded p-1 text-sidebar-foreground/50 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground"
                   title="Expand MCP editor"
                   disabled={updatingWorld || deletingWorld}
@@ -660,11 +645,7 @@ export default function RightPanelContent({
                 setAgent={setCreatingAgent}
                 disabled={savingAgent}
                 providerOptions={AGENT_PROVIDER_OPTIONS}
-                onExpandPrompt={() => {
-                  setPromptEditorValue(creatingAgent.systemPrompt);
-                  setPromptEditorTarget('create');
-                  setPromptEditorOpen(true);
-                }}
+                onExpandPrompt={() => onOpenAgentPromptEditor('create')}
               />
             </div>
             <PanelActionBar>
@@ -695,11 +676,7 @@ export default function RightPanelContent({
                 setAgent={setEditingAgent}
                 disabled={savingAgent || deletingAgent}
                 providerOptions={AGENT_PROVIDER_OPTIONS}
-                onExpandPrompt={() => {
-                  setPromptEditorValue(editingAgent.systemPrompt);
-                  setPromptEditorTarget('edit');
-                  setPromptEditorOpen(true);
-                }}
+                onExpandPrompt={() => onOpenAgentPromptEditor('edit')}
               />
             </div>
             <PanelActionBar

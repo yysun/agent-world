@@ -15,7 +15,6 @@
  * - 2026-03-23: Added the initial app-shell component barrel.
  */
 
-export { default as AppOverlaysHost } from './AppOverlaysHost';
 export { default as LeftSidebarPanel } from './LeftSidebarPanel';
 export { default as MainContentArea } from './MainContentArea';
 export { default as MainHeaderBar } from './MainHeaderBar';

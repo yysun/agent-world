@@ -83,18 +83,13 @@ describe('RightPanelContent', () => {
       setEditingWorld: () => { },
       updatingWorld: false,
       deletingWorld: false,
-      setWorldConfigEditorField: () => { },
-      setWorldConfigEditorValue: () => { },
-      setWorldConfigEditorTarget: () => { },
-      setWorldConfigEditorOpen: () => { },
+      onOpenWorldTextEditor: () => { },
       onDeleteWorld: () => { },
       closePanel: () => { },
       onCreateAgent: () => { },
       creatingAgent: {},
       setCreatingAgent: () => { },
-      setPromptEditorValue: () => { },
-      setPromptEditorTarget: () => { },
-      setPromptEditorOpen: () => { },
+      onOpenAgentPromptEditor: () => { },
       savingAgent: false,
       onUpdateAgent: () => { },
       editingAgent: {},
@@ -152,18 +147,13 @@ describe('RightPanelContent', () => {
       setEditingWorld: () => { },
       updatingWorld: false,
       deletingWorld: false,
-      setWorldConfigEditorField: () => { },
-      setWorldConfigEditorValue: () => { },
-      setWorldConfigEditorTarget: () => { },
-      setWorldConfigEditorOpen: () => { },
+      onOpenWorldTextEditor: () => { },
       onDeleteWorld: () => { },
       closePanel: () => { },
       onCreateAgent: () => { },
       creatingAgent: {},
       setCreatingAgent: () => { },
-      setPromptEditorValue: () => { },
-      setPromptEditorTarget: () => { },
-      setPromptEditorOpen: () => { },
+      onOpenAgentPromptEditor: () => { },
       savingAgent: false,
       onUpdateAgent: () => { },
       editingAgent: {},
@@ -242,18 +232,13 @@ describe('RightPanelContent', () => {
       setEditingWorld,
       updatingWorld: false,
       deletingWorld: false,
-      setWorldConfigEditorField: () => { },
-      setWorldConfigEditorValue: () => { },
-      setWorldConfigEditorTarget: () => { },
-      setWorldConfigEditorOpen: () => { },
+      onOpenWorldTextEditor: () => { },
       onDeleteWorld: () => { },
       closePanel: () => { },
       onCreateAgent: () => { },
       creatingAgent: {},
       setCreatingAgent: () => { },
-      setPromptEditorValue: () => { },
-      setPromptEditorTarget: () => { },
-      setPromptEditorOpen: () => { },
+      onOpenAgentPromptEditor: () => { },
       savingAgent: false,
       onUpdateAgent: () => { },
       editingAgent: {},
@@ -278,5 +263,80 @@ describe('RightPanelContent', () => {
     expect(setEditingWorld).toHaveBeenCalledTimes(1);
     const updater = setEditingWorld.mock.calls[0][0];
     expect(updater({ heartbeatEnabled: false })).toEqual({ heartbeatEnabled: true });
+  });
+
+  it('routes world long-text expand buttons through the workspace editor callback', () => {
+    const onOpenWorldTextEditor = vi.fn();
+
+    const result: any = RightPanelContent({
+      panelMode: 'edit-world',
+      loadedWorld: { id: 'world-1', name: 'World 1' },
+      selectedAgentForPanel: null,
+      themePreference: 'system',
+      setThemePreference: () => { },
+      systemSettings: { enableGlobalSkills: true, enableProjectSkills: true, storageType: 'sqlite', sqliteDatabase: '', dataPath: '' },
+      setSystemSettings: () => { },
+      workspace: { workspacePath: null },
+      api: { pickFile: async () => ({ canceled: true }), pickDirectory: async () => ({ canceled: true }) },
+      globalSkillEntries: [],
+      disabledGlobalSkillIdSet: new Set(),
+      setGlobalSkillsEnabled: () => { },
+      toggleSkillEnabled: () => { },
+      projectSkillEntries: [],
+      disabledProjectSkillIdSet: new Set(),
+      setProjectSkillsEnabled: () => { },
+      onCancelSettings: () => { },
+      savingSystemSettings: false,
+      onSaveSettings: () => { },
+      settingsNeedRestart: false,
+      onUpdateWorld: () => { },
+      editingWorld: {
+        name: 'World 1',
+        description: '',
+        chatLLMProvider: '',
+        chatLLMModel: '',
+        turnLimit: 10,
+        mainAgent: '',
+        variables: 'OPENAI_API_KEY=test',
+        mcpConfig: '{"mcpServers":{}}',
+        heartbeatEnabled: false,
+      },
+      setEditingWorld: () => { },
+      updatingWorld: false,
+      deletingWorld: false,
+      onOpenWorldTextEditor,
+      onDeleteWorld: () => { },
+      closePanel: () => { },
+      onCreateAgent: () => { },
+      creatingAgent: {},
+      setCreatingAgent: () => { },
+      onOpenAgentPromptEditor: () => { },
+      savingAgent: false,
+      onUpdateAgent: () => { },
+      editingAgent: {},
+      setEditingAgent: () => { },
+      deletingAgent: false,
+      onDeleteAgent: () => { },
+      onCreateWorld: () => { },
+      creatingWorld: {},
+      setCreatingWorld: () => { },
+      panelLogs: [],
+      onClearPanelLogs: () => { },
+      onEditSkill: () => { },
+      onInstallSkill: () => { },
+    });
+
+    const nodes = allDescendants(result);
+    const variablesButton = nodes.find((node: any) => node?.type === 'button' && node?.props?.title === 'Expand variables editor');
+    const mcpButton = nodes.find((node: any) => node?.type === 'button' && node?.props?.title === 'Expand MCP editor');
+
+    expect(variablesButton).toBeDefined();
+    expect(mcpButton).toBeDefined();
+
+    variablesButton.props.onClick();
+    mcpButton.props.onClick();
+
+    expect(onOpenWorldTextEditor).toHaveBeenNthCalledWith(1, 'variables');
+    expect(onOpenWorldTextEditor).toHaveBeenNthCalledWith(2, 'mcpConfig');
   });
 });

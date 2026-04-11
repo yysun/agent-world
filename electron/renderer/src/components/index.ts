@@ -21,8 +21,5 @@
 export { default as ToolExecutionStatus } from './ToolExecutionStatus';
 export { default as WorldInfoCard } from './WorldInfoCard';
 export { default as AgentFormFields } from './AgentFormFields';
-export { default as PromptEditorModal } from './PromptEditorModal';
-export { default as WorldConfigEditorModal } from './WorldConfigEditorModal';
 export { default as RightPanelContent } from './RightPanelContent';
 export { default as WorkingStatusBar } from './WorkingStatusBar';
-export { default as EditorModalsHost } from './EditorModalsHost';

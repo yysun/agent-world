@@ -33,7 +33,7 @@
  * - 2026-03-22: Replaced the default editor chat pane with a skill folder structure pane on the right side.
  * - 2026-03-22: Added a confirmed delete action to the toolbar immediately left of Save and disabled the editor during delete in-flight state.
  * - 2026-03-08: Initial implementation as part of editor skill-editor feature.
- * - 2026-03-08: Match textarea font to PromptEditorModal (removed font-mono).
+ * - 2026-03-08: Match textarea font to the shared long-form editor treatment (removed font-mono).
  */
 
 import React from 'react';

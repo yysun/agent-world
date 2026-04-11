@@ -110,4 +110,31 @@ describe('AgentFormFields', () => {
     const updater = setAgent.mock.calls[0][0];
     expect(updater({ name: 'Agent One' })).toEqual({ name: 'Updated Agent' });
   });
+
+  it('routes the expand button through the provided prompt editor callback', () => {
+    const onExpandPrompt = vi.fn();
+
+    const tree = AgentFormFields({
+      agent: {
+        name: 'Agent One',
+        autoReply: true,
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        temperature: '0.5',
+        maxTokens: '512',
+        systemPrompt: 'hello',
+      },
+      setAgent: () => undefined,
+      disabled: false,
+      providerOptions: ['openai', 'anthropic'],
+      onExpandPrompt,
+    }) as any;
+
+    const nodes = flatten(tree);
+    const expandButton = nodes.find((node) => node.type === 'button' && node.props?.title === 'Expand editor');
+
+    expect(expandButton).toBeDefined();
+    expandButton.props.onClick();
+    expect(onExpandPrompt).toHaveBeenCalledTimes(1);
+  });
 });
