@@ -4,7 +4,7 @@
  * - Render the right-side panel body for settings, world, and agent forms.
  *
  * Key Features:
- * - Settings panel with theme/storage/skill toggles.
+ * - Settings panel with theme and skill toggles.
  * - World edit/create forms.
  * - Agent create/edit forms.
  *
@@ -32,7 +32,7 @@ import {
   WORLD_PROVIDER_OPTIONS,
 } from '../constants/app-defaults';
 import { LabeledField, PanelActionBar } from '../design-system/patterns';
-import { Checkbox, Input, Radio, Select, Textarea } from '../design-system/primitives';
+import { Checkbox, Input, Select, Textarea } from '../design-system/primitives';
 import { SettingsSkillSwitch, SettingsSwitch } from '../features/settings';
 import AgentFormFields from './AgentFormFields';
 
@@ -272,87 +272,6 @@ export default function RightPanelContent({
 
             <div className="border-t border-sidebar-border pt-4">
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-sidebar-foreground/90">Storage Type</label>
-                  <div className="flex gap-3">
-                    {['file', 'sqlite'].map((type) => (
-                      <label key={type} className="flex items-center gap-1.5 cursor-pointer">
-                        <Radio
-                          name="storageType"
-                          value={type}
-                          checked={(systemSettings.storageType || 'sqlite') === type}
-                          onChange={() => setSystemSettings((settings) => ({ ...settings, storageType: type }))}
-                        />
-                        <span className="text-xs text-sidebar-foreground">{type === 'file' ? 'File' : 'SQLite'}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                {(systemSettings.storageType || 'sqlite') === 'file' ? (
-                  <div className="mt-4 flex flex-col gap-1">
-                    <label className="text-xs font-bold text-sidebar-foreground/90">Data File Path</label>
-                    <div className="flex gap-1">
-                      <Input
-                        value={systemSettings.dataPath}
-                        onChange={(event) => setSystemSettings((settings) => ({ ...settings, dataPath: event.target.value }))}
-                        placeholder={workspace.workspacePath || 'Select folder...'}
-                        tone="sidebar"
-                        className="min-w-0 flex-1 placeholder:text-sidebar-foreground/40"
-                      />
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const result = typeof api.pickDirectory === 'function'
-                            ? await api.pickDirectory()
-                            : await api.openWorkspace();
-                          const directoryPath = result?.directoryPath ?? result?.workspacePath;
-                          if (!result.canceled && directoryPath) {
-                            setSystemSettings((settings) => ({ ...settings, dataPath: String(directoryPath) }));
-                          }
-                        }}
-                        className="flex h-auto shrink-0 items-center justify-center rounded-md border border-sidebar-border px-2 text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
-                        title="Browse folder..."
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-                          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                        </svg>
-                      </button>
-                    </div>
-                    <span className="text-[10px] text-sidebar-foreground/50">AGENT_WORLD_DATA_PATH</span>
-                  </div>
-                ) : (
-                  <div className="mt-4 flex flex-col gap-1">
-                    <label className="text-xs font-bold text-sidebar-foreground/90">Database File</label>
-                    <div className="flex gap-1">
-                      <Input
-                        value={systemSettings.sqliteDatabase}
-                        onChange={(event) => setSystemSettings((settings) => ({ ...settings, sqliteDatabase: event.target.value }))}
-                        placeholder={workspace.workspacePath ? `${workspace.workspacePath}/database.db` : 'Select file...'}
-                        tone="sidebar"
-                        className="min-w-0 flex-1 placeholder:text-sidebar-foreground/40"
-                      />
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const result = await api.pickFile();
-                          if (!result.canceled && result.filePath) {
-                            setSystemSettings((settings) => ({ ...settings, sqliteDatabase: String(result.filePath) }));
-                          }
-                        }}
-                        className="flex h-auto shrink-0 items-center justify-center rounded-md border border-sidebar-border px-2 text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
-                        title="Browse file..."
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                          <polyline points="14 2 14 8 20 8" />
-                        </svg>
-                      </button>
-                    </div>
-                    <span className="text-[10px] text-sidebar-foreground/50">AGENT_WORLD_SQLITE_DATABASE</span>
-                  </div>
-                )}
-
                 <div className="mt-2 border-t border-sidebar-border pt-2">
                   <SettingsSwitch
                     label="Show tool messages"

@@ -118,6 +118,70 @@ describe('RightPanelContent', () => {
     expect(onInstallSkill).toHaveBeenCalledTimes(1);
   });
 
+  it('does not render storage settings controls in the system settings panel', () => {
+    const result: any = RightPanelContent({
+      panelMode: 'settings',
+      loadedWorld: null,
+      selectedAgentForPanel: null,
+      themePreference: 'system',
+      setThemePreference: () => { },
+      systemSettings: { enableGlobalSkills: true, enableProjectSkills: true, storageType: 'file', sqliteDatabase: '/tmp/database.db', dataPath: '/tmp/data.json' },
+      setSystemSettings: () => { },
+      workspace: { workspacePath: '/tmp/workspace' },
+      api: {
+        pickFile: async () => ({ canceled: true }),
+        pickDirectory: async () => ({ canceled: true }),
+        openWorkspace: async () => ({ canceled: true })
+      },
+      globalSkillEntries: [],
+      disabledGlobalSkillIdSet: new Set(),
+      setGlobalSkillsEnabled: () => { },
+      toggleSkillEnabled: () => { },
+      projectSkillEntries: [],
+      disabledProjectSkillIdSet: new Set(),
+      setProjectSkillsEnabled: () => { },
+      onCancelSettings: () => { },
+      savingSystemSettings: false,
+      onSaveSettings: () => { },
+      settingsNeedRestart: false,
+      onUpdateWorld: () => { },
+      editingWorld: {},
+      setEditingWorld: () => { },
+      updatingWorld: false,
+      deletingWorld: false,
+      onOpenWorldTextEditor: () => { },
+      onDeleteWorld: () => { },
+      closePanel: () => { },
+      onCreateAgent: () => { },
+      creatingAgent: {},
+      setCreatingAgent: () => { },
+      onOpenAgentPromptEditor: () => { },
+      savingAgent: false,
+      onUpdateAgent: () => { },
+      editingAgent: {},
+      setEditingAgent: () => { },
+      deletingAgent: false,
+      onDeleteAgent: () => { },
+      onCreateWorld: () => { },
+      creatingWorld: {},
+      setCreatingWorld: () => { },
+      panelLogs: [],
+      onClearPanelLogs: () => { },
+      onEditSkill: () => { },
+      onInstallSkill: () => { },
+    });
+
+    const renderedTree = JSON.stringify(result);
+
+    expect(renderedTree).not.toContain('Storage Type');
+    expect(renderedTree).not.toContain('Data File Path');
+    expect(renderedTree).not.toContain('Database File');
+    expect(renderedTree).not.toContain('AGENT_WORLD_DATA_PATH');
+    expect(renderedTree).not.toContain('AGENT_WORLD_SQLITE_DATABASE');
+    expect(renderedTree).not.toContain('Browse folder...');
+    expect(renderedTree).not.toContain('Browse file...');
+  });
+
   it('routes create-world field updates through the provided setter callbacks', () => {
     const setCreatingWorld = vi.fn();
 
