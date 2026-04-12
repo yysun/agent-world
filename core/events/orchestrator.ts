@@ -37,6 +37,8 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-04-12: Limited direct intent-only narration rejection to execution-oriented turns so planning replies can still complete normally.
+ * - 2026-04-12: Added bounded direct-turn rejection of intent-only action narration so weak models cannot complete a turn by saying they will use a tool.
  * - 2026-03-29: Routed direct persisted tool execution through shared `tool-action-runtime` helpers so initial, continuation, and restore turns share one tool-step runtime owner.
  * - 2026-03-29: Normalized direct-turn tool actions through shared agent-turn helpers so `human_intervention_request` persists as `hitl_request` with `waiting_for_hitl`.
  * - 2026-03-29: Routed initial agent-turn model call / retry / response classification through the explicit `runAgentTurnLoop(...)` helper while preserving existing tool execution semantics.
@@ -125,6 +127,11 @@ import {
 } from '../agent-turn.js';
 import { runAgentTurnLoop } from './agent-turn-loop.js';
 import {
+  INTENT_ONLY_RETRY_NOTICE,
+  INTENT_ONLY_WARNING_MESSAGE,
+  shouldRejectIntentOnlyActionNarration,
+} from './assistant-response-guards.js';
+import {
   appendSyntheticAssistantToolResult,
   executeToolActionStep,
   formatToolErrorContent,
@@ -148,6 +155,7 @@ type DisplayToolCall = {
 const EMPTY_INITIAL_RESPONSE_RETRY_LIMIT = 1;
 const EMPTY_INITIAL_RESPONSE_RETRY_NOTICE =
   'System notice: Your previous reply was empty. Continue this turn with either non-empty assistant text or a tool call. Do not return an empty response.';
+const INTENT_ONLY_DIRECT_RETRY_LIMIT = 1;
 
 function parsePlainTextToolIntentValue(rawValue: string): unknown {
   const trimmed = String(rawValue || '').trim();
@@ -507,6 +515,9 @@ export async function processAgentMessage(
     let llmResponse: import('../types.js').LLMResponse | null = null;
     let messageId = '';
     let initialLoopStoppedOnEmptyText = false;
+    let initialLoopStoppedOnIntentOnlyText = false;
+    let directIntentOnlyRetryCount = 0;
+    const latestDirectUserContent = String(messageEvent.content || '').trim();
 
     await runAgentTurnLoop({
       world,
@@ -532,11 +543,51 @@ export async function processAgentMessage(
       },
       parsePlainTextToolIntent,
       onTextResponse: async ({ responseText, messageId: loopMessageId }) => {
+        if (shouldRejectIntentOnlyActionNarration({
+          assistantContent: responseText,
+          latestUserContent: latestDirectUserContent,
+        })) {
+          if (directIntentOnlyRetryCount < INTENT_ONLY_DIRECT_RETRY_LIMIT) {
+            directIntentOnlyRetryCount += 1;
+            loggerAgent.warn('Direct turn returned intent-only action narration; retrying with corrective instruction', {
+              agentId: agent.id,
+              worldId: world.id,
+              chatId: targetChatId,
+              messageId: loopMessageId,
+              directIntentOnlyRetryCount,
+              retryLimit: INTENT_ONLY_DIRECT_RETRY_LIMIT,
+            });
+            return {
+              control: 'continue',
+              transientInstruction: INTENT_ONLY_RETRY_NOTICE,
+            };
+          }
+
+          messageId = loopMessageId;
+          initialLoopStoppedOnIntentOnlyText = true;
+          loggerAgent.warn('Direct turn returned repeated intent-only action narration; stopping without terminal completion', {
+            agentId: agent.id,
+            worldId: world.id,
+            chatId: targetChatId,
+            messageId: loopMessageId,
+            directIntentOnlyRetryCount,
+            retryLimit: INTENT_ONLY_DIRECT_RETRY_LIMIT,
+          });
+          publishEvent(world, 'system', {
+            message: INTENT_ONLY_WARNING_MESSAGE,
+            type: 'warning',
+            eventType: 'warning',
+            agentName: agent.id,
+          }, targetChatId);
+          return { control: 'stop' };
+        }
+
         llmResponse = {
           type: 'text',
           content: responseText,
         } as import('../types.js').LLMResponse;
         messageId = loopMessageId;
+        return undefined;
       },
       onToolCallsResponse: async ({ llmResponse: loopResponse, messageId: loopMessageId }) => {
         llmResponse = loopResponse;
@@ -564,7 +615,7 @@ export async function processAgentMessage(
     });
     throwIfMessageProcessingStopped(processingHandle?.signal);
 
-    if (initialLoopStoppedOnEmptyText || !llmResponse) {
+    if (initialLoopStoppedOnEmptyText || initialLoopStoppedOnIntentOnlyText || !llmResponse) {
       return;
     }
 

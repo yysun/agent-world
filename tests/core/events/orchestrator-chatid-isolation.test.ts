@@ -13,6 +13,8 @@
  * - Keeps execution in-memory and deterministic.
  *
  * Recent Changes:
+ * - 2026-04-12: Added regression coverage that planning-only prompts are not blocked by the direct intent-only narration guard.
+ * - 2026-04-12: Added regression coverage that direct intent-only action narration retries once and then stops without terminal assistant completion.
  * - 2026-03-29: Added Phase 1 regression coverage that direct tool-call turns execute at most one tool per hop.
  * - 2026-03-29: Added coverage that direct HITL tool requests persist `hitl_request` action metadata with `waiting_for_hitl` state.
  * - 2026-03-29: Added coverage that successful `send_message` tool execution marks the assistant tool request as terminal handoff-dispatched metadata and stops follow-up continuation.
@@ -123,9 +125,9 @@ function createAgent(): Agent {
   } as Agent;
 }
 
-function createMessageEvent(chatId: string): WorldMessageEvent {
+function createMessageEvent(chatId: string, content = 'Run the test tool'): WorldMessageEvent {
   return {
-    content: 'Run the test tool',
+    content,
     sender: 'human',
     timestamp: new Date(),
     messageId: 'msg-user-1',
@@ -270,6 +272,85 @@ describe('processAgentMessage chat isolation', () => {
       'Calling tool: web_fetch (url: "https://example.com/")',
       'assistant-plaintext-tool-1',
       expect.anything(),
+      'chat-1',
+    );
+  });
+
+  it('retries once and then rejects direct intent-only action narration without publishing a terminal assistant message', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    mocks.generateAgentResponse
+      .mockResolvedValueOnce({
+        response: {
+          type: 'text',
+          content: 'I will run the command now.',
+        },
+        messageId: 'assistant-intent-only-1',
+      })
+      .mockResolvedValueOnce({
+        response: {
+          type: 'text',
+          content: 'I will run the command now.',
+        },
+        messageId: 'assistant-intent-only-2',
+      });
+
+    const { processAgentMessage } = await import('../../../core/events/orchestrator.js');
+    await processAgentMessage(world, agent, createMessageEvent('chat-1'));
+
+    expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(2);
+    expect(mocks.handleTextResponse).not.toHaveBeenCalled();
+    expect(mocks.publishEvent).toHaveBeenCalledWith(
+      world,
+      'system',
+      expect.objectContaining({
+        type: 'warning',
+        message: expect.stringContaining('future tool action'),
+      }),
+      'chat-1',
+    );
+  });
+
+  it('allows planning-only prompts to return a future-tense text plan without forcing a retry', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    mocks.generateAgentResponse.mockResolvedValueOnce({
+      response: {
+        type: 'text',
+        content: 'I will inspect the loop boundaries first, then compare how retries are persisted.',
+      },
+      messageId: 'assistant-plan-only-1',
+    });
+
+    const { processAgentMessage } = await import('../../../core/events/orchestrator.js');
+    await processAgentMessage(
+      world,
+      agent,
+      createMessageEvent('chat-1', 'What would you do to review the LLM call loop?')
+    );
+
+    expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(1);
+    expect(mocks.handleTextResponse).toHaveBeenCalledWith(
+      world,
+      agent,
+      'I will inspect the loop boundaries first, then compare how retries are persisted.',
+      'assistant-plan-only-1',
+      expect.objectContaining({
+        content: 'What would you do to review the LLM call loop?',
+      }),
+      'chat-1',
+      expect.objectContaining({
+        source: 'direct',
+      })
+    );
+    expect(mocks.publishEvent).not.toHaveBeenCalledWith(
+      world,
+      'system',
+      expect.objectContaining({
+        message: expect.stringContaining('future tool action'),
+      }),
       'chat-1',
     );
   });

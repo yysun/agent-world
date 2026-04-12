@@ -13,6 +13,7 @@
  * - Pure unit tests; no storage, world setup, or external provider calls.
  *
  * Recent Changes:
+ * - 2026-04-12: Added coverage for no-future-tool-narration guidance and corrected-tool-call guidance after validation failures.
  * - 2026-03-01: Added regression coverage ensuring grep guidance uses `includePattern` and forbids `.includePattern`.
  * - 2026-03-01: Updated guidance coverage to remove mandatory pre-tool planning narration and enforce concise result-focused tool messaging.
  * - 2026-03-01: Added coverage for global pre-tool planning narration guidance before tool calls.
@@ -32,6 +33,9 @@ describe('buildToolUsagePromptSection', () => {
     expect(content).toContain('You have access to tools.');
     expect(content).toContain('Use tools when the user requests an action that requires tool execution.');
     expect(content).toContain('When using tools, keep assistant text concise and focused on results.');
+    expect(content).toContain('Do not describe future tool actions in assistant text.');
+    expect(content).toContain('emit the tool call now');
+    expect(content).toContain('If a tool call fails validation, emit a corrected tool call');
     expect(content).not.toContain('Before any tool call, first send a short planning message');
   });
 

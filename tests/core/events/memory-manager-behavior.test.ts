@@ -15,6 +15,8 @@
  * - No real filesystem, database, or external LLM/tool network calls.
  *
  * Recent changes:
+ * - 2026-04-12: Added regression coverage that planning-only continuation replies are not blocked and that validation retry budgets reset after non-validation progress.
+ * - 2026-04-12: Added regression coverage for continuation intent-only narration rejection and bounded repeated validation-failure recovery.
  * - 2026-03-29: Added direct terminal-response idempotency coverage so the same turn does not republish an assistant final response twice.
  * - 2026-03-29: Added restore-resume coverage for terminal `send_message` handoffs and continuation no-op when the turn is already terminal.
  * - 2026-03-29: Added coverage for terminal assistant turn metadata and in-process idempotent pending-tool resume leases.
@@ -347,6 +349,147 @@ describe('memory-manager behavior', () => {
       outcome: 'completed',
     });
     expect(finalAssistantMessage?.agentTurn?.completion?.mechanism).toBe('assistant_message_metadata');
+  });
+
+  it('retries once and then rejects continuation intent-only action narration without publishing a terminal assistant message', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    mocks.generateAgentResponse
+      .mockResolvedValueOnce(textResult('assistant-intent-only-cont-1', 'I will inspect the file next.'))
+      .mockResolvedValueOnce(textResult('assistant-intent-only-cont-2', 'I will inspect the file next.'));
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    await continueLLMAfterToolExecution(world, agent, 'chat-1', {
+      turnId: 'turn-intent-only-1',
+    });
+
+    expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(2);
+    expect(mocks.publishMessageWithId).not.toHaveBeenCalled();
+    expect(mocks.publishEvent).toHaveBeenCalledWith(
+      world,
+      'system',
+      expect.objectContaining({
+        type: 'warning',
+        message: expect.stringContaining('future tool action'),
+      }),
+      'chat-1',
+    );
+    expect(
+      agent.memory.some((message) => message.role === 'assistant' && message.messageId === 'assistant-intent-only-cont-2')
+    ).toBe(false);
+  });
+
+  it('allows planning-only continuation replies to complete without forcing an intent-only retry', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    mocks.prepareMessagesForLLM.mockResolvedValue([
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'What would you do next to investigate this issue?' },
+      { role: 'assistant', content: 'Calling tool: demo_tool' },
+      { role: 'tool', content: 'ok' },
+    ]);
+    mocks.generateAgentResponse.mockResolvedValueOnce(
+      textResult(
+        'assistant-plan-cont-1',
+        'I will inspect the parser branch next and compare it with the direct-turn path.'
+      )
+    );
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    await continueLLMAfterToolExecution(world, agent, 'chat-1', {
+      turnId: 'turn-plan-cont-1',
+    });
+
+    expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(1);
+    expect(mocks.publishMessageWithId).toHaveBeenCalledWith(
+      world,
+      'I will inspect the parser branch next and compare it with the direct-turn path.',
+      'agent-a',
+      'assistant-plan-cont-1',
+      'chat-1',
+      undefined
+    );
+    expect(mocks.publishEvent).not.toHaveBeenCalledWith(
+      world,
+      'system',
+      expect.objectContaining({
+        message: expect.stringContaining('future tool action'),
+      }),
+      'chat-1',
+    );
+  });
+
+  it('stops after repeated validation failures instead of looping indefinitely on corrected-tool retries', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    const execute = vi.fn(async () => 'Error: Tool parameter validation failed for demo_tool: Required parameter \'query\' is missing or empty');
+    mocks.getMCPToolsForWorld.mockResolvedValue({ demo_tool: { execute } });
+    mocks.generateAgentResponse
+      .mockResolvedValueOnce(toolCallResult('assistant-validation-1', 'demo_tool', '{}', 'tc-validation-1'))
+      .mockResolvedValueOnce(toolCallResult('assistant-validation-2', 'demo_tool', '{}', 'tc-validation-2'));
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    await continueLLMAfterToolExecution(world, agent, 'chat-1', {
+      turnId: 'turn-validation-1',
+    });
+
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(2);
+    expect(mocks.publishMessageWithId).not.toHaveBeenCalled();
+    expect(mocks.publishEvent).toHaveBeenCalledWith(
+      world,
+      'system',
+      expect.objectContaining({
+        type: 'warning',
+        message: expect.stringContaining('invalid tool parameters'),
+      }),
+      'chat-1',
+    );
+  });
+
+  it('resets validation retry budget after a non-validation continuation step succeeds', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    const firstToolExecute = vi.fn(
+      async () => 'Error: Tool parameter validation failed for first_tool: Required parameter \'query\' is missing or empty'
+    );
+    const okToolExecute = vi.fn(async () => 'ok');
+    const secondToolExecute = vi.fn(
+      async () => 'Error: Tool parameter validation failed for second_tool: Required parameter \'path\' is missing or empty'
+    );
+    mocks.getMCPToolsForWorld.mockResolvedValue({
+      first_tool: { execute: firstToolExecute },
+      ok_tool: { execute: okToolExecute },
+      second_tool: { execute: secondToolExecute },
+    });
+    mocks.generateAgentResponse
+      .mockResolvedValueOnce(toolCallResult('assistant-validation-reset-1', 'first_tool', '{}', 'tc-validation-reset-1'))
+      .mockResolvedValueOnce(toolCallResult('assistant-validation-reset-2', 'ok_tool', '{}', 'tc-validation-reset-2'))
+      .mockResolvedValueOnce(toolCallResult('assistant-validation-reset-3', 'second_tool', '{}', 'tc-validation-reset-3'))
+      .mockResolvedValueOnce(toolCallResult('assistant-validation-reset-4', 'second_tool', '{}', 'tc-validation-reset-4'));
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    await continueLLMAfterToolExecution(world, agent, 'chat-1', {
+      turnId: 'turn-validation-reset-1',
+    });
+
+    expect(firstToolExecute).toHaveBeenCalledTimes(1);
+    expect(okToolExecute).toHaveBeenCalledTimes(1);
+    expect(secondToolExecute).toHaveBeenCalledTimes(2);
+    expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(4);
+    expect(mocks.publishEvent).toHaveBeenCalledWith(
+      world,
+      'system',
+      expect.objectContaining({
+        type: 'warning',
+        message: expect.stringContaining('invalid tool parameters'),
+      }),
+      'chat-1',
+    );
   });
 
   it('does not republish the same direct terminal response twice for one turn', async () => {

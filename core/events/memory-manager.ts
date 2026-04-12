@@ -20,6 +20,8 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-04-12: Scoped continuation intent-only rejection to execution-oriented turns and reset validation correction budgets after non-validation progress.
+ * - 2026-04-12: Added shared continuation guards for intent-only narration and repeated tool-parameter validation failures so weak models cannot end turns or loop forever on invalid tool args.
  * - 2026-03-29: Moved shared tool-action execution/persistence mechanics into `tool-action-runtime` so direct, continuation, and restore flows use one runtime owner for persisted tool steps.
  * - 2026-03-29: Centralized terminal assistant response persistence/publication behind an idempotent helper so duplicate same-turn final publishes are suppressed.
  * - 2026-03-29: Added shared HITL/handoff action classification plus terminal-turn no-op guards so restore/continuation avoids duplicate handoff follow-up and skips already-terminal turns.
@@ -119,6 +121,15 @@ import {
   setTerminalTurnMetadata,
 } from '../agent-turn.js';
 import { runAgentTurnLoop } from './agent-turn-loop.js';
+import {
+  getLatestUserMessageContent,
+  INTENT_ONLY_RETRY_NOTICE,
+  INTENT_ONLY_WARNING_MESSAGE,
+  VALIDATION_FAILURE_RETRY_NOTICE,
+  VALIDATION_FAILURE_WARNING_MESSAGE,
+  isValidationFailureToolResult,
+  shouldRejectIntentOnlyActionNarration,
+} from './assistant-response-guards.js';
 import {
   appendSyntheticAssistantToolResult,
   buildShellCommandSignature,
@@ -1138,6 +1149,7 @@ export async function continueLLMAfterToolExecution(
     hopCount?: number;
     emptyTextRetryCount?: number;
     emptyToolCallRetryCount?: number;
+    validationFailureRetryCount?: number;
     continuationRunId?: string;
     transientContinuationInstruction?: string;
     preloadedSkillIds?: string[];
@@ -1198,7 +1210,13 @@ export async function continueLLMAfterToolExecution(
     const maxEmptyTextRetries = 2;
     const emptyToolCallRetryCount = options?.emptyToolCallRetryCount ?? 0;
     const maxEmptyToolCallRetries = 2;
+    let validationFailureRetryCount = options?.validationFailureRetryCount ?? 0;
+    const maxValidationFailureRetries = 1;
     let transientGuardrailError: string | undefined = options?.transientContinuationInstruction;
+    let continuationStoppedOnIntentOnlyText = false;
+    let continuationIntentOnlyRetryCount = 0;
+    const maxIntentOnlyContinuationRetries = 1;
+    let latestContinuationUserContent = '';
 
     if (hopCount > maxToolHops) {
       const guardrailErrorMessage = `[Error] Tool continuation exceeded ${maxToolHops} hops. Guardrail triggered; reporting error and continuing.`;
@@ -1296,6 +1314,7 @@ export async function continueLLMAfterToolExecution(
           agent,
           targetChatId ?? null
         );
+        latestContinuationUserContent = getLatestUserMessageContent(messages);
         throwIfMessageProcessingStopped(options?.abortSignal);
 
         const effectiveInstruction = transientInstruction || transientGuardrailError;
@@ -1331,11 +1350,49 @@ export async function continueLLMAfterToolExecution(
       },
       parsePlainTextToolIntent,
       onTextResponse: async ({ responseText, messageId: loopMessageId }) => {
+        if (shouldRejectIntentOnlyActionNarration({
+          assistantContent: responseText,
+          latestUserContent: latestContinuationUserContent,
+          hasPriorToolCall: true,
+        })) {
+          if (continuationIntentOnlyRetryCount < maxIntentOnlyContinuationRetries) {
+            continuationIntentOnlyRetryCount += 1;
+            loggerAgent.warn('Continuation returned intent-only action narration; retrying with corrective instruction', {
+              agentId: agent.id,
+              chatId: targetChatId,
+              hopCount,
+              messageId: loopMessageId,
+              continuationIntentOnlyRetryCount,
+              retryLimit: maxIntentOnlyContinuationRetries,
+            });
+            return {
+              control: 'continue',
+              transientInstruction: INTENT_ONLY_RETRY_NOTICE,
+            };
+          }
+
+          continuationStoppedOnIntentOnlyText = true;
+          loggerAgent.warn('Continuation returned repeated intent-only action narration; stopping without terminal completion', {
+            agentId: agent.id,
+            chatId: targetChatId,
+            hopCount,
+            messageId: loopMessageId,
+            continuationIntentOnlyRetryCount,
+            retryLimit: maxIntentOnlyContinuationRetries,
+          });
+          publishEvent(world, 'system', {
+            message: INTENT_ONLY_WARNING_MESSAGE,
+            type: 'warning'
+          }, targetChatId);
+          return { control: 'stop' };
+        }
+
         messageId = loopMessageId;
         llmResponse = {
           type: 'text',
           content: responseText,
         } as import('../types.js').LLMResponse;
+        return undefined;
       },
       onToolCallsResponse: async ({ llmResponse: loopResponse, messageId: loopMessageId }) => {
         messageId = loopMessageId;
@@ -1366,7 +1423,7 @@ export async function continueLLMAfterToolExecution(
     });
     throwIfMessageProcessingStopped(options?.abortSignal);
 
-    if (continuationStoppedOnEmptyText || !llmResponse) {
+    if (continuationStoppedOnEmptyText || continuationStoppedOnIntentOnlyText || !llmResponse) {
       return;
     }
 
@@ -1595,6 +1652,7 @@ export async function continueLLMAfterToolExecution(
             ...options,
             hopCount: hopCount + 1,
             emptyToolCallRetryCount: emptyToolCallRetryCount + 1,
+            validationFailureRetryCount: 0,
             continuationRunId,
           });
           return;
@@ -1630,6 +1688,7 @@ export async function continueLLMAfterToolExecution(
         await continueLLMAfterToolExecution(world, agent, targetChatId, {
           ...options,
           hopCount: hopCount + 1,
+          validationFailureRetryCount: 0,
           continuationRunId,
           transientContinuationInstruction:
             `System notice: Suppressed duplicate load_skill("${requestedLoadSkillId}") in this run because the skill was already loaded. Continue the task using the existing skill context without calling load_skill again for this skill.`,
@@ -1757,11 +1816,23 @@ export async function continueLLMAfterToolExecution(
 
         const storage = await getStorageWrappers();
         await storage.saveAgent(world.id, agent);
-        await continueLLMAfterToolExecution(world, agent, targetChatId, {
-          ...options,
-          hopCount: hopCount + 1,
-          continuationRunId,
-        });
+        if (validationFailureRetryCount < maxValidationFailureRetries) {
+          validationFailureRetryCount += 1;
+          await continueLLMAfterToolExecution(world, agent, targetChatId, {
+            ...options,
+            hopCount: hopCount + 1,
+            continuationRunId,
+            validationFailureRetryCount,
+            transientContinuationInstruction: VALIDATION_FAILURE_RETRY_NOTICE,
+            turnId,
+          });
+          return;
+        }
+
+        publishEvent(world, 'system', {
+          message: VALIDATION_FAILURE_WARNING_MESSAGE,
+          type: 'warning',
+        }, targetChatId);
         return;
       }
 
@@ -1839,6 +1910,7 @@ export async function continueLLMAfterToolExecution(
           await continueLLMAfterToolExecution(world, agent, targetChatId, {
             ...options,
             hopCount: hopCount + 1,
+            validationFailureRetryCount: 0,
             continuationRunId,
             transientContinuationInstruction:
               'System notice: Suppressed duplicate shell_cmd call in this continuation run and reused its previous result. Continue from the existing command output without rerunning the same command.',
@@ -1897,6 +1969,29 @@ export async function continueLLMAfterToolExecution(
         });
       }
 
+      const validationFailureResult = executionResult.status !== 'skipped_success_persistence'
+        && isValidationFailureToolResult(executionResult.serializedToolResult);
+      if (validationFailureResult) {
+        if (validationFailureRetryCount < maxValidationFailureRetries) {
+          validationFailureRetryCount += 1;
+          await continueLLMAfterToolExecution(world, agent, targetChatId, {
+            ...options,
+            hopCount: hopCount + 1,
+            continuationRunId,
+            validationFailureRetryCount,
+            transientContinuationInstruction: VALIDATION_FAILURE_RETRY_NOTICE,
+            turnId,
+          });
+          return;
+        }
+
+        publishEvent(world, 'system', {
+          message: VALIDATION_FAILURE_WARNING_MESSAGE,
+          type: 'warning',
+        }, targetChatId);
+        return;
+      }
+
       if (executionResult.status === 'success' && toolCall.function.name === 'send_message' && isSuccessfulSendMessageDispatchResult(
         executionResult.serializedToolResult
       )) {
@@ -1925,6 +2020,7 @@ export async function continueLLMAfterToolExecution(
       await continueLLMAfterToolExecution(world, agent, targetChatId, {
         ...options,
         hopCount: hopCount + 1,
+        validationFailureRetryCount: 0,
         continuationRunId,
         turnId,
       });
@@ -1953,6 +2049,7 @@ export async function continueLLMAfterToolExecution(
         await continueLLMAfterToolExecution(world, agent, targetChatId, {
           ...options,
           emptyTextRetryCount: emptyTextRetryCount + 1,
+          validationFailureRetryCount: 0,
           continuationRunId,
         });
         return;

@@ -34,6 +34,7 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-04-12: Hardened tool-usage guidance to forbid future-tense tool narration and require corrected tool calls after validation failures.
  * - 2026-03-22: Updated Agent Skills prompt guidance to emphasize `load_skill` as a
  *   continue-the-task step instead of requiring a separate post-load acknowledgment.
  * - 2026-03-19: Agent-skills prompt assembly now refreshes skill roots from the active world's `variables` so project-scope skills track `working_directory`.
@@ -235,6 +236,9 @@ export function buildToolUsagePromptSection(options: { toolNames: string[] }): s
     'You have access to tools.',
     'Use tools when the user requests an action that requires tool execution.',
     'When using tools, keep assistant text concise and focused on results.',
+    'Do not describe future tool actions in assistant text. Do not say you will run, check, search, open, write, or use a tool later.',
+    'If action is required, emit the tool call now. If work is already complete, return verified results only.',
+    'If a tool call fails validation, emit a corrected tool call with complete valid parameters instead of narrating intent.',
   ];
 
   if (hasHitlTool) {

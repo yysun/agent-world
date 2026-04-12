@@ -61,3 +61,5 @@ electron/release/
 electron/builder-effective-config.yaml
 electron/.cache/
 electron/.electron-builder/
+
+.wiki/
