@@ -14,21 +14,27 @@
  * - Verifies tool_call_id handling with fallback
  *
  * Recent changes:
+ * - 2026-04-12: Added wrapToolWithValidation coverage for silent first-pass recoverable validation failures in LLM tool loops.
  * - 2026-03-01: Added `.includePattern` alias normalization coverage for `list_files` and `grep`.
  * - 2026-02-27: Added removed HITL confirmation-arg coverage to verify silent stripping for backward compatibility.
  * - 2026-02-20: Added alias normalization coverage for `create_agent` (`auto-reply` and `next agent` variants).
  */
 
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import { filterAndHandleEmptyNamedFunctionCalls, validateToolParameters } from '../../core/tool-utils.js';
+import { filterAndHandleEmptyNamedFunctionCalls, validateToolParameters, wrapToolWithValidation } from '../../core/tool-utils.js';
 import type { World, Agent } from '../../core/types.js';
 import { LLMProvider } from '../../core/types.js';
 import { EventEmitter } from 'events';
 import * as events from '../../core/events/index.js';
+import * as publishers from '../../core/events/publishers.js';
 
 // Mock publishToolEvent
 vi.mock('../../core/events/index.js', () => ({
   publishToolEvent: vi.fn(),
+}));
+
+vi.mock('../../core/events/publishers.js', () => ({
+  publishEvent: vi.fn(),
 }));
 
 describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
@@ -561,5 +567,60 @@ describe('Tool Utils - validateToolParameters', () => {
       question: 'Pick one',
       options: ['A', 'B'],
     });
+  });
+});
+
+describe('Tool Utils - wrapToolWithValidation', () => {
+  const validationSchema = {
+    type: 'object',
+    properties: {
+      command: { type: 'string' },
+    },
+    required: ['command'],
+    additionalProperties: false,
+  };
+
+  test('emits a system error event for non-suppressed validation failures', async () => {
+    const execute = vi.fn();
+    const tool = wrapToolWithValidation({
+      parameters: validationSchema,
+      execute,
+    }, 'shell_cmd');
+
+    const result = await tool.execute({}, undefined, undefined, {
+      world: { id: 'world-1' },
+      chatId: 'chat-1',
+    });
+
+    expect(result).toContain('Tool parameter validation failed for shell_cmd');
+    expect(execute).not.toHaveBeenCalled();
+    expect(publishers.publishEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'world-1' }),
+      'system',
+      expect.objectContaining({
+        type: 'error',
+        eventType: 'error',
+        message: expect.stringContaining("Required parameter 'command' is missing or empty"),
+      }),
+      'chat-1',
+    );
+  });
+
+  test('suppresses system error events for recoverable validation failures', async () => {
+    const execute = vi.fn();
+    const tool = wrapToolWithValidation({
+      parameters: validationSchema,
+      execute,
+    }, 'shell_cmd');
+
+    const result = await tool.execute({}, undefined, undefined, {
+      world: { id: 'world-1' },
+      chatId: 'chat-1',
+      suppressValidationErrorEvent: true,
+    });
+
+    expect(result).toContain('Tool parameter validation failed for shell_cmd');
+    expect(execute).not.toHaveBeenCalled();
+    expect(publishers.publishEvent).not.toHaveBeenCalled();
   });
 });

@@ -812,6 +812,7 @@ export async function resumePendingToolCallsForChat(
         persistToolEnvelope: toolCall.function.name === 'shell_cmd'
           || toolCall.function.name === 'load_skill'
           || toolCall.function.name === 'web_fetch',
+        suppressValidationErrorEvent: true,
       });
 
       if (executionResult.status === 'success') {
@@ -1938,6 +1939,7 @@ export async function continueLLMAfterToolExecution(
         persistToolEnvelope: toolCall.function.name === 'shell_cmd'
           || toolCall.function.name === 'load_skill'
           || toolCall.function.name === 'web_fetch',
+        suppressValidationErrorEvent: true,
       });
 
       if (

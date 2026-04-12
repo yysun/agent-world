@@ -945,6 +945,7 @@ export async function processAgentMessage(
             persistToolEnvelope: toolCall.function.name === 'shell_cmd'
               || toolCall.function.name === 'load_skill'
               || toolCall.function.name === 'web_fetch',
+            suppressValidationErrorEvent: true,
             shouldPersistSuccessfulResult: () => !processingHandle?.isStopped(),
             shouldPersistExecutionError: (error) => !isMessageProcessingCanceledError(error) && !processingHandle?.isStopped(),
           });

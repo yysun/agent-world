@@ -16,6 +16,7 @@
  * - Consistent parameter validation for both MCP and built-in tools
  *
  * Recent Changes:
+ * - 2026-04-12: Added optional recoverable-validation suppression so LLM turn retries can correct invalid tool args once without surfacing an immediate UI system error.
  * - 2026-03-11: Strip workingDirectory/working_directory from shell_cmd args in normalizeKnownParameterAliases; these are context fields the LLM echoes from the system prompt, not tool parameters.
  * - 2026-03-11: Emit system error event in wrapToolWithValidation when tool parameter validation fails so errors surface in the UI.
  * - 2026-03-01: Added backward-compatible normalization for `.includePattern` -> `includePattern` in `list_files` and `grep`.
@@ -414,10 +415,12 @@ export function wrapToolWithValidation(tool: any, toolName: string): any {
       if (tool.parameters) {
         const validation = validateToolParameters(args, tool.parameters, toolName);
         if (!validation.valid) {
-          // Emit system error event so the UI can surface the validation failure
+          // Emit a system error event only when the caller has not marked this
+          // validation failure as recoverable within the current LLM retry loop.
           const validationWorld = context?.world;
           const validationChatId = typeof context?.chatId === 'string' ? context.chatId.trim() : '';
-          if (validationWorld && validationChatId) {
+          const suppressValidationErrorEvent = context?.suppressValidationErrorEvent === true;
+          if (!suppressValidationErrorEvent && validationWorld && validationChatId) {
             try {
               publishEvent(validationWorld, 'system', {
                 type: 'error',

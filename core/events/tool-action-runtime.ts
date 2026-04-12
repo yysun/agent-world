@@ -358,6 +358,7 @@ export async function executeToolActionStep(options: {
   toolResultMetadata?: Record<string, unknown>;
   llmResultMode: 'minimal' | 'verbose';
   persistToolEnvelope?: boolean;
+  suppressValidationErrorEvent?: boolean;
   shouldPersistSuccessfulResult?: (params: {
     toolResult: unknown;
     serializedToolResult: string;
@@ -429,6 +430,7 @@ export async function executeToolActionStep(options: {
       agentName: options.agent.id,
       llmResultMode: options.llmResultMode,
       persistToolEnvelope: options.persistToolEnvelope,
+      suppressValidationErrorEvent: options.suppressValidationErrorEvent === true,
     };
 
     const toolResult = await toolDef.execute(options.toolArgs, undefined, undefined, toolContext);
