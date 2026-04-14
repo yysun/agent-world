@@ -15,6 +15,7 @@
  * - Uses native `details/summary` rows for a simple deterministic tree view.
  *
  * Recent Changes:
+ * - 2026-04-14: Removed the decorative file-row dash marker so skill file names align cleanly in the tree.
  * - 2026-04-11: Added configurable empty-state copy so install preview can explain loading and error states instead of showing a misleading blank tree.
  * - 2026-04-03: Switched the install-preview file pane onto the main editor surface styling so it matches the updated install screen.
  * - 2026-03-22: Added a disabled state so busy save/delete/load work can block file switching from the tree.
@@ -128,9 +129,6 @@ function renderSkillFolderNodes(
           ].join(' ')}
           style={indentStyle}
         >
-          <span className="flex h-3 w-3 flex-none items-center justify-center text-foreground/30">
-            <span className="h-px w-2 bg-current" />
-          </span>
           <FileGlyph />
           <span className="truncate">{entry.name}</span>
         </button>

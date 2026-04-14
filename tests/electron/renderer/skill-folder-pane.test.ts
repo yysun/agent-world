@@ -7,6 +7,7 @@
  * - Confirms tree semantics are exposed on the root container.
  * - Verifies file rows keep the click callback wired with the selected relative path.
  * - Guards against regressing to textual DIR/FILE badges.
+ * - Guards against reintroducing the decorative dash spacer ahead of file names.
  *
  * Implementation Notes:
  * - Uses virtual React/JSX mocks to inspect element output without jsdom.
@@ -111,6 +112,7 @@ describe('SkillFolderPane', () => {
     const fileButton = nodes.find((node: any) => node?.type === 'button' && node?.props?.role === 'treeitem');
     expect(fileButton).toBeDefined();
     expect(fileButton.props['aria-selected']).toBe(true);
+    expect(JSON.stringify(fileButton.props.children)).not.toContain('h-px w-2 bg-current');
 
     fileButton.props.onClick();
     expect(onSelectFile).toHaveBeenCalledWith('openai.yaml');

@@ -14,6 +14,7 @@
  * - Mirrors the existing skill tree interaction model where that improves consistency.
  *
  * Recent Changes:
+ * - 2026-04-14: Removed the decorative file-row dash marker so file names align cleanly in the tree.
  * - 2026-04-14: Initial implementation for the composer project folder viewer.
  */
 
@@ -120,9 +121,6 @@ function renderProjectFolderNodes(
           ].join(' ')}
           style={indentStyle}
         >
-          <span className="flex h-3 w-3 flex-none items-center justify-center text-foreground/30">
-            <span className="h-px w-2 bg-current" />
-          </span>
           <FileGlyph />
           <span className="truncate">{entry.name}</span>
         </button>
