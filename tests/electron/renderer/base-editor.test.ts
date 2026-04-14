@@ -7,6 +7,7 @@
  * - Confirms collapsed-sidebar mode adds the left titlebar inset used to clear macOS traffic lights.
  * - Confirms the default toolbar padding remains unchanged when no inset is requested.
  * - Confirms the secondary pane is opt-in rather than a built-in business-specific default.
+ * - Confirms an accessible splitter is rendered when the secondary pane is present.
  *
  * Implementation Notes:
  * - Uses virtual React/JSX mocks and inspects the returned element tree directly.
@@ -98,8 +99,12 @@ describe('BaseEditor', () => {
 
     const withRightPaneChildren = toChildArray(withRightPane.props?.children).filter(Boolean);
     const contentRowChildren = toChildArray(withRightPaneChildren[0]?.props?.children);
+    const rightPaneGroupChildren = toChildArray(contentRowChildren[1]?.props?.children);
     expect(contentRowChildren).toHaveLength(2);
     expect(contentRowChildren[0]?.props?.className).toContain('flex-[3]');
-    expect(contentRowChildren[1]?.props?.children).toBe(rightPaneNode);
+    expect(rightPaneGroupChildren).toHaveLength(2);
+    expect(rightPaneGroupChildren[0]?.props?.role).toBe('separator');
+    expect(rightPaneGroupChildren[0]?.props?.['aria-label']).toBe('Resize editor panes');
+    expect(rightPaneGroupChildren[1]?.props?.children).toBe(rightPaneNode);
   });
 });
