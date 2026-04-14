@@ -101,6 +101,7 @@ describe('ProjectFolderViewer', () => {
     const readonlyHeader = nodes.find((node: any) => typeof node?.props?.children === 'string' && node.props.children === 'Read Only');
     const inlineSelectedFileLabel = contentNodes.find((node: any) => node?.type === 'p' && node?.props?.children === 'README.md');
     const toolbarSaveButton = toolbarNodes.find((node: any) => node?.type === 'button' && node?.props?.['aria-label'] === 'Save file');
+    const editorBody = contentNodes.find((node: any) => typeof node?.props?.className === 'string' && node.props.className.includes('min-h-0 flex-1 overflow-hidden'));
 
     expect(textarea).toBeDefined();
     expect(textarea.props.value).toBe('# Project');
@@ -110,6 +111,7 @@ describe('ProjectFolderViewer', () => {
     expect(readonlyHeader).toBeUndefined();
     expect(inlineSelectedFileLabel).toBeDefined();
     expect(toolbarSaveButton).toBeUndefined();
+    expect(editorBody).toBeDefined();
 
     textarea.props.onChange({ target: { value: '# Updated' } });
     markdownRadio.props.onChange();
@@ -143,6 +145,7 @@ describe('ProjectFolderViewer', () => {
     const preview = nodes.find((node: any) => node?.props?.['aria-label'] === 'Preview README.md');
 
     expect(preview).toBeDefined();
+    expect(preview.props.className).toContain('overflow-y-auto');
     expect(preview.props.dangerouslySetInnerHTML.__html).toContain('<p># Project</p>');
   });
 

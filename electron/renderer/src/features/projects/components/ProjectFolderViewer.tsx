@@ -13,8 +13,10 @@
  * Implementation Notes:
  * - Controlled component; parent owns folder data, selected file path, draft content, and loading state.
  * - Saving and dirty-state prompts stay in the parent so file switching/back behavior remains centralized.
+ * - The editor body keeps only one active scroll container at a time so text editing does not render nested scrollbars.
  *
  * Recent Changes:
+ * - 2026-04-14: Removed the redundant left-pane overflow container so the file editor no longer shows double scrollbars.
  * - 2026-04-14: Moved save and markdown controls into an in-pane file action row so project files save like the skill editor.
  * - 2026-04-14: Switched from a read-only preview panel to a skill-editor-style project file editor with markdown preview and save support.
  * - 2026-04-14: Initial implementation for the composer project folder viewer.
@@ -208,14 +210,14 @@ export default function ProjectFolderViewer({
             </div>
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div className="min-h-0 flex-1 overflow-hidden">
           {loadingStructure ? (
             <div className="m-4 rounded-lg border border-border/70 bg-card/40 p-4 text-sm text-muted-foreground">Loading project folder structure...</div>
           ) : loadingFile ? (
             <div className="m-4 rounded-lg border border-border/70 bg-card/40 p-4 text-sm text-muted-foreground">Loading {selectedFilePath || 'file'}...</div>
           ) : showRenderedMarkdown ? (
             <div
-              className="prose max-w-none min-h-full p-4 text-foreground"
+              className="prose max-w-none flex-1 overflow-y-auto p-4 text-foreground"
               aria-label={`Preview ${selectedFilePath}`}
               dangerouslySetInnerHTML={{ __html: renderedMarkdown || '<p>(empty markdown)</p>' }}
             />
