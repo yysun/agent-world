@@ -15,6 +15,7 @@
  * - Tests BaseEditor slot contract by inspecting children tree structure.
  *
  * Recent Changes:
+ * - 2026-04-14: Added preview-scroll coverage so markdown preview keeps an explicit full-height scroll surface.
  * - 2026-04-14: Updated Back-button coverage for the shared primary `Button` treatment in both edit and install modes.
  * - 2026-04-11: Added install-preview empty-state coverage so loading and failed preview fetches do not regress to blank editor panes.
  * - 2026-04-11: Reworked install-mode coverage for the new preview-only role after search/discovery moved to `SkillInstallBrowser`.
@@ -107,6 +108,8 @@ describe('SkillEditor', () => {
     const preview = nodes.find((node: any) => node?.props?.['aria-label'] === 'Preview SKILL.md for rpd');
     expect(textarea).toBeUndefined();
     expect(preview).toBeDefined();
+    expect(preview?.props?.className).toContain('h-full');
+    expect(preview?.props?.className).toContain('overflow-y-auto');
     expect(String(preview?.props?.dangerouslySetInnerHTML?.__html || '')).toContain('<h1');
 
     // toolbar should contain the scope + skill name, but not the file name

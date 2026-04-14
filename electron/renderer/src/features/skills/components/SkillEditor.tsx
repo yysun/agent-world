@@ -15,6 +15,7 @@
  * - Back button fires `onBack` without prompting (unsaved changes are parent's concern).
  *
  * Recent Changes:
+ * - 2026-04-14: Restored an explicit full-height scroll surface for markdown preview mode so preview content still scrolls after the single-scroll editor-body cleanup.
  * - 2026-04-14: Standardized both skill-editor Back actions onto the primary `Button` primitive for consistent workspace editor chrome.
  * - 2026-04-11: Added install-preview loading/error placeholders so failed or pending preview fetches do not render as blank content and blank file trees.
  * - 2026-04-11: Narrowed install mode to preview-only so search/discovery lives in `SkillInstallBrowser`.
@@ -341,7 +342,7 @@ export default function SkillEditor({
           </div>
         ) : showRenderedMarkdown ? (
           <div
-            className="prose max-w-none flex-1 overflow-y-auto p-4 text-foreground"
+            className="prose h-full max-w-none overflow-y-auto p-4 text-foreground"
             aria-label={`Preview ${selectedFilePath || 'SKILL.md'} for ${skillId}`}
             dangerouslySetInnerHTML={{ __html: renderedSkillMarkdown || '<p>(empty markdown)</p>' }}
           />

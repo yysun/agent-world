@@ -148,6 +148,7 @@ describe('ProjectFolderViewer', () => {
     const preview = nodes.find((node: any) => node?.props?.['aria-label'] === 'Preview README.md');
 
     expect(preview).toBeDefined();
+    expect(preview.props.className).toContain('h-full');
     expect(preview.props.className).toContain('overflow-y-auto');
     expect(preview.props.dangerouslySetInnerHTML.__html).toContain('<p># Project</p>');
   });

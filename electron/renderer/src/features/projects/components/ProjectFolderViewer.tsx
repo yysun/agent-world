@@ -16,6 +16,7 @@
  * - The editor body keeps only one active scroll container at a time so text editing does not render nested scrollbars.
  *
  * Recent Changes:
+ * - 2026-04-14: Restored an explicit full-height scroll surface for markdown preview mode after the single-scroll editor-body cleanup clipped preview scrolling.
  * - 2026-04-14: Promoted the toolbar Back action to the primary button treatment used across workspace editors.
  * - 2026-04-14: Removed the redundant left-pane overflow container so the file editor no longer shows double scrollbars.
  * - 2026-04-14: Moved save and markdown controls into an in-pane file action row so project files save like the skill editor.
@@ -218,7 +219,7 @@ export default function ProjectFolderViewer({
             <div className="m-4 rounded-lg border border-border/70 bg-card/40 p-4 text-sm text-muted-foreground">Loading {selectedFilePath || 'file'}...</div>
           ) : showRenderedMarkdown ? (
             <div
-              className="prose max-w-none flex-1 overflow-y-auto p-4 text-foreground"
+              className="prose h-full max-w-none overflow-y-auto p-4 text-foreground"
               aria-label={`Preview ${selectedFilePath}`}
               dangerouslySetInnerHTML={{ __html: renderedMarkdown || '<p>(empty markdown)</p>' }}
             />
