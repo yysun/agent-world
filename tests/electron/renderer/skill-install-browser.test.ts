@@ -13,6 +13,7 @@
  * - Stubs BaseEditor so tests can assert toolbar/content slot boundaries directly.
  *
  * Recent Changes:
+ * - 2026-04-14: Added explicit coverage that the Back action uses the primary workspace-editor button treatment.
  * - 2026-04-11: Local-folder assertions now cover scanning a chosen root and rendering discovered skills from nested `skills/*` directories.
  * - 2026-04-11: Restored coverage for the GitHub and Local Folder source selector plus the local-folder preview card.
  * - 2026-04-11: Removed local-skill assertions because the install browser now only shows GitHub-found skills.
@@ -134,6 +135,7 @@ describe('SkillInstallBrowser', () => {
     expect(githubToggleButton).toBeDefined();
     expect(localToggleButton).toBeDefined();
     expect(backButton).toBeDefined();
+    expect(backButton?.props?.variant).toBe('primary');
     expect(contentStr).toContain('Browse installable skills');
     expect(contentStr).toContain('Reviews changes for regressions and missing tests.');
     expect(contentStr).not.toContain('Open this skill in install preview.');

@@ -13,6 +13,7 @@
  * - Reuses BaseEditor for full-area workspace framing while omitting the file-tree pane.
  *
  * Recent Changes:
+ * - 2026-04-14: Promoted the Back action to the primary workspace-editor button treatment.
  * - 2026-04-11: Local-folder mode now scans the chosen root and lists discovered skills from the root plus nested skills directories.
  * - 2026-04-11: Restored the right-aligned GitHub/Local Folder source selector and local-folder preview card without bringing back the old local-skills list.
  * - 2026-04-11: Removed local-skill rendering from the install browser so the browse stage only shows GitHub-discovered skills.
@@ -84,7 +85,7 @@ export default function SkillInstallBrowser({
   const githubSourceSelected = sourceType === 'github';
   const toolbar = (
     <div className="flex items-center gap-3">
-      <Button variant="ghost" size="sm" onClick={onBack} disabled={busy} aria-label="Back">
+      <Button variant="primary" size="sm" onClick={onBack} disabled={busy} aria-label="Back">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           width="14"

@@ -12,6 +12,7 @@
  * - Uses virtual React/JSX mocks and inspects the returned element tree directly.
  *
  * Recent Changes:
+ * - 2026-04-14: Added explicit coverage that the Back action uses the primary workspace-editor button treatment.
  * - 2026-04-11: Added the initial regression coverage for the full-area world text editor.
  */
 
@@ -112,6 +113,7 @@ describe('WorldTextEditor', () => {
     const applyButton = buttons.find((node: any) => node?.props?.onClick === onApply);
 
     expect(backButton).toBeDefined();
+    expect(backButton.props.variant).toBe('primary');
     expect(applyButton).toBeDefined();
     expect(applyButton.props.disabled).toBe(false);
 

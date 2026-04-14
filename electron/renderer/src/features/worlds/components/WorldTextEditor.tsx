@@ -14,6 +14,7 @@
  * - Apply writes only to the in-memory world form draft via parent callbacks.
  *
  * Recent Changes:
+ * - 2026-04-14: Promoted the Back action to the primary workspace-editor button treatment.
  * - 2026-04-11: Added the initial full-area world text editor for Variables and MCP Config.
  */
 
@@ -55,7 +56,7 @@ export default function WorldTextEditor({
   const toolbar = (
     <div className="flex min-w-0 items-center gap-3">
       <Button
-        variant="ghost"
+        variant="primary"
         size="sm"
         onClick={onBack}
         aria-label="Back"

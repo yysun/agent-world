@@ -15,6 +15,7 @@
  * - Back button fires `onBack` without prompting (unsaved changes are parent's concern).
  *
  * Recent Changes:
+ * - 2026-04-14: Standardized both skill-editor Back actions onto the primary `Button` primitive for consistent workspace editor chrome.
  * - 2026-04-11: Added install-preview loading/error placeholders so failed or pending preview fetches do not render as blank content and blank file trees.
  * - 2026-04-11: Narrowed install mode to preview-only so search/discovery lives in `SkillInstallBrowser`.
  * - 2026-04-03: Added edit-mode Preview and Markdown radios for markdown files, defaulting to preview beside the save action.
@@ -98,7 +99,6 @@ export default function SkillEditor({
 }) {
   const isInstallMode = mode === 'install';
   const busy = saving || deleting || loadingFile || installing;
-  const backButtonClassName = 'flex self-start items-center gap-1.5 rounded-md px-2 py-1 text-xs text-foreground/70 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50';
   const toolbarClassName = 'flex items-center gap-3';
   const canSave = !busy && hasUnsavedChanges;
   const canInstall = !busy && folderEntries.length > 0 && Boolean(installItemName.trim());
@@ -134,7 +134,7 @@ export default function SkillEditor({
       {isInstallMode ? (
         <>
           <Button
-            variant="ghost"
+            variant="primary"
             size="sm"
             onClick={onBack}
             disabled={busy}
@@ -163,12 +163,12 @@ export default function SkillEditor({
         </>
       ) : (
         <>
-          <button
-            type="button"
+          <Button
+            variant="primary"
+            size="sm"
             onClick={onBack}
             disabled={busy}
             aria-label="Back"
-            className={backButtonClassName}
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -185,7 +185,7 @@ export default function SkillEditor({
               <polyline points="15 18 9 12 15 6" />
             </svg>
             Back
-          </button>
+          </Button>
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{scopeLabel}</p>
             <p className="truncate text-sm font-medium text-foreground">{titleText}</p>

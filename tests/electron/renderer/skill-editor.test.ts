@@ -15,6 +15,7 @@
  * - Tests BaseEditor slot contract by inspecting children tree structure.
  *
  * Recent Changes:
+ * - 2026-04-14: Updated Back-button coverage for the shared primary `Button` treatment in both edit and install modes.
  * - 2026-04-11: Added install-preview empty-state coverage so loading and failed preview fetches do not regress to blank editor panes.
  * - 2026-04-11: Reworked install-mode coverage for the new preview-only role after search/discovery moved to `SkillInstallBrowser`.
  * - 2026-04-03: Added edit-mode markdown preview toggle coverage and updated markdown-file expectations to default to preview.
@@ -180,10 +181,11 @@ describe('SkillEditor', () => {
 
     const nodes = allNodes(result.props.toolbar);
     const backBtn = nodes.find(
-      (n: any) => n?.type === 'button' && n?.props?.onClick === onBack
+      (n: any) => n?.type === Button && n?.props?.onClick === onBack
     );
     expect(backBtn).toBeDefined();
     expect(backBtn.props['aria-label']).toBe('Back');
+    expect(backBtn.props.variant).toBe('primary');
     backBtn.props.onClick();
     expect(onBack).toHaveBeenCalledTimes(1);
   });
@@ -229,10 +231,13 @@ describe('SkillEditor', () => {
       deleting: false,
     });
 
-    const buttons = allNodes(result.props.toolbar).filter((n: any) => n?.type === 'button');
-    expect(JSON.stringify(buttons[1])).toContain('Delete');
+    const deleteButton = allNodes(result.props.toolbar).find(
+      (node: any) => node?.type === 'button' && node?.props?.onClick === onDelete
+    );
+    expect(deleteButton).toBeDefined();
+    expect(JSON.stringify(deleteButton)).toContain('Delete');
 
-    buttons[1].props.onClick();
+    deleteButton.props.onClick();
     expect(onDelete).toHaveBeenCalledTimes(1);
   });
 
@@ -469,7 +474,7 @@ describe('SkillEditor', () => {
     expect(contentStr).toContain('Project');
     expect(contentStr).toContain('Install');
 
-    expect(backButton?.props?.variant).toBe('ghost');
+    expect(backButton?.props?.variant).toBe('primary');
     expect(backButton?.props?.size).toBe('sm');
     expect(installButton?.props?.variant).toBe('primary');
     expect(installButton?.props?.size).toBe('sm');

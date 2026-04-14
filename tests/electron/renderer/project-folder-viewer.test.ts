@@ -51,6 +51,7 @@ vi.mock('../../../electron/renderer/src/utils/markdown', () => ({
 }));
 
 import { ProjectFolderViewer } from '../../../electron/renderer/src/features/projects';
+import { Button } from '../../../electron/renderer/src/design-system/primitives';
 
 function allDescendants(node: any): any[] {
   if (!node || typeof node !== 'object') return [];
@@ -101,6 +102,7 @@ describe('ProjectFolderViewer', () => {
     const readonlyHeader = nodes.find((node: any) => typeof node?.props?.children === 'string' && node.props.children === 'Read Only');
     const inlineSelectedFileLabel = contentNodes.find((node: any) => node?.type === 'p' && node?.props?.children === 'README.md');
     const toolbarSaveButton = toolbarNodes.find((node: any) => node?.type === 'button' && node?.props?.['aria-label'] === 'Save file');
+    const backButton = toolbarNodes.find((node: any) => node?.type === Button && node?.props?.['aria-label'] === 'Back');
     const editorBody = contentNodes.find((node: any) => typeof node?.props?.className === 'string' && node.props.className.includes('min-h-0 flex-1 overflow-hidden'));
 
     expect(textarea).toBeDefined();
@@ -111,6 +113,7 @@ describe('ProjectFolderViewer', () => {
     expect(readonlyHeader).toBeUndefined();
     expect(inlineSelectedFileLabel).toBeDefined();
     expect(toolbarSaveButton).toBeUndefined();
+    expect(backButton?.props?.variant).toBe('primary');
     expect(editorBody).toBeDefined();
 
     textarea.props.onChange({ target: { value: '# Updated' } });

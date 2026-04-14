@@ -16,6 +16,7 @@
  * - The editor body keeps only one active scroll container at a time so text editing does not render nested scrollbars.
  *
  * Recent Changes:
+ * - 2026-04-14: Promoted the toolbar Back action to the primary button treatment used across workspace editors.
  * - 2026-04-14: Removed the redundant left-pane overflow container so the file editor no longer shows double scrollbars.
  * - 2026-04-14: Moved save and markdown controls into an in-pane file action row so project files save like the skill editor.
  * - 2026-04-14: Switched from a read-only preview panel to a skill-editor-style project file editor with markdown preview and save support.
@@ -111,7 +112,7 @@ export default function ProjectFolderViewer({
 
   const toolbar = (
     <div className="flex min-w-0 items-center gap-3">
-      <Button variant="ghost" size="sm" onClick={onBack} aria-label="Back">
+      <Button variant="primary" size="sm" onClick={onBack} aria-label="Back">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           width="14"

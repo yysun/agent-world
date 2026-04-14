@@ -14,6 +14,7 @@
  * - Apply writes only to the in-memory form draft via parent callbacks.
  *
  * Recent Changes:
+ * - 2026-04-14: Promoted the Back action to the primary workspace-editor button treatment.
  * - 2026-04-11: Added the initial full-area agent system-prompt editor.
  */
 
@@ -45,7 +46,7 @@ export default function AgentPromptEditor({
   const toolbar = (
     <div className="flex min-w-0 items-center gap-3">
       <Button
-        variant="ghost"
+        variant="primary"
         size="sm"
         onClick={onBack}
         aria-label="Back"
