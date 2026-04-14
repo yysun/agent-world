@@ -10,6 +10,8 @@
  * - Keeps channel naming and payload routing in one module.
  *
  * Recent Changes:
+ * - 2026-04-14: Added `project:saveFileContent` route wiring for editable project files in the composer project viewer.
+ * - 2026-04-14: Added `project:readFolderStructure` and `project:readFileContent` route wiring for the composer project viewer.
  * - 2026-04-11: Added `skill:listLocalSkills` route wiring for local skill-root discovery in the install browser.
  * - 2026-03-22: Added `skill:previewImport` route wiring for the skill editor install-mode preview flow.
  * - 2026-03-22: Added `skill:readFolderStructure` route wiring for the skill editor right pane.
@@ -104,6 +106,9 @@ export interface MainIpcHandlers {
   readSkillFolderStructure: (payload: unknown) => Promise<unknown> | unknown;
   saveSkillContent: (payload: unknown) => Promise<unknown> | unknown;
   deleteSkill: (payload: unknown) => Promise<unknown> | unknown;
+  readProjectFolderStructure: (payload: unknown) => Promise<unknown> | unknown;
+  readProjectFileContent: (payload: unknown) => Promise<unknown> | unknown;
+  saveProjectFileContent: (payload: unknown) => Promise<unknown> | unknown;
 }
 
 export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
@@ -246,6 +251,9 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
     { channel: DESKTOP_INVOKE_CHANNELS.SKILL_READ_CONTENT, handler: async (_event, payload) => handlers.readSkillContent(payload) },
     { channel: DESKTOP_INVOKE_CHANNELS.SKILL_READ_FOLDER_STRUCTURE, handler: async (_event, payload) => handlers.readSkillFolderStructure(payload) },
     { channel: DESKTOP_INVOKE_CHANNELS.SKILL_SAVE_CONTENT, handler: async (_event, payload) => handlers.saveSkillContent(payload) },
-    { channel: DESKTOP_INVOKE_CHANNELS.SKILL_DELETE, handler: async (_event, payload) => handlers.deleteSkill(payload) }
+    { channel: DESKTOP_INVOKE_CHANNELS.SKILL_DELETE, handler: async (_event, payload) => handlers.deleteSkill(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.PROJECT_READ_FOLDER_STRUCTURE, handler: async (_event, payload) => handlers.readProjectFolderStructure(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.PROJECT_READ_FILE_CONTENT, handler: async (_event, payload) => handlers.readProjectFileContent(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.PROJECT_SAVE_FILE_CONTENT, handler: async (_event, payload) => handlers.saveProjectFileContent(payload) }
   ];
 }

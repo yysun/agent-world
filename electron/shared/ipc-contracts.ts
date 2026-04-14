@@ -15,6 +15,8 @@
  * - Runtime validation remains in main-process handlers for behavior parity.
  *
  * Recent Changes:
+ * - 2026-04-14: Added `project:saveFileContent` contracts so the project folder viewer can edit and save text files.
+ * - 2026-04-14: Added `project:readFolderStructure` and `project:readFileContent` contracts for the composer project-folder viewer.
  * - 2026-04-11: Added `skill:listLocalSkills` plus `LocalSkillSummary` for scanning a chosen local root for installable skills.
  * - 2026-03-22: Added `skill:previewImport` plus install-target payload fields so the skill editor can preview and install skills from local or GitHub sources.
  * - 2026-03-22: Extended skill content payloads with optional `relativePath` so the skill editor can open files from the folder tree.
@@ -101,7 +103,10 @@ export const DESKTOP_INVOKE_CHANNELS = {
   SKILL_READ_CONTENT: 'skill:readContent',
   SKILL_READ_FOLDER_STRUCTURE: 'skill:readFolderStructure',
   SKILL_SAVE_CONTENT: 'skill:saveContent',
-  SKILL_DELETE: 'skill:delete'
+  SKILL_DELETE: 'skill:delete',
+  PROJECT_READ_FOLDER_STRUCTURE: 'project:readFolderStructure',
+  PROJECT_READ_FILE_CONTENT: 'project:readFileContent',
+  PROJECT_SAVE_FILE_CONTENT: 'project:saveFileContent'
 } as const;
 
 export type DesktopInvokeChannel =
@@ -282,6 +287,34 @@ export interface SkillFolderEntry {
   children?: SkillFolderEntry[];
 }
 
+export interface ProjectFolderEntry {
+  name: string;
+  relativePath: string;
+  type: 'file' | 'directory';
+  children?: ProjectFolderEntry[];
+}
+
+export interface ProjectFolderPayload {
+  projectPath: string;
+}
+
+export interface ProjectFileContentPayload extends ProjectFolderPayload {
+  relativePath: string;
+}
+
+export interface ProjectFileSavePayload extends ProjectFileContentPayload {
+  content: string;
+}
+
+export type ProjectFileReadStatus = 'ok' | 'binary' | 'unsupported' | 'too-large';
+
+export interface ProjectFileReadResult {
+  status: ProjectFileReadStatus;
+  relativePath: string;
+  content?: string;
+  sizeBytes?: number;
+}
+
 export interface PickDirectoryPayload {
   defaultPath?: string;
 }
@@ -384,4 +417,7 @@ export interface DesktopApi {
   readSkillFolderStructure: (skillId: string) => Promise<SkillFolderEntry[]>;
   saveSkillContent: (skillId: string, content: string, relativePath?: string) => Promise<void>;
   deleteSkill: (skillId: string) => Promise<void>;
+  readProjectFolderStructure: (projectPath: string) => Promise<ProjectFolderEntry[]>;
+  readProjectFileContent: (projectPath: string, relativePath: string) => Promise<ProjectFileReadResult>;
+  saveProjectFileContent: (projectPath: string, content: string, relativePath: string) => Promise<void>;
 }

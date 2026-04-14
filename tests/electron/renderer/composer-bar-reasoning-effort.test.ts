@@ -6,6 +6,8 @@
  * Key Features:
  * - Confirms the dropdown is visible with the current value.
  * - Confirms changing the dropdown calls the renderer action callback.
+ * - Confirms the toolbar dropdowns request medium native control sizing on macOS.
+ * - Confirms the toolbar dropdown labels use the smaller text treatment needed to avoid clipping.
  *
  * Implementation Notes:
  * - Uses virtual React/JSX mocks and inspects the returned element tree directly.
@@ -56,7 +58,8 @@ describe('ComposerBar reasoning effort', () => {
       composer: 'hello',
       onComposerChange: () => { },
       onComposerKeyDown: () => { },
-      onSelectProject: () => { },
+      onOpenProjectFolder: () => { },
+      onOpenProjectViewer: () => { },
       selectedProjectPath: null,
       canStopCurrentSession: false,
       isCurrentSessionStopping: false,
@@ -71,6 +74,12 @@ describe('ComposerBar reasoning effort', () => {
     const nodes = allDescendants(tree);
     const reasoningSelect = nodes.find((node: any) => (
       node?.type === Select && node?.props?.['aria-label'] === 'Reasoning effort'
+    ));
+    const toolPermissionSelect = nodes.find((node: any) => (
+      node?.type === Select && node?.props?.['aria-label'] === 'Tool permission level'
+    ));
+    const projectControlsRow = nodes.find((node: any) => (
+      node?.props?.['data-testid'] === 'composer-project-controls-row'
     ));
     const defaultOption = nodes.find((node: any) => (
       node?.type === 'option' && node?.props?.value === 'default'
@@ -89,17 +98,33 @@ describe('ComposerBar reasoning effort', () => {
     ));
 
     expect(reasoningSelect).toBeDefined();
+    expect(toolPermissionSelect).toBeDefined();
     expect(defaultOption).toBeDefined();
     expect(noneOption).toBeDefined();
     expect(readOption).toBeDefined();
     expect(askOption).toBeDefined();
     expect(autoOption).toBeDefined();
+    expect(projectControlsRow).toBeDefined();
+    expect(projectControlsRow.props.className).toContain('flex-nowrap');
+    expect(projectControlsRow.props.className).not.toContain('overflow-x-auto');
     expect(reasoningSelect.props.value).toBe('high');
     expect(defaultOption.props.children).toBe('Not set');
     expect(noneOption.props.children).toBe('None');
     expect(readOption.props.children).toBe('Read');
     expect(askOption.props.children).toBe('Ask');
     expect(autoOption.props.children).toBe('Auto');
+    expect(reasoningSelect.props.size).toBe('sm');
+    expect(toolPermissionSelect.props.size).toBe('sm');
+    expect(reasoningSelect.props.className).toContain('!w-[78px]');
+    expect(reasoningSelect.props.className).toContain('shrink-0');
+    expect(reasoningSelect.props.className).toContain('px-1.5');
+    expect(reasoningSelect.props.className).toContain('text-[12px]');
+    expect(reasoningSelect.props.className).toContain('leading-none');
+    expect(toolPermissionSelect.props.className).toContain('!w-[72px]');
+    expect(toolPermissionSelect.props.className).toContain('shrink-0');
+    expect(toolPermissionSelect.props.className).toContain('px-1.5');
+    expect(toolPermissionSelect.props.className).toContain('text-[12px]');
+    expect(toolPermissionSelect.props.className).toContain('leading-none');
 
     reasoningSelect.props.onChange({ target: { value: 'none' } });
     expect(onSetReasoningEffort).toHaveBeenCalledWith('none');

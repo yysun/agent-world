@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-04-14: Split the composer project affordance and added a full-area project folder viewer/editor with lazy file loading.
  * - 2026-04-11: Local install mode now scans the chosen root for SKILL.md plus nested skills directories before preview/install.
  * - 2026-04-03: Added edit-mode markdown preview state for the skill editor and reset it to preview when opening or switching skill files.
  * - 2026-03-23: Passed the collapsed-sidebar state into the full-area skill editor so its toolbar clears the macOS traffic lights.
@@ -67,6 +68,7 @@ import { LeftSidebarPanel, MainWorkspaceLayout, WorkingStatusBar } from './app/s
 import { AppFrameLayout } from './design-system/patterns';
 import { AgentPromptEditor } from './features/agents';
 import { MessageQueuePanel } from './features/queue';
+import { ProjectFolderViewer } from './features/projects';
 import { SkillEditor, SkillInstallBrowser } from './features/skills';
 import { WorldTextEditor, type WorldTextEditorField } from './features/worlds';
 import { useWorkingStatus } from './hooks/useWorkingStatus';
@@ -165,7 +167,14 @@ import {
   normalizeUnifiedLogEntry,
   type UnifiedLogEntry,
 } from './domain/panel-log-scope';
-import type { DesktopApi, GitHubSkillSummary, LocalSkillSummary, SkillFolderEntry } from './types/desktop-api';
+import type {
+  DesktopApi,
+  GitHubSkillSummary,
+  LocalSkillSummary,
+  ProjectFileReadResult,
+  ProjectFolderEntry,
+  SkillFolderEntry,
+} from './types/desktop-api';
 
 type WorkspaceState = {
   workspacePath: string | null;
@@ -209,6 +218,7 @@ type WorkspaceEditorState =
   | { kind: 'none' }
   | { kind: 'skill-edit' }
   | { kind: 'skill-install'; stage: SkillInstallEditorStage }
+  | { kind: 'project-folder-viewer' }
   | { kind: 'agent-system-prompt'; target: 'create' | 'edit' }
   | { kind: 'world-text-field'; target: 'edit'; field: WorldTextEditorField };
 
@@ -240,6 +250,30 @@ function findFirstSkillFile(entries: SkillFolderEntry[]): string {
 function getInitialSkillFilePath(entries: SkillFolderEntry[]): string {
   const defaultSkillFile = entries.find((entry) => entry.type === 'file' && entry.relativePath === 'SKILL.md');
   return defaultSkillFile?.relativePath || findFirstSkillFile(entries) || 'SKILL.md';
+}
+
+function findFirstProjectFile(entries: ProjectFolderEntry[]): string {
+  for (const entry of entries) {
+    if (entry.type === 'file') {
+      return entry.relativePath;
+    }
+    if (entry.type === 'directory' && Array.isArray(entry.children) && entry.children.length > 0) {
+      const nestedFilePath = findFirstProjectFile(entry.children);
+      if (nestedFilePath) {
+        return nestedFilePath;
+      }
+    }
+  }
+
+  return '';
+}
+
+function getInitialProjectFilePath(entries: ProjectFolderEntry[]): string {
+  return findFirstProjectFile(entries);
+}
+
+function isMarkdownWorkspaceFile(filePath: string): boolean {
+  return /(^|\/)[^/]+\.(?:md|markdown)$/i.test(String(filePath || '').trim());
 }
 
 function confirmWorkspaceEditorDiscard(message: string): boolean {
@@ -342,15 +376,26 @@ function AppContent({ api }: { api: DesktopApi }) {
   const [installGitHubSkillOptions, setInstallGitHubSkillOptions] = useState<GitHubSkillSummary[]>([]);
   const [installLocalSkillOptions, setInstallLocalSkillOptions] = useState<LocalSkillSummary[]>([]);
   const [installResolvedSourcePath, setInstallResolvedSourcePath] = useState('');
+  const [projectViewerRootPath, setProjectViewerRootPath] = useState('');
+  const [projectViewerEntries, setProjectViewerEntries] = useState<ProjectFolderEntry[]>([]);
+  const [projectViewerSelectedFilePath, setProjectViewerSelectedFilePath] = useState('');
+  const [projectViewerFileResult, setProjectViewerFileResult] = useState<ProjectFileReadResult | null>(null);
+  const [projectViewerContent, setProjectViewerContent] = useState('');
+  const [savedProjectViewerContent, setSavedProjectViewerContent] = useState('');
+  const [projectViewerMarkdownView, setProjectViewerMarkdownView] = useState<'preview' | 'markdown'>('preview');
   const [loadingSkillFileContent, setLoadingSkillFileContent] = useState(false);
   const [loadingInstallGitHubSkills, setLoadingInstallGitHubSkills] = useState(false);
   const [loadingInstallLocalSkills, setLoadingInstallLocalSkills] = useState(false);
+  const [loadingProjectFolderStructure, setLoadingProjectFolderStructure] = useState(false);
+  const [loadingProjectFileContent, setLoadingProjectFileContent] = useState(false);
   const [savingSkillContent, setSavingSkillContent] = useState(false);
   const [deletingSkillContent, setDeletingSkillContent] = useState(false);
   const [installingSkillContent, setInstallingSkillContent] = useState(false);
+  const [savingProjectFileContent, setSavingProjectFileContent] = useState(false);
   const skillFileRequestIdRef = useRef(0);
   const installGitHubSkillLoadRequestIdRef = useRef(0);
   const installLocalSkillLoadRequestIdRef = useRef(0);
+  const projectViewerRequestIdRef = useRef(0);
 
   const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [notification, setNotification] = useState<{ text: string; kind: 'error' | 'success' | 'info' } | null>(null);
@@ -381,6 +426,20 @@ function AppContent({ api }: { api: DesktopApi }) {
     setInstallGitHubSkillOptions([]);
     setInstallLocalSkillOptions([]);
     setInstallSkillTargetScope('project');
+  }, []);
+
+  const resetProjectFolderViewerState = useCallback(() => {
+    projectViewerRequestIdRef.current += 1;
+    setProjectViewerRootPath('');
+    setProjectViewerEntries([]);
+    setProjectViewerSelectedFilePath('');
+    setProjectViewerFileResult(null);
+    setProjectViewerContent('');
+    setSavedProjectViewerContent('');
+    setProjectViewerMarkdownView('preview');
+    setLoadingProjectFolderStructure(false);
+    setLoadingProjectFileContent(false);
+    setSavingProjectFileContent(false);
   }, []);
 
   useEffect(() => {
@@ -1466,6 +1525,142 @@ function AppContent({ api }: { api: DesktopApi }) {
     onCloseWorldTextEditor();
   }, [onCloseWorldTextEditor, setEditingWorld, workspaceEditor, worldTextEditorDraft]);
 
+  const onCloseProjectFolderViewer = useCallback(() => {
+    if (projectViewerContent !== savedProjectViewerContent
+      && !confirmWorkspaceEditorDiscard('Discard unsaved project file changes?')) {
+      return;
+    }
+
+    resetProjectFolderViewerState();
+    setWorkspaceEditor({ kind: 'none' });
+  }, [projectViewerContent, resetProjectFolderViewerState, savedProjectViewerContent]);
+
+  const onSelectProjectViewerFile = useCallback(async (relativePath: string) => {
+    const normalizedRelativePath = String(relativePath || '').trim();
+    if (!projectViewerRootPath || !normalizedRelativePath) {
+      return;
+    }
+
+    if (projectViewerContent !== savedProjectViewerContent
+      && !confirmWorkspaceEditorDiscard('Discard unsaved project file changes?')) {
+      return;
+    }
+
+    const requestId = projectViewerRequestIdRef.current + 1;
+    projectViewerRequestIdRef.current = requestId;
+    setProjectViewerSelectedFilePath(normalizedRelativePath);
+    setLoadingProjectFileContent(true);
+    setProjectViewerFileResult(null);
+    setProjectViewerMarkdownView('preview');
+
+    try {
+      const fileResult = await api.readProjectFileContent(projectViewerRootPath, normalizedRelativePath);
+      if (projectViewerRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setProjectViewerFileResult(fileResult);
+      const nextContent = fileResult?.status === 'ok' ? String(fileResult.content || '') : '';
+      setProjectViewerContent(nextContent);
+      setSavedProjectViewerContent(nextContent);
+    } catch (error) {
+      if (projectViewerRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setProjectViewerFileResult({ status: 'unsupported', relativePath: normalizedRelativePath });
+      setProjectViewerContent('');
+      setSavedProjectViewerContent('');
+      setStatusText(safeMessage(error, 'Failed to load project file.'), 'error');
+    } finally {
+      if (projectViewerRequestIdRef.current === requestId) {
+        setLoadingProjectFileContent(false);
+      }
+    }
+  }, [api, projectViewerContent, projectViewerRootPath, savedProjectViewerContent, setStatusText]);
+
+  const onSaveProjectViewerContent = useCallback(async () => {
+    const normalizedRelativePath = String(projectViewerSelectedFilePath || '').trim();
+    if (!projectViewerRootPath || !normalizedRelativePath || projectViewerContent === savedProjectViewerContent) {
+      return;
+    }
+
+    setSavingProjectFileContent(true);
+    try {
+      await api.saveProjectFileContent(projectViewerRootPath, projectViewerContent, normalizedRelativePath);
+      setSavedProjectViewerContent(projectViewerContent);
+      setProjectViewerFileResult((current) => (
+        current && current.status === 'ok'
+          ? { ...current, content: projectViewerContent, sizeBytes: projectViewerContent.length }
+          : current
+      ));
+      setStatusText(`Saved ${normalizedRelativePath}.`, 'success');
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to save project file.'), 'error');
+    } finally {
+      setSavingProjectFileContent(false);
+    }
+  }, [api, projectViewerContent, projectViewerRootPath, projectViewerSelectedFilePath, savedProjectViewerContent, setStatusText]);
+
+  const onOpenProjectFolderViewer = useCallback(async () => {
+    const projectPath = String(selectedProjectPath || '').trim();
+    if (!projectPath) {
+      setStatusText('Select a project folder first.', 'info');
+      return;
+    }
+
+    const requestId = projectViewerRequestIdRef.current + 1;
+    projectViewerRequestIdRef.current = requestId;
+    setProjectViewerRootPath(projectPath);
+    setProjectViewerEntries([]);
+    setProjectViewerSelectedFilePath('');
+    setProjectViewerFileResult(null);
+    setLoadingProjectFolderStructure(true);
+    setLoadingProjectFileContent(false);
+    setWorkspaceEditor({ kind: 'project-folder-viewer' });
+
+    try {
+      const folderEntries = await api.readProjectFolderStructure(projectPath);
+      if (projectViewerRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      const normalizedEntries = Array.isArray(folderEntries) ? folderEntries : [];
+      const initialFilePath = getInitialProjectFilePath(normalizedEntries);
+      setProjectViewerEntries(normalizedEntries);
+      setProjectViewerSelectedFilePath(initialFilePath);
+      setProjectViewerMarkdownView('preview');
+
+      if (!initialFilePath) {
+        return;
+      }
+
+      setLoadingProjectFileContent(true);
+      const fileResult = await api.readProjectFileContent(projectPath, initialFilePath);
+      if (projectViewerRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setProjectViewerFileResult(fileResult);
+      const nextContent = fileResult?.status === 'ok' ? String(fileResult.content || '') : '';
+      setProjectViewerContent(nextContent);
+      setSavedProjectViewerContent(nextContent);
+    } catch (error) {
+      if (projectViewerRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      resetProjectFolderViewerState();
+      setWorkspaceEditor({ kind: 'none' });
+      setStatusText(safeMessage(error, 'Failed to open project folder viewer.'), 'error');
+    } finally {
+      if (projectViewerRequestIdRef.current === requestId) {
+        setLoadingProjectFolderStructure(false);
+        setLoadingProjectFileContent(false);
+      }
+    }
+  }, [api, resetProjectFolderViewerState, selectedProjectPath, setStatusText]);
+
   const onChangeInstallSkillSourceType = useCallback((value: SkillInstallSourceType) => {
     installGitHubSkillLoadRequestIdRef.current += 1;
     installLocalSkillLoadRequestIdRef.current += 1;
@@ -2090,7 +2285,8 @@ function AppContent({ api }: { api: DesktopApi }) {
     composer,
     setComposer,
     onComposerKeyDown,
-    onSelectProject,
+    onOpenProjectFolder: onSelectProject,
+    onOpenProjectViewer: onOpenProjectFolderViewer,
     selectedProjectPath,
     reasoningEffort,
     onSetReasoningEffort,
@@ -2301,6 +2497,29 @@ function AppContent({ api }: { api: DesktopApi }) {
               ? 'Loading preview files…'
               : (installSkillPreviewStatusMessage || `Preview files are unavailable for ${installSkillItemName || 'this skill'}.`))
             : ''}
+        />
+      );
+    }
+
+    if (workspaceEditor.kind === 'project-folder-viewer') {
+      return (
+        <ProjectFolderViewer
+          rootPath={projectViewerRootPath}
+          entries={projectViewerEntries}
+          selectedFilePath={projectViewerSelectedFilePath}
+          fileResult={projectViewerFileResult}
+          content={projectViewerContent}
+          markdownViewMode={projectViewerMarkdownView}
+          loadingStructure={loadingProjectFolderStructure}
+          loadingFile={loadingProjectFileContent}
+          saving={savingProjectFileContent}
+          hasUnsavedChanges={projectViewerContent !== savedProjectViewerContent}
+          onSelectFile={onSelectProjectViewerFile}
+          onContentChange={setProjectViewerContent}
+          onMarkdownViewModeChange={setProjectViewerMarkdownView}
+          onSave={onSaveProjectViewerContent}
+          onBack={onCloseProjectFolderViewer}
+          leftSidebarCollapsed={leftSidebarCollapsed}
         />
       );
     }

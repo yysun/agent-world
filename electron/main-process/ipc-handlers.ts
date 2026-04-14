@@ -12,6 +12,8 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-04-14: Added project file save IPC handling so the project viewer can edit text files and persist changes safely.
+ * - 2026-04-14: Added bounded project-folder tree and file-preview IPC handlers for the composer project viewer.
  * - 2026-04-11: Extracted skill markdown parsing, local discovery, and file traversal helpers into dedicated main-process modules.
  * - 2026-04-11: Added local skill-root discovery so the install browser can scan a chosen root for SKILL.md and nested skills directories.
  * - 2026-04-11: GitHub skill discovery now reads SKILL.md descriptions so the renderer can render found skills with the same card content as local skills.
@@ -93,6 +95,11 @@ import {
   resolveSkillFilePath,
   writeSkillFilesToTarget,
 } from './skill-file-helpers.js';
+import {
+  readProjectFileContent as readProjectFileContentResult,
+  readProjectFolderEntries,
+  saveProjectFileContent as saveProjectFileContentResult,
+} from './project-file-helpers.js';
 import { parseSkillDescriptionFromMarkdown, parseSkillNameFromMarkdown } from './skill-markdown.js';
 
 interface BrowserWindowLike {
@@ -2550,6 +2557,32 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     await fs.promises.rm(getSkillRootPath(skillPath), { recursive: true, force: true });
   }
 
+  async function readProjectFolderStructure(payload: unknown) {
+    await ensureCoreReady();
+    const projectPath = String((payload as any)?.projectPath || '').trim();
+    if (!projectPath) throw new Error('Project path is required.');
+    return readProjectFolderEntries(projectPath);
+  }
+
+  async function readProjectFileContent(payload: unknown) {
+    await ensureCoreReady();
+    const projectPath = String((payload as any)?.projectPath || '').trim();
+    const relativePath = String((payload as any)?.relativePath || '').trim();
+    if (!projectPath) throw new Error('Project path is required.');
+    if (!relativePath) throw new Error('Project file path is required.');
+    return readProjectFileContentResult(projectPath, relativePath);
+  }
+
+  async function saveProjectFileContent(payload: unknown) {
+    await ensureCoreReady();
+    const projectPath = String((payload as any)?.projectPath || '').trim();
+    const relativePath = String((payload as any)?.relativePath || '').trim();
+    const content = String((payload as any)?.content ?? '');
+    if (!projectPath) throw new Error('Project path is required.');
+    if (!relativePath) throw new Error('Project file path is required.');
+    await saveProjectFileContentResult(projectPath, relativePath, content);
+  }
+
   return {
     loadWorldsFromWorkspace,
     loadSpecificWorld,
@@ -2600,6 +2633,9 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     readSkillContent,
     readSkillFolderStructure,
     saveSkillContent,
-    deleteSkill
+    deleteSkill,
+    readProjectFolderStructure,
+    readProjectFileContent,
+    saveProjectFileContent
   };
 }

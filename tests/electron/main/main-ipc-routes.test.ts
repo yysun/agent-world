@@ -11,6 +11,8 @@
  * - Tests route build + registration helpers together.
  *
  * Recent Changes:
+ * - 2026-04-14: Added channel/order/payload assertions for `project:saveFileContent` route wiring.
+ * - 2026-04-14: Added channel/order/payload assertions for `project:readFolderStructure` and `project:readFileContent` route wiring.
  * - 2026-04-11: Added channel/order/payload assertions for `skill:listLocalSkills` route wiring.
  * - 2026-03-22: Added relative-path payload coverage for `skill:readContent` and `skill:saveContent`.
  * - 2026-03-22: Added `skill:readFolderStructure` channel/order/payload coverage.
@@ -96,7 +98,10 @@ function createHandlerMocks() {
     readSkillContent: vi.fn(async () => '# skill content'),
     readSkillFolderStructure: vi.fn(async () => []),
     saveSkillContent: vi.fn(async () => undefined),
-    deleteSkill: vi.fn(async () => undefined)
+    deleteSkill: vi.fn(async () => undefined),
+    readProjectFolderStructure: vi.fn(async () => []),
+    readProjectFileContent: vi.fn(async () => ({ status: 'ok', relativePath: 'README.md', content: '# project' })),
+    saveProjectFileContent: vi.fn(async () => undefined)
   };
 }
 
@@ -166,7 +171,10 @@ describe('buildMainIpcRoutes', () => {
       'skill:readContent',
       'skill:readFolderStructure',
       'skill:saveContent',
-      'skill:delete'
+      'skill:delete',
+      'project:readFolderStructure',
+      'project:readFileContent',
+      'project:saveFileContent'
     ]);
   });
 
@@ -215,6 +223,9 @@ describe('buildMainIpcRoutes', () => {
     await routes.find((route) => route.channel === 'skill:readFolderStructure')?.handler({}, { skillId: 'skill-1' });
     await routes.find((route) => route.channel === 'skill:saveContent')?.handler({}, { skillId: 'skill-1', content: '# docs', relativePath: 'docs/guide.md' });
     await routes.find((route) => route.channel === 'skill:delete')?.handler({}, { skillId: 'skill-1' });
+    await routes.find((route) => route.channel === 'project:readFolderStructure')?.handler({}, { projectPath: '/tmp/project' });
+    await routes.find((route) => route.channel === 'project:readFileContent')?.handler({}, { projectPath: '/tmp/project', relativePath: 'README.md' });
+    await routes.find((route) => route.channel === 'project:saveFileContent')?.handler({}, { projectPath: '/tmp/project', relativePath: 'README.md', content: '# updated' });
 
     expect(handlers.writeWorldPreference).toHaveBeenCalledWith('world-99');
     expect(handlers.openWorkspaceDialog).toHaveBeenCalledWith({ directoryPath: '/tmp/workspace' });
@@ -257,6 +268,9 @@ describe('buildMainIpcRoutes', () => {
     expect(handlers.readSkillFolderStructure).toHaveBeenCalledWith({ skillId: 'skill-1' });
     expect(handlers.saveSkillContent).toHaveBeenCalledWith({ skillId: 'skill-1', content: '# docs', relativePath: 'docs/guide.md' });
     expect(handlers.deleteSkill).toHaveBeenCalledWith({ skillId: 'skill-1' });
+    expect(handlers.readProjectFolderStructure).toHaveBeenCalledWith({ projectPath: '/tmp/project' });
+    expect(handlers.readProjectFileContent).toHaveBeenCalledWith({ projectPath: '/tmp/project', relativePath: 'README.md' });
+    expect(handlers.saveProjectFileContent).toHaveBeenCalledWith({ projectPath: '/tmp/project', relativePath: 'README.md', content: '# updated' });
   });
 });
 
@@ -276,7 +290,7 @@ describe('registerIpcRoutes', () => {
     );
     expect(ipcMainLike.handle).toHaveBeenNthCalledWith(
       routes.length,
-      'skill:delete',
+      'project:saveFileContent',
       expect.any(Function)
     );
   });

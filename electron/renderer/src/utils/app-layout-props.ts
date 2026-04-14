@@ -12,6 +12,7 @@
  * - Data-only transformations from provided inputs.
  *
  * Recent Changes:
+ * - 2026-04-14: Split composer project props into separate open-folder and open-viewer actions for the project viewer flow.
  * - 2026-03-15: Added `editingAgentId` wiring so the Electron header can highlight the agent currently being edited.
  * - 2026-03-14: Moved world import props from the right panel into left-sidebar wiring.
  * - 2026-03-13: Added `reasoningEffort` and `onSetReasoningEffort` to composer props for world-level reasoning control.
@@ -75,7 +76,8 @@ export function createMainContentComposerProps<T extends PropBag>(input: T) {
     composer: input.composer,
     onComposerChange: input.setComposer,
     onComposerKeyDown: input.onComposerKeyDown,
-    onSelectProject: input.onSelectProject,
+    onOpenProjectFolder: input.onOpenProjectFolder,
+    onOpenProjectViewer: input.onOpenProjectViewer,
     selectedProjectPath: input.selectedProjectPath,
     canStopCurrentSession: input.canStopCurrentSession,
     isCurrentSessionStopping: input.isCurrentSessionStopping,

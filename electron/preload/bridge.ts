@@ -14,6 +14,8 @@
  * - Payload normalization helpers preserve existing invoke payload formats.
  *
  * Recent Changes:
+ * - 2026-04-14: Added `saveProjectFileContent()` bridge wiring for editable project files in the composer project viewer.
+ * - 2026-04-14: Added `readProjectFolderStructure()` and `readProjectFileContent()` bridge wiring for the composer project viewer.
  * - 2026-04-11: Added `listLocalSkills()` bridge wiring for scanning a chosen local root for installable skills.
  * - 2026-03-22: Added `previewSkillImport()` bridge wiring for the skill editor install-mode preview flow.
  * - 2026-03-22: Extended `readSkillContent` and `saveSkillContent` bridge wiring with optional relative paths for tree-selected files.
@@ -47,6 +49,8 @@ import {
   type DesktopApi,
   type GitHubSkillSummary,
   type LocalSkillSummary,
+  type ProjectFileReadResult,
+  type ProjectFolderEntry,
   type HeartbeatJobStatus,
   type RendererLoggingConfig,
   type SkillImportPreviewResult,
@@ -350,7 +354,13 @@ export function createDesktopApi(ipcRendererLike?: IpcRendererLike): DesktopApi 
     saveSkillContent: (skillId, content, relativePath) =>
       invokeDesktopChannel<void>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_SAVE_CONTENT, { skillId, content, relativePath }),
     deleteSkill: (skillId) =>
-      invokeDesktopChannel<void>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_DELETE, { skillId })
+      invokeDesktopChannel<void>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.SKILL_DELETE, { skillId }),
+    readProjectFolderStructure: (projectPath) =>
+      invokeDesktopChannel<ProjectFolderEntry[]>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.PROJECT_READ_FOLDER_STRUCTURE, { projectPath }),
+    readProjectFileContent: (projectPath, relativePath) =>
+      invokeDesktopChannel<ProjectFileReadResult>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.PROJECT_READ_FILE_CONTENT, { projectPath, relativePath }),
+    saveProjectFileContent: (projectPath, content, relativePath) =>
+      invokeDesktopChannel<void>(activeIpcRenderer, DESKTOP_INVOKE_CHANNELS.PROJECT_SAVE_FILE_CONTENT, { projectPath, content, relativePath })
   };
 }
 

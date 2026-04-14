@@ -11,6 +11,16 @@
  * - Keeps action-button sizing and iconography consistent with desktop UI updates
  *
  * Recent Changes:
+ * - 2026-04-14: Increased the permission dropdown width after the compact layout clipped its label too aggressively.
+ * - 2026-04-14: Rebalanced the compact composer dropdown widths after the previous forced sizing made their labels too cramped.
+ * - 2026-04-14: Forced narrower dropdown widths with compact overrides so the reasoning and permission controls do not sprawl across the composer row.
+ * - 2026-04-14: Switched the grouped composer dropdowns to compact select sizing and removed horizontal overflow scrolling from the action row.
+ * - 2026-04-14: Tightened the reasoning and permission dropdown widths so the grouped project controls fit without horizontal scrolling.
+ * - 2026-04-14: Kept the Project button, reasoning dropdown, and permission dropdown in a single non-wrapping toolbar cluster.
+ * - 2026-04-14: Reduced toolbar dropdown label size and line-height so the native select text clears the button chrome cleanly.
+ * - 2026-04-14: Switched toolbar dropdowns back to native medium select sizing and aligned adjacent controls to avoid bottom-edge clipping.
+ * - 2026-04-14: Increased toolbar control height and allowed the left action row to wrap so native macOS dropdowns do not clip.
+ * - 2026-04-14: Split the project affordance into separate open-folder and project-viewer buttons.
  * - 2026-03-23: Rewired the composer textarea and toolbar selects onto shared design-system primitives.
  * - 2026-03-13: Removed reasoning/permission prefixes from dropdown option labels and capitalized the visible text.
  * - 2026-03-13: Switched composer reasoning-effort options to `default`/`none` so users can distinguish omission from an explicit no-reasoning hint.
@@ -30,7 +40,8 @@ export default function ComposerBar({
   composer,
   onComposerChange,
   onComposerKeyDown,
-  onSelectProject,
+  onOpenProjectFolder,
+  onOpenProjectViewer,
   selectedProjectPath,
   canStopCurrentSession,
   isCurrentSessionStopping,
@@ -58,11 +69,11 @@ export default function ComposerBar({
           aria-label="Message input"
           disabled={composerDisabled}
         />
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="flex items-end justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1.5">
             <button
               type="button"
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               aria-label="Attach file"
             >
               <svg
@@ -80,10 +91,10 @@ export default function ComposerBar({
             </button>
             <button
               type="button"
-              onClick={onSelectProject}
-              className="flex h-7 items-center gap-1 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              aria-label="Select project folder"
-              title={selectedProjectPath ? `Project folder: ${selectedProjectPath}` : 'Select project folder for context'}
+              onClick={onOpenProjectFolder}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label="Open project folder"
+              title={selectedProjectPath ? `Open project folder. Current folder: ${selectedProjectPath}` : 'Open project folder for context'}
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -97,38 +108,54 @@ export default function ComposerBar({
               >
                 <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
               </svg>
-              <span>Project</span>
             </button>
-            <Select
-              value={reasoningEffort}
-              onChange={(e) => onSetReasoningEffort?.(e.target.value)}
-              className="h-7 w-auto rounded-lg border-0 bg-transparent px-1.5 py-0 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:border-transparent focus:ring-0"
-              aria-label="Reasoning effort"
-              title="Reasoning effort"
-              data-testid="composer-reasoning-effort"
+            <div
+              className="flex min-w-0 flex-nowrap items-center gap-1.5"
+              data-testid="composer-project-controls-row"
             >
-              <option value="default">Not set</option>
-              <option value="none">None</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </Select>
-            <Select
-              value={toolPermission}
-              onChange={(e) => onSetToolPermission?.(e.target.value)}
-              className="h-7 w-auto rounded-lg border-0 bg-transparent px-1.5 py-0 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:border-transparent focus:ring-0"
-              aria-label="Tool permission level"
-              title="Tool permission level"
-            >
-              <option value="read">Read</option>
-              <option value="ask">Ask</option>
-              <option value="auto">Auto</option>
-            </Select>
+              <button
+                type="button"
+                onClick={onOpenProjectViewer}
+                disabled={!selectedProjectPath}
+                className="flex h-9 shrink-0 items-center rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Open project viewer"
+                title={selectedProjectPath ? `Open project viewer for ${selectedProjectPath}` : 'Select project folder first'}
+              >
+                <span>Project</span>
+              </button>
+              <Select
+                size="sm"
+                value={reasoningEffort}
+                onChange={(e) => onSetReasoningEffort?.(e.target.value)}
+                className="!w-[78px] shrink-0 rounded-lg border-0 bg-transparent px-1.5 text-[12px] leading-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:border-transparent focus:ring-0"
+                aria-label="Reasoning effort"
+                title="Reasoning effort"
+                data-testid="composer-reasoning-effort"
+              >
+                <option value="default">Not set</option>
+                <option value="none">None</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </Select>
+              <Select
+                size="sm"
+                value={toolPermission}
+                onChange={(e) => onSetToolPermission?.(e.target.value)}
+                className="!w-[72px] shrink-0 rounded-lg border-0 bg-transparent px-1.5 text-[12px] leading-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:border-transparent focus:ring-0"
+                aria-label="Tool permission level"
+                title="Tool permission level"
+              >
+                <option value="read">Read</option>
+                <option value="ask">Ask</option>
+                <option value="auto">Auto</option>
+              </Select>
+            </div>
           </div>
           <button
             type="submit"
             disabled={showStopButton ? (isCurrentSessionStopping || isCurrentSessionSending) : (!composer.trim() || composerDisabled)}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-40"
             aria-label={showStopButton ? 'Stop message processing' : 'Send message'}
             title={showStopButton ? 'Stop processing' : 'Send message'}
           >

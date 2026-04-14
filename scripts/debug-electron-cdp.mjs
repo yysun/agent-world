@@ -1,7 +1,8 @@
-const targets = await (await fetch('http://127.0.0.1:9222/json/list')).json();
+const cdpPort = String(process.argv[2] || process.env.AGENT_WORLD_ELECTRON_CDP_PORT || '9222').trim();
+const targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json/list`)).json();
 const pageTarget = targets.find((target) => target.type === 'page');
 if (!pageTarget?.webSocketDebuggerUrl) {
-  throw new Error('No Electron page target found on CDP port 9222.');
+  throw new Error(`No Electron page target found on CDP port ${cdpPort}.`);
 }
 
 const ws = new WebSocket(pageTarget.webSocketDebuggerUrl);

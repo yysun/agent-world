@@ -19,6 +19,8 @@
  * - Defaults to SQLite storage and workspace path if env vars not set
  *
  * Recent Changes:
+ * - 2026-04-14: Wired `project:saveFileContent` through the main-process IPC route builder for editable project files.
+ * - 2026-04-14: Passed the new project-folder viewer IPC handlers into the canonical main-process route builder.
  * - 2026-04-11: Canonical skill-root defaults are now shared directly by core,
  *   so Electron no longer needs a desktop-only environment override.
  * - 2026-03-10: Added an E2E-only user-data override and optional single-instance-lock bypass so the real Playwright Electron harness can launch without colliding with another generic Electron process.
@@ -407,7 +409,10 @@ function registerIpcHandlers() {
     readSkillContent: ipcHandlers.readSkillContent,
     readSkillFolderStructure: ipcHandlers.readSkillFolderStructure,
     saveSkillContent: ipcHandlers.saveSkillContent,
-    deleteSkill: ipcHandlers.deleteSkill
+    deleteSkill: ipcHandlers.deleteSkill,
+    readProjectFolderStructure: ipcHandlers.readProjectFolderStructure,
+    readProjectFileContent: ipcHandlers.readProjectFileContent,
+    saveProjectFileContent: ipcHandlers.saveProjectFileContent
   });
   registerIpcRoutes(ipcMain, routes);
 }

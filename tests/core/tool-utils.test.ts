@@ -41,6 +41,7 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
   let mockWorld: World;
   let mockAgent: Agent;
   const testMessageId = 'msg-test-123';
+  const testChatId = 'chat-test-123';
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -91,7 +92,8 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       functionCalls,
       mockWorld,
       mockAgent,
-      testMessageId
+      testMessageId,
+      testChatId
     );
 
     expect(result.validCalls).toHaveLength(2);
@@ -112,7 +114,8 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       functionCalls,
       mockWorld,
       mockAgent,
-      testMessageId
+      testMessageId,
+      testChatId
     );
 
     expect(result.validCalls).toHaveLength(0);
@@ -132,7 +135,8 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       functionCalls,
       mockWorld,
       mockAgent,
-      testMessageId
+      testMessageId,
+      testChatId
     );
 
     expect(result.validCalls).toHaveLength(0);
@@ -152,7 +156,8 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       functionCalls,
       mockWorld,
       mockAgent,
-      testMessageId
+      testMessageId,
+      testChatId
     );
 
     expect(result.validCalls).toHaveLength(0);
@@ -172,7 +177,8 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       functionCalls,
       mockWorld,
       mockAgent,
-      testMessageId
+      testMessageId,
+      testChatId
     );
 
     expect(result.toolResults).toHaveLength(1);
@@ -194,7 +200,8 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       functionCalls as any,
       mockWorld,
       mockAgent,
-      testMessageId
+      testMessageId,
+      testChatId
     );
 
     expect(result.toolResults).toHaveLength(1);
@@ -215,7 +222,8 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       functionCalls,
       mockWorld,
       mockAgent,
-      testMessageId
+      testMessageId,
+      testChatId
     );
 
     expect(events.publishToolEvent).toHaveBeenCalledTimes(1);
@@ -223,6 +231,7 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       agentName: 'test-agent',
       type: 'tool-error',
       messageId: testMessageId,
+      chatId: testChatId,
       toolExecution: {
         toolName: '',
         toolCallId: 'call-bad',
@@ -259,7 +268,8 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       functionCalls,
       mockWorld,
       mockAgent,
-      testMessageId
+      testMessageId,
+      testChatId
     );
 
     expect(result.validCalls).toHaveLength(2);
@@ -278,7 +288,8 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       [],
       mockWorld,
       mockAgent,
-      testMessageId
+      testMessageId,
+      testChatId
     );
 
     expect(result.validCalls).toHaveLength(0);
@@ -305,7 +316,8 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
         functionCalls,
         mockWorld,
         mockAgent,
-        testMessageId
+        testMessageId,
+        testChatId
       );
     }).not.toThrow();
   });
@@ -329,7 +341,8 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       functionCalls,
       mockWorld,
       agentWithoutId,
-      testMessageId
+      testMessageId,
+      testChatId
     );
 
     expect(events.publishToolEvent).toHaveBeenCalledWith(mockWorld, expect.objectContaining({
