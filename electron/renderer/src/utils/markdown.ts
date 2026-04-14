@@ -18,6 +18,7 @@
  * - Handles browser/window environment checks
  * 
  * Recent Changes:
+ * - 2026-04-14: Normalize leading YAML frontmatter fences into explicit top-and-bottom markdown rules so previews keep both wrappers without turning the metadata block into a heading.
  * - 2026-02-28: Added XML payload detection so raw XML content is rendered as escaped markdown code blocks instead of being interpreted as HTML.
  * - 2026-02-28: Fixed DOMPurify attribute allowlist shape to preserve `img src`/`a href` and explicitly allowed data URIs for `img` tags.
  * - 2026-02-28: Allowed safe base64 data image URIs (including SVG) so markdown image embeds render in Electron.
@@ -154,6 +155,13 @@ function normalizeXmlForMarkdownDisplay(markdownText: string): string {
   return `\`\`\`xml\n${markdownText}\n\`\`\``;
 }
 
+function normalizeLeadingFrontmatterFence(markdownText: string): string {
+  return markdownText.replace(/^---\s*\n([\s\S]*?)\n---\s*(?:\n|$)/, (_fullMatch, frontmatterBody: string) => {
+    const trimmedBody = String(frontmatterBody || '').trimEnd();
+    return trimmedBody ? `---\n\n${trimmedBody}\n\n---\n\n` : '---\n\n---\n\n';
+  });
+}
+
 /**
  * Renders markdown text to safe HTML
  * @param markdownText - The markdown text to render
@@ -166,7 +174,9 @@ export function renderMarkdown(markdownText: string | null | undefined): string 
 
   try {
     const normalizedMarkdown = normalizeXmlForMarkdownDisplay(
-      normalizeMultilineMarkdownLinks(markdownText)
+      normalizeLeadingFrontmatterFence(
+        normalizeMultilineMarkdownLinks(markdownText)
+      )
     );
 
     // Convert markdown to HTML

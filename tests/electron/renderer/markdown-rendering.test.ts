@@ -13,6 +13,7 @@
  * - Tests parser/output behavior at the renderMarkdown unit boundary.
  *
  * Summary of Recent Changes:
+ * - 2026-04-14: Added regression coverage that leading YAML frontmatter fences render paired horizontal rules around the metadata block.
  * - 2026-02-28: Added regression coverage for XML payloads prefixed by command mentions (for example `@engraver`).
  * - 2026-02-28: Added regression coverage for raw XML payload rendering as escaped code text.
  * - 2026-02-28: Added regression coverage that sanitizer URL policy allows base64 SVG data URIs for markdown images.
@@ -119,5 +120,23 @@ Build an MCP App
     expect(html).toContain('&lt;score-partwise version=&quot;3.1&quot;&gt;');
     expect(html).toContain('@engraver');
     expect(html).not.toContain('<score-partwise version="3.1">');
+  });
+
+  it('renders paired horizontal rules for YAML frontmatter fences', () => {
+    const input = `---
+name: git-wiki
+description: |
+  Build and maintain a local code-project wiki under .wiki.
+---
+
+# Skill Title`;
+
+    const html = renderMarkdown(input);
+
+    expect((html.match(/<hr\s*\/?>/g) || [])).toHaveLength(2);
+    expect(html).toContain('name: git-wiki');
+    expect(html).toContain('description: |');
+    expect(html).not.toContain('<h2>name: git-wiki');
+    expect(html).toContain('<h1>Skill Title</h1>');
   });
 });
