@@ -11,6 +11,7 @@
  * - Keeps action-button sizing and iconography consistent with desktop UI updates
  *
  * Recent Changes:
+ * - 2026-04-15: Restyled the Project viewer button to the secondary button treatment so it reads as a contextual action instead of a muted text button.
  * - 2026-04-14: Increased the permission dropdown width after the compact layout clipped its label too aggressively.
  * - 2026-04-14: Rebalanced the compact composer dropdown widths after the previous forced sizing made their labels too cramped.
  * - 2026-04-14: Forced narrower dropdown widths with compact overrides so the reasoning and permission controls do not sprawl across the composer row.
@@ -117,7 +118,7 @@ export default function ComposerBar({
                 type="button"
                 onClick={onOpenProjectViewer}
                 disabled={!selectedProjectPath}
-                className="flex h-9 shrink-0 items-center rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex h-9 shrink-0 items-center rounded-lg bg-secondary px-2.5 text-xs text-secondary-foreground transition-colors hover:bg-secondary/80 disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label="Open project viewer"
                 title={selectedProjectPath ? `Open project viewer for ${selectedProjectPath}` : 'Select project folder first'}
               >

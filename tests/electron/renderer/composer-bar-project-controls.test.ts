@@ -7,6 +7,7 @@
  * - Confirms the folder icon button and Project button are both present.
  * - Confirms the Project button disables cleanly when no project is selected.
  * - Confirms both callbacks fire when a project path is available.
+ * - Confirms the Project button uses the secondary button treatment.
  *
  * Implementation Notes:
  * - Uses virtual React/JSX mocks and inspects the returned element tree directly.
@@ -78,6 +79,8 @@ describe('ComposerBar project controls', () => {
     expect(projectControlsRow).toBeDefined();
     expect(projectControlsRow.props.className).toContain('flex-nowrap');
     expect(projectButton.props.disabled).toBe(true);
+    expect(projectButton.props.className).toContain('bg-secondary');
+    expect(projectButton.props.className).toContain('text-secondary-foreground');
   });
 
   it('fires separate callbacks when a project path is selected', () => {

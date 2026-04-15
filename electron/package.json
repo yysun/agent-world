@@ -49,7 +49,7 @@
     "renderer:dev": "vite --config vite.config.js",
     "renderer:build": "vite build --config vite.config.js",
     "postinstall": "electron-builder install-app-deps",
-    "electron:dev": "wait-on http://127.0.0.1:5181 file:dist/main.js && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5181 electron --remote-debugging-port=9222 .",
+    "electron:dev": "wait-on http://127.0.0.1:5181 file:dist/main.js && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5181 node ../scripts/run-electron-dev.mjs",
     "dev": "npm-run-all --parallel main:watch renderer:dev electron:dev",
     "start": "npm run main:build && npm run renderer:build && electron .",
     "prepare:runtime": "npm --prefix .. run build:core && node ../scripts/prepare-electron-runtime.js",
