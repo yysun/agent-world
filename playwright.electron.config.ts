@@ -26,6 +26,7 @@ export const ELECTRON_E2E_EXPECT_TIMEOUT_MS = 60_000;
 export default defineConfig({
   testDir: './tests/electron-e2e',
   fullyParallel: false,
+  maxFailures: 1,
   workers: 1,
   timeout: ELECTRON_E2E_TIMEOUT_MS,
   expect: {

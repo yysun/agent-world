@@ -34,7 +34,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { createRequire } from 'node:module';
 import { promisify } from 'node:util';
 import { expect, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { resolveCreatedSessionId } from './session-resolution.js';
@@ -46,7 +45,6 @@ import {
 } from './seeded-agent.js';
 
 const execFileAsync = promisify(execFile);
-const electronWorkspaceRequire = createRequire(path.resolve(process.cwd(), 'electron/package.json'));
 const ELECTRON_E2E_QUEUE_NO_RESPONSE_FALLBACK_MS = process.env.AGENT_WORLD_QUEUE_NO_RESPONSE_FALLBACK_MS || '5000';
 const WORLD_SELECTION_TIMEOUT_MS = 15_000;
 const WORLD_SELECTION_MAX_ATTEMPTS = 4;
@@ -58,6 +56,35 @@ export const CHAT_NAMES = {
   current: 'Loaded Current Chat',
   switched: 'Switched Chat',
 };
+
+export function resolveElectronExecutablePath(
+  electronPackageRoot: string = path.resolve(process.cwd(), 'electron/node_modules/electron'),
+  options: {
+    existsSync?: (targetPath: string) => boolean;
+    readFileSync?: (targetPath: string, encoding: BufferEncoding) => string;
+    overrideDistPath?: string | undefined;
+  } = {},
+): string {
+  const existsSync = options.existsSync ?? fs.existsSync;
+  const readFileSync = options.readFileSync ?? fs.readFileSync;
+  const pathFile = path.join(electronPackageRoot, 'path.txt');
+  const executableName = existsSync(pathFile)
+    ? readFileSync(pathFile, 'utf8').trim()
+    : '';
+
+  if (!executableName) {
+    throw new Error('Electron failed to install correctly for desktop E2E. Missing electron/path.txt executable entry.');
+  }
+
+  const overrideDistPath = String(
+    options.overrideDistPath ?? process.env.ELECTRON_OVERRIDE_DIST_PATH ?? '',
+  ).trim();
+  if (overrideDistPath) {
+    return path.join(overrideDistPath, executableName);
+  }
+
+  return path.join(electronPackageRoot, 'dist', executableName);
+}
 
 let activeWorkspacePath = '';
 
@@ -184,7 +211,7 @@ export function getElectronLaunchOptions(): {
   );
 
   return {
-    executablePath: electronWorkspaceRequire('electron'),
+    executablePath: resolveElectronExecutablePath(),
     args: [
       electronLauncherEntryPath,
       `--workspace=${workspacePath}`,
@@ -303,7 +330,7 @@ export async function selectSeededWorld(page: Page): Promise<void> {
       if (!isRetryableWorldSelectionError(error)) {
         throw error;
       }
-      await page.keyboard.press('Escape').catch(() => {});
+      await page.keyboard.press('Escape').catch(() => { });
     }
   }
 
@@ -332,7 +359,7 @@ async function reloadSeededWorld(page: Page): Promise<void> {
       if (!isRetryableWorldSelectionError(error)) {
         throw error;
       }
-      await page.keyboard.press('Escape').catch(() => {});
+      await page.keyboard.press('Escape').catch(() => { });
     }
   }
 

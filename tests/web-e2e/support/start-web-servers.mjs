@@ -16,17 +16,31 @@
  */
 
 import { spawn } from 'node:child_process';
-import fs from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import dotenv from 'dotenv';
 
-const children = [];
-let shuttingDown = false;
 const workspacePath = path.resolve(process.cwd(), '.tmp', 'web-playwright-workspace');
+
+export function hydrateStartWebServersEnv(
+  env = process.env,
+  cwd = process.cwd(),
+  loadEnv = dotenv.config,
+) {
+  loadEnv({
+    path: path.resolve(cwd, '.env'),
+    processEnv: env,
+    quiet: true,
+  });
+
+  return env;
+}
 
 function seedWorkspaceArtifacts() {
   const skillRoot = path.join(workspacePath, '.agent-world', 'skills', 'e2e-matrix-skill');
-  fs.mkdirSync(path.join(skillRoot, 'scripts'), { recursive: true });
-  fs.writeFileSync(
+  mkdirSync(path.join(skillRoot, 'scripts'), { recursive: true });
+  writeFileSync(
     path.join(skillRoot, 'SKILL.md'),
     [
       '---',
@@ -41,7 +55,7 @@ function seedWorkspaceArtifacts() {
     ].join('\n'),
     'utf8',
   );
-  fs.writeFileSync(
+  writeFileSync(
     path.join(skillRoot, 'scripts', 'mark-load-skill.js'),
     [
       "import { promises as fs } from 'node:fs';",
@@ -53,41 +67,54 @@ function seedWorkspaceArtifacts() {
   );
 }
 
-function spawnChild(args) {
-  const child = spawn('npm', args, {
-    stdio: 'inherit',
-    env: process.env,
-    shell: false,
-  });
-  children.push(child);
-  child.on('exit', (code, signal) => {
+export function startWebServersSupervisor(env = hydrateStartWebServersEnv()) {
+  const children = [];
+  let shuttingDown = false;
+
+  function spawnChild(args) {
+    const child = spawn('npm', args, {
+      stdio: 'inherit',
+      env,
+      shell: false,
+    });
+    children.push(child);
+    child.on('exit', (code, signal) => {
+      if (shuttingDown) {
+        return;
+      }
+      shuttingDown = true;
+      for (const other of children) {
+        if (other.pid && other.pid !== child.pid) {
+          other.kill('SIGTERM');
+        }
+      }
+      process.exit(code ?? (signal ? 1 : 0));
+    });
+    return child;
+  }
+
+  function shutdown(signal) {
     if (shuttingDown) {
       return;
     }
     shuttingDown = true;
-    for (const other of children) {
-      if (other.pid && other.pid !== child.pid) {
-        other.kill('SIGTERM');
-      }
+    for (const child of children) {
+      child.kill(signal);
     }
-    process.exit(code ?? (signal ? 1 : 0));
-  });
-  return child;
+  }
+
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+  seedWorkspaceArtifacts();
+  spawnChild(['run', 'server:dev']);
+  spawnChild(['run', 'web:vite:e2e']);
+
+  return {
+    shutdown,
+  };
 }
 
-function shutdown(signal) {
-  if (shuttingDown) {
-    return;
-  }
-  shuttingDown = true;
-  for (const child of children) {
-    child.kill(signal);
-  }
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  startWebServersSupervisor();
 }
-
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-
-seedWorkspaceArtifacts();
-spawnChild(['run', 'server:dev']);
-spawnChild(['run', 'web:vite:e2e']);

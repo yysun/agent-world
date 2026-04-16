@@ -18,7 +18,7 @@
  */
 
 import { describe, expect, test } from 'vitest';
-import { appendToolRulesToSystemMessage } from '../../core/llm-manager.js';
+import { appendToolRulesToSystemMessage } from '../../core/llm-runtime.js';
 import type { AgentMessage } from '../../core/types.js';
 
 function createSystemMessages(): AgentMessage[] {

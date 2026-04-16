@@ -62,7 +62,7 @@ vi.mock('../../../core/storage/storage-factory', () => ({
   }),
 }));
 
-vi.mock('../../../core/llm-manager', () => ({
+vi.mock('../../../core/llm-runtime.js', () => ({
   generateAgentResponse: mocks.generateAgentResponse
 }));
 

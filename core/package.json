@@ -27,6 +27,7 @@
     "dotenv": "^17.2.3",
     "events": "^3.3.0",
     "fast-glob": "^3.3.3",
+    "llm-runtime": "^0.3.0",
     "nanoid": "^5.1.5",
     "node-cron": "^4.2.1",
     "openai": "^6.15.0",

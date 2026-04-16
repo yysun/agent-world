@@ -197,6 +197,7 @@ export { type World, type Agent, type Chat, type AgentMessage, type RemovalResul
 export {
   configureLLMProvider,
   validateProviderConfig,
+  getLLMProviderConfig,
   isProviderConfigured,
   getConfiguredProviders,
   clearAllConfiguration,
@@ -211,7 +212,7 @@ export {
   type OllamaConfig,
   type ProviderConfigMap,
   type ProviderConfig,
-} from './llm-config.js';
+} from './llm-runtime.js';
 
 // === LOGGER ===
 export { type LoggerConfig, type LogLevel, logger, createCategoryLogger, loggers, addLogStreamCallback } from './logger.js';

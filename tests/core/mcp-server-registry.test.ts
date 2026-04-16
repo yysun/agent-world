@@ -202,7 +202,6 @@ import {
   listMCPServers,
   parseMCPConfig,
   parseServersFromConfig,
-  performHealthCheck,
   refreshServerToolsCache,
   registerMCPServer,
   restartMCPServer,
@@ -466,14 +465,13 @@ describe('mcp-server-registry behavior', () => {
     await expect(executeMCPTool(id1, 'search_agents', {})).rejects.toThrow('MCP tool error');
 
     const previousHealth = getMCPServer(id1)?.lastHealthCheck;
-    performHealthCheck();
-    expect(getMCPServer(id1)?.lastHealthCheck.getTime()).toBeGreaterThanOrEqual(
-      previousHealth?.getTime() ?? 0
-    );
 
     expect(await restartMCPServer(id1)).toBe(true);
     expect(mockClientClose).toHaveBeenCalled();
     expect(mockClientConnect).toHaveBeenCalled();
+    expect(getMCPServer(id1)?.lastHealthCheck.getTime()).toBeGreaterThanOrEqual(
+      previousHealth?.getTime() ?? 0
+    );
   });
 
   it('retries AI-converted MCP tool execution with chat-scoped retry status updates', async () => {

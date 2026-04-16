@@ -111,7 +111,7 @@ import {
   handleWorldEventWithStreaming,
   handleToolEvents,
 } from './stream.js';
-import { configureLLMProvider } from '../core/llm-config.js';
+import { configureLLMProvider } from '../core/llm-runtime.js';
 import {
   createStatusLineManager,
   type StatusLineManager,

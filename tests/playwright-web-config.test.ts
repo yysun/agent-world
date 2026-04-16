@@ -31,6 +31,10 @@ describe('playwright.web.config', () => {
     expect(playwrightWebConfig.timeout).toBe(5_000);
   });
 
+  it('stops the web E2E run on the first failure', () => {
+    expect(playwrightWebConfig.maxFailures).toBe(1);
+  });
+
   it('keeps the expect timeout aligned with the test timeout', () => {
     expect(playwrightWebConfig.expect?.timeout).toBe(WEB_E2E_TIMEOUT_MS);
   });

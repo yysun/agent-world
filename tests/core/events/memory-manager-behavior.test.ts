@@ -81,8 +81,8 @@ vi.mock('../../../core/utils.js', async () => {
   };
 });
 
-vi.mock('../../../core/llm-manager.js', async () => {
-  const actual = await vi.importActual<typeof import('../../../core/llm-manager.js')>('../../../core/llm-manager.js');
+vi.mock('../../../core/llm-runtime.js', async () => {
+  const actual = await vi.importActual<typeof import('../../../core/llm-runtime.js')>('../../../core/llm-runtime.js');
   return {
     ...actual,
     generateAgentResponse: mocks.generateAgentResponse,

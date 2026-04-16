@@ -28,7 +28,7 @@ dotenv.config({ quiet: true });
 
 import open from 'open';
 import { createCategoryLogger, LLMProvider, LogLevel } from '../core/index.js';
-import { configureLLMProvider } from '../core/llm-config.js';
+import { configureLLMProvider } from '../core/llm-runtime.js';
 
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';

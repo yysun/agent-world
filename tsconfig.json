@@ -5,11 +5,6 @@
     "moduleResolution": "node",
     "ignoreDeprecations": "6.0",
     "baseUrl": ".",
-    "paths": {
-      "@agent-world/llm": [
-        "packages/llm"
-      ]
-    },
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "allowJs": true,

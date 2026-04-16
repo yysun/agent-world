@@ -21,7 +21,7 @@
  * - 2026-02-14: Added `hasActiveChatMessageProcessing()` for chat-scoped lock checks (e.g., message edit guards).
  */
 
-import { cancelLLMCallsForChat } from './llm-manager.js';
+import { cancelLLMCallsForChat } from './llm-runtime.js';
 import { stopShellCommandsForChat } from './shell-cmd-tool.js';
 import { generateId } from './utils.js';
 

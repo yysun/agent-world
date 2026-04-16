@@ -29,6 +29,10 @@ describe('playwright.electron.config', () => {
     expect(playwrightElectronConfig.timeout).toBe(180_000);
   });
 
+  it('stops the Electron E2E run on the first failure', () => {
+    expect(playwrightElectronConfig.maxFailures).toBe(1);
+  });
+
   it('sets the Electron expect timeout to 60 seconds', () => {
     expect(ELECTRON_E2E_EXPECT_TIMEOUT_MS).toBe(60_000);
     expect(playwrightElectronConfig.expect?.timeout).toBe(60_000);

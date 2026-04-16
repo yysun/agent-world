@@ -19,14 +19,13 @@ import 'dotenv/config';
 
 import { pathToFileURL } from 'node:url';
 
-import { createGoogleClient } from '../../core/google-direct.js';
-import { createAzureOpenAIClient } from '../../core/openai-direct.js';
+import { createGoogleClient, createAzureOpenAIClient } from 'llm-runtime';
 import {
   configureLLMProvider,
   getLLMProviderConfig,
   type AzureConfig,
   type GoogleConfig,
-} from '../../core/llm-config.js';
+} from '../../core/llm-runtime.js';
 import { LLMProvider } from '../../core/types.js';
 
 export type ProbeProvider = 'azure' | 'google';

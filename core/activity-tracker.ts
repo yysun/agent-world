@@ -18,7 +18,7 @@
  */
 import { World } from './types.js';
 import { createCategoryLogger } from './logger.js';
-import { getLLMQueueStatus } from './llm-manager.js';
+import { getLLMQueueStatus } from './llm-runtime.js';
 import { nanoid } from 'nanoid';
 
 type ActivityState = {

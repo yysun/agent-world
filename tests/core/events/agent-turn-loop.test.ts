@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => ({
   isStreamingEnabled: vi.fn(() => false),
 }));
 
-vi.mock('../../../core/llm-manager.js', () => ({
+vi.mock('../../../core/llm-runtime.js', () => ({
   generateAgentResponse: mocks.generateAgentResponse,
   streamAgentResponse: mocks.streamAgentResponse,
 }));

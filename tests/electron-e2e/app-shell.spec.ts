@@ -50,8 +50,10 @@ test('launches the real Electron app and exposes the desktop shell controls', as
   await page.getByLabel('Close panel').click();
 
   await page.getByLabel('Settings').click();
-  await expect(page.getByText('~/.agent-world/skills', { exact: false })).toBeVisible();
-  await expect(page.getByText('./.agent-world/skills', { exact: false })).toBeVisible();
+  await expect(page.getByRole('switch', { name: 'git-wiki' })).toBeVisible();
+  await expect(page.getByRole('switch', { name: 'e2e-matrix-skill' })).toBeVisible();
+  await expect(page.getByText('~/.agent-world/skills', { exact: false })).toHaveCount(0);
+  await expect(page.getByText('./.agent-world/skills', { exact: false })).toHaveCount(0);
   await expect(page.getByText('~/.agents/skills', { exact: false })).toHaveCount(0);
   await expect(page.getByText('./agents/skills', { exact: false })).toHaveCount(0);
   await expect(page.getByLabel('Close panel')).toBeVisible();

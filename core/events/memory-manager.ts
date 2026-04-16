@@ -90,7 +90,7 @@ import { parseMessageContent } from '../message-prep.js';
 import { createCategoryLogger } from '../logger.js';
 import { beginWorldActivity } from '../activity-tracker.js';
 import { createStorageWithWrappers } from '../storage/storage-factory.js';
-import { generateAgentResponse } from '../llm-manager.js';
+import { generateAgentResponse } from '../llm-runtime.js';
 import {
   getToolEventPreviewPayload,
   parseToolExecutionEnvelopeContent,

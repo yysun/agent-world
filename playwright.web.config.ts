@@ -46,6 +46,7 @@ const PLAYWRIGHT_WEB_ENV = hydratePlaywrightWebEnv();
 export default defineConfig({
   testDir: './tests/web-e2e',
   fullyParallel: false,
+  maxFailures: 1,
   workers: 1,
   timeout: WEB_E2E_TIMEOUT_MS,
   expect: {

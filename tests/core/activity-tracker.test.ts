@@ -17,7 +17,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { EventEmitter } from 'events';
 
-vi.mock('../../core/llm-manager.js', () => ({
+vi.mock('../../core/llm-runtime.js', () => ({
   getLLMQueueStatus: vi.fn(() => ({ pending: 0, processing: 0, completed: 0, failed: 0 })),
 }));
 

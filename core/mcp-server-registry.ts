@@ -131,6 +131,7 @@ import { createCategoryLogger } from './logger.js';
 import { createCreateAgentToolDefinition } from './create-agent-tool.js';
 import { createHitlToolDefinition } from './hitl-tool.js';
 import { createSendMessageToolDefinition } from './send-message-tool.js';
+import { getRuntimeToolsForWorld } from './llm-runtime.js';
 import {
   createReadFileToolDefinition,
   createWriteFileToolDefinition,
@@ -1447,6 +1448,33 @@ export async function registerMCPServer(
   return serverId;
 }
 
+async function startServerAsync(serverInstance: MCPServerInstance): Promise<void> {
+  serverInstance.client = await connectMCPServer(serverInstance.config);
+  serverInstance.status = 'running';
+  serverInstance.error = undefined;
+  serverInstance.lastHealthCheck = new Date();
+}
+
+async function stopServer(serverInstance: MCPServerInstance): Promise<void> {
+  await safelyCloseClient(serverInstance.client, {
+    serverName: serverInstance.config.name,
+    reason: 'server-stop',
+  });
+  serverInstance.client = null;
+  serverInstance.status = 'stopping';
+}
+
+export async function shutdownAllMCPServers(): Promise<void> {
+  shutdownInProgress = true;
+  const servers = Array.from(serverRegistry.values());
+  await Promise.all(servers.map(async (serverInstance) => {
+    await stopServer(serverInstance);
+  }));
+  serverRegistry.clear();
+  worldServerMapping.clear();
+  shutdownInProgress = false;
+}
+
 /**
  * Unregister MCP server for a world - decreases reference count
  * Schedules shutdown when no more references exist
@@ -1502,108 +1530,6 @@ export function listMCPServers(): MCPServerInstance[] {
 export function getMCPServersForWorld(worldId: string): string[] {
   const worldServers = worldServerMapping.get(worldId);
   return worldServers ? Array.from(worldServers) : [];
-}
-
-// === LIFECYCLE MANAGEMENT ===
-
-/** Shutdown all MCP servers - called on Express app shutdown */
-export async function shutdownAllMCPServers(): Promise<void> {
-  if (shutdownInProgress) {
-    logger.warn('Shutdown already in progress');
-    return;
-  }
-
-  shutdownInProgress = true;
-  logger.info(`Shutting down ${serverRegistry.size} MCP servers`);
-
-  const shutdownPromises = Array.from(serverRegistry.values()).map(async (serverInstance) => {
-    try {
-      await stopServer(serverInstance);
-    } catch (error) {
-      logger.error(`Error shutting down MCP server: ${serverInstance.config.name}`, {
-        serverId: serverInstance.id.slice(0, 8),
-        error: error instanceof Error ? error.message : error
-      });
-    }
-  });
-
-  await Promise.allSettled(shutdownPromises);
-
-  serverRegistry.clear();
-  worldServerMapping.clear();
-
-  // Clear tools cache during shutdown
-  const cacheEntriesCleared = await disposeAllToolCacheEntries('shutdown');
-
-  isInitialized = false;
-  shutdownInProgress = false;
-
-  logger.info('All MCP servers shut down', {
-    cacheEntriesCleared
-  });
-}
-
-// === INTERNAL HELPER FUNCTIONS ===
-
-/** Start server asynchronously */
-async function startServerAsync(serverInstance: MCPServerInstance): Promise<void> {
-  try {
-    const client = await connectMCPServer(serverInstance.config);
-    serverInstance.client = client;
-
-    serverInstance.status = 'running';
-    serverInstance.lastHealthCheck = new Date();
-
-    logger.info(`MCP server started successfully: ${serverInstance.config.name}`, {
-      serverId: serverInstance.id.slice(0, 8),
-      referenceCount: serverInstance.referenceCount,
-      transport: serverInstance.config.transport
-    });
-  } catch (error) {
-    serverInstance.status = 'error';
-    serverInstance.error = error instanceof Error ? error : new Error(String(error));
-    throw error;
-  }
-}
-
-/** Stop server and cleanup resources */
-async function stopServer(serverInstance: MCPServerInstance): Promise<void> {
-  if (serverInstance.status === 'stopping' || serverInstance.status === 'error') {
-    return;
-  }
-
-  serverInstance.status = 'stopping';
-
-  if (serverInstance.client) {
-    try {
-      await safelyCloseClient(serverInstance.client, {
-        serverName: serverInstance.config.name,
-        reason: 'stop-server'
-      });
-      serverInstance.client = null;
-
-      logger.info(`MCP server stopped: ${serverInstance.config.name}`, {
-        serverId: serverInstance.id.slice(0, 8)
-      });
-    } catch (error) {
-      logger.error(`Error stopping MCP server: ${serverInstance.config.name}`, {
-        serverId: serverInstance.id.slice(0, 8),
-        error: error instanceof Error ? error.message : error
-      });
-    }
-  }
-}
-
-// === MONITORING AND UTILITIES ===
-
-/** Health check for MCP servers - can be called periodically */
-export function performHealthCheck(): void {
-  const now = new Date();
-  for (const serverInstance of serverRegistry.values()) {
-    if (serverInstance.status === 'running' && serverInstance.client) {
-      serverInstance.lastHealthCheck = now;
-    }
-  }
 }
 
 /** Get registry statistics */

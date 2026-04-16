@@ -18,8 +18,9 @@
  * - 2026-03-29: Initial extracted agent-turn loop helper used by direct and continuation paths.
  */
 
+import { runTurnLoop } from 'llm-runtime';
 import type { Agent, AgentMessage, LLMResponse, World, WorldSSEEvent } from '../types.js';
-import { generateAgentResponse, streamAgentResponse } from '../llm-manager.js';
+import { generateAgentResponse, streamAgentResponse } from '../llm-runtime.js';
 import { createCategoryLogger } from '../logger.js';
 import { isStreamingEnabled, publishSSE } from './publishers.js';
 
@@ -129,77 +130,83 @@ async function callAgentModel(params: {
 }
 
 export async function runAgentTurnLoop(options: RunAgentTurnLoopOptions): Promise<void> {
-  let emptyTextRetryCount = options.initialEmptyTextRetryCount ?? 0;
-  let transientInstruction: string | undefined;
-
-  while (true) {
-    const messages = await options.buildMessages({
+  await runTurnLoop<null, AgentMessage>({
+    initialState: null,
+    emptyTextRetryLimit: options.emptyTextRetryLimit,
+    initialEmptyTextRetryCount: options.initialEmptyTextRetryCount ?? 0,
+    abortSignal: options.abortSignal,
+    buildMessages: async ({ emptyTextRetryCount, transientInstruction }) => await options.buildMessages({
       emptyTextRetryCount,
       transientInstruction,
-    });
-    transientInstruction = undefined;
-
-    const { response, messageId } = await callAgentModel({
-      world: options.world,
-      agent: options.agent,
-      chatId: options.chatId,
-      abortSignal: options.abortSignal,
-      messages,
-    });
-
-    const llmResponse = normalizeToolIntentResponse({
-      llmResponse: response,
-      parsePlainTextToolIntent: options.parsePlainTextToolIntent,
-    });
-
-    if (llmResponse.type === 'tool_calls') {
-      emptyTextRetryCount = 0;
-      const next = await options.onToolCallsResponse({ llmResponse, messageId });
-      if (next?.control === 'continue') {
-        transientInstruction = next.transientInstruction;
-        continue;
-      }
-      return;
-    }
-
-    if (llmResponse.type === 'text' && String(llmResponse.content || '').trim()) {
-      emptyTextRetryCount = 0;
+    }),
+    callModel: async ({ messages, abortSignal }) => {
+      const { response, messageId } = await callAgentModel({
+        world: options.world,
+        agent: options.agent,
+        chatId: options.chatId,
+        abortSignal,
+        messages,
+      });
+      const normalizedResponse: LLMResponse = response.assistantMessage
+        ? response
+        : {
+          ...response,
+          assistantMessage: {
+            role: 'assistant',
+            content: response.content ?? '',
+            ...(response.tool_calls ? { tool_calls: response.tool_calls } : {}),
+          },
+        };
+      ((normalizedResponse.assistantMessage as unknown) as Record<string, unknown>).messageId = messageId;
+      return normalizedResponse as unknown as import('llm-runtime').LLMResponse;
+    },
+    parsePlainTextToolIntent: options.parsePlainTextToolIntent,
+    onTextResponse: async ({ response }) => {
+      const messageId = String((((response.assistantMessage as unknown) as Record<string, unknown>).messageId) || '');
       const next = await options.onTextResponse({
-        responseText: String(llmResponse.content || ''),
+        responseText: String(response.content || ''),
         messageId,
       });
-      if (next?.control === 'continue') {
-        transientInstruction = next.transientInstruction;
-        continue;
-      }
-      return;
-    }
-
-    loggerTurnLoop.warn('Agent turn loop received empty or unhandled response', {
-      worldId: options.world.id,
-      chatId: options.chatId,
-      agentId: options.agent.id,
-      label: options.label,
-      responseType: llmResponse.type,
-      retryCount: emptyTextRetryCount,
-      messageId,
-    });
-
-    if (llmResponse.type === 'text' && emptyTextRetryCount < options.emptyTextRetryLimit) {
-      emptyTextRetryCount += 1;
-      continue;
-    }
-
-    if (llmResponse.type === 'text') {
-      await options.onEmptyTextStop?.({ messageId, retryCount: emptyTextRetryCount });
-      return;
-    }
-
-    await options.onUnhandledResponse?.({
-      llmResponse,
-      messageId,
-      retryCount: emptyTextRetryCount,
-    });
-    return;
-  }
+      return { state: null, ...(next ? { next } : {}) };
+    },
+    onToolCallsResponse: async ({ response }) => {
+      const messageId = String((((response.assistantMessage as unknown) as Record<string, unknown>).messageId) || '');
+      const next = await options.onToolCallsResponse({
+        llmResponse: response as unknown as LLMResponse,
+        messageId,
+      });
+      return { state: null, ...(next ? { next } : {}) };
+    },
+    onEmptyTextStop: async ({ response, retryCount }) => {
+      const messageId = String((((response.assistantMessage as unknown) as Record<string, unknown>).messageId) || '');
+      loggerTurnLoop.warn('Agent turn loop received empty response', {
+        worldId: options.world.id,
+        chatId: options.chatId,
+        agentId: options.agent.id,
+        label: options.label,
+        retryCount,
+        messageId,
+      });
+      await options.onEmptyTextStop?.({ messageId, retryCount });
+      return { state: null };
+    },
+    onUnhandledResponse: async ({ response, retryCount }) => {
+      const messageId = String((((response.assistantMessage as unknown) as Record<string, unknown>).messageId) || '');
+      loggerTurnLoop.warn('Agent turn loop received unhandled response', {
+        worldId: options.world.id,
+        chatId: options.chatId,
+        agentId: options.agent.id,
+        label: options.label,
+        responseType: response.type,
+        retryCount,
+        messageId,
+      });
+      await options.onUnhandledResponse?.({
+        llmResponse: response as unknown as LLMResponse,
+        messageId,
+        retryCount,
+      });
+      return { state: null };
+    },
+  });
 }
