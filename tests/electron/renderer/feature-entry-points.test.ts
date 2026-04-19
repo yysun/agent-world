@@ -32,17 +32,24 @@ import * as designSystem from '../../../electron/renderer/src/design-system';
 
 describe('renderer feature entry points', () => {
   it('exposes migrated business UI through dedicated feature barrels', () => {
+    expect(typeof agents.AgentFormFields).toBe('function');
+    expect(typeof agents.AgentPanelContent).toBe('function');
     expect(typeof agents.AgentPromptEditor).toBe('function');
     expect(typeof chat.ComposerBar).toBe('function');
     expect(typeof chat.EditorChatPane).toBe('function');
     expect(typeof chat.MessageListPanel).toBe('function');
     expect(typeof chat.MessageContent).toBe('function');
+    expect(typeof chat.SessionSidebarSection).toBe('function');
     expect(typeof queue.MessageQueuePanel).toBe('function');
+    expect(typeof settings.SettingsPanelContent).toBe('function');
     expect(typeof skills.SkillEditor).toBe('function');
     expect(typeof skills.SkillFolderPane).toBe('function');
     expect(typeof skills.SkillInstallBrowser).toBe('function');
     expect(typeof settings.SettingsSwitch).toBe('function');
     expect(typeof settings.SettingsSkillSwitch).toBe('function');
+    expect(typeof worlds.WorldImportPanel).toBe('function');
+    expect(typeof worlds.WorldPanelContent).toBe('function');
+    expect(typeof worlds.WorldSidebarSection).toBe('function');
     expect(typeof worlds.WorldTextEditor).toBe('function');
   });
 
@@ -51,6 +58,7 @@ describe('renderer feature entry points', () => {
     expect(typeof shell.MainContentArea).toBe('function');
     expect(typeof shell.MainHeaderBar).toBe('function');
     expect(typeof shell.MainWorkspaceLayout).toBe('function');
+    expect(typeof shell.RightPanelContent).toBe('function');
     expect(typeof shell.RightPanelShell).toBe('function');
     expect(typeof shell.SidebarToggleButton).toBe('function');
   });
@@ -71,11 +79,13 @@ describe('renderer feature entry points', () => {
     expect((components as Record<string, unknown>).SkillEditor).toBeUndefined();
     expect((components as Record<string, unknown>).SkillFolderPane).toBeUndefined();
     expect((components as Record<string, unknown>).SkillInstallBrowser).toBeUndefined();
+    expect((components as Record<string, unknown>).AgentFormFields).toBeUndefined();
     expect((components as Record<string, unknown>).SettingsSkillSwitch).toBeUndefined();
     expect((components as Record<string, unknown>).MessageQueuePanel).toBeUndefined();
     expect((components as Record<string, unknown>).MainContentArea).toBeUndefined();
     expect((components as Record<string, unknown>).MainHeaderBar).toBeUndefined();
     expect((components as Record<string, unknown>).MainWorkspaceLayout).toBeUndefined();
+    expect((components as Record<string, unknown>).RightPanelContent).toBeUndefined();
     expect((components as Record<string, unknown>).RightPanelShell).toBeUndefined();
     expect((components as Record<string, unknown>).AppOverlaysHost).toBeUndefined();
   });

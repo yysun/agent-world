@@ -42,7 +42,7 @@ vi.mock('react/jsx-dev-runtime', () => ({
 }), { virtual: true });
 
 import { Input, Select, Switch, Textarea } from '../../../electron/renderer/src/design-system/primitives';
-import AgentFormFields from '../../../electron/renderer/src/components/AgentFormFields';
+import AgentFormFields from '../../../electron/renderer/src/features/agents/components/AgentFormFields';
 
 function flatten(node: any): any[] {
   if (!node || typeof node !== 'object') return [];

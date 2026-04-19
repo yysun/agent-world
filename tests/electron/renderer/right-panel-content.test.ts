@@ -34,24 +34,25 @@ vi.mock('react/jsx-dev-runtime', () => ({
   jsxDEV: jsxFactory,
 }), { virtual: true });
 
-vi.mock('../../../electron/renderer/src/components/AgentFormFields', () => ({
-  default: Symbol('AgentFormFields'),
-}));
-
-vi.mock('../../../electron/renderer/src/features/settings', () => ({
-  SettingsSwitch: Symbol('SettingsSwitch'),
-  SettingsSkillSwitch: Symbol('SettingsSkillSwitch'),
-}));
-
-import RightPanelContent from '../../../electron/renderer/src/components/RightPanelContent';
+import SettingsPanelContent from '../../../electron/renderer/src/features/settings/components/SettingsPanelContent';
+import WorldPanelContent from '../../../electron/renderer/src/features/worlds/components/WorldPanelContent';
 import Checkbox from '../../../electron/renderer/src/design-system/primitives/Checkbox';
 
 function allDescendants(node: any): any[] {
   if (!node || typeof node !== 'object') return [];
+  if (typeof node.type === 'function') {
+    return [node, ...allDescendants(node.type(node.props ?? {}))];
+  }
   const children = node.props?.children;
   if (!children) return [node];
   const childArr = Array.isArray(children) ? children : [children];
   return [node, ...childArr.flatMap(allDescendants)];
+}
+
+function RightPanelContent(props: any) {
+  return props.panelMode === 'settings'
+    ? SettingsPanelContent(props)
+    : WorldPanelContent(props);
 }
 
 describe('RightPanelContent', () => {

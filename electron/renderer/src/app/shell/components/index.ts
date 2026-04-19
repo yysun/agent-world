@@ -19,6 +19,7 @@ export { default as LeftSidebarPanel } from './LeftSidebarPanel';
 export { default as MainContentArea } from './MainContentArea';
 export { default as MainHeaderBar } from './MainHeaderBar';
 export { default as MainWorkspaceLayout } from './MainWorkspaceLayout';
+export { default as RightPanelContent } from './RightPanelContent';
 export { default as RightPanelShell } from './RightPanelShell';
 export { default as SidebarToggleButton } from './SidebarToggleButton';
 export { WorkingStatusBar } from './transitional';

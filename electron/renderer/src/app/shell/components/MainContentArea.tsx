@@ -27,7 +27,7 @@ import type React from 'react';
 import { DEFAULT_FLOATING_COMPOSER_HEIGHT } from '../../../constants/ui-constants';
 import { ComposerBar, MessageListPanel } from '../../../features/chat';
 import RightPanelShell from './RightPanelShell';
-import { RightPanelContent } from './transitional';
+import RightPanelContent from './RightPanelContent';
 
 export { DEFAULT_FLOATING_COMPOSER_HEIGHT };
 

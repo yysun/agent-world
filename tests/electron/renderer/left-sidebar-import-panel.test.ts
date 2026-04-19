@@ -87,6 +87,9 @@ function renderTree(overrides: Record<string, unknown> = {}) {
 
 function allDescendants(node: any): any[] {
   if (!node || typeof node !== 'object') return [];
+  if (typeof node.type === 'function') {
+    return [node, ...allDescendants(node.type(node.props ?? {}))];
+  }
   const children = node.props?.children;
   if (!children) return [node];
   const childArray = Array.isArray(children) ? children : [children];

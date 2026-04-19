@@ -50,7 +50,7 @@ vi.mock('../../../electron/renderer/src/features/chat', () => ({
   MessageListPanel: messageListPanelSpy,
 }));
 
-vi.mock('../../../electron/renderer/src/components/RightPanelContent', () => ({
+vi.mock('../../../electron/renderer/src/app/shell/components/RightPanelContent', () => ({
   default: rightPanelContentSpy,
 }));
 

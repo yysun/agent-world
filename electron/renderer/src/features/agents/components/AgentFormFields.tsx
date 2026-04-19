@@ -11,13 +11,14 @@
  * - Parent controls submit/delete/cancel actions and modal routing
  *
  * Recent Changes:
+ * - 2026-04-19: Moved into the agents feature so panel ownership no longer relies on the transitional components layer.
  * - 2026-02-14: Added explicit `aria-labelledby` wiring for the Auto Reply switch to keep it screen-reader labeled after refactor.
  * - 2026-02-14: Extracted from App.jsx to remove duplicated agent create/edit form markup.
  */
 
 import React, { useId } from 'react';
-import { LabeledField } from '../design-system/patterns';
-import { Input, Select, Switch, Textarea } from '../design-system/primitives';
+import { LabeledField } from '../../../design-system/patterns';
+import { Input, Select, Switch, Textarea } from '../../../design-system/primitives';
 
 export default function AgentFormFields({
   agent,
