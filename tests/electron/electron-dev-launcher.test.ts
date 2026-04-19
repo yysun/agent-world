@@ -11,15 +11,19 @@
  * Implementation Notes:
  * - Reads the real Electron package manifest for script coverage.
  * - Imports the helper directly for deterministic argument assertions.
+ *
+ * Recent Changes:
+ * - 2026-04-19: Added regression coverage for script-anchored workspace resolution.
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import {
   buildElectronDevLaunchArgs,
+  resolveElectronExecutablePath,
   resolveElectronWorkspacePackageJsonPath,
 } from '../../scripts/run-electron-dev.mjs';
 
@@ -50,7 +54,14 @@ describe('electron dev launcher', () => {
     ]);
   });
 
-  it('resolves the Electron workspace package.json so launcher imports use the desktop workspace dependency tree', () => {
+  it('resolves the Electron executable from the desktop workspace package tree', () => {
+    const executablePath = resolveElectronExecutablePath();
+
+    expect(existsSync(executablePath)).toBe(true);
+    expect(executablePath).toContain(`${path.sep}electron${path.sep}node_modules${path.sep}electron${path.sep}`);
+  });
+
+  it('resolves the Electron workspace package.json from the helper location', () => {
     expect(resolveElectronWorkspacePackageJsonPath()).toBe(
       path.resolve(process.cwd(), 'electron/package.json'),
     );
