@@ -42,6 +42,7 @@ describe('buildToolUsagePromptSection', () => {
   test('includes HITL-only guidance when human_intervention_request is available', () => {
     const content = buildToolUsagePromptSection({ toolNames: ['human_intervention_request'] });
     expect(content).toContain('call human_intervention_request');
+    expect(content).toContain('Prefer human_intervention_request for clarification');
     expect(content).toContain('do not request free-text HITL input');
   });
 

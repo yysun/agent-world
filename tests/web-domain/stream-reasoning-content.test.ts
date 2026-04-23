@@ -95,4 +95,27 @@ describe('web assistant reasoning streaming', () => {
 
     vi.useRealTimers();
   });
+
+  it('drops discarded streamed assistant rows on stream end', () => {
+    const startedState = handleStreamStart(createBaseState(), {
+      messageId: 'assistant-stream-3',
+      sender: 'assistant-1',
+    } as any);
+
+    const chunkedState = handleStreamChunk(startedState, {
+      messageId: 'assistant-stream-3',
+      sender: 'assistant-1',
+      content: 'A few quick questions first',
+      isAccumulated: true,
+    });
+
+    const finalizedState = handleStreamEnd(chunkedState, {
+      messageId: 'assistant-stream-3',
+      sender: 'assistant-1',
+      content: 'A few quick questions first',
+      discard: true,
+    } as any);
+
+    expect(finalizedState.messages).toEqual([]);
+  });
 });

@@ -491,6 +491,7 @@ export interface StreamEndData {
   messageId: string;
   sender: string;
   content: string;
+  discard?: boolean;
   worldName?: string;
 }
 

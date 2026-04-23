@@ -14,6 +14,8 @@
  * - Avoids any real provider/tool execution and filesystem-backed state.
  *
  * Recent Changes:
+ * - 2026-04-23: Added streaming regression coverage to discard provisional
+ *   assistant text when a duplicate continuation `load_skill` call is suppressed.
  * - 2026-03-29: Updated continuation guard coverage for the extracted `runAgentTurnLoop(...)` runner and preserved retry-state assertions across continuation re-entry.
  * - 2026-03-06: Updated shell continuation guard coverage to assert the unified bounded-preview shell result mode instead of the removed `smart` branch.
  * - 2026-03-05: Added bounded empty-follow-up continuation retry coverage for recovery (retry succeeds) and exhaustion (stops after configured max retries).
@@ -34,9 +36,12 @@ const mocks = vi.hoisted(() => ({
   saveAgent: vi.fn(async () => undefined),
   prepareMessagesForLLM: vi.fn(async () => []),
   generateAgentResponse: vi.fn(),
+  streamAgentResponse: vi.fn(),
   publishMessageWithId: vi.fn(),
   publishEvent: vi.fn(),
   publishToolEvent: vi.fn(),
+  publishSSE: vi.fn(),
+  isStreamingEnabled: vi.fn().mockReturnValue(false),
   getMCPToolsForWorld: vi.fn(),
   loadSkillExecute: vi.fn(),
 }));
@@ -60,6 +65,7 @@ vi.mock('../../../core/llm-runtime.js', async () => {
   return {
     ...actual,
     generateAgentResponse: mocks.generateAgentResponse,
+    streamAgentResponse: mocks.streamAgentResponse,
   };
 });
 
@@ -70,10 +76,10 @@ vi.mock('../../../core/mcp-server-registry.js', () => ({
 vi.mock('../../../core/events/publishers.js', () => ({
   publishMessage: vi.fn(),
   publishMessageWithId: mocks.publishMessageWithId,
-  publishSSE: vi.fn(),
+  publishSSE: mocks.publishSSE,
   publishEvent: mocks.publishEvent,
   publishToolEvent: mocks.publishToolEvent,
-  isStreamingEnabled: vi.fn().mockReturnValue(false),
+  isStreamingEnabled: mocks.isStreamingEnabled,
 }));
 
 function createDeferred<T>() {
@@ -163,6 +169,7 @@ describe('continueLLMAfterToolExecution guard', () => {
     mocks.getMCPToolsForWorld.mockResolvedValue({});
     mocks.loadSkillExecute.mockReset();
     mocks.publishToolEvent.mockReset();
+    mocks.isStreamingEnabled.mockReturnValue(false);
   });
 
   it('skips duplicate concurrent continuation run for same scope', async () => {
@@ -296,6 +303,54 @@ describe('continueLLMAfterToolExecution guard', () => {
 
     expect(mocks.loadSkillExecute).toHaveBeenCalledTimes(0);
     expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(2);
+
+    const loadSkillAssistantCalls = agent.memory.filter((message: any) =>
+      message.role === 'assistant'
+      && Array.isArray(message.tool_calls)
+      && message.tool_calls.some((toolCall: any) => toolCall?.function?.name === 'load_skill')
+    );
+    expect(loadSkillAssistantCalls).toHaveLength(0);
+    expect(mocks.publishMessageWithId).toHaveBeenCalledTimes(1);
+  });
+
+  it('discards streamed assistant text when a duplicate preloaded load_skill call is suppressed', async () => {
+    mocks.isStreamingEnabled.mockReturnValue(true);
+    mocks.streamAgentResponse
+      .mockResolvedValueOnce(
+        buildToolCallResponse(
+          'assistant-tool-stream-1',
+          'call-load-skill-stream-1',
+          'load_skill',
+          { skill_id: 'presentation' },
+          'I\'ll load the presentation skill before continuing.',
+        ),
+      )
+      .mockResolvedValueOnce(
+        buildTextResponse(
+          'assistant-stream-final',
+          'Who is the audience and how many slides do you want?',
+        ),
+      );
+
+    const { continueLLMAfterToolExecution } = await import('../../../core/events/memory-manager.js');
+    const world = createWorld();
+    const agent = createAgent();
+
+    await continueLLMAfterToolExecution(world, agent, 'chat-1', {
+      preloadedSkillIds: ['presentation'],
+    });
+
+    expect(mocks.streamAgentResponse).toHaveBeenCalledTimes(2);
+    expect(mocks.publishSSE).toHaveBeenCalledWith(
+      world,
+      expect.objectContaining({
+        agentName: agent.id,
+        type: 'end',
+        chatId: 'chat-1',
+        messageId: 'assistant-tool-stream-1',
+        discard: true,
+      }),
+    );
 
     const loadSkillAssistantCalls = agent.memory.filter((message: any) =>
       message.role === 'assistant'

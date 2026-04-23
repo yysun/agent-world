@@ -203,6 +203,18 @@ export function createChatSubscriptionEventHandler({
     streaming.endAllToolStreams();
   };
 
+  const discardAssistantStreamMessage = (messageId: string) => {
+    const normalizedMessageId = String(messageId || '').trim();
+    if (!normalizedMessageId) {
+      return;
+    }
+
+    setMessages((existing) => existing.filter((message) => {
+      const candidateId = String(message?.messageId || message?.id || '').trim();
+      return candidateId !== normalizedMessageId;
+    }));
+  };
+
   const toActivityId = (value: unknown): number | null => {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) {
@@ -349,7 +361,14 @@ export function createChatSubscriptionEventHandler({
         if (isShellStdoutSSE) {
           streaming.handleToolStreamEnd(messageId);
         } else {
-          streaming.handleEnd(messageId);
+          if (streaming.isActive(messageId)) {
+            streaming.handleEnd(messageId);
+          }
+          if (streamPayload.discard === true) {
+            discardAssistantStreamMessage(messageId);
+          } else {
+            streaming.handleEnd(messageId);
+          }
         }
         if (sseAgentName && loadedWorldId && sseChatId) {
           updateRegistry((r) => applyEventToRegistry(r, loadedWorldId, sseChatId, sseAgentName, 'sse', 'end'));

@@ -32,11 +32,13 @@ const mocks = vi.hoisted(() => ({
   saveAgent: vi.fn(async () => undefined),
   prepareMessagesForLLM: vi.fn(async () => []),
   generateAgentResponse: vi.fn(),
+  streamAgentResponse: vi.fn(),
   getMCPToolsForWorld: vi.fn(),
   publishEvent: vi.fn(),
   publishToolEvent: vi.fn(),
   publishSSE: vi.fn(),
   publishMessage: vi.fn(),
+  isStreamingEnabled: vi.fn().mockReturnValue(false),
   continueLLMAfterToolExecution: vi.fn(async () => undefined),
   handleTextResponse: vi.fn(async () => undefined),
   loggerCalls: [] as Array<{
@@ -66,6 +68,7 @@ vi.mock('../../../core/llm-runtime.js', async () => {
   return {
     ...actual,
     generateAgentResponse: mocks.generateAgentResponse,
+    streamAgentResponse: mocks.streamAgentResponse,
   };
 });
 
@@ -78,7 +81,7 @@ vi.mock('../../../core/events/publishers.js', () => ({
   publishSSE: mocks.publishSSE,
   publishEvent: mocks.publishEvent,
   publishToolEvent: mocks.publishToolEvent,
-  isStreamingEnabled: vi.fn().mockReturnValue(false),
+  isStreamingEnabled: mocks.isStreamingEnabled,
 }));
 
 vi.mock('../../../core/events/memory-manager.js', () => ({
@@ -141,6 +144,7 @@ describe('processAgentMessage chat isolation', () => {
     vi.resetModules();
     mocks.saveAgent.mockResolvedValue(undefined);
     mocks.prepareMessagesForLLM.mockResolvedValue([]);
+    mocks.isStreamingEnabled.mockReturnValue(false);
     mocks.continueLLMAfterToolExecution.mockResolvedValue(undefined);
     mocks.handleTextResponse.mockResolvedValue(undefined);
     mocks.loggerCalls.length = 0;
@@ -309,6 +313,103 @@ describe('processAgentMessage chat isolation', () => {
         message: expect.stringContaining('future tool action'),
       }),
       'chat-1',
+    );
+  });
+
+  it('allows clarifying-question replies to complete without intent-only retry', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    mocks.generateAgentResponse.mockResolvedValueOnce({
+      response: {
+        type: 'text',
+        content: 'I will create the presentation, but first: who is the audience and how many slides do you want?',
+      },
+      messageId: 'assistant-clarify-1',
+    });
+
+    const { processAgentMessage } = await import('../../../core/events/orchestrator.js');
+    await processAgentMessage(
+      world,
+      agent,
+      createMessageEvent('chat-1', 'Create a presentation for this project.')
+    );
+
+    expect(mocks.generateAgentResponse).toHaveBeenCalledTimes(1);
+    expect(mocks.handleTextResponse).toHaveBeenCalledWith(
+      world,
+      agent,
+      'I will create the presentation, but first: who is the audience and how many slides do you want?',
+      'assistant-clarify-1',
+      expect.objectContaining({
+        messageId: 'msg-user-1',
+        chatId: 'chat-1',
+      }),
+      'chat-1',
+      expect.objectContaining({
+        source: 'direct',
+      }),
+    );
+    expect(mocks.publishEvent).not.toHaveBeenCalledWith(
+      world,
+      'system',
+      expect.objectContaining({
+        type: 'warning',
+        message: expect.stringContaining('future tool action'),
+      }),
+      'chat-1',
+    );
+  });
+
+  it('discards streamed intent-only replies before retrying or stopping', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    mocks.isStreamingEnabled.mockReturnValue(true);
+    mocks.streamAgentResponse
+      .mockResolvedValueOnce({
+        response: {
+          type: 'text',
+          content: 'I will create the presentation after I ask a few questions.',
+        },
+        messageId: 'assistant-stream-intent-1',
+      })
+      .mockResolvedValueOnce({
+        response: {
+          type: 'text',
+          content: 'I will create the presentation after I ask a few questions.',
+        },
+        messageId: 'assistant-stream-intent-2',
+      });
+
+    const { processAgentMessage } = await import('../../../core/events/orchestrator.js');
+    await processAgentMessage(
+      world,
+      agent,
+      createMessageEvent('chat-1', 'Create a presentation for this project.')
+    );
+
+    expect(mocks.streamAgentResponse).toHaveBeenCalledTimes(2);
+    expect(mocks.handleTextResponse).not.toHaveBeenCalled();
+    expect(mocks.publishSSE).toHaveBeenCalledWith(
+      world,
+      expect.objectContaining({
+        agentName: 'agent-a',
+        type: 'end',
+        chatId: 'chat-1',
+        messageId: 'assistant-stream-intent-1',
+        discard: true,
+      })
+    );
+    expect(mocks.publishSSE).toHaveBeenCalledWith(
+      world,
+      expect.objectContaining({
+        agentName: 'agent-a',
+        type: 'end',
+        chatId: 'chat-1',
+        messageId: 'assistant-stream-intent-2',
+        discard: true,
+      })
     );
   });
 

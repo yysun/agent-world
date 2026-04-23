@@ -589,6 +589,7 @@ export interface WorldSSEEvent {
   content?: string;
   reasoningContent?: string;
   error?: string;
+  discard?: boolean;
   messageId: string;
   /** Chat ID for concurrency-safe event routing. Events without chatId are broadcast to all sessions. */
   chatId?: string | null;

@@ -246,6 +246,9 @@ export function buildToolUsagePromptSection(options: { toolNames: string[] }): s
       'If you need to ask the human a clarifying question, request an option choice, or request confirmation, call human_intervention_request instead of asking directly in plain assistant text.'
     );
     lines.push(
+      'Prefer human_intervention_request for clarification; only fall back to plain assistant questions when the tool cannot express what you need.'
+    );
+    lines.push(
       'Use multiple-choice options only; do not request free-text HITL input.'
     );
   }

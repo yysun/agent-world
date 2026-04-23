@@ -20,6 +20,8 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-04-23: Discard streamed assistant replies when duplicate `load_skill`
+ *   continuation calls are suppressed so provisional text does not linger in UI.
  * - 2026-04-12: Scoped continuation intent-only rejection to execution-oriented turns and reset validation correction budgets after non-validation progress.
  * - 2026-04-12: Added shared continuation guards for intent-only narration and repeated tool-parameter validation failures so weak models cannot end turns or loop forever on invalid tool args.
  * - 2026-03-29: Moved shared tool-action execution/persistence mechanics into `tool-action-runtime` so direct, continuation, and restore flows use one runtime owner for persisted tool steps.
@@ -1218,6 +1220,22 @@ export async function continueLLMAfterToolExecution(
     let continuationIntentOnlyRetryCount = 0;
     const maxIntentOnlyContinuationRetries = 1;
     let latestContinuationUserContent = '';
+    const discardStreamedAssistantReply = (discardMessageId: string) => {
+      if (!isStreamingEnabled()) {
+        return;
+      }
+      const normalizedMessageId = String(discardMessageId || '').trim();
+      if (!normalizedMessageId) {
+        return;
+      }
+      publishSSE(world, {
+        agentName: agent.id,
+        type: 'end',
+        messageId: normalizedMessageId,
+        chatId: targetChatId,
+        discard: true,
+      });
+    };
 
     if (hopCount > maxToolHops) {
       const guardrailErrorMessage = `[Error] Tool continuation exceeded ${maxToolHops} hops. Guardrail triggered; reporting error and continuing.`;
@@ -1358,6 +1376,7 @@ export async function continueLLMAfterToolExecution(
         })) {
           if (continuationIntentOnlyRetryCount < maxIntentOnlyContinuationRetries) {
             continuationIntentOnlyRetryCount += 1;
+            discardStreamedAssistantReply(loopMessageId);
             loggerAgent.warn('Continuation returned intent-only action narration; retrying with corrective instruction', {
               agentId: agent.id,
               chatId: targetChatId,
@@ -1373,6 +1392,7 @@ export async function continueLLMAfterToolExecution(
           }
 
           continuationStoppedOnIntentOnlyText = true;
+          discardStreamedAssistantReply(loopMessageId);
           loggerAgent.warn('Continuation returned repeated intent-only action narration; stopping without terminal completion', {
             agentId: agent.id,
             chatId: targetChatId,
@@ -1676,6 +1696,7 @@ export async function continueLLMAfterToolExecution(
       }
 
       if (requestedLoadSkillId && loadedSkillsForRun.has(requestedLoadSkillId)) {
+        discardStreamedAssistantReply(messageId);
         loggerAgent.debug('Suppressing duplicate load_skill call in continuation run', {
           worldId: world.id,
           agentId: agent.id,

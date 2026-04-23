@@ -36,11 +36,16 @@ import {
   respondToHitlPrompt,
   selectSessionByName,
   sendComposerMessage,
+  setSeededAgentSystemPrompt,
   waitForAssistantToken,
   waitForHitlPrompt,
   waitForQueuePanel,
   waitForQueueStatus,
 } from './support/electron-harness.js';
+import {
+  PRESENTATION_CLARIFY_QUESTION,
+  buildPresentationClarificationFallbackPrompt,
+} from './support/seeded-agent.js';
 
 const HITL_DELETE_TARGET = '.e2e-hitl-delete-me.txt';
 const HITL_SHELL_SUCCESS_TOKEN = `E2E_SHELL_OK: ${HITL_DELETE_TARGET}`;
@@ -262,6 +267,54 @@ test.describe('New Chat', () => {
     await createNewSession(page);
     await sendComposerMessage(page, 'New chat success token new-send-success');
     await waitForAssistantToken(page, 'new-send-success');
+  });
+
+  test('create new chat and keep a presentation clarification fallback to one assistant turn', async ({ page }) => {
+    await launchAndPrepare(page);
+    await setSeededAgentSystemPrompt(page, buildPresentationClarificationFallbackPrompt());
+    await createNewSession(page);
+    await sendComposerMessage(page, 'PRESENTATION_CLARIFY: create a presentation for this project.');
+    await waitForAssistantToken(page, PRESENTATION_CLARIFY_QUESTION, 30_000);
+    await expect(page.getByTestId('hitl-prompt')).toHaveCount(0);
+
+    await page.waitForTimeout(2_000);
+
+    const nonUserMessages = await page.evaluate(async () => {
+      const api = (window as any).agentWorldDesktop;
+      const worlds = await api.listWorlds();
+      const targetWorld = Array.isArray(worlds)
+        ? worlds.find((entry: any) => String(entry?.id || '').trim() === 'e2e-test') || worlds[0]
+        : null;
+      if (!targetWorld?.id) {
+        throw new Error('e2e-test world is not available in the desktop app.');
+      }
+
+      await api.loadWorld(targetWorld.id);
+      const chatHeaderEl = document.querySelector('[title*="Click to copy chat ID:"]');
+      const titleAttr = chatHeaderEl?.getAttribute('title') || '';
+      const match = titleAttr.match(/chat ID:\s*(\S+)/);
+      const currentChatId = match?.[1] || '';
+      if (!currentChatId) {
+        throw new Error('Unable to resolve current chat ID for presentation clarification assertion.');
+      }
+
+      const messages = await api.getMessages(targetWorld.id, currentChatId);
+      return Array.isArray(messages)
+        ? messages.filter((message: any) => {
+          const role = String(message?.role || '').trim().toLowerCase();
+          const sender = String(message?.sender || '').trim().toLowerCase();
+          if (role === 'user') {
+            return false;
+          }
+          if (!role && (sender === 'human' || sender === 'user')) {
+            return false;
+          }
+          return true;
+        }).map((message: any) => String(message?.content || '').trim())
+        : [];
+    });
+
+    expect(nonUserMessages).toEqual([PRESENTATION_CLARIFY_QUESTION]);
   });
 
   test('create new chat and send HITL', async ({ page }) => {

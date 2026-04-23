@@ -15,6 +15,7 @@
  * - Prompt content is intentionally explicit so real-model E2E flows stay stable.
  *
  * Recent Changes:
+ * - 2026-04-23: Added a dedicated presentation-clarification fallback prompt builder so Electron E2E can verify plain clarifying questions do not auto-continue into duplicate assistant turns.
  * - 2026-03-24: Added narrow per-tool prompt builders so Electron permission-matrix
  *   E2E tests can isolate flaky real-model branches the same way as the web suite.
  * - 2026-03-24: Hardened permission-matrix branch matching and ask-mode tool-call wording so
@@ -36,6 +37,7 @@ export const TOOL_PERMISSION_SKILL_ID = 'e2e-matrix-skill';
 export const TOOL_PERMISSION_SKILL_SCRIPT_NAME = 'mark-load-skill.js';
 export const CREATE_AGENT_ASK_NAME = 'E2E Ask Agent';
 export const CREATE_AGENT_AUTO_NAME = 'E2E Auto Agent';
+export const PRESENTATION_CLARIFY_QUESTION = 'I will create the presentation, but first: who is the audience and how many slides do you want?';
 
 function buildSeededAgentPromptFromRules(rules: string[]): string {
   return [
@@ -128,6 +130,13 @@ export function buildLoadSkillPermissionPrompt(): string {
     `- If a user message starts with "LOAD_SKILL_READ:", immediately call exactly one tool: load_skill with skill_id "${TOOL_PERMISSION_SKILL_ID}". Do not answer with plain text before the tool call. After the tool returns, reply exactly "E2E_LOAD_SKILL_READ_BLOCKED".`,
     `- If a user message starts with "LOAD_SKILL_ASK:", immediately call exactly one tool: load_skill with skill_id "${TOOL_PERMISSION_SKILL_ID}". Do not answer with plain text first and do not wait for the user; the tool itself will request approval if needed. Do not reply with "E2E_LOAD_SKILL_AUTO_OK" in this branch. After the tool returns, reply exactly "E2E_LOAD_SKILL_ASK_OK".`,
     `- If a user message starts with "LOAD_SKILL_AUTO:", immediately call exactly one tool: load_skill with skill_id "${TOOL_PERMISSION_SKILL_ID}". Do not answer with plain text before the tool call. Do not reply with "E2E_LOAD_SKILL_ASK_OK" in this branch. After the tool returns, reply exactly "E2E_LOAD_SKILL_AUTO_OK".`,
+  ]);
+}
+
+export function buildPresentationClarificationFallbackPrompt(): string {
+  return buildSeededAgentPromptFromRules([
+    '- Treat "PRESENTATION_CLARIFY:" as a dedicated exact branch for clarification-fallback coverage. Never call write_file, web_fetch, shell_cmd, create_agent, load_skill, or human_intervention_request in this branch.',
+    `- If a user message starts with "PRESENTATION_CLARIFY:", reply with exactly "${PRESENTATION_CLARIFY_QUESTION}". Do not answer with any other text. Do not send a second follow-up message until the user replies.`,
   ]);
 }
 

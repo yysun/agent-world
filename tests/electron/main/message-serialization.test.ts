@@ -276,6 +276,27 @@ describe('serializeRealtimeSSEEvent', () => {
       },
     });
   });
+
+  it('preserves discard flags on realtime SSE end events', () => {
+    const payload = serializeRealtimeSSEEvent('world-1', 'chat-1', {
+      type: 'end',
+      messageId: 'msg-2',
+      agentName: 'a1',
+      discard: true,
+    });
+
+    expect(payload).toMatchObject({
+      type: 'sse',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      sse: {
+        eventType: 'end',
+        messageId: 'msg-2',
+        agentName: 'a1',
+        discard: true,
+      },
+    });
+  });
 });
 
 describe('serializeChatsWithMessageCounts', () => {

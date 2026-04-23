@@ -894,6 +894,41 @@ describe('createChatSubscriptionEventHandler', () => {
     expect(streamingStateRef.current.handleEnd).not.toHaveBeenCalled();
   });
 
+  it('removes discarded assistant stream rows on scoped SSE end events', () => {
+    const harness = createMessageStateHarness([{
+      messageId: 'm-1',
+      role: 'assistant',
+      sender: 'assistant-1',
+      chatId: 'chat-1',
+      content: 'A few quick questions first',
+      isStreaming: false,
+    } as any]);
+    const streamingStateRef = makeFullStreamingRef();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef,
+      setMessages: harness.setMessages as Parameters<typeof createChatSubscriptionEventHandler>[0]['setMessages'],
+    });
+
+    handler({
+      type: 'sse',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      sse: {
+        eventType: 'end',
+        messageId: 'm-1',
+        agentName: 'assistant-1',
+        chatId: 'chat-1',
+        discard: true,
+      }
+    });
+
+    expect(harness.getMessages()).toEqual([]);
+  });
+
   it('ignores unscoped SSE end events without messageId', () => {
     const harness = createMessageStateHarness();
     const streamingStateRef = makeFullStreamingRef();

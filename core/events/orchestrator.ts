@@ -511,6 +511,21 @@ export async function processAgentMessage(
     const publishSSEWithChatId = (w: World, data: Partial<import('../types.js').WorldSSEEvent>) => {
       publishSSE(w, { ...data, chatId: targetChatId });
     };
+    const discardStreamedAssistantReply = (discardMessageId: string) => {
+      if (!isStreamingEnabled()) {
+        return;
+      }
+      const normalizedMessageId = String(discardMessageId || '').trim();
+      if (!normalizedMessageId) {
+        return;
+      }
+      publishSSEWithChatId(world, {
+        agentName: agent.id,
+        type: 'end',
+        messageId: normalizedMessageId,
+        discard: true,
+      });
+    };
 
     let llmResponse: import('../types.js').LLMResponse | null = null;
     let messageId = '';
@@ -549,6 +564,7 @@ export async function processAgentMessage(
         })) {
           if (directIntentOnlyRetryCount < INTENT_ONLY_DIRECT_RETRY_LIMIT) {
             directIntentOnlyRetryCount += 1;
+            discardStreamedAssistantReply(loopMessageId);
             loggerAgent.warn('Direct turn returned intent-only action narration; retrying with corrective instruction', {
               agentId: agent.id,
               worldId: world.id,
@@ -565,6 +581,7 @@ export async function processAgentMessage(
 
           messageId = loopMessageId;
           initialLoopStoppedOnIntentOnlyText = true;
+          discardStreamedAssistantReply(loopMessageId);
           loggerAgent.warn('Direct turn returned repeated intent-only action narration; stopping without terminal completion', {
             agentId: agent.id,
             worldId: world.id,

@@ -314,6 +314,7 @@ export function serializeRealtimeSSEEvent(
       stream: event?.stream || null,
       content: event?.content || '',
       reasoningContent: typeof event?.reasoningContent === 'string' ? event.reasoningContent : null,
+      discard: event?.discard === true,
       error: event?.error || null,
       createdAt: new Date().toISOString(),
       chatId: chatId || null
