@@ -160,6 +160,7 @@ import {
 } from '../../../shared/conversation-message-counts';
 import {
   createSessionSystemStatus,
+  shouldDisplaySessionSystemStatus,
   retainSessionSystemStatusForContext,
   type SessionSystemStatusEntry,
 } from '../domain/session-system-status';
@@ -526,6 +527,7 @@ function AppContent({ api }: { api: DesktopApi }) {
   const onMainProcessLogEvent = useCallback((entry: MainProcessLogEntry) => {
     appendUnifiedLogEntry(entry);
   }, [appendUnifiedLogEntry]);
+  const chatStatusRef = useRef<string>('idle');
 
   useEffect(() => {
     const unsubscribe = rendererLogger.subscribe((entry: RendererLogEntry) => {
@@ -1245,8 +1247,17 @@ function AppContent({ api }: { api: DesktopApi }) {
       createdAt: event?.createdAt ? String(event.createdAt) : null,
       content: event?.content,
     });
+
+    if (!shouldDisplaySessionSystemStatus({
+      status: nextStatus,
+      chatStatus: chatStatusRef.current,
+      draftText: composer,
+    })) {
+      return;
+    }
+
     showSessionSystemStatus(nextStatus);
-  }, [loadedWorld?.id, showSessionSystemStatus]);
+  }, [composer, loadedWorld?.id, showSessionSystemStatus]);
 
   useChatEventSubscriptions({
     api,
@@ -2112,6 +2123,23 @@ function AppContent({ api }: { api: DesktopApi }) {
     [worldAgents]
   );
   const { chatStatus, agentStatuses } = useWorkingStatus(loadedWorld?.id, selectedSessionId, agentStatusInput);
+
+  useEffect(() => {
+    chatStatusRef.current = chatStatus;
+  }, [chatStatus]);
+
+  useEffect(() => {
+    setSystemStatus((current) => {
+      if (shouldDisplaySessionSystemStatus({
+        status: current,
+        chatStatus,
+        draftText: composer,
+      })) {
+        return current;
+      }
+      return null;
+    });
+  }, [chatStatus, composer]);
 
   const workingStartTimeRef = useRef<number | null>(null);
   const [inlineElapsedMs, setInlineElapsedMs] = useState(0);

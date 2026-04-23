@@ -15,6 +15,7 @@
  * - Host-owned tools remain explicit extras so existing approval and persistence semantics are preserved.
  *
  * Recent Changes:
+ * - 2026-04-23: Clear completed queue timeout timers so successful LLM calls do not emit stale timeout system events after the turn has already finished.
  * - 2026-04-16: Replaced the deleted core llm-manager/llm-config boundary with direct llm-runtime integration.
  */
 
@@ -94,6 +95,7 @@ type QueuedLLMCall = {
   onTakingTooLong?: (details: { elapsedMs: number; timeoutMs: number }) => void;
   onTimedOut?: (details: { elapsedMs: number; timeoutMs: number }) => void;
   canceled: boolean;
+  clearTimeoutTimer?: () => void;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
 };
@@ -258,6 +260,10 @@ async function processChatQueue(worldId: string, chatId: string | null): Promise
       item.abortController.signal.addEventListener('abort', () => {
         clearTimeout(timeoutTimer);
       }, { once: true });
+
+      item.clearTimeoutTimer = () => {
+        clearTimeout(timeoutTimer);
+      };
     });
 
     try {
@@ -276,6 +282,7 @@ async function processChatQueue(worldId: string, chatId: string | null): Promise
       }
     } finally {
       clearTimeout(warningTimer);
+      item.clearTimeoutTimer?.();
       state.activeItem = null;
     }
   }
@@ -310,6 +317,7 @@ async function addToQueue<T>(
       onTakingTooLong: options?.onTakingTooLong,
       onTimedOut: options?.onTimedOut,
       canceled: false,
+      clearTimeoutTimer: undefined,
       resolve: resolve as (value: unknown) => void,
       reject,
     });

@@ -13,6 +13,11 @@
  * - Unknown structured payloads fall back to `message`/`title` extraction when possible.
  *
  * Recent Changes:
+ * - 2026-04-23: Added pure timeout-status visibility gating so renderer callers
+ *   can show timeout banners only while the selected chat is still actively
+ *   working and hide them once the user resumes composing.
+ * - 2026-04-23: Added timeout-status detection so the renderer can suppress or
+ *   clear stale LLM timeout banners once a chat is idle or the user resumes typing.
  * - 2026-03-06: Preserved error-kind system statuses until superseded or context changes while keeping other statuses transient.
  * - 2026-03-06: Added selected-chat system-event normalization for Electron status-bar visibility.
  */
@@ -36,6 +41,37 @@ export interface SessionSystemStatusEntry {
   text: string;
   kind: SessionSystemStatusKind;
   expiresAfterMs: number | null;
+}
+
+export function shouldDisplaySessionSystemStatus(params: {
+  status: SessionSystemStatusEntry | null;
+  chatStatus?: string | null;
+  draftText?: string | null;
+}): boolean {
+  const { status } = params;
+  if (!status) {
+    return false;
+  }
+
+  if (!isTimeoutSystemStatusText(status.text)) {
+    return true;
+  }
+
+  if (readTrimmedString(params.draftText)) {
+    return false;
+  }
+
+  return readTrimmedString(params.chatStatus).toLowerCase() === 'working';
+}
+
+export function isTimeoutSystemStatusText(value: unknown): boolean {
+  const normalized = readTrimmedString(value).toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return normalized.includes('llm processing timed out')
+    || normalized.includes('llm processing taking too long');
 }
 
 export const SESSION_SYSTEM_STATUS_TTL_MS = 5000;

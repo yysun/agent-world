@@ -13,6 +13,7 @@
  * - Uses `skipTools=true` to keep the coverage focused on queue semantics.
  *
  * Recent Changes:
+ * - 2026-04-23: Added regression coverage that successful LLM calls clear queue timeout timers and do not emit stale timeout system events later.
  * - 2026-04-16: Added regression coverage for chat cancel and timeout behavior after the llm-runtime migration.
  */
 
@@ -178,5 +179,34 @@ describe('llm-runtime queue behavior', () => {
       provider: 'google',
       providerConfig: { apiKey: 'test-key' },
     }));
+  });
+
+  it('does not emit timeout system status after a successful call already resolved', async () => {
+    vi.useFakeTimers();
+
+    mockGenerate.mockResolvedValueOnce({
+      type: 'text',
+      content: 'done',
+      assistantMessage: {
+        role: 'assistant',
+        content: 'done',
+      },
+    });
+
+    const world = createWorld();
+    const agent = createAgent();
+
+    const result = await generateAgentResponse(world, agent, [], undefined, true, 'chat-success');
+    expect(result.response.content).toBe('done');
+
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(world.eventEmitter.emit).not.toHaveBeenCalledWith(
+      'system',
+      expect.objectContaining({
+        content: expect.stringContaining('timed out for'),
+        chatId: 'chat-success',
+      }),
+    );
   });
 });

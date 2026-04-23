@@ -20,7 +20,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   createSessionSystemStatus,
+  isTimeoutSystemStatusText,
   retainSessionSystemStatusForContext,
+  shouldDisplaySessionSystemStatus,
 } from '../../../electron/renderer/src/domain/session-system-status';
 
 describe('session-system-status helpers', () => {
@@ -76,6 +78,35 @@ describe('session-system-status helpers', () => {
     expect(retryStatus?.expiresAfterMs).toBe(5000);
     expect(queueFailureStatus?.kind).toBe('error');
     expect(queueFailureStatus?.expiresAfterMs).toBeNull();
+  });
+
+  it('detects plain-text timeout system status strings', () => {
+    expect(isTimeoutSystemStatusText('LLM processing timed out for gemini after 900s.')).toBe(true);
+    expect(isTimeoutSystemStatusText('LLM processing taking too long for gemini (elapsed 30s, timeout 900s).')).toBe(true);
+    expect(isTimeoutSystemStatusText('Queue retry scheduled (timeout): attempt 2/3')).toBe(false);
+    expect(isTimeoutSystemStatusText('')).toBe(false);
+  });
+
+  it('shows timeout status only while the chat is still working and no draft exists', () => {
+    const timeoutStatus = createSessionSystemStatus('world-1', {
+      eventType: 'system',
+      chatId: 'chat-1',
+      messageId: 'sys-timeout-active',
+      createdAt: null,
+      content: 'LLM processing timed out for gemini after 900s.',
+    });
+    const retryStatus = createSessionSystemStatus('world-1', {
+      eventType: 'system',
+      chatId: 'chat-1',
+      messageId: 'sys-retry-visible',
+      createdAt: null,
+      content: 'Queue retry scheduled (timeout): attempt 2/3, remaining attempts 1, elapsed 3s, next retry in 1s.',
+    });
+
+    expect(shouldDisplaySessionSystemStatus({ status: timeoutStatus, chatStatus: 'working', draftText: '' })).toBe(true);
+    expect(shouldDisplaySessionSystemStatus({ status: timeoutStatus, chatStatus: 'idle', draftText: '' })).toBe(false);
+    expect(shouldDisplaySessionSystemStatus({ status: timeoutStatus, chatStatus: 'working', draftText: '1.features' })).toBe(false);
+    expect(shouldDisplaySessionSystemStatus({ status: retryStatus, chatStatus: 'idle', draftText: '1.features' })).toBe(true);
   });
 
   it('rejects unscoped events and clears state on chat switch', () => {
