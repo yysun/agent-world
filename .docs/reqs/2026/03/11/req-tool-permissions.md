@@ -28,7 +28,7 @@ Agents may only passively inspect project content, fetch public web content, and
 - `web_fetch` — fetch public web content (existing SSRF/private-network guards still apply)
 - `load_skill` — load skill instruction text into agent context (read phase only; skill script execution is blocked)
 - `send_message` — agent-to-agent messaging (unrelated to file/web/shell)
-- `human_intervention_request` — HITL is always available
+- `ask_user_input` / `human_intervention_request` — HITL is always available; `ask_user_input` is the preferred public alias
 
 **Blocked tools (returns an error / refused at dispatch):**
 - `write_file`
@@ -58,7 +58,7 @@ Agents may use all built-in tools according to their existing automatic behavior
 - `shell_cmd` — existing risk-tier logic
 - `load_skill` (including script execution) — automatic
 - `create_agent` — existing approval flow remains active
-- `read_file`, `list_files`, `grep`, `send_message`, `human_intervention_request` — unchanged
+- `read_file`, `list_files`, `grep`, `send_message`, `ask_user_input` / `human_intervention_request` — unchanged
 
 ---
 

@@ -12,6 +12,7 @@
  * - LOG_MCP=debug - Enable all MCP logs
  *
  * Recent Changes:
+ * - 2026-04-23: Registered `ask_user_input` as an execution alias of the core HITL built-in so the preferred llm-runtime alias resolves through the host tool runtime.
  * - 2026-03-17: Tightened remote MCP header validation so world config JSON accepts only string-to-string HTTP header maps.
  * - 2026-03-06: Removed `world.currentChatId` fallback from retry-status routing; MCP retry status emits only when `context.chatId` is explicit.
  * 
@@ -1693,6 +1694,7 @@ export async function updateMCPServersForWorld(worldId: string, newMcpConfig: st
  * - load_skill: Load full SKILL.md instructions by registry skill_id
  * - create_agent: Create a new agent after explicit user approval
  * - human_intervention_request: Ask a human question with options (single-step selection)
+ * - ask_user_input: Preferred alias for the built-in human question tool
  * - send_message: Dispatch message arrays to the active world/chat context
  * - web_fetch: Fetch URL content and convert to markdown
  * - read_file: Read file contents with pagination controls
@@ -1707,6 +1709,10 @@ function getBuiltInTools(): Record<string, any> {
   const loadSkillTool = createLoadSkillToolDefinition();
   const createAgentTool = createCreateAgentToolDefinition();
   const hitlTool = createHitlToolDefinition();
+  const askUserInputTool = {
+    ...hitlTool,
+    name: 'ask_user_input',
+  };
   const sendMessageTool = createSendMessageToolDefinition();
   const webFetchTool = createWebFetchToolDefinition();
   const readFileTool = createReadFileToolDefinition();
@@ -1719,6 +1725,7 @@ function getBuiltInTools(): Record<string, any> {
     'load_skill': wrapToolWithValidation(loadSkillTool, 'load_skill'),
     'create_agent': wrapToolWithValidation(createAgentTool, 'create_agent'),
     'human_intervention_request': wrapToolWithValidation(hitlTool, 'human_intervention_request'),
+    'ask_user_input': wrapToolWithValidation(askUserInputTool, 'ask_user_input'),
     'send_message': wrapToolWithValidation(sendMessageTool, 'send_message'),
     'web_fetch': wrapToolWithValidation(webFetchTool, 'web_fetch'),
     'read_file': wrapToolWithValidation(readFileTool, 'read_file'),

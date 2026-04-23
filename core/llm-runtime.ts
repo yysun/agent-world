@@ -15,13 +15,20 @@
  * - Host-owned tools remain explicit extras so existing approval and persistence semantics are preserved.
  *
  * Recent Changes:
- * - 2026-04-23: Always expose the preferred `ask_user_input` HITL alias in runtime tool lists and always forward `webSearch` for llm-runtime provider calls.
+ * - 2026-04-23: Added a compatibility loader for `resolveTools` and `resolveToolsAsync` so published `llm-runtime@0.3.2` remains usable until the root exports are published.
+ * - 2026-04-23: Disabled host-level `webSearch` by default without a host-side opt-in path.
+ * - 2026-04-23: Switched tool discovery to the newly exported `resolveTools` and `resolveToolsAsync` package APIs from llm-runtime.
+ * - 2026-04-23: Switched normal host calls back to llm-runtime built-ins and stopped re-registering reserved built-in names as host extras.
+ * - 2026-04-23: Always expose the preferred `ask_user_input` HITL alias in runtime tool lists.
  * - 2026-04-23: Clear completed queue timeout timers so successful LLM calls do not emit stale timeout system events after the turn has already finished.
  * - 2026-04-16: Replaced the deleted core llm-manager/llm-config boundary with direct llm-runtime integration.
  */
 
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import * as llmRuntimeModule from 'llm-runtime';
 import {
-  createMCPRegistry,
   clearAllConfiguration,
   configureLLMProvider,
   generate,
@@ -37,10 +44,10 @@ import {
   type BaseLLMConfig,
   type GoogleConfig,
   type LLMProviderName,
+  type LLMResolveToolsOptions,
   type LLMResponse as RuntimeLLMResponse,
   type LLMToolExecutionContext,
   type LLMToolDefinition,
-  type MCPRegistry,
   type OllamaConfig,
   type OpenAICompatibleConfig,
   type OpenAIConfig,
@@ -51,16 +58,6 @@ import {
 } from 'llm-runtime';
 import { createCreateAgentToolDefinition } from './create-agent-tool.js';
 import { createSendMessageToolDefinition } from './send-message-tool.js';
-import { createShellCmdToolDefinition } from './shell-cmd-tool.js';
-import { createLoadSkillToolDefinition } from './load-skill-tool.js';
-import { createHitlToolDefinition } from './hitl-tool.js';
-import { createWebFetchToolDefinition } from './web-fetch-tool.js';
-import {
-  createReadFileToolDefinition,
-  createWriteFileToolDefinition,
-  createListFilesToolDefinition,
-  createGrepToolDefinition,
-} from './file-tools.js';
 import { wrapToolWithValidation } from './tool-utils.js';
 import { RELIABILITY_CONFIG } from './reliability-config.js';
 import { createCategoryLogger } from './logger.js';
@@ -84,7 +81,13 @@ import {
 
 const loggerQueue = createCategoryLogger('llm.queue');
 const loggerRuntime = createCategoryLogger('llm.runtime');
-const mcpRegistries = new Map<string, MCPRegistry>();
+
+type RuntimeResolveToolsExports = {
+  resolveTools: (options?: LLMResolveToolsOptions) => Record<string, LLMToolDefinition>;
+  resolveToolsAsync: (options?: LLMResolveToolsOptions) => Promise<Record<string, LLMToolDefinition>>;
+};
+
+let runtimeResolveToolsExportsPromise: Promise<RuntimeResolveToolsExports> | null = null;
 
 type QueuedLLMCall = {
   id: string;
@@ -375,57 +378,59 @@ function getToolPermission(world: World): ToolPermission {
 }
 
 function getHostToolDefinitions(): LLMToolDefinition[] {
-  const hitlToolDefinition = createHitlToolDefinition();
-
   return [
-    wrapToolWithValidation(createShellCmdToolDefinition(), 'shell_cmd'),
-    wrapToolWithValidation(createLoadSkillToolDefinition(), 'load_skill'),
-    wrapToolWithValidation(createCreateAgentToolDefinition(), 'create_agent'),
-    wrapToolWithValidation({
-      ...hitlToolDefinition,
-      name: 'human_intervention_request',
-    }, 'human_intervention_request'),
-    wrapToolWithValidation({
-      ...hitlToolDefinition,
-      name: 'ask_user_input',
-    }, 'ask_user_input'),
-    wrapToolWithValidation(createSendMessageToolDefinition(), 'send_message'),
-    wrapToolWithValidation(createWebFetchToolDefinition(), 'web_fetch'),
-    wrapToolWithValidation(createReadFileToolDefinition(), 'read_file'),
-    wrapToolWithValidation(createWriteFileToolDefinition(), 'write_file'),
-    wrapToolWithValidation(createListFilesToolDefinition(), 'list_files'),
-    wrapToolWithValidation(createGrepToolDefinition(), 'grep'),
+    {
+      ...wrapToolDefinitionForHost(wrapToolWithValidation(createCreateAgentToolDefinition(), 'create_agent')),
+      name: 'create_agent',
+    },
+    {
+      ...wrapToolDefinitionForHost(wrapToolWithValidation(createSendMessageToolDefinition(), 'send_message')),
+      name: 'send_message',
+    },
   ] as LLMToolDefinition[];
 }
 
-function stableStringify(value: unknown): string {
-  if (value === null || value === undefined) {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map((entry) => stableStringify(entry)).join(',')}]`;
-  }
-  if (typeof value === 'object') {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .filter(([, entryValue]) => entryValue !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(value);
+function getHostToolMap(): Record<string, LLMToolDefinition> {
+  return Object.fromEntries(getHostToolDefinitions().map((tool) => [tool.name, tool]));
 }
 
-function getCachedMCPRegistry(world: World): MCPRegistry {
-  const config = parseMCPConfigJson(world.mcpConfig ?? null);
-  const cacheKey = stableStringify(config);
-  const existing = mcpRegistries.get(cacheKey);
-  if (existing) {
-    return existing;
+function getSkillRootsForWorld(world: World | null | undefined): string[] {
+  if (!world) {
+    return [];
   }
 
-  const created = createMCPRegistry(config);
-  mcpRegistries.set(cacheKey, created);
-  return created;
+  return resolveSkillRootDescriptors({ worldVariablesText: world.variables })
+    .map((descriptor) => descriptor.rootPath)
+    .filter(Boolean);
+}
+
+async function loadRuntimeResolveToolsExports(): Promise<RuntimeResolveToolsExports> {
+  const maybeResolveTools = (llmRuntimeModule as Partial<RuntimeResolveToolsExports>).resolveTools;
+  const maybeResolveToolsAsync = (llmRuntimeModule as Partial<RuntimeResolveToolsExports>).resolveToolsAsync;
+  if (typeof maybeResolveTools === 'function' && typeof maybeResolveToolsAsync === 'function') {
+    return {
+      resolveTools: maybeResolveTools,
+      resolveToolsAsync: maybeResolveToolsAsync,
+    };
+  }
+
+  if (!runtimeResolveToolsExportsPromise) {
+    runtimeResolveToolsExportsPromise = (async () => {
+      const require = createRequire(import.meta.url);
+      const runtimePackageJsonPath = require.resolve('llm-runtime/package.json');
+      const runtimeModuleUrl = pathToFileURL(join(dirname(runtimePackageJsonPath), 'dist', 'runtime.js')).href;
+      const runtimeModule = await import(runtimeModuleUrl) as Partial<RuntimeResolveToolsExports>;
+      if (typeof runtimeModule.resolveTools !== 'function' || typeof runtimeModule.resolveToolsAsync !== 'function') {
+        throw new Error('llm-runtime runtime tool resolvers are unavailable from both the package root and dist/runtime.js');
+      }
+      return {
+        resolveTools: runtimeModule.resolveTools,
+        resolveToolsAsync: runtimeModule.resolveToolsAsync,
+      };
+    })();
+  }
+
+  return await runtimeResolveToolsExportsPromise;
 }
 
 function wrapToolDefinitionForHost(toolDefinition: LLMToolDefinition): LLMToolDefinition {
@@ -451,21 +456,19 @@ function wrapToolDefinitionForHost(toolDefinition: LLMToolDefinition): LLMToolDe
 }
 
 export async function getRuntimeToolsForWorld(world: World | null | undefined): Promise<Record<string, LLMToolDefinition>> {
-  const hostTools = getHostToolDefinitions();
+  const runtimeResolveTools = await loadRuntimeResolveToolsExports();
   if (!world) {
-    return Object.fromEntries(hostTools.map((tool) => [tool.name, wrapToolDefinitionForHost(tool)]));
+    return runtimeResolveTools.resolveTools({
+      skillRoots: getSkillRootsForWorld(world),
+      tools: getHostToolMap(),
+    });
   }
 
-  resolveSkillRootDescriptors({ worldVariablesText: world.variables }).map((descriptor) => descriptor.rootPath);
-  const registry = getCachedMCPRegistry(world);
-  const runtimeTools = {
-    ...Object.fromEntries(hostTools.map((tool) => [tool.name, tool])),
-    ...(await registry.resolveTools()),
-  };
-
-  return Object.fromEntries(
-    Object.entries(runtimeTools).map(([toolName, toolDefinition]) => [toolName, wrapToolDefinitionForHost(toolDefinition as LLMToolDefinition)]),
-  );
+  return await runtimeResolveTools.resolveToolsAsync({
+    mcpConfig: parseMCPConfigJson(world.mcpConfig ?? null),
+    skillRoots: getSkillRootsForWorld(world),
+    tools: getHostToolMap(),
+  });
 }
 
 export function appendToolRulesToSystemMessage(
@@ -508,16 +511,22 @@ async function executeGenerateAgentResponse(
   const providerConfig = getLLMProviderConfig(provider);
   const workingDirectory = String(getEnvValueFromText(world.variables, 'working_directory') || getDefaultWorkingDirectory()).trim();
   let preparedMessages = stripCustomFieldsFromMessages(messages) as AgentMessage[];
-  const tools = skipTools ? {} : await getRuntimeToolsForWorld(world);
-  preparedMessages = appendToolRulesToSystemMessage(preparedMessages, Object.keys(tools), { workingDirectory });
+  const advertisedTools = skipTools ? {} : await getRuntimeToolsForWorld(world);
+  const hostTools = getHostToolMap();
+  preparedMessages = appendToolRulesToSystemMessage(preparedMessages, Object.keys(advertisedTools), { workingDirectory });
 
   const response = await generate({
     provider,
     providerConfig,
     model: agent.model,
     messages: preparedMessages,
-    tools,
-    webSearch: true,
+    ...(skipTools
+      ? { builtIns: false, tools: {} }
+      : {
+        mcpConfig: parseMCPConfigJson(world.mcpConfig ?? null),
+        skillRoots: getSkillRootsForWorld(world),
+        tools: hostTools,
+      }),
     context: {
       abortSignal,
       workingDirectory,
@@ -559,8 +568,9 @@ async function executeStreamAgentResponse(
   const providerConfig = getLLMProviderConfig(provider);
   const workingDirectory = String(getEnvValueFromText(world.variables, 'working_directory') || getDefaultWorkingDirectory()).trim();
   let preparedMessages = stripCustomFieldsFromMessages(messages) as AgentMessage[];
-  const tools = await getRuntimeToolsForWorld(world);
-  preparedMessages = appendToolRulesToSystemMessage(preparedMessages, Object.keys(tools), { workingDirectory });
+  const runtimeTools = await getRuntimeToolsForWorld(world);
+  const hostTools = getHostToolMap();
+  preparedMessages = appendToolRulesToSystemMessage(preparedMessages, Object.keys(runtimeTools), { workingDirectory });
 
   publishSSE(world, {
     agentName: agent.id,
@@ -575,8 +585,9 @@ async function executeStreamAgentResponse(
       providerConfig,
       model: agent.model,
       messages: preparedMessages,
-      tools,
-      webSearch: true,
+      mcpConfig: parseMCPConfigJson(world.mcpConfig ?? null),
+      skillRoots: getSkillRootsForWorld(world),
+      tools: hostTools,
       onChunk: (chunk) => {
         publishSSE(world, {
           agentName: agent.id,

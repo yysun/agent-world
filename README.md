@@ -159,6 +159,8 @@ Each world can define MCP servers in `mcpConfig`. Agent World starts them on dem
 
 Agent World is not limited to a single provider or a single tool surface.
 
+Note: Agent World's current `llm-runtime` host integration does not use provider-native `webSearch` support. For web research, use `web_fetch` or MCP-provided search/browser tools instead.
+
 - Use hosted models from OpenAI, Anthropic, Google, Azure OpenAI, xAI, or other OpenAI-compatible endpoints
 - Use local models through Ollama
 - Use built-in tools for common runtime operations
@@ -183,7 +185,9 @@ Available built-ins include:
 - `create_agent`
 - `shell_cmd`
 - `load_skill`
-- `human_intervention_request`
+- `ask_user_input` / `human_intervention_request`
+
+`web_fetch` is the supported built-in path for fetching web content. Agent World does not currently expose provider-native `webSearch` through the `llm-runtime` host boundary.
 
 World owners can set tool access to:
 

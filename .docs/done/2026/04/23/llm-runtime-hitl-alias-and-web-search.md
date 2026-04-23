@@ -6,7 +6,7 @@
 
 Completed a focused llm-runtime integration update to:
 - always expose the preferred `ask_user_input` HITL alias alongside the legacy `human_intervention_request` name,
-- always forward `webSearch: true` on llm-runtime generate/stream calls,
+- stop relying on host-side `webSearch` forwarding in the current `llm-runtime` host integration,
 - consolidate duplicated HITL tool-name alias checks into a shared helper,
 - and fix a follow-up regression where `getWorldTurnLimit()` was accidentally removed while still being used by the orchestrator.
 
@@ -17,7 +17,7 @@ Completed a focused llm-runtime integration update to:
 Updated `core/llm-runtime.ts` to:
 - register both `human_intervention_request` and `ask_user_input` using the same HITL tool definition,
 - keep the existing host-owned tool wrapping behavior,
-- send `webSearch: true` in both non-streaming and streaming llm-runtime calls.
+- stop forwarding `webSearch` from the host boundary and rely on `web_fetch` or MCP search/browser tools for web research.
 
 ### 2. HITL alias consolidation
 
@@ -100,5 +100,5 @@ This work leaves the runtime in a more consistent state:
 - the preferred public HITL tool name is available in the host integration,
 - legacy HITL alias behavior remains compatible,
 - prompt guidance and persisted replay logic follow the same alias rules,
-- web search is enabled consistently at the llm-runtime boundary,
+- web research flows are expected to use `web_fetch` or MCP tools rather than host-forwarded provider web search,
 - and the reviewed regression on `getWorldTurnLimit()` is fixed and protected by test coverage.

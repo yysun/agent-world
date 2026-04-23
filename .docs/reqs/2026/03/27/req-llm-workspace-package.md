@@ -5,6 +5,8 @@
 **Component**: Monorepo workspace structure, LLM runtime boundary, MCP/tool/skill integration  
 **Related**: `core/llm-manager.ts`, `core/mcp-server-registry.ts`, `core/load-skill-tool.ts`, `core/skill-registry.ts`, `core/events/*`
 
+> Superseded on 2026-04-16 by [req-remove-internal-llm-package.md](../../04/16/req-remove-internal-llm-package.md), [plan-remove-internal-llm-package.md](../../../plans/2026/04/16/plan-remove-internal-llm-package.md), and [remove-internal-llm-package.md](../../../done/2026/04/16/remove-internal-llm-package.md).
+
 ## Overview
 
 Create a new monorepo workspace for LLM functionality that can be published as an npm package and consumed by `core/`.

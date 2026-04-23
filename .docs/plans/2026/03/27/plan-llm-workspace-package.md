@@ -2,7 +2,9 @@
 
 **Date:** 2026-03-27  
 **Related Requirement:** [req-llm-workspace-package.md](/Users/esun/Documents/Projects/agent-world/.docs/reqs/2026/03/27/req-llm-workspace-package.md)  
-**Status:** In Progress
+**Status:** Superseded on 2026-04-16
+
+> Superseded by [req-remove-internal-llm-package.md](../../../reqs/2026/04/16/req-remove-internal-llm-package.md), [plan-remove-internal-llm-package.md](../../04/16/plan-remove-internal-llm-package.md), and [remove-internal-llm-package.md](../../../done/2026/04/16/remove-internal-llm-package.md).
 
 ## Overview
 

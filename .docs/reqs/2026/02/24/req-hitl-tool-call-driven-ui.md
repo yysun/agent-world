@@ -3,7 +3,7 @@
 **Last Updated:** 2026-02-25
 
 ## Summary
-Move HITL prompt rendering to a tool-call-driven model where frontend clients display HITL UI when they observe `human_intervention_request` tool calls in the live stream, and reconstruct unresolved HITL prompts from persisted raw tool-call request/response messages when restoring chats.
+Move HITL prompt rendering to a tool-call-driven model where frontend clients display HITL UI when they observe HITL tool calls in the live stream, and reconstruct unresolved HITL prompts from persisted raw tool-call request/response messages when restoring chats.
 
 ## Problem Statement
 Current HITL UI behavior previously relied on `hitl-option-request` system events and replay payloads to keep prompts visible across chat switches and reconnects. After removing that dependency, unresolved prompt recovery must be guaranteed from persisted raw LLM tool-call request/response messages without introducing a separate HITL persistence store.
@@ -22,7 +22,7 @@ Current HITL UI behavior previously relied on `hitl-option-request` system event
 - Adding a dedicated HITL persistence store/table.
 
 ## Requirements (WHAT)
-1. Frontend clients MUST render HITL prompts when a streamed `human_intervention_request` tool call is observed.
+1. Frontend clients MUST render HITL prompts when a streamed HITL tool call is observed, including the preferred `ask_user_input` alias and the legacy-compatible `human_intervention_request` alias.
 2. The prompt shown from tool-call data MUST include stable request identity usable for response submission.
 3. The system MUST continue enforcing request validation by `(worldId, requestId, optionId, chatId)` scope.
 4. Switching chats or reconnecting MUST preserve visibility of unresolved HITL prompts for the active chat.
@@ -45,12 +45,12 @@ Current HITL UI behavior previously relied on `hitl-option-request` system event
 - Pending reconstruction SHOULD be linear-time over the loaded chat message set.
 
 ## Assumptions
-- `human_intervention_request` remains the canonical HITL tool name.
+- `ask_user_input` is the preferred public HITL tool name, and `human_intervention_request` remains a supported legacy-compatible alias.
 - HITL response submission continues using existing server endpoint semantics (`requestId` + `optionId` + optional `chatId`).
 - Existing persisted message schema (`assistant.tool_calls` and `tool.tool_call_id`) is available on chat restore.
 
 ## Acceptance Criteria
-- A newly emitted `human_intervention_request` tool call appears as HITL prompt UI without parsing `hitl-option-request` system events.
+- A newly emitted HITL tool call appears as HITL prompt UI without parsing `hitl-option-request` system events.
 - Submitting an option still succeeds using the same server endpoint and validation rules.
 - Chat switch/reconnect restores pending HITL prompt visibility by parsing persisted raw tool-call request/response messages.
 - Process restart + chat reload restores unresolved HITL prompt visibility from persisted raw messages.
@@ -84,7 +84,7 @@ Current HITL UI behavior previously relied on `hitl-option-request` system event
 
 - Use streamed tool events for immediate HITL prompt rendering.
 - On chat restore, reconstruct unresolved HITL prompts from persisted messages by:
-  1) collecting assistant `human_intervention_request` tool calls,
+  1) collecting assistant HITL tool calls (`ask_user_input` and legacy `human_intervention_request`),
   2) collecting tool-role responses keyed by `tool_call_id`,
   3) rendering requests that have no matched response.
 - Keep submission endpoint unchanged externally, but enforce internal identity alignment with tool-call ID for deterministic matching.

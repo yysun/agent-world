@@ -20,6 +20,7 @@ These rules apply to ALL code you write in this project. If any user request con
 - **Development Workflow:** Use the RPD skill from `yysun/rpd` for all feature and bug-fix work. Follow the RPD workflow (`REQ → AP → AR → AT → SS → TT → CR → ET → DD → GC`).
 - **Default Local Storage:** SQLite → `~/agent-world/database.db`
 - **Debug Tests:** Simple debug tests may be written as `.ts` files and run using `npx tsx`.
+- **Web Search Note:** Agent World currently does not expose provider-native `webSearch` through the `llm-runtime` host boundary. Do not document or assume built-in provider web-search support in repo changes; use `web_fetch` or MCP search/browser tools instead.
 
 ---
 

@@ -15,6 +15,7 @@
  * - Avoids network/process side effects while preserving runtime code paths.
  *
  * Recent changes:
+ * - 2026-04-23: Added coverage that the execution registry exposes the preferred `ask_user_input` HITL alias alongside the legacy built-in name.
  * - 2026-03-29: Removed temporary package-backed HITL bridge coverage after restoring core-owned built-ins.
  * - 2026-03-17: Added remote MCP header validation, transport propagation, and registry-isolation coverage.
  * - 2026-03-05: Added deterministic MCP tool-discovery timeout coverage for hanging `listTools()` calls.
@@ -677,6 +678,7 @@ describe('mcp-server-registry behavior', () => {
     expect(toolsFirst).toHaveProperty('shell_cmd');
     expect(toolsFirst).toHaveProperty('load_skill');
     expect(toolsFirst).toHaveProperty('human_intervention_request');
+    expect(toolsFirst).toHaveProperty('ask_user_input');
     expect(toolsFirst).toHaveProperty('send_message');
     expect(toolsFirst).toHaveProperty('web_fetch');
     expect(toolsFirst).toHaveProperty('write_file');

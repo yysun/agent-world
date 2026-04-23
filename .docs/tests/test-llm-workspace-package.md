@@ -4,9 +4,11 @@
 **Related Requirement:** [req-llm-workspace-package.md](/Users/esun/Documents/Projects/agent-world/.docs/reqs/2026/03/27/req-llm-workspace-package.md)  
 **Related Plan:** [plan-llm-workspace-package.md](/Users/esun/Documents/Projects/agent-world/.docs/plans/2026/03/27/plan-llm-workspace-package.md)
 
+> Superseded on 2026-04-16 by [req-remove-internal-llm-package.md](../reqs/2026/04/16/req-remove-internal-llm-package.md), [plan-remove-internal-llm-package.md](../plans/2026/04/16/plan-remove-internal-llm-package.md), and [remove-internal-llm-package.md](../done/2026/04/16/remove-internal-llm-package.md).
+
 ## Goal
 
-Verify that `@agent-world/llm` is a publishable runtime package that owns provider config, MCP support, built-in tool configuration and execution, tool contracts, and skill support while remaining consumable by `core/`.
+Historical note: this spec described the now-reversed internal `@agent-world/llm` workspace direction. The active runtime boundary is the external `llm-runtime` package.
 
 ## Scope
 

@@ -13,6 +13,8 @@
  * - Uses `skipTools=true` to keep the coverage focused on queue semantics.
  *
  * Recent Changes:
+ * - 2026-04-23: Added regression coverage that `webSearch` remains off by default in host runtime calls.
+ * - 2026-04-23: Added regression coverage that normal host calls keep llm-runtime built-ins enabled while avoiding reserved-name collisions by only passing non-built-in host extras.
  * - 2026-04-23: Added regression coverage that successful LLM calls clear queue timeout timers and do not emit stale timeout system events later.
  * - 2026-04-16: Added regression coverage for chat cancel and timeout behavior after the llm-runtime migration.
  */
@@ -26,9 +28,6 @@ const { mockGenerate, mockStream, mockGetLLMProviderConfig } = vi.hoisted(() => 
 }));
 
 vi.mock('llm-runtime', () => ({
-  createMCPRegistry: vi.fn(() => ({
-    resolveTools: vi.fn(async () => ({})),
-  })),
   clearAllConfiguration: vi.fn(),
   configureLLMProvider: vi.fn(),
   generate: mockGenerate,
@@ -37,6 +36,16 @@ vi.mock('llm-runtime', () => ({
   getLLMProviderConfig: mockGetLLMProviderConfig,
   isProviderConfigured: vi.fn(() => false),
   parseMCPConfigJson: vi.fn(() => null),
+  resolveTools: vi.fn(({ tools }: { tools?: Record<string, unknown> } = {}) => ({
+    human_intervention_request: { name: 'human_intervention_request' },
+    ask_user_input: { name: 'ask_user_input' },
+    ...(tools || {}),
+  })),
+  resolveToolsAsync: vi.fn(async ({ tools }: { tools?: Record<string, unknown> } = {}) => ({
+    human_intervention_request: { name: 'human_intervention_request' },
+    ask_user_input: { name: 'ask_user_input' },
+    ...(tools || {}),
+  })),
   stream: mockStream,
   validateProviderConfig: vi.fn(),
 }));
@@ -175,21 +184,32 @@ describe('llm-runtime queue behavior', () => {
     await streamAgentResponse(world, agent, [], vi.fn(), 'chat-stream');
 
     expect(mockGetLLMProviderConfig).toHaveBeenCalledWith('google');
-    expect(mockStream).toHaveBeenCalledWith(expect.objectContaining({
+    const streamRequest = mockStream.mock.calls[0]?.[0];
+    expect(streamRequest).toMatchObject({
       provider: 'google',
       providerConfig: { apiKey: 'test-key' },
-      webSearch: true,
-    }));
+    });
+    expect(streamRequest.webSearch).toBeUndefined();
+    expect(streamRequest.tools).toHaveProperty('create_agent');
+    expect(streamRequest.tools).toHaveProperty('send_message');
+    expect(streamRequest.tools).not.toHaveProperty('human_intervention_request');
+    expect(streamRequest.tools).not.toHaveProperty('ask_user_input');
   });
 
-  it('always exposes ask_user_input and forwards webSearch on generate calls', async () => {
-    mockGenerate.mockResolvedValueOnce({
-      type: 'text',
-      content: 'done',
-      assistantMessage: {
-        role: 'assistant',
+  it('keeps llm-runtime built-ins enabled and avoids reserved-name collisions on generate calls', async () => {
+    mockGenerate.mockImplementationOnce(async ({ builtIns, tools }: { builtIns?: boolean; tools?: Record<string, unknown> }) => {
+      if (builtIns !== false && tools?.human_intervention_request) {
+        throw new Error('Tool name "human_intervention_request" is reserved by llm-runtime built-ins.');
+      }
+
+      return {
+        type: 'text',
         content: 'done',
-      },
+        assistantMessage: {
+          role: 'assistant',
+          content: 'done',
+        },
+      };
     });
 
     const world = createWorld();
@@ -200,13 +220,17 @@ describe('llm-runtime queue behavior', () => {
 
     await generateAgentResponse(world, createAgent(), [], undefined, false, 'chat-tools');
 
-    expect(mockGenerate).toHaveBeenCalledWith(expect.objectContaining({
-      webSearch: true,
+    const generateRequest = mockGenerate.mock.calls[0]?.[0];
+    expect(generateRequest).toMatchObject({
       tools: expect.objectContaining({
-        human_intervention_request: expect.any(Object),
-        ask_user_input: expect.any(Object),
+        create_agent: expect.any(Object),
+        send_message: expect.any(Object),
       }),
-    }));
+    });
+    expect(generateRequest.webSearch).toBeUndefined();
+    expect(generateRequest.builtIns).toBeUndefined();
+    expect(generateRequest.tools).not.toHaveProperty('human_intervention_request');
+    expect(generateRequest.tools).not.toHaveProperty('ask_user_input');
   });
 
   it('does not emit timeout system status after a successful call already resolved', async () => {
