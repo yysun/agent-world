@@ -610,6 +610,46 @@ describe('listPendingHitlPromptEventsFromMessages (message-authoritative read mo
     });
   });
 
+  it('reconstructs unresolved ask_user_input prompts as HITL requests', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        sender: 'planner',
+        chatId: 'chat-alias',
+        content: 'Calling tool: ask_user_input',
+        tool_calls: [
+          {
+            id: 'ask-user-input-1',
+            function: {
+              name: 'ask_user_input',
+              arguments: JSON.stringify({
+                question: 'Proceed?',
+                options: ['Yes', 'No'],
+              }),
+            },
+          },
+        ],
+      },
+    ];
+
+    const pending = listPendingHitlPromptEventsFromMessages(messages as any, 'chat-alias');
+
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({
+      chatId: 'chat-alias',
+      prompt: {
+        requestId: 'ask-user-input-1',
+        toolCallId: 'ask-user-input-1',
+        toolName: 'ask_user_input',
+        message: 'Proceed?',
+        options: [
+          { id: 'opt_1', label: 'Yes' },
+          { id: 'opt_2', label: 'No' },
+        ],
+      },
+    });
+  });
+
   it('returns multiple unresolved requests in stable creation order', () => {
     const messages = [
       makeHitlAssistantMessage('call-m1', 'First?', ['A', 'B'], 'chat-d'),

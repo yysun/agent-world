@@ -13,6 +13,7 @@
  * - Tests are pure utility tests with no storage/LLM dependencies.
  *
  * Recent changes:
+ * - 2026-04-23: Added regression coverage for `getWorldTurnLimit()` after a refactor accidentally removed the export used by the orchestrator.
  * - 2026-02-14: Updated missing `working_directory` default expectation to use core default working directory resolver (user home in Node runtimes).
  */
 
@@ -20,6 +21,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getDefaultWorkingDirectory,
   getEnvValueFromText,
+  getWorldTurnLimit,
   interpolateTemplateVariables,
   parseEnvText
 } from '../../core/utils.js';
@@ -57,6 +59,11 @@ working_directory=/tmp
   it('defaults working_directory to core default working directory when missing', () => {
     const value = getEnvValueFromText('', 'working_directory');
     expect(value).toBe(getDefaultWorkingDirectory());
+  });
+
+  it('returns the configured world turn limit or the default fallback', () => {
+    expect(getWorldTurnLimit({ turnLimit: 9 } as any)).toBe(9);
+    expect(getWorldTurnLimit({} as any)).toBe(5);
   });
 
   it('interpolates template variables with optional spaces', () => {

@@ -28,6 +28,7 @@
  */
 
 import { type AgentMessage, type World } from './types.js';
+import { isHitlToolName } from './hitl-tool-names.js';
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
 
@@ -440,7 +441,7 @@ export function listPendingHitlPromptEventsFromMessages(
     for (const toolCall of message.tool_calls) {
       const toolName = String(toolCall?.function?.name || '').trim();
       const toolCallId = String(toolCall?.id || '').trim();
-      if (!toolCallId || toolName !== 'human_intervention_request') {
+      if (!toolCallId || !isHitlToolName(toolName)) {
         continue;
       }
       if (resolvedToolCallIds.has(toolCallId) || unresolvedById.has(toolCallId)) {

@@ -581,6 +581,37 @@ describe('Tool Utils - validateToolParameters', () => {
       options: ['A', 'B'],
     });
   });
+
+  test('applies HITL compatibility normalization for ask_user_input', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        question: { type: 'string' },
+        options: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+      },
+      required: ['question', 'options'],
+      additionalProperties: false,
+    };
+
+    const validation = validateToolParameters(
+      {
+        prompt: 'Pick one',
+        options: ['A', 'B'],
+        requireConfirmation: true,
+      },
+      schema,
+      'ask_user_input',
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(validation.correctedArgs).toEqual({
+      question: 'Pick one',
+      options: ['A', 'B'],
+    });
+  });
 });
 
 describe('Tool Utils - wrapToolWithValidation', () => {

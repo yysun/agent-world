@@ -567,6 +567,69 @@ describe('processAgentMessage chat isolation', () => {
     await processPromise;
   });
 
+  it('persists waiting HITL action metadata for direct ask_user_input tool calls', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+    let resolveExecute: ((value: string) => void) | null = null;
+
+    mocks.generateAgentResponse.mockResolvedValueOnce({
+      response: {
+        type: 'tool_calls',
+        content: 'Calling tool: ask_user_input',
+        tool_calls: [{
+          id: 'tool-call-hitl-alias-1',
+          type: 'function',
+          function: {
+            name: 'ask_user_input',
+            arguments: JSON.stringify({
+              question: 'Proceed?',
+              options: ['Yes', 'No'],
+            }),
+          },
+        }],
+      },
+      messageId: 'assistant-hitl-alias-msg-1',
+    });
+
+    mocks.getMCPToolsForWorld.mockResolvedValue({
+      ask_user_input: {
+        execute: vi.fn(
+          async () =>
+            await new Promise<string>((resolve) => {
+              resolveExecute = resolve;
+            })
+        ),
+      },
+    });
+
+    const { processAgentMessage } = await import('../../../core/events/orchestrator.js');
+    const processPromise = processAgentMessage(world, agent, createMessageEvent('chat-1'));
+    await vi.waitFor(() => {
+      expect(
+        agent.memory.find((message) => message.messageId === 'assistant-hitl-alias-msg-1')
+      ).toBeDefined();
+    });
+
+    const pendingAssistantMessage = agent.memory.find(
+      (message) => message.messageId === 'assistant-hitl-alias-msg-1'
+    );
+    expect(pendingAssistantMessage?.agentTurn).toMatchObject({
+      source: 'direct',
+      action: 'hitl_request',
+      state: 'waiting_for_hitl',
+    });
+
+    resolveExecute?.(JSON.stringify({
+      ok: true,
+      status: 'confirmed',
+      confirmed: true,
+      selectedOption: 'Yes',
+      source: 'user',
+      requestId: 'hitl-req-alias-1',
+    }));
+    await processPromise;
+  });
+
   it('persists direct tool execution failures with scoped logs and completed tool status', async () => {
     const world = createWorld();
     const agent = createAgent();

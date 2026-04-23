@@ -22,6 +22,7 @@
  * - 2026-03-29: Initial helper module for explicit agent-turn loop metadata and resume guards.
  */
 
+import { isHitlToolName } from './hitl-tool-names.js';
 import type { AgentMessage, AgentTurnAction, AgentTurnMetadata, AgentTurnOutcome, AgentTurnSource } from './types.js';
 
 const activeResumeLeases = new Set<string>();
@@ -35,7 +36,7 @@ export function resolveAgentTurnActionForToolName(toolName: string): AgentTurnAc
   if (normalizedToolName === 'send_message') {
     return 'agent_handoff';
   }
-  if (normalizedToolName === 'human_intervention_request') {
+  if (isHitlToolName(normalizedToolName)) {
     return 'hitl_request';
   }
   return 'tool_call';

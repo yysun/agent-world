@@ -73,7 +73,7 @@ vi.mock('../../core/reliability-config.js', () => ({
   },
 }));
 
-import { cancelLLMCallsForChat, clearLLMQueue, generateAgentResponse, streamAgentResponse } from '../../core/llm-runtime.js';
+import { cancelLLMCallsForChat, clearLLMQueue, generateAgentResponse, getRuntimeToolsForWorld, streamAgentResponse } from '../../core/llm-runtime.js';
 import { LLMProvider } from '../../core/types.js';
 
 function createWorld() {
@@ -178,6 +178,34 @@ describe('llm-runtime queue behavior', () => {
     expect(mockStream).toHaveBeenCalledWith(expect.objectContaining({
       provider: 'google',
       providerConfig: { apiKey: 'test-key' },
+      webSearch: true,
+    }));
+  });
+
+  it('always exposes ask_user_input and forwards webSearch on generate calls', async () => {
+    mockGenerate.mockResolvedValueOnce({
+      type: 'text',
+      content: 'done',
+      assistantMessage: {
+        role: 'assistant',
+        content: 'done',
+      },
+    });
+
+    const world = createWorld();
+    const tools = await getRuntimeToolsForWorld(world);
+
+    expect(tools).toHaveProperty('human_intervention_request');
+    expect(tools).toHaveProperty('ask_user_input');
+
+    await generateAgentResponse(world, createAgent(), [], undefined, false, 'chat-tools');
+
+    expect(mockGenerate).toHaveBeenCalledWith(expect.objectContaining({
+      webSearch: true,
+      tools: expect.objectContaining({
+        human_intervention_request: expect.any(Object),
+        ask_user_input: expect.any(Object),
+      }),
     }));
   });
 

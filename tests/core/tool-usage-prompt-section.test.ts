@@ -6,7 +6,7 @@
  *
  * Key Features:
  * - Returns empty guidance when no tools are available.
- * - Includes HITL-specific instructions when `human_intervention_request` is present.
+ * - Includes HITL-specific instructions when a HITL tool alias is present.
  * - Includes `list_files` narrowing instructions for `includePattern` and bounded `maxEntries`.
  *
  * Notes on Implementation:
@@ -39,10 +39,10 @@ describe('buildToolUsagePromptSection', () => {
     expect(content).not.toContain('Before any tool call, first send a short planning message');
   });
 
-  test('includes HITL-only guidance when human_intervention_request is available', () => {
-    const content = buildToolUsagePromptSection({ toolNames: ['human_intervention_request'] });
-    expect(content).toContain('call human_intervention_request');
-    expect(content).toContain('Prefer human_intervention_request for clarification');
+  test('includes HITL-only guidance when ask_user_input is available', () => {
+    const content = buildToolUsagePromptSection({ toolNames: ['ask_user_input'] });
+    expect(content).toContain('call ask_user_input');
+    expect(content).toContain('Prefer ask_user_input for clarification');
     expect(content).toContain('do not request free-text HITL input');
   });
 

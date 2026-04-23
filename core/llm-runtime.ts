@@ -15,6 +15,7 @@
  * - Host-owned tools remain explicit extras so existing approval and persistence semantics are preserved.
  *
  * Recent Changes:
+ * - 2026-04-23: Always expose the preferred `ask_user_input` HITL alias in runtime tool lists and always forward `webSearch` for llm-runtime provider calls.
  * - 2026-04-23: Clear completed queue timeout timers so successful LLM calls do not emit stale timeout system events after the turn has already finished.
  * - 2026-04-16: Replaced the deleted core llm-manager/llm-config boundary with direct llm-runtime integration.
  */
@@ -374,11 +375,20 @@ function getToolPermission(world: World): ToolPermission {
 }
 
 function getHostToolDefinitions(): LLMToolDefinition[] {
+  const hitlToolDefinition = createHitlToolDefinition();
+
   return [
     wrapToolWithValidation(createShellCmdToolDefinition(), 'shell_cmd'),
     wrapToolWithValidation(createLoadSkillToolDefinition(), 'load_skill'),
     wrapToolWithValidation(createCreateAgentToolDefinition(), 'create_agent'),
-    wrapToolWithValidation(createHitlToolDefinition(), 'human_intervention_request'),
+    wrapToolWithValidation({
+      ...hitlToolDefinition,
+      name: 'human_intervention_request',
+    }, 'human_intervention_request'),
+    wrapToolWithValidation({
+      ...hitlToolDefinition,
+      name: 'ask_user_input',
+    }, 'ask_user_input'),
     wrapToolWithValidation(createSendMessageToolDefinition(), 'send_message'),
     wrapToolWithValidation(createWebFetchToolDefinition(), 'web_fetch'),
     wrapToolWithValidation(createReadFileToolDefinition(), 'read_file'),
@@ -507,6 +517,7 @@ async function executeGenerateAgentResponse(
     model: agent.model,
     messages: preparedMessages,
     tools,
+    webSearch: true,
     context: {
       abortSignal,
       workingDirectory,
@@ -565,6 +576,7 @@ async function executeStreamAgentResponse(
       model: agent.model,
       messages: preparedMessages,
       tools,
+      webSearch: true,
       onChunk: (chunk) => {
         publishSSE(world, {
           agentName: agent.id,

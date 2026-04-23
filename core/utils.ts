@@ -34,6 +34,7 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-04-23: Restored `getWorldTurnLimit()` after an unrelated HITL alias refactor accidentally removed the exported helper still used by the orchestrator.
  * - 2026-04-12: Hardened tool-usage guidance to forbid future-tense tool narration and require corrected tool calls after validation failures.
  * - 2026-03-22: Updated Agent Skills prompt guidance to emphasize `load_skill` as a
  *   continue-the-task step instead of requiring a separate post-load acknowledgment.
@@ -69,6 +70,7 @@ import { filterClientSideMessages } from './message-prep.js';
 import { getSkillSourceScope, getSkillsForSystemPrompt, syncSkills, waitForInitialSkillSync } from './skill-registry.js';
 import { parseSkillIdListFromEnv } from './skill-settings.js';
 import { createCategoryLogger } from './logger.js';
+import { resolvePreferredHitlToolName } from './hitl-tool-names.js';
 
 const logger = createCategoryLogger('core.utils');
 
@@ -228,7 +230,7 @@ export function buildToolUsagePromptSection(options: { toolNames: string[] }): s
   }
 
   const normalizedToolNames = new Set(toolNames.map((toolName) => toolName.toLowerCase()));
-  const hasHitlTool = normalizedToolNames.has('human_intervention_request');
+  const hitlToolName = resolvePreferredHitlToolName(normalizedToolNames);
   const hasListFilesTool = normalizedToolNames.has('list_files');
   const hasGrepTool = normalizedToolNames.has('grep');
 
@@ -241,12 +243,12 @@ export function buildToolUsagePromptSection(options: { toolNames: string[] }): s
     'If a tool call fails validation, emit a corrected tool call with complete valid parameters instead of narrating intent.',
   ];
 
-  if (hasHitlTool) {
+  if (hitlToolName) {
     lines.push(
-      'If you need to ask the human a clarifying question, request an option choice, or request confirmation, call human_intervention_request instead of asking directly in plain assistant text.'
+      `If you need to ask the human a clarifying question, request an option choice, or request confirmation, call ${hitlToolName} instead of asking directly in plain assistant text.`
     );
     lines.push(
-      'Prefer human_intervention_request for clarification; only fall back to plain assistant questions when the tool cannot express what you need.'
+      `Prefer ${hitlToolName} for clarification; only fall back to plain assistant questions when the tool cannot express what you need.`
     );
     lines.push(
       'Use multiple-choice options only; do not request free-text HITL input.'
@@ -360,7 +362,7 @@ import { World, Agent, SenderType, MessageData, AgentMessage, ChatMessage } from
  * Get world-specific turn limit or default value
  */
 export function getWorldTurnLimit(world: World): number {
-  return world.turnLimit || 5; // Default to 5 if not configured
+  return world.turnLimit || 5;
 }
 
 /**

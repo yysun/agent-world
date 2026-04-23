@@ -33,6 +33,7 @@
 import { World, Agent, ChatMessage, WorldSSEEvent } from './types.js';
 import { publishToolEvent } from './events/index.js';
 import { publishEvent } from './events/publishers.js';
+import { isHitlToolName } from './hitl-tool-names.js';
 
 function normalizeKnownParameterAliases(toolName: string, args: any): {
   normalizedArgs: any;
@@ -126,7 +127,7 @@ function normalizeKnownParameterAliases(toolName: string, args: any): {
     delete normalizedArgs.next_agent;
   }
 
-  if (toolName === 'human_intervention_request') {
+  if (isHitlToolName(toolName)) {
     if (normalizedArgs.question === undefined && normalizedArgs.prompt !== undefined) {
       normalizedArgs.question = normalizedArgs.prompt;
       corrections.push("prompt -> question");
