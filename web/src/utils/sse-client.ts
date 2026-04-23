@@ -23,6 +23,7 @@
  * - Extracts error details from log data for better error visibility in UI
  *
  * Recent Changes:
+ * - 2026-04-23: Restored the shell assistant stream start branch after a malformed merge broke web builds and preserved typed active-stream state.
  * - 2026-03-13: Preserved streamed assistant `reasoningContent` separately from answer text so reasoning-only chunks do not get dropped.
  * - 2026-03-12: Routed shell assistant stdout SSE (`start/chunk/end`) through the web tool-stream path, preserved
  *   shell command metadata for live tool rows, and finalized matching shell stream rows on terminal tool events.
@@ -471,24 +472,21 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
   switch (eventType) {
     case 'start':
       if (isShellAssistantStream) {
-        if (endStream || eventData.discard === true) {
-          const finalContent = eventData.finalContent !== undefined
-            ? eventData.finalContent
-            : endStream?.content || '';
+        const streamKey = String(messageId || '').trim();
+        streamingState.activeMessages.set(streamKey, {
+          content: '',
+          reasoningContent: '',
           sender: agentName,
-            messageId: streamKey,
-              isStreaming: true
+          messageId: streamKey,
+          isStreaming: true
         });
+
         publishEvent('handleToolStream', {
-          discard: eventData.discard === true,
           messageId: streamKey,
           agentName,
-
-          if(endStream) {
-            streamingState.activeMessages.delete(messageId);
-          }
-        }
           chatId: eventData.chatId ?? shellToolMetadata?.chatId,
+          content: '',
+          stream: 'stdout',
           accumulatedContent: '',
           toolName: 'shell_cmd',
           toolInput: shellToolMetadata?.toolInput,
@@ -496,276 +494,278 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
           toolCallId: shellToolCallId,
           worldName: eventData.worldName || streamingState.currentWorldName
         } satisfies ToolStreamData);
+        break;
+      }
+
+      streamingState.activeMessages.set(messageId, {
+        content: '',
+        reasoningContent: '',
+        sender: agentName,
+        messageId: messageId,
+        isStreaming: true
+      });
+
+      publishEvent('handleStreamStart', {
+        messageId,
+        sender: agentName,
+        worldName: eventData.worldName || streamingState.currentWorldName
+      });
       break;
-  }
-
-  streamingState.activeMessages.set(messageId, {
-    content: '',
-    reasoningContent: '',
-    sender: agentName,
-    messageId: messageId,
-    isStreaming: true
-  });
-
-  publishEvent('handleStreamStart', {
-    messageId,
-    sender: agentName,
-    worldName: eventData.worldName || streamingState.currentWorldName
-  });
-  break;
 
     case 'chunk':
-if (isShellAssistantStream) {
-  const streamKey = String(messageId || '').trim();
-  const stream = streamingState.activeMessages.get(streamKey);
-  const newContent = eventData.accumulatedContent !== undefined
-    ? eventData.accumulatedContent
-    : (stream?.content || '') + (eventData.content || '');
+      if (isShellAssistantStream) {
+        const streamKey = String(messageId || '').trim();
+        const stream = streamingState.activeMessages.get(streamKey);
+        const newContent = eventData.accumulatedContent !== undefined
+          ? eventData.accumulatedContent
+          : (stream?.content || '') + (eventData.content || '');
 
-  streamingState.activeMessages.set(streamKey, {
-    content: newContent,
-    sender: agentName,
-    messageId: streamKey,
-    isStreaming: true
-  });
+        streamingState.activeMessages.set(streamKey, {
+          content: newContent,
+          reasoningContent: stream?.reasoningContent || '',
+          sender: agentName,
+          messageId: streamKey,
+          isStreaming: true
+        });
 
-  publishEvent('handleToolStream', {
-    messageId: streamKey,
-    agentName,
-    chatId: eventData.chatId ?? shellToolMetadata?.chatId,
-    content: newContent,
-    stream: 'stdout',
-    accumulatedContent: newContent,
-    toolName: 'shell_cmd',
-    toolInput: shellToolMetadata?.toolInput,
-    command: shellToolMetadata?.command,
-    toolCallId: shellToolCallId,
-    worldName: eventData.worldName || streamingState.currentWorldName
-  } satisfies ToolStreamData);
-  break;
-}
+        publishEvent('handleToolStream', {
+          messageId: streamKey,
+          agentName,
+          chatId: eventData.chatId ?? shellToolMetadata?.chatId,
+          content: newContent,
+          stream: 'stdout',
+          accumulatedContent: newContent,
+          toolName: 'shell_cmd',
+          toolInput: shellToolMetadata?.toolInput,
+          command: shellToolMetadata?.command,
+          toolCallId: shellToolCallId,
+          worldName: eventData.worldName || streamingState.currentWorldName
+        } satisfies ToolStreamData);
+        break;
+      }
 
-const stream = streamingState.activeMessages.get(messageId);
-if (stream) {
-  const newContent = eventData.accumulatedContent !== undefined
-    ? eventData.accumulatedContent
-    : stream.content + (eventData.content || '');
-  const newReasoningContent = stream.reasoningContent + (eventData.reasoningContent || '');
+      const stream = streamingState.activeMessages.get(messageId);
+      if (stream) {
+        const newContent = eventData.accumulatedContent !== undefined
+          ? eventData.accumulatedContent
+          : stream.content + (eventData.content || '');
+        const newReasoningContent = stream.reasoningContent + (eventData.reasoningContent || '');
 
-  stream.content = newContent;
-  stream.reasoningContent = newReasoningContent;
-  const toolCalls = eventData.tool_calls;
+        stream.content = newContent;
+        stream.reasoningContent = newReasoningContent;
+        const toolCalls = eventData.tool_calls;
 
-  publishEvent('handleStreamChunk', {
-    messageId,
-    sender: agentName,
-    content: newContent,
-    reasoningContent: newReasoningContent || undefined,
-    isAccumulated: eventData.accumulatedContent !== undefined,
-    worldName: eventData.worldName || streamingState.currentWorldName,
-    tool_calls: toolCalls
-  });
+        publishEvent('handleStreamChunk', {
+          messageId,
+          sender: agentName,
+          content: newContent,
+          reasoningContent: newReasoningContent || undefined,
+          isAccumulated: eventData.accumulatedContent !== undefined,
+          worldName: eventData.worldName || streamingState.currentWorldName,
+          tool_calls: toolCalls
+        });
 
-}
-break;
+      }
+      break;
 
     // PHASE 2.2 ENHANCEMENT: Tool-specific event handlers
     case 'tool-start':
-// Debug: Check if toolExecution is missing
-if (!eventData.toolExecution) {
-  console.warn('tool-start event missing toolExecution:', { eventData, messageId, agentName });
-}
-if (eventData.toolExecution?.toolCallId) {
-  const normalizedToolInput = normalizeToolInput(eventData.toolExecution.input);
-  streamingState.toolExecutionMetadata.set(String(eventData.toolExecution.toolCallId), {
-    toolName: String(eventData.toolExecution.toolName || '').trim() || 'unknown',
-    toolCallId: String(eventData.toolExecution.toolCallId),
-    toolInput: normalizedToolInput,
-    command: readShellCommand(normalizedToolInput),
-    chatId: eventData.chatId,
-  });
-}
-publishEvent('handleToolStart', {
-  messageId,
-  sender: agentName,
-  chatId: eventData.chatId,
-  toolExecution: eventData.toolExecution,
-  worldName: eventData.worldName || streamingState.currentWorldName
-});
-break;
+      // Debug: Check if toolExecution is missing
+      if (!eventData.toolExecution) {
+        console.warn('tool-start event missing toolExecution:', { eventData, messageId, agentName });
+      }
+      if (eventData.toolExecution?.toolCallId) {
+        const normalizedToolInput = normalizeToolInput(eventData.toolExecution.input);
+        streamingState.toolExecutionMetadata.set(String(eventData.toolExecution.toolCallId), {
+          toolName: String(eventData.toolExecution.toolName || '').trim() || 'unknown',
+          toolCallId: String(eventData.toolExecution.toolCallId),
+          toolInput: normalizedToolInput,
+          command: readShellCommand(normalizedToolInput),
+          chatId: eventData.chatId,
+        });
+      }
+      publishEvent('handleToolStart', {
+        messageId,
+        sender: agentName,
+        chatId: eventData.chatId,
+        toolExecution: eventData.toolExecution,
+        worldName: eventData.worldName || streamingState.currentWorldName
+      });
+      break;
 
     case 'tool-progress':
-publishEvent('handleToolProgress', {
-  messageId,
-  sender: agentName,
-  chatId: eventData.chatId,
-  toolExecution: eventData.toolExecution,
-  worldName: eventData.worldName || streamingState.currentWorldName
-});
-break;
+      publishEvent('handleToolProgress', {
+        messageId,
+        sender: agentName,
+        chatId: eventData.chatId,
+        toolExecution: eventData.toolExecution,
+        worldName: eventData.worldName || streamingState.currentWorldName
+      });
+      break;
 
     case 'tool-result':
-// Debug: Check if toolExecution is missing
-if (!eventData.toolExecution) {
-  console.warn('tool-result event missing toolExecution:', { eventData, messageId, agentName });
-}
-if (eventData.toolExecution?.toolCallId) {
-  publishEvent('handleToolStreamEnd', {
-    messageIds: getShellToolStreamTerminalMessageIds(String(eventData.toolExecution.toolCallId)),
-    chatId: eventData.chatId,
-  } satisfies ToolStreamEndData);
-  streamingState.toolExecutionMetadata.delete(String(eventData.toolExecution.toolCallId));
-  streamingState.activeMessages.delete(String(eventData.toolExecution.toolCallId));
-  streamingState.activeMessages.delete(`${String(eventData.toolExecution.toolCallId)}-stdout`);
-}
-publishEvent('handleToolResult', {
-  messageId,
-  sender: agentName,
-  chatId: eventData.chatId,
-  toolExecution: eventData.toolExecution,
-  worldName: eventData.worldName || streamingState.currentWorldName
-});
-break;
+      // Debug: Check if toolExecution is missing
+      if (!eventData.toolExecution) {
+        console.warn('tool-result event missing toolExecution:', { eventData, messageId, agentName });
+      }
+      if (eventData.toolExecution?.toolCallId) {
+        publishEvent('handleToolStreamEnd', {
+          messageIds: getShellToolStreamTerminalMessageIds(String(eventData.toolExecution.toolCallId)),
+          chatId: eventData.chatId,
+        } satisfies ToolStreamEndData);
+        streamingState.toolExecutionMetadata.delete(String(eventData.toolExecution.toolCallId));
+        streamingState.activeMessages.delete(String(eventData.toolExecution.toolCallId));
+        streamingState.activeMessages.delete(`${String(eventData.toolExecution.toolCallId)}-stdout`);
+      }
+      publishEvent('handleToolResult', {
+        messageId,
+        sender: agentName,
+        chatId: eventData.chatId,
+        toolExecution: eventData.toolExecution,
+        worldName: eventData.worldName || streamingState.currentWorldName
+      });
+      break;
 
     case 'tool-error':
-// Debug: Check if toolExecution is missing
-if (!eventData.toolExecution) {
-  console.warn('tool-error event missing toolExecution:', { eventData, messageId, agentName });
-}
-if (eventData.toolExecution?.toolCallId) {
-  publishEvent('handleToolStreamEnd', {
-    messageIds: getShellToolStreamTerminalMessageIds(String(eventData.toolExecution.toolCallId)),
-    chatId: eventData.chatId,
-  } satisfies ToolStreamEndData);
-  streamingState.toolExecutionMetadata.delete(String(eventData.toolExecution.toolCallId));
-  streamingState.activeMessages.delete(String(eventData.toolExecution.toolCallId));
-  streamingState.activeMessages.delete(`${String(eventData.toolExecution.toolCallId)}-stdout`);
-}
-publishEvent('handleToolError', {
-  messageId,
-  sender: agentName,
-  chatId: eventData.chatId,
-  toolExecution: eventData.toolExecution,
-  worldName: eventData.worldName || streamingState.currentWorldName
-});
-break;
+      // Debug: Check if toolExecution is missing
+      if (!eventData.toolExecution) {
+        console.warn('tool-error event missing toolExecution:', { eventData, messageId, agentName });
+      }
+      if (eventData.toolExecution?.toolCallId) {
+        publishEvent('handleToolStreamEnd', {
+          messageIds: getShellToolStreamTerminalMessageIds(String(eventData.toolExecution.toolCallId)),
+          chatId: eventData.chatId,
+        } satisfies ToolStreamEndData);
+        streamingState.toolExecutionMetadata.delete(String(eventData.toolExecution.toolCallId));
+        streamingState.activeMessages.delete(String(eventData.toolExecution.toolCallId));
+        streamingState.activeMessages.delete(`${String(eventData.toolExecution.toolCallId)}-stdout`);
+      }
+      publishEvent('handleToolError', {
+        messageId,
+        sender: agentName,
+        chatId: eventData.chatId,
+        toolExecution: eventData.toolExecution,
+        worldName: eventData.worldName || streamingState.currentWorldName
+      });
+      break;
 
     case 'tool-stream':
-// Handle streaming shell command output (stdout/stderr)
-const toolStream = streamingState.activeMessages.get(messageId);
-if (toolStream) {
-  // Accumulate content for this stream
-  const newContent = eventData.accumulatedContent !== undefined
-    ? eventData.accumulatedContent
-    : toolStream.content + (eventData.content || '');
+      // Handle streaming shell command output (stdout/stderr)
+      const toolStream = streamingState.activeMessages.get(messageId);
+      if (toolStream) {
+        // Accumulate content for this stream
+        const newContent = eventData.accumulatedContent !== undefined
+          ? eventData.accumulatedContent
+          : toolStream.content + (eventData.content || '');
 
-  toolStream.content = newContent;
+        toolStream.content = newContent;
 
-  // Publish tool stream event with stream type metadata
-  publishEvent('handleToolStream', {
-    messageId,
-    agentName,
-    chatId: eventData.chatId ?? streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.chatId,
-    content: newContent,
-    stream: eventData.stream || 'stdout',
-    accumulatedContent: newContent,
-    toolName: toolName || streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.toolName,
-    toolInput: streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.toolInput,
-    command: streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.command,
-    toolCallId: String(messageId || '').trim() || undefined,
-    worldName: eventData.worldName || streamingState.currentWorldName
-  } satisfies ToolStreamData);
+        // Publish tool stream event with stream type metadata
+        publishEvent('handleToolStream', {
+          messageId,
+          agentName,
+          chatId: eventData.chatId ?? streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.chatId,
+          content: newContent,
+          stream: eventData.stream || 'stdout',
+          accumulatedContent: newContent,
+          toolName: toolName || streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.toolName,
+          toolInput: streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.toolInput,
+          command: streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.command,
+          toolCallId: String(messageId || '').trim() || undefined,
+          worldName: eventData.worldName || streamingState.currentWorldName
+        } satisfies ToolStreamData);
 
-  console.log('[tool-stream] Accumulated output:', {
-    messageId,
-    stream: eventData.stream,
-    chunkLength: eventData.content?.length,
-    totalLength: newContent.length
-  });
-} else {
-  // Create new stream if not exists (tool started without tool-start event)
-  streamingState.activeMessages.set(messageId, {
-    content: eventData.content || '',
-    sender: agentName,
-    messageId: messageId,
-    isStreaming: true
-  });
+        console.log('[tool-stream] Accumulated output:', {
+          messageId,
+          stream: eventData.stream,
+          chunkLength: eventData.content?.length,
+          totalLength: newContent.length
+        });
+      } else {
+        // Create new stream if not exists (tool started without tool-start event)
+        streamingState.activeMessages.set(messageId, {
+          content: eventData.content || '',
+          reasoningContent: '',
+          sender: agentName,
+          messageId: messageId,
+          isStreaming: true
+        });
 
-  publishEvent('handleToolStream', {
-    messageId,
-    agentName,
-    chatId: eventData.chatId ?? streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.chatId,
-    content: eventData.content || '',
-    stream: eventData.stream || 'stdout',
-    accumulatedContent: eventData.content || '',
-    toolName: toolName || streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.toolName,
-    toolInput: streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.toolInput,
-    command: streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.command,
-    toolCallId: String(messageId || '').trim() || undefined,
-    worldName: eventData.worldName || streamingState.currentWorldName
-  } satisfies ToolStreamData);
+        publishEvent('handleToolStream', {
+          messageId,
+          agentName,
+          chatId: eventData.chatId ?? streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.chatId,
+          content: eventData.content || '',
+          stream: eventData.stream || 'stdout',
+          accumulatedContent: eventData.content || '',
+          toolName: toolName || streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.toolName,
+          toolInput: streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.toolInput,
+          command: streamingState.toolExecutionMetadata.get(String(messageId || '').trim())?.command,
+          toolCallId: String(messageId || '').trim() || undefined,
+          worldName: eventData.worldName || streamingState.currentWorldName
+        } satisfies ToolStreamData);
 
-  console.log('[tool-stream] Started new stream:', {
-    messageId,
-    stream: eventData.stream,
-    contentLength: eventData.content?.length
-  });
-}
-break;
+        console.log('[tool-stream] Started new stream:', {
+          messageId,
+          stream: eventData.stream,
+          contentLength: eventData.content?.length
+        });
+      }
+      break;
 
     case 'end':
-if (isShellAssistantStream) {
-  publishEvent('handleToolStreamEnd', {
-    messageIds: [String(messageId || '').trim()],
-    chatId: eventData.chatId,
-  } satisfies ToolStreamEndData);
-  streamingState.activeMessages.delete(String(messageId || '').trim());
-  break;
-}
+      if (isShellAssistantStream) {
+        publishEvent('handleToolStreamEnd', {
+          messageIds: [String(messageId || '').trim()],
+          chatId: eventData.chatId,
+        } satisfies ToolStreamEndData);
+        streamingState.activeMessages.delete(String(messageId || '').trim());
+        break;
+      }
 
-const endStream = streamingState.activeMessages.get(messageId);
-if (endStream) {
-  const finalContent = eventData.finalContent !== undefined
-    ? eventData.finalContent
-    : endStream.content;
+      const endStream = streamingState.activeMessages.get(messageId);
+      if (endStream) {
+        const finalContent = eventData.finalContent !== undefined
+          ? eventData.finalContent
+          : endStream.content;
 
-  publishEvent('handleStreamEnd', {
-    messageId,
-    sender: agentName,
-    content: finalContent,
-    worldName: eventData.worldName || streamingState.currentWorldName
-  });
+        publishEvent('handleStreamEnd', {
+          messageId,
+          sender: agentName,
+          content: finalContent,
+          worldName: eventData.worldName || streamingState.currentWorldName
+        });
 
-  streamingState.activeMessages.delete(messageId);
-}
-break;
+        streamingState.activeMessages.delete(messageId);
+      }
+      break;
 
     case 'error':
-publishEvent('handleStreamError', {
-  messageId,
-  sender: agentName,
-  error: eventData.error || 'Streaming error',
-  worldName: eventData.worldName || streamingState.currentWorldName
-});
+      publishEvent('handleStreamError', {
+        messageId,
+        sender: agentName,
+        error: eventData.error || 'Streaming error',
+        worldName: eventData.worldName || streamingState.currentWorldName
+      });
 
-streamingState.activeMessages.delete(messageId);
-break;
+      streamingState.activeMessages.delete(messageId);
+      break;
 
     // Note: memory-only events are no longer sent via SSE as per requirements
     // Memory-only messages are handled internally without frontend notification
 
     case 'log':
-const normalizedLogEvent = normalizeLogEventPayload(eventData);
-if (!normalizedLogEvent) {
-  return;
-}
-publishEvent('handleLogEvent', {
-  messageId: normalizedLogEvent.messageId,
-  chatId: eventData.chatId ?? (normalizedLogEvent as any).chatId ?? null,
-  logEvent: normalizedLogEvent,
-  worldName: eventData.worldName || streamingState.currentWorldName
-});
-break;
+      const normalizedLogEvent = normalizeLogEventPayload(eventData);
+      if (!normalizedLogEvent) {
+        return;
+      }
+      publishEvent('handleLogEvent', {
+        messageId: normalizedLogEvent.messageId,
+        chatId: eventData.chatId ?? (normalizedLogEvent as any).chatId ?? null,
+        logEvent: normalizedLogEvent,
+        worldName: eventData.worldName || streamingState.currentWorldName
+      });
+      break;
   }
 };
 

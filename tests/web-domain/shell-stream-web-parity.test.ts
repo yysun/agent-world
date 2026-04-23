@@ -15,6 +15,7 @@
  * - Asserts transcript-visible outcomes instead of implementation internals.
  *
  * Summary of Recent Changes:
+ * - 2026-04-23: Covered empty shell stream rows so shell assistant stream starts can create a live row before stdout arrives.
  * - 2026-03-12: Initial coverage for web shell stream parity and reply-linked merge fallback.
  */
 
@@ -25,14 +26,14 @@ import { getToolSummaryStatus } from '../../web/src/domain/message-content';
 import { worldUpdateHandlers } from '../../web/src/pages/World.update';
 
 describe('web shell stream parity', () => {
-  it('backfills shell command metadata onto an existing live tool stream row', () => {
+  it('backfills shell command metadata onto an empty live tool stream row', () => {
     const streamingState = handleToolStream({
       messages: [],
       isWaiting: false,
     } as any, {
       messageId: 'call-1-stdout',
       agentName: 'agent-a',
-      content: 'line 1\n',
+      content: '',
       stream: 'stdout',
     });
 

@@ -13,6 +13,9 @@
  * Implementation Notes:
  * - Stateless presentation; parent owns queue state and action callbacks.
  * - Queue processing is driven by core, not this component.
+ *
+ * Summary of Recent Changes:
+ * - 2026-04-23: Added a defensive visibility guard so the panel stays hidden until two queue items remain.
  */
 
 import React from 'react';
@@ -39,7 +42,7 @@ export default function MessageQueuePanel({
   onClear: () => void;
   isPaused?: boolean;
 }) {
-  if (queuedMessages.length === 0) return null;
+  if (queuedMessages.length < 2) return null;
 
   const hasSending = queuedMessages.some((m) => m.status === 'sending');
 
