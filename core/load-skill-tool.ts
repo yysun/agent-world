@@ -83,7 +83,7 @@ const loadSkillRunResultCache = new Map<string, string>();
 const inFlightLoadSkillRunResults = new Map<string, Promise<string>>();
 const loggerLoadSkillHitl = createCategoryLogger('load_skill.hitl');
 
-type LoadSkillToolContext = {
+export type LoadSkillToolContext = {
   world?: { id?: string; currentChatId?: string | null; eventEmitter?: unknown };
   chatId?: string | null;
   abortSignal?: AbortSignal;
@@ -824,6 +824,8 @@ async function requestSkillExecutionApproval(options: {
       worldId,
       chatId,
       optionId: approvalResult.optionId,
+      answers: [{ questionId: 'question-1', optionIds: [approvalResult.optionId] }],
+      skipped: false,
       source: approvalResult.source,
     };
 
@@ -1477,184 +1479,168 @@ function buildSuccessResult(options: {
   ].join('\n');
 }
 
-export function createLoadSkillToolDefinition() {
-  return {
-    description:
-      'Load full SKILL.md instructions by skill_id from the skill registry. Use this when a request matches a listed skill. After loading, apply the skill instructions directly to the user request.',
-    parameters: {
-      type: 'object',
-      properties: {
-        skill_id: {
-          type: 'string',
-          description: 'Skill ID from <available_skills>/<id> in the system prompt.',
-        },
-      },
-      required: ['skill_id'],
-      additionalProperties: false,
-    },
-    execute: async (args: any, _sequenceId?: string, _parentToolCall?: string, context?: LoadSkillToolContext) => {
-      await waitForInitialSkillSync();
-      const persistToolEnvelope = context?.persistToolEnvelope === true;
-      const toolCallId = typeof context?.toolCallId === 'string' ? context.toolCallId : undefined;
+export async function executeLoadSkillWithHostSemantics(args: any, context?: LoadSkillToolContext): Promise<string> {
+  await waitForInitialSkillSync();
+  const persistToolEnvelope = context?.persistToolEnvelope === true;
+  const toolCallId = typeof context?.toolCallId === 'string' ? context.toolCallId : undefined;
 
-      const requestedSkillId = typeof args?.skill_id === 'string' ? args.skill_id.trim() : '';
-      if (!requestedSkillId) {
-        const result = buildReadErrorResult('', 'Missing required parameter: skill_id');
-        return persistToolEnvelope
+  const requestedSkillId = typeof args?.skill_id === 'string' ? args.skill_id.trim() : '';
+  if (!requestedSkillId) {
+    const result = buildReadErrorResult('', 'Missing required parameter: skill_id');
+    return persistToolEnvelope
+      ? wrapLoadSkillToolResult({
+        result,
+        preview: createTextToolPreview('Missing required parameter: skill_id'),
+        toolCallId,
+      })
+      : result;
+  }
+
+  const runScopedResultKey = getRunScopedLoadSkillResultKey(requestedSkillId, context);
+  if (runScopedResultKey) {
+    const cachedResult = loadSkillRunResultCache.get(runScopedResultKey);
+    if (cachedResult !== undefined) {
+      loggerLoadSkillHitl.debug('Returning cached run-scoped load_skill result', {
+        skillId: requestedSkillId,
+        runScopedResultKey,
+      });
+      return cachedResult;
+    }
+    const inFlightResult = inFlightLoadSkillRunResults.get(runScopedResultKey);
+    if (inFlightResult) {
+      return await inFlightResult;
+    }
+  }
+
+  const computeResult = async (): Promise<LoadSkillExecutionOutcome> => {
+    const entry = getSkill(requestedSkillId);
+    const sourcePath = getSkillSourcePath(requestedSkillId);
+    if (!entry || !sourcePath) {
+      const result = buildNotFoundResult(requestedSkillId);
+      return {
+        result,
+        cacheableForRun: false,
+      };
+    }
+
+    if (!isSkillEnabledBySettings(requestedSkillId)) {
+      const result = buildDisabledBySettingsResult(requestedSkillId);
+      return {
+        result,
+        cacheableForRun: false,
+      };
+    }
+
+    try {
+      const markdown = await fs.readFile(sourcePath, 'utf8');
+      const instructionsMarkdown = stripYamlFrontMatter(markdown);
+      const skillRoot = path.dirname(sourcePath);
+      const scriptPaths = extractReferencedScriptPaths(instructionsMarkdown);
+      const toolPermission = getEnvValueFromText((context?.world as any)?.variables, 'tool_permission') ?? 'auto';
+      if (context?.world && !getExplicitContextChatId(context)) {
+        const result = buildReadErrorResult(
+          requestedSkillId,
+          'Interactive load_skill execution requires an explicit chatId.'
+        );
+        return {
+          result,
+          cacheableForRun: false,
+        };
+      }
+      if (toolPermission === 'ask') {
+        const isApproved = await requestSkillExecutionApproval({
+          skillId: requestedSkillId,
+          scriptPaths,
+          context,
+        });
+        if (!isApproved) {
+          const result = buildDeclinedResult(requestedSkillId);
+          return {
+            result,
+            cacheableForRun: false,
+          };
+        }
+      }
+      const scriptOutputs: SkillScriptExecutionOutcome[] = [];
+      const result = buildSuccessResult({
+        skillId: requestedSkillId,
+        skillName: entry.skill_id,
+        skillDescription: entry.description?.trim() || entry.skill_id,
+        skillRoot,
+        markdown: instructionsMarkdown,
+        scriptOutputs,
+        referenceFiles: [],
+        scriptPaths: [],
+      });
+
+      if (!persistToolEnvelope) {
+        return {
+          result,
+          cacheableForRun: true,
+        };
+      }
+
+      return {
+        result: wrapLoadSkillToolResult({
+          result,
+          preview: null,
+          toolCallId,
+        }),
+        cacheableForRun: true,
+      };
+    } catch (error) {
+      if (error instanceof SkillScriptExecutionError) {
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      const result = buildReadErrorResult(requestedSkillId, message);
+      return {
+        result: persistToolEnvelope
           ? wrapLoadSkillToolResult({
             result,
-            preview: createTextToolPreview('Missing required parameter: skill_id'),
+            preview: null,
             toolCallId,
           })
-          : result;
-      }
-
-      const runScopedResultKey = getRunScopedLoadSkillResultKey(requestedSkillId, context);
-      if (runScopedResultKey) {
-        const cachedResult = loadSkillRunResultCache.get(runScopedResultKey);
-        if (cachedResult !== undefined) {
-          loggerLoadSkillHitl.debug('Returning cached run-scoped load_skill result', {
-            skillId: requestedSkillId,
-            runScopedResultKey,
-          });
-          return cachedResult;
-        }
-        const inFlightResult = inFlightLoadSkillRunResults.get(runScopedResultKey);
-        if (inFlightResult) {
-          return await inFlightResult;
-        }
-      }
-
-      const computeResult = async (): Promise<LoadSkillExecutionOutcome> => {
-        const entry = getSkill(requestedSkillId);
-        const sourcePath = getSkillSourcePath(requestedSkillId);
-        if (!entry || !sourcePath) {
-          const result = buildNotFoundResult(requestedSkillId);
-          return {
-            result,
-            cacheableForRun: false,
-          };
-        }
-
-        if (!isSkillEnabledBySettings(requestedSkillId)) {
-          const result = buildDisabledBySettingsResult(requestedSkillId);
-          return {
-            result,
-            cacheableForRun: false,
-          };
-        }
-
-        try {
-          const markdown = await fs.readFile(sourcePath, 'utf8');
-          const instructionsMarkdown = stripYamlFrontMatter(markdown);
-          const skillRoot = path.dirname(sourcePath);
-          const scriptPaths = extractReferencedScriptPaths(instructionsMarkdown);
-          const toolPermission = getEnvValueFromText((context?.world as any)?.variables, 'tool_permission') ?? 'auto';
-          if (context?.world && !getExplicitContextChatId(context)) {
-            const result = buildReadErrorResult(
-              requestedSkillId,
-              'Interactive load_skill execution requires an explicit chatId.'
-            );
-            return {
-              result,
-              cacheableForRun: false,
-            };
-          }
-          if (toolPermission === 'ask') {
-            const isApproved = await requestSkillExecutionApproval({
-              skillId: requestedSkillId,
-              scriptPaths,
-              context,
-            });
-            if (!isApproved) {
-              const result = buildDeclinedResult(requestedSkillId);
-              return {
-                result,
-                cacheableForRun: false,
-              };
-            }
-          }
-          const scriptOutputs: SkillScriptExecutionOutcome[] = [];
-          const result = buildSuccessResult({
-            skillId: requestedSkillId,
-            skillName: entry.skill_id,
-            skillDescription: entry.description?.trim() || entry.skill_id,
-            skillRoot,
-            markdown: instructionsMarkdown,
-            scriptOutputs,
-            referenceFiles: [],
-            scriptPaths: [],
-          });
-
-          if (!persistToolEnvelope) {
-            return {
-              result,
-              cacheableForRun: true,
-            };
-          }
-
-          return {
-            result: wrapLoadSkillToolResult({
-              result,
-              preview: null,
-              toolCallId,
-            }),
-            cacheableForRun: true,
-          };
-        } catch (error) {
-          if (error instanceof SkillScriptExecutionError) {
-            throw error;
-          }
-          const message = error instanceof Error ? error.message : String(error);
-          const result = buildReadErrorResult(requestedSkillId, message);
-          return {
-            result: persistToolEnvelope
-              ? wrapLoadSkillToolResult({
-                result,
-                preview: null,
-                toolCallId,
-              })
-              : result,
-            cacheableForRun: false,
-          };
-        }
+          : result,
+        cacheableForRun: false,
       };
-
-      if (!runScopedResultKey) {
-        const outcome = await computeResult();
-        if (persistToolEnvelope && !parseToolExecutionEnvelopeContent(outcome.result)) {
-          return wrapLoadSkillToolResult({
-            result: outcome.result,
-            preview: null,
-            toolCallId,
-          });
-        }
-        return outcome.result;
-      }
-
-      const runScopedPromise = computeResult().then((outcome) => {
-        if (outcome.cacheableForRun) {
-          rememberRunScopedLoadSkillResult(runScopedResultKey, outcome.result);
-        }
-        return outcome.result;
-      });
-      inFlightLoadSkillRunResults.set(runScopedResultKey, runScopedPromise);
-      try {
-        const result = await runScopedPromise;
-        if (persistToolEnvelope && !parseToolExecutionEnvelopeContent(result)) {
-          return wrapLoadSkillToolResult({
-            result,
-            preview: null,
-            toolCallId,
-          });
-        }
-        return result;
-      } finally {
-        const inFlightResult = inFlightLoadSkillRunResults.get(runScopedResultKey);
-        if (inFlightResult === runScopedPromise) {
-          inFlightLoadSkillRunResults.delete(runScopedResultKey);
-        }
-      }
-    },
+    }
   };
+
+  if (!runScopedResultKey) {
+    const outcome = await computeResult();
+    if (persistToolEnvelope && !parseToolExecutionEnvelopeContent(outcome.result)) {
+      return wrapLoadSkillToolResult({
+        result: outcome.result,
+        preview: null,
+        toolCallId,
+      });
+    }
+    return outcome.result;
+  }
+
+  const runScopedPromise = computeResult().then((outcome) => {
+    if (outcome.cacheableForRun) {
+      rememberRunScopedLoadSkillResult(runScopedResultKey, outcome.result);
+    }
+    return outcome.result;
+  });
+  inFlightLoadSkillRunResults.set(runScopedResultKey, runScopedPromise);
+  try {
+    const result = await runScopedPromise;
+    if (persistToolEnvelope && !parseToolExecutionEnvelopeContent(result)) {
+      return wrapLoadSkillToolResult({
+        result,
+        preview: null,
+        toolCallId,
+      });
+    }
+    return result;
+  } finally {
+    const inFlightResult = inFlightLoadSkillRunResults.get(runScopedResultKey);
+    if (inFlightResult === runScopedPromise) {
+      inFlightLoadSkillRunResults.delete(runScopedResultKey);
+    }
+  }
 }
+

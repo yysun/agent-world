@@ -20,7 +20,7 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { resolveElectronExecutablePath } from '../electron-e2e/support/electron-harness.js';
+import { getFirstElectronWindow, resolveElectronExecutablePath } from '../electron-e2e/support/electron-harness.js';
 
 describe('electron e2e harness', () => {
   it('resolves the Electron executable from the workspace path.txt shim', () => {
@@ -38,5 +38,19 @@ describe('electron e2e harness', () => {
       readFileSync: () => 'electron',
       overrideDistPath: '/tmp/custom-electron-dist',
     })).toBe('/tmp/custom-electron-dist/electron');
+  });
+
+  it('reuses an already-open Electron window before waiting on firstWindow', async () => {
+    const existingPage = { id: 'existing-window' };
+    const firstWindow = async () => {
+      throw new Error('firstWindow should not be called when a window already exists');
+    };
+
+    const page = await getFirstElectronWindow({
+      windows: () => [existingPage],
+      firstWindow,
+    } as any, 5_000);
+
+    expect(page).toBe(existingPage);
   });
 });

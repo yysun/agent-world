@@ -94,11 +94,6 @@ import type { RealtimeEventsRuntime } from './main-process/realtime-events.js';
 import { resolveRealtimeEventsRuntimeFactory } from './main-process/module-interop.js';
 import { createWorkspaceRuntime } from './main-process/workspace-runtime.js';
 import {
-  importCoreGitHubWorldImportModule,
-  importCoreModule,
-  importCoreStorageFactoryModule
-} from './main-process/core-module-loader.js';
-import {
   applySystemSettings,
   configureProvidersFromEnv,
   configureWorkspaceStorage,
@@ -133,6 +128,7 @@ if (!hasSingleInstanceLock) {
 // Load env before importing core so logger/category levels honor LOG_* from .env.
 loadEnvironmentVariables(__dirname);
 applySystemSettings(readSystemSettings(app));
+const coreModule = await import('agent-world/core') as Record<string, any>;
 const {
   createAgent,
   createWorld,
@@ -177,9 +173,13 @@ const {
   configureLLMProvider,
   createCategoryLogger,
   addLogStreamCallback,
-} = await importCoreModule(__dirname);
-const { createStorage, createStorageFromEnv } = await importCoreStorageFactoryModule(__dirname);
-const { GitHubWorldImportError, listGitHubDirectoryNames, stageGitHubWorldFromShorthand, stageGitHubFolderFromRepo } = await importCoreGitHubWorldImportModule(__dirname);
+  createStorage,
+  createStorageFromEnv,
+  GitHubWorldImportError,
+  listGitHubDirectoryNames,
+  stageGitHubWorldFromShorthand,
+  stageGitHubFolderFromRepo,
+} = coreModule;
 const realtimeEventsRuntimeModule = await import('./main-process/realtime-events.js');
 const createRealtimeEventsRuntime = resolveRealtimeEventsRuntimeFactory(realtimeEventsRuntimeModule) as
   ((dependencies: unknown) => RealtimeEventsRuntime) | null;

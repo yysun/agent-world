@@ -1302,6 +1302,7 @@ function AppContent({ api }: { api: DesktopApi }) {
     loadedWorld,
     selectedSessionId,
     sessions,
+    hitlPromptQueue,
     setMessages,
     chatSubscriptionCounter,
     streamingStateRef,

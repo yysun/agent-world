@@ -22,6 +22,7 @@ vi.mock('react', () => ({
 
 import {
   enqueueHitlPromptFromToolEvent,
+  shouldRefreshSessionsAfterHitlTerminalEvent,
   shouldResetHitlQueueForWorldChange,
 } from '../../../electron/renderer/src/hooks/useChatEventSubscriptions';
 
@@ -205,6 +206,74 @@ describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
     });
 
     expect(resolved).toEqual([]);
+  });
+
+  it('keeps sequential tool lifecycle ingestion stable without deferred batching', () => {
+    const toolStart = {
+      chatId: 'chat-1',
+      tool: {
+        eventType: 'tool-start',
+        toolUseId: 'call-seq-1',
+      },
+    };
+    const toolProgress = {
+      chatId: 'chat-1',
+      tool: {
+        eventType: 'tool-progress',
+        toolUseId: 'call-seq-1',
+        metadata: {
+          hitlPrompt: {
+            requestId: 'req-seq-1',
+            toolCallId: 'call-seq-1',
+            questions: [{
+              id: 'question-1',
+              header: 'Approval required',
+              question: 'Proceed?',
+              options: [
+                { id: 'approve', label: 'Approve' },
+                { id: 'deny', label: 'Deny' },
+              ],
+            }],
+          },
+        },
+      },
+    };
+    const toolResult = {
+      chatId: 'chat-1',
+      tool: {
+        eventType: 'tool-result',
+        toolUseId: 'call-seq-1',
+      },
+    };
+
+    const afterStart = enqueueHitlPromptFromToolEvent([], toolStart);
+    const afterProgress = enqueueHitlPromptFromToolEvent(afterStart, toolProgress);
+    const afterResult = enqueueHitlPromptFromToolEvent(afterProgress, toolResult);
+
+    expect(afterStart).toEqual([]);
+    expect(afterProgress).toHaveLength(1);
+    expect(afterProgress[0]).toMatchObject({
+      requestId: 'req-seq-1',
+      toolCallId: 'call-seq-1',
+      chatId: 'chat-1',
+    });
+    expect(afterResult).toEqual([]);
+  });
+
+  it('refreshes session state for terminal HITL events when pending state exists only in the transient queue', () => {
+    expect(shouldRefreshSessionsAfterHitlTerminalEvent({
+      chatId: 'chat-1',
+      hitlPromptQueue: [{
+        requestId: 'req-queue-only',
+        chatId: 'chat-1',
+        toolCallId: 'call-1',
+        title: 'Approval required',
+        message: 'Proceed?',
+        mode: 'option',
+        options: [{ id: 'approve', label: 'Approve' }],
+      }],
+      sessions: [{ id: 'chat-1', hasPendingHitlPrompt: false }],
+    })).toBe(true);
   });
 
   it('enqueues all prompts when multiple tool events are batched sequentially', () => {

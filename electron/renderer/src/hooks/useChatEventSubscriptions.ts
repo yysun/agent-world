@@ -170,6 +170,7 @@ type UseChatEventSubscriptionsArgs = {
   loadedWorld: { id?: string } | null;
   selectedSessionId: string | null;
   sessions: Array<{ id?: string | null; hasPendingHitlPrompt?: boolean }>;
+  hitlPromptQueue: HitlPrompt[];
   setMessages: Dispatch<SetStateAction<MessageLike[]>>;
   chatSubscriptionCounter: MutableRefObject<number>;
   streamingStateRef: MutableRefObject<RealtimeState | null>;
@@ -309,11 +310,35 @@ export function shouldResetHitlQueueForWorldChange(
   return previous !== null && previous !== next;
 }
 
+export function shouldRefreshSessionsAfterHitlTerminalEvent(args: {
+  chatId: string;
+  hitlPromptQueue: HitlPrompt[];
+  sessions: Array<{ id?: string | null; hasPendingHitlPrompt?: boolean }>;
+}): boolean {
+  const chatId = String(args.chatId || '').trim();
+  if (!chatId) {
+    return false;
+  }
+
+  const queueHasPendingState = args.hitlPromptQueue.some((entry) => (
+    String(entry?.chatId || '').trim() === chatId
+  ));
+  if (queueHasPendingState) {
+    return true;
+  }
+
+  return args.sessions.some((session) => (
+    String(session?.id || '').trim() === chatId
+    && session?.hasPendingHitlPrompt === true
+  ));
+}
+
 export function useChatEventSubscriptions({
   api,
   loadedWorld,
   selectedSessionId,
   sessions,
+  hitlPromptQueue,
   setMessages,
   chatSubscriptionCounter,
   streamingStateRef,
@@ -323,11 +348,6 @@ export function useChatEventSubscriptions({
   onMainLogEvent,
   onSessionSystemEvent,
 }: UseChatEventSubscriptionsArgs) {
-  const pendingHitlEventsRef = useRef<any[]>([]);
-  const pendingHitlFlushTimerRef = useRef<number | null>(null);
-  const globalPendingHitlEventsRef = useRef<any[]>([]);
-  const globalPendingHitlFlushTimerRef = useRef<number | null>(null);
-
   // Stable refs for callback-type dependencies so subscription effects never
   // re-run solely because a callback identity changed between renders.
   const onMainLogEventRef = useRef(onMainLogEvent);
@@ -338,6 +358,8 @@ export function useChatEventSubscriptions({
   refreshSessionsRef.current = refreshSessions;
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
+  const hitlPromptQueueRef = useRef(hitlPromptQueue);
+  hitlPromptQueueRef.current = hitlPromptQueue;
   const resetActivityRef = useRef(resetActivityRuntimeState);
   resetActivityRef.current = resetActivityRuntimeState;
   const setHitlPromptQueueRef = useRef(setHitlPromptQueue);
@@ -396,27 +418,19 @@ export function useChatEventSubscriptions({
         return;
       }
 
-      pendingHitlEventsRef.current.push(payload);
-      if (pendingHitlFlushTimerRef.current === null) {
-        pendingHitlFlushTimerRef.current = window.setTimeout(() => {
-          const batch = pendingHitlEventsRef.current.splice(0);
-          pendingHitlFlushTimerRef.current = null;
-          if (batch.length === 0) return;
-          rendererLogger.debug('electron.renderer.subscription', 'Ingesting HITL prompt batch from realtime events', {
-            worldId: loadedWorldId,
-            chatId: selectedSessionId,
-            eventCount: batch.length,
-            subscriptionId
-          });
-          setHitlPromptQueueRef.current((existing) => {
-            let queue = existing;
-            for (const entry of batch) {
-              queue = enqueueHitlPromptFromToolEvent(queue, entry);
-            }
-            return queue;
-          });
-        }, 0);
-      }
+      rendererLogger.debug('electron.renderer.subscription', 'Ingesting HITL prompt event from selected-chat realtime subscription', {
+        worldId: loadedWorldId,
+        chatId: selectedSessionId,
+        subscriptionId,
+        eventType: payload?.tool?.eventType || null,
+      });
+      const nextHitlPromptQueue = enqueueHitlPromptFromToolEvent(hitlPromptQueueRef.current, payload);
+      hitlPromptQueueRef.current = nextHitlPromptQueue;
+      setHitlPromptQueueRef.current((existing) => {
+        const reconciledQueue = enqueueHitlPromptFromToolEvent(existing, payload);
+        hitlPromptQueueRef.current = reconciledQueue;
+        return reconciledQueue;
+      });
     });
 
     api.subscribeChatEvents(loadedWorldId, selectedSessionId, subscriptionId).catch(() => { });
@@ -437,11 +451,6 @@ export function useChatEventSubscriptions({
       if (streamingStateRef.current) {
         streamingStateRef.current.cleanup();
       }
-      if (pendingHitlFlushTimerRef.current !== null) {
-        clearTimeout(pendingHitlFlushTimerRef.current);
-        pendingHitlFlushTimerRef.current = null;
-      }
-      pendingHitlEventsRef.current = [];
       resetActivityRef.current();
     };
   }, [
@@ -475,51 +484,36 @@ export function useChatEventSubscriptions({
         return;
       }
 
-      globalPendingHitlEventsRef.current.push(payload);
-      if (globalPendingHitlFlushTimerRef.current === null) {
-        globalPendingHitlFlushTimerRef.current = window.setTimeout(() => {
-          const batch = globalPendingHitlEventsRef.current.splice(0);
-          globalPendingHitlFlushTimerRef.current = null;
-          if (batch.length === 0) return;
-          rendererLogger.debug('electron.renderer.subscription', 'Ingesting all-chat HITL prompt batch from realtime events', {
-            worldId: loadedWorldId,
-            eventCount: batch.length,
-            subscriptionId
-          });
-          const refreshChatIds = new Set<string>();
-          setHitlPromptQueueRef.current((existing) => {
-            let queue = existing;
-            for (const entry of batch) {
-              queue = enqueueHitlPromptFromToolEvent(queue, entry);
-            }
+      rendererLogger.debug('electron.renderer.subscription', 'Ingesting HITL prompt event from all-chat realtime subscription', {
+        worldId: loadedWorldId,
+        subscriptionId,
+        eventType: payload?.tool?.eventType || null,
+        chatId: payload?.chatId || null,
+      });
 
-            for (const entry of batch) {
-              const toolPayload = entry?.tool && typeof entry.tool === 'object'
-                ? (entry.tool as Record<string, unknown>)
-                : null;
-              const eventType = String(toolPayload?.eventType || '').trim().toLowerCase();
-              const chatId = String(entry?.chatId || '').trim();
-              if (!chatId || (eventType !== 'tool-result' && eventType !== 'tool-error')) {
-                continue;
-              }
+      const toolPayload = payload?.tool && typeof payload.tool === 'object'
+        ? (payload.tool as Record<string, unknown>)
+        : null;
+      const eventType = String(toolPayload?.eventType || '').trim().toLowerCase();
+      const chatId = String(payload?.chatId || '').trim();
+      const shouldRefreshAfterTerminalEvent = chatId
+        && (eventType === 'tool-result' || eventType === 'tool-error')
+        && shouldRefreshSessionsAfterHitlTerminalEvent({
+          chatId,
+          hitlPromptQueue: hitlPromptQueueRef.current,
+          sessions: sessionsRef.current,
+        });
 
-              const queueHadPendingState = existing.some((prompt) => String(prompt?.chatId || '').trim() === chatId);
-              const queueHasPendingState = queue.some((prompt) => String(prompt?.chatId || '').trim() === chatId);
-              const sessionHasPendingState = sessionsRef.current.some((session) => (
-                String(session?.id || '').trim() === chatId
-                && session?.hasPendingHitlPrompt === true
-              ));
-              if (queueHadPendingState || queueHasPendingState || sessionHasPendingState) {
-                refreshChatIds.add(chatId);
-              }
-            }
+      const nextHitlPromptQueue = enqueueHitlPromptFromToolEvent(hitlPromptQueueRef.current, payload);
+      hitlPromptQueueRef.current = nextHitlPromptQueue;
+      setHitlPromptQueueRef.current((existing) => {
+        const reconciledQueue = enqueueHitlPromptFromToolEvent(existing, payload);
+        hitlPromptQueueRef.current = reconciledQueue;
+        return reconciledQueue;
+      });
 
-            return queue;
-          });
-          for (const chatId of refreshChatIds) {
-            refreshSessionsRef.current(loadedWorldId, chatId).catch(() => { });
-          }
-        }, 0);
+      if (shouldRefreshAfterTerminalEvent) {
+        refreshSessionsRef.current(loadedWorldId, chatId).catch(() => { });
       }
     });
 
@@ -536,11 +530,6 @@ export function useChatEventSubscriptions({
       });
       removeListener();
       api.unsubscribeChatEvents(subscriptionId).catch(() => { });
-      if (globalPendingHitlFlushTimerRef.current !== null) {
-        clearTimeout(globalPendingHitlFlushTimerRef.current);
-        globalPendingHitlFlushTimerRef.current = null;
-      }
-      globalPendingHitlEventsRef.current = [];
     };
   }, [
     api,

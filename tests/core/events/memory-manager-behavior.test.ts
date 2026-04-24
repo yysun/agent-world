@@ -15,6 +15,7 @@
  * - No real filesystem, database, or external LLM/tool network calls.
  *
  * Recent changes:
+ * - 2026-04-24: Updated execution-path mocks to target `getRuntimeToolsForWorld(...)` and added a restore-resume regression that fails if the legacy mixed MCP registry path is consulted.
  * - 2026-04-12: Added regression coverage that planning-only continuation replies are not blocked and that validation retry budgets reset after non-validation progress.
  * - 2026-04-12: Added regression coverage for continuation intent-only narration rejection and bounded repeated validation-failure recovery.
  * - 2026-03-29: Added direct terminal-response idempotency coverage so the same turn does not republish an assistant final response twice.
@@ -39,6 +40,7 @@ const mocks = vi.hoisted(() => ({
   publishMessageWithId: vi.fn(),
   publishEvent: vi.fn(),
   publishToolEvent: vi.fn(),
+  getRuntimeToolsForWorld: vi.fn(async () => ({})),
   getMCPToolsForWorld: vi.fn(async () => ({})),
   loadSkillExecute: vi.fn(async () => '<skill_context id="find-skills"><instructions># Skill</instructions></skill_context>'),
   loggerCalls: [] as Array<{
@@ -86,6 +88,7 @@ vi.mock('../../../core/llm-runtime.js', async () => {
   return {
     ...actual,
     generateAgentResponse: mocks.generateAgentResponse,
+    getRuntimeToolsForWorld: mocks.getRuntimeToolsForWorld,
   };
 });
 
@@ -201,6 +204,7 @@ describe('memory-manager behavior', () => {
     mocks.getMemory.mockResolvedValue([]);
     mocks.prepareMessagesForLLM.mockResolvedValue([]);
     mocks.generateAgentResponse.mockReset();
+    mocks.getRuntimeToolsForWorld.mockResolvedValue({});
     mocks.getMCPToolsForWorld.mockResolvedValue({});
     mocks.loadSkillExecute.mockResolvedValue(
       '<skill_context id="find-skills"><instructions># Skill</instructions></skill_context>'
@@ -284,7 +288,7 @@ describe('memory-manager behavior', () => {
     const agent = createAgent();
 
     const execute = vi.fn(async () => '<skill_context id="find-skills"><instructions># Skill</instructions></skill_context>');
-    mocks.getMCPToolsForWorld.mockResolvedValue({ load_skill: { execute } });
+    mocks.getRuntimeToolsForWorld.mockResolvedValue({ load_skill: { execute } });
 
     mocks.generateAgentResponse
       .mockResolvedValueOnce(
@@ -305,8 +309,6 @@ describe('memory-manager behavior', () => {
         retries: 2,
         enabled: true,
       }),
-      undefined,
-      undefined,
       expect.objectContaining({
         chatId: 'chat-1',
         agentName: 'agent-a',
@@ -426,7 +428,7 @@ describe('memory-manager behavior', () => {
     const agent = createAgent();
 
     const execute = vi.fn(async () => 'Error: Tool parameter validation failed for demo_tool: Required parameter \'query\' is missing or empty');
-    mocks.getMCPToolsForWorld.mockResolvedValue({ demo_tool: { execute } });
+    mocks.getRuntimeToolsForWorld.mockResolvedValue({ demo_tool: { execute } });
     mocks.generateAgentResponse
       .mockResolvedValueOnce(toolCallResult('assistant-validation-1', 'demo_tool', '{}', 'tc-validation-1'))
       .mockResolvedValueOnce(toolCallResult('assistant-validation-2', 'demo_tool', '{}', 'tc-validation-2'));
@@ -461,7 +463,7 @@ describe('memory-manager behavior', () => {
     const secondToolExecute = vi.fn(
       async () => 'Error: Tool parameter validation failed for second_tool: Required parameter \'path\' is missing or empty'
     );
-    mocks.getMCPToolsForWorld.mockResolvedValue({
+    mocks.getRuntimeToolsForWorld.mockResolvedValue({
       first_tool: { execute: firstToolExecute },
       ok_tool: { execute: okToolExecute },
       second_tool: { execute: secondToolExecute },
@@ -553,10 +555,6 @@ describe('memory-manager behavior', () => {
     const agent = createAgent();
     world.agents.set(agent.id, agent);
 
-    vi.doMock('../../../core/mcp-server-registry.js', () => ({
-      getMCPToolsForWorld: mocks.getMCPToolsForWorld,
-    }));
-
     let releaseExecute: ((value: string) => void) | null = null;
     const execute = vi.fn(
       async () =>
@@ -565,7 +563,7 @@ describe('memory-manager behavior', () => {
         })
     );
 
-    mocks.getMCPToolsForWorld.mockResolvedValue({
+    mocks.getRuntimeToolsForWorld.mockResolvedValue({
       demo_tool: { execute },
     });
     mocks.generateAgentResponse.mockResolvedValueOnce(textResult('assistant-after-resume-1', 'Resume complete'));
@@ -620,7 +618,7 @@ describe('memory-manager behavior', () => {
     const agent = createAgent();
 
     const execute = vi.fn(async () => 'tool-output');
-    mocks.getMCPToolsForWorld.mockResolvedValue({ demo_tool: { execute } });
+    mocks.getRuntimeToolsForWorld.mockResolvedValue({ demo_tool: { execute } });
     mocks.generateAgentResponse
       .mockResolvedValueOnce(toolCallResult('assistant-tool-1', 'demo_tool', '{}', 'tool-call-1'))
       .mockResolvedValueOnce(textResult('assistant-final-1', 'done'));
@@ -657,7 +655,7 @@ describe('memory-manager behavior', () => {
     const agent = createAgent();
 
     const execute = vi.fn(async () => 'stdout line one\nstdout line two');
-    mocks.getMCPToolsForWorld.mockResolvedValue({ shell_cmd: { execute } });
+    mocks.getRuntimeToolsForWorld.mockResolvedValue({ shell_cmd: { execute } });
 
     mocks.generateAgentResponse
       .mockResolvedValueOnce(toolCallResult('assistant-shell-1', 'shell_cmd', '{"command":"echo","parameters":["ok"]}', 'tc-shell-1'))
@@ -672,8 +670,6 @@ describe('memory-manager behavior', () => {
         command: 'echo',
         parameters: ['ok'],
       }),
-      undefined,
-      undefined,
       expect.objectContaining({
         chatId: 'chat-1',
         agentName: 'agent-a',
@@ -706,7 +702,7 @@ describe('memory-manager behavior', () => {
     } as any);
 
     const execute = vi.fn(async () => '![score](data:image/svg+xml;base64,AAA...)');
-    mocks.getMCPToolsForWorld.mockResolvedValue({ shell_cmd: { execute } });
+    mocks.getRuntimeToolsForWorld.mockResolvedValue({ shell_cmd: { execute } });
 
     mocks.generateAgentResponse
       .mockResolvedValueOnce(toolCallResult('assistant-shell-skill-1', 'shell_cmd', '{"command":"python","parameters":["scripts/convert.py","-i","./score.musicxml"]}', 'tc-shell-skill-1'))
@@ -721,8 +717,6 @@ describe('memory-manager behavior', () => {
         command: 'python',
         parameters: ['scripts/convert.py', '-i', './score.musicxml'],
       }),
-      undefined,
-      undefined,
       expect.objectContaining({
         chatId: 'chat-1',
         agentName: 'agent-a',
@@ -738,7 +732,7 @@ describe('memory-manager behavior', () => {
     const execute = vi.fn(async () => {
       throw new Error('approval required for remote_download and request was not approved');
     });
-    mocks.getMCPToolsForWorld.mockResolvedValue({ shell_cmd: { execute } });
+    mocks.getRuntimeToolsForWorld.mockResolvedValue({ shell_cmd: { execute } });
 
     mocks.generateAgentResponse
       .mockResolvedValueOnce(toolCallResult('assistant-shell-error-1', 'shell_cmd', '{"command":"curl","parameters":["-O","https://example.com/file"]}', 'tc-shell-error-1'))
@@ -780,7 +774,7 @@ describe('memory-manager behavior', () => {
       result: '<skill_context id="demo"></skill_context>',
     });
     const execute = vi.fn(async () => envelopeResult);
-    mocks.getMCPToolsForWorld.mockResolvedValue({ load_skill: { execute } });
+    mocks.getRuntimeToolsForWorld.mockResolvedValue({ load_skill: { execute } });
 
     mocks.generateAgentResponse
       .mockResolvedValueOnce(toolCallResult('assistant-preview-1', 'load_skill', '{"skill_id":"demo"}', 'tc-preview-1'))
@@ -814,7 +808,7 @@ describe('memory-manager behavior', () => {
     const world = createWorld();
     const agent = createAgent();
 
-    mocks.getMCPToolsForWorld.mockResolvedValue({});
+    mocks.getRuntimeToolsForWorld.mockResolvedValue({});
     mocks.generateAgentResponse
       .mockResolvedValueOnce(toolCallResult('assistant-tool', 'unknown_tool', '{}', 'tc-missing'))
       .mockResolvedValueOnce(textResult('assistant-final', 'Recovered after missing tool'));
@@ -840,7 +834,7 @@ describe('memory-manager behavior', () => {
     const agent = createAgent();
 
     const execute = vi.fn(async () => 'should not execute');
-    mocks.getMCPToolsForWorld.mockResolvedValue({ load_skill: { execute } });
+    mocks.getRuntimeToolsForWorld.mockResolvedValue({ load_skill: { execute } });
     mocks.generateAgentResponse
       .mockResolvedValueOnce(toolCallResult('assistant-tool', 'load_skill', '{bad-json', 'tc-parse'))
       .mockResolvedValueOnce(textResult('assistant-final', 'Recovered after parse error'));
@@ -895,7 +889,7 @@ describe('memory-manager behavior', () => {
     world.agents.set(agent.id, agent);
 
     const execute = vi.fn(async () => '<skill_context id="find-skills"><instructions># Skill</instructions></skill_context>');
-    mocks.getMCPToolsForWorld.mockResolvedValue({ load_skill: { execute } });
+    mocks.getRuntimeToolsForWorld.mockResolvedValue({ load_skill: { execute } });
     mocks.generateAgentResponse.mockResolvedValueOnce(textResult('assistant-final', 'Resume complete'));
 
     const { resumePendingToolCallsForChat } = await import('../../../core/events/memory-manager.js');
@@ -912,6 +906,54 @@ describe('memory-manager behavior', () => {
       'chat-1',
       undefined
     );
+  });
+
+  it('resumes pending tool calls through getRuntimeToolsForWorld without consulting the legacy mixed registry', async () => {
+    const world = createWorld();
+    const agent = createAgent();
+
+    agent.memory.push({
+      role: 'assistant',
+      content: 'Calling tool: load_skill',
+      sender: agent.id,
+      createdAt: new Date('2026-04-24T10:00:00.000Z'),
+      chatId: 'chat-1',
+      messageId: 'assistant-runtime-resume',
+      agentId: agent.id,
+      tool_calls: [
+        {
+          id: 'tc-runtime-resume',
+          type: 'function',
+          function: {
+            name: 'load_skill',
+            arguments: JSON.stringify({ skill_id: 'find-skills' }),
+          },
+        },
+      ],
+      toolCallStatus: {
+        'tc-runtime-resume': {
+          complete: false,
+          result: null,
+        },
+      },
+    } as any);
+
+    world.agents.set(agent.id, agent);
+
+    const execute = vi.fn(async () => '<skill_context id="find-skills"><instructions># Skill</instructions></skill_context>');
+    mocks.getRuntimeToolsForWorld.mockResolvedValue({ load_skill: { execute } });
+    mocks.getMCPToolsForWorld.mockImplementation(async () => {
+      throw new Error('legacy mixed MCP registry should not be consulted for resume');
+    });
+    mocks.generateAgentResponse.mockResolvedValueOnce(textResult('assistant-runtime-resume-final', 'Resume complete'));
+
+    const { resumePendingToolCallsForChat } = await import('../../../core/events/memory-manager.js');
+    const resumed = await resumePendingToolCallsForChat(world, 'chat-1');
+
+    expect(resumed).toBe(1);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(mocks.getRuntimeToolsForWorld).toHaveBeenCalledWith(world);
+    expect(mocks.getMCPToolsForWorld).not.toHaveBeenCalled();
   });
 
   it('marks resumed pending send_message handoffs terminal and skips follow-up continuation', async () => {
@@ -959,7 +1001,7 @@ describe('memory-manager behavior', () => {
       status: 'dispatched',
       dispatched: 1,
     }));
-    mocks.getMCPToolsForWorld.mockResolvedValue({ send_message: { execute } });
+    mocks.getRuntimeToolsForWorld.mockResolvedValue({ send_message: { execute } });
 
     const { resumePendingToolCallsForChat } = await import('../../../core/events/memory-manager.js');
     const resumed = await resumePendingToolCallsForChat(world, 'chat-1');

@@ -41,7 +41,7 @@ import {
   type ToolPreview,
 } from './tool-execution-envelope.js';
 
-type WebFetchArgs = {
+export type WebFetchArgs = {
   url: string;
   timeoutMs?: number;
   maxChars?: number;
@@ -49,7 +49,7 @@ type WebFetchArgs = {
   includeImages?: boolean;
 };
 
-type WebFetchToolContext = {
+export type WebFetchToolContext = {
   world?: World;
   chatId?: string | null;
   toolCallId?: string;
@@ -455,7 +455,7 @@ function formatWebFetchReturnContent(options: {
   });
 }
 
-async function executeWebFetch(args: WebFetchArgs, context?: WebFetchToolContext): Promise<string> {
+export async function executeWebFetchWithHostSemantics(args: WebFetchArgs, context?: WebFetchToolContext): Promise<string> {
   const startedAt = Date.now();
   const activeTimeoutMs = clamp(Number(args.timeoutMs ?? DEFAULT_TIMEOUT_MS), MIN_TIMEOUT_MS, MAX_TIMEOUT_MS);
   let timedOut = false;
@@ -657,37 +657,3 @@ async function executeWebFetch(args: WebFetchArgs, context?: WebFetchToolContext
   }
 }
 
-export function createWebFetchToolDefinition() {
-  return {
-    description:
-      'Fetch a URL and convert response content to markdown. Supports lightweight SPA data extraction from embedded JSON state without running a browser renderer.',
-    parameters: {
-      type: 'object',
-      properties: {
-        url: {
-          type: 'string',
-          description: 'Target URL to fetch. Only http/https schemes are allowed.',
-        },
-        timeoutMs: {
-          type: 'number',
-          description: `Request timeout in milliseconds (default: ${DEFAULT_TIMEOUT_MS}, max: ${MAX_TIMEOUT_MS}).`,
-        },
-        maxChars: {
-          type: 'number',
-          description: `Maximum markdown output characters (default: ${DEFAULT_MAX_CHARS}, max: ${MAX_MAX_CHARS}).`,
-        },
-        includeLinks: {
-          type: 'boolean',
-          description: 'When false, link URLs are stripped and only anchor text is kept (default: true).',
-        },
-        includeImages: {
-          type: 'boolean',
-          description: 'When true, image markdown is preserved (default: false).',
-        },
-      },
-      required: ['url'],
-      additionalProperties: false,
-    },
-    execute: async (args: WebFetchArgs, _sequenceId?: string, _parentToolCall?: string, context?: WebFetchToolContext) => executeWebFetch(args, context),
-  };
-}

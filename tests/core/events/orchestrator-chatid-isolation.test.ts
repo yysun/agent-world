@@ -13,6 +13,7 @@
  * - Keeps execution in-memory and deterministic.
  *
  * Recent Changes:
+ * - 2026-04-24: Updated tool-resolution mocks to target the canonical runtime-backed resolver rather than the mixed MCP registry surface.
  * - 2026-04-12: Added regression coverage that planning-only prompts are not blocked by the direct intent-only narration guard.
  * - 2026-04-12: Added regression coverage that direct intent-only action narration retries once and then stops without terminal assistant completion.
  * - 2026-03-29: Added Phase 1 regression coverage that direct tool-call turns execute at most one tool per hop.
@@ -69,12 +70,9 @@ vi.mock('../../../core/llm-runtime.js', async () => {
     ...actual,
     generateAgentResponse: mocks.generateAgentResponse,
     streamAgentResponse: mocks.streamAgentResponse,
+    getRuntimeToolsForWorld: mocks.getMCPToolsForWorld,
   };
 });
-
-vi.mock('../../../core/mcp-server-registry.js', () => ({
-  getMCPToolsForWorld: mocks.getMCPToolsForWorld,
-}));
 
 vi.mock('../../../core/events/publishers.js', () => ({
   publishMessage: mocks.publishMessage,

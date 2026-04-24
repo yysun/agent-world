@@ -240,6 +240,28 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
     });
   });
 
+  test('should skip publishing tool-error events when chat scope is unavailable', () => {
+    const functionCalls = [
+      {
+        id: 'call-no-chat',
+        type: 'function',
+        function: { name: '', arguments: '{}' },
+      },
+    ];
+
+    const result = filterAndHandleEmptyNamedFunctionCalls(
+      functionCalls,
+      mockWorld,
+      mockAgent,
+      testMessageId,
+      undefined,
+    );
+
+    expect(result.validCalls).toHaveLength(0);
+    expect(result.toolResults).toHaveLength(1);
+    expect(events.publishToolEvent).not.toHaveBeenCalled();
+  });
+
   test('should handle mixed valid and invalid calls', () => {
     const functionCalls = [
       {

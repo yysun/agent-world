@@ -47,7 +47,7 @@ import {
 import { getEnvValueFromText } from './utils.js';
 import { requestToolApproval } from './tool-approval.js';
 
-type ToolContext = {
+export type ToolContext = {
   workingDirectory?: string;
   world?: {
     variables?: string;
@@ -477,137 +477,106 @@ function normalizeWriteMode(mode: unknown): WriteMode {
   throw new Error(`Invalid mode '${String(mode)}'. Expected 'create' or 'overwrite'.`);
 }
 
-export function createWriteFileToolDefinition() {
-  return {
-    description:
-      'Write text content to a file inside the trusted working-directory scope. Supports explicit create-only and overwrite modes.',
-    parameters: {
-      type: 'object',
-      properties: {
-        filePath: {
-          type: 'string',
-          description: 'Target file path. Relative paths resolve from runtime working directory.',
-        },
-        path: {
-          type: 'string',
-          description: 'Alias for filePath.',
-        },
-        content: {
-          type: 'string',
-          description: 'UTF-8 text content to write.',
-        },
-        mode: {
-          type: 'string',
-          enum: ['create', 'overwrite'],
-          description: "Write mode. 'create' fails if the file exists. 'overwrite' replaces existing content (default).",
-        },
-      },
-      required: ['content'],
-      additionalProperties: false,
-    },
-    execute: async (args: any, _sequenceId?: string, _parentToolCall?: string, context?: ToolContext) => {
-      try {
-        // Check world-level tool permission
-        const toolPermission = getEnvValueFromText((context?.world as any)?.variables, 'tool_permission') ?? 'auto';
-        if (toolPermission === 'read') {
-          return 'Error: write_file is blocked by the current permission level (read).';
-        }
+export async function executeWriteFileWithHostSemantics(args: any, context?: ToolContext): Promise<string> {
+  try {
+    const toolPermission = getEnvValueFromText((context?.world as any)?.variables, 'tool_permission') ?? 'auto';
+    if (toolPermission === 'read') {
+      return 'Error: write_file is blocked by the current permission level (read).';
+    }
 
-        if (toolPermission === 'ask' && context?.world) {
-          const approval = await requestToolApproval({
-            world: context.world as any,
-            chatId: typeof context.chatId === 'string' ? context.chatId : null,
-            toolCallId: context.toolCallId,
-            title: 'Approve file write?',
-            message: `write_file wants to write to: ${String(args.filePath ?? args.path ?? '').trim() || '(unknown)'}`,
-            defaultOptionId: 'deny',
-            options: [
-              { id: 'approve', label: 'Approve', description: 'Allow this file write.' },
-              { id: 'deny', label: 'Deny', description: 'Block this file write.' },
-            ],
-            approvedOptionIds: ['approve'],
-            metadata: { tool: 'write_file', filePath: String(args.filePath ?? args.path ?? '').trim() },
-            agentName: context.agentName || null,
-            messages: context.messages as any,
-          });
-          if (!approval.approved) {
-            return `Error: write_file was denied by the user (${approval.reason}).`;
-          }
-        }
-
-        const trustedWorkingDirectory = getTrustedWorkingDirectory(context);
-        const requestedFilePath = String(args.filePath ?? args.path ?? '').trim();
-        if (!requestedFilePath) {
-          return 'Error: write_file failed - filePath is required';
-        }
-
-        if (typeof args.content !== 'string') {
-          return 'Error: write_file failed - content must be a string';
-        }
-
-        const mode = normalizeWriteMode(args.mode);
-        const resolvedPath = resolveTargetPath(requestedFilePath, trustedWorkingDirectory);
-        ensurePathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory);
-
-        let fileExists = false;
-        try {
-          const stat = await fs.stat(resolvedPath);
-          if (stat.isDirectory()) {
-            return 'Error: write_file failed - target path is a directory';
-          }
-          fileExists = true;
-        } catch (error) {
-          const code = (error as NodeJS.ErrnoException | undefined)?.code;
-          if (code !== 'ENOENT') {
-            throw error;
-          }
-        }
-
-        if (mode === 'create' && fileExists) {
-          return `Error: write_file failed - file already exists: ${resolvedPath}`;
-        }
-
-        const parentDirectory = path.dirname(resolvedPath);
-        ensurePathWithinTrustedDirectory(parentDirectory, trustedWorkingDirectory);
-        await fs.mkdir(parentDirectory, { recursive: true });
-        try {
-          await fs.writeFile(
-            resolvedPath,
-            args.content,
-            mode === 'create'
-              ? { encoding: 'utf8', flag: 'wx' }
-              : { encoding: 'utf8', flag: 'w' },
-          );
-        } catch (error) {
-          const code = (error as NodeJS.ErrnoException | undefined)?.code;
-          if (code === 'EEXIST' && mode === 'create') {
-            return `Error: write_file failed - file already exists: ${resolvedPath}`;
-          }
-          throw error;
-        }
-
-        const created = !fileExists;
-        const bytesWritten = Buffer.byteLength(args.content, 'utf8');
-        return JSON.stringify(
-          {
-            ok: true,
-            status: 'success',
-            filePath: resolvedPath,
-            mode,
-            operation: created ? 'created' : 'updated',
-            created,
-            updated: !created,
-            bytesWritten,
-          },
-          null,
-          2,
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return `Error: write_file failed - ${message}`;
+    if (toolPermission === 'ask' && context?.world) {
+      const approval = await requestToolApproval({
+        world: context.world as any,
+        chatId: typeof context.chatId === 'string' ? context.chatId : null,
+        toolCallId: context.toolCallId,
+        title: 'Approve file write?',
+        message: `write_file wants to write to: ${String(args.filePath ?? args.path ?? '').trim() || '(unknown)'}`,
+        defaultOptionId: 'deny',
+        options: [
+          { id: 'approve', label: 'Approve', description: 'Allow this file write.' },
+          { id: 'deny', label: 'Deny', description: 'Block this file write.' },
+        ],
+        approvedOptionIds: ['approve'],
+        metadata: { tool: 'write_file', filePath: String(args.filePath ?? args.path ?? '').trim() },
+        agentName: context.agentName || null,
+        messages: context.messages as any,
+      });
+      if (!approval.approved) {
+        return `Error: write_file was denied by the user (${approval.reason}).`;
       }
-    },
-  };
+    }
+
+    const trustedWorkingDirectory = getTrustedWorkingDirectory(context);
+    const requestedFilePath = String(args.filePath ?? args.path ?? '').trim();
+    if (!requestedFilePath) {
+      return 'Error: write_file failed - filePath is required';
+    }
+
+    if (typeof args.content !== 'string') {
+      return 'Error: write_file failed - content must be a string';
+    }
+
+    const mode = normalizeWriteMode(args.mode);
+    const resolvedPath = resolveTargetPath(requestedFilePath, trustedWorkingDirectory);
+    ensurePathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory);
+
+    let fileExists = false;
+    try {
+      const stat = await fs.stat(resolvedPath);
+      if (stat.isDirectory()) {
+        return 'Error: write_file failed - target path is a directory';
+      }
+      fileExists = true;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
+      if (code !== 'ENOENT') {
+        throw error;
+      }
+    }
+
+    if (mode === 'create' && fileExists) {
+      return `Error: write_file failed - file already exists: ${resolvedPath}`;
+    }
+
+    const parentDirectory = path.dirname(resolvedPath);
+    ensurePathWithinTrustedDirectory(parentDirectory, trustedWorkingDirectory);
+    await fs.mkdir(parentDirectory, { recursive: true });
+    try {
+      await fs.writeFile(
+        resolvedPath,
+        args.content,
+        mode === 'create'
+          ? { encoding: 'utf8', flag: 'wx' }
+          : { encoding: 'utf8', flag: 'w' },
+      );
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
+      if (code === 'EEXIST' && mode === 'create') {
+        return `Error: write_file failed - file already exists: ${resolvedPath}`;
+      }
+      throw error;
+    }
+
+    const created = !fileExists;
+    const bytesWritten = Buffer.byteLength(args.content, 'utf8');
+    return JSON.stringify(
+      {
+        ok: true,
+        status: 'success',
+        filePath: resolvedPath,
+        mode,
+        operation: created ? 'created' : 'updated',
+        created,
+        updated: !created,
+        bytesWritten,
+      },
+      null,
+      2,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return `Error: write_file failed - ${message}`;
+  }
 }
 
 export function createListFilesToolDefinition() {

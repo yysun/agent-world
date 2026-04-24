@@ -27,7 +27,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { countConversationDisplayMessages } from '../shared/conversation-message-counts.js';
-import { importCoreHitlModule } from './core-module-loader.js';
 
 type GetMemory = (worldId: string, chatId: string | null) => Promise<any>;
 type PendingHitlPromptDetector = (messages: any[], chatId: string | null) => any[];
@@ -43,7 +42,7 @@ let cachedPendingHitlPromptDetector: Promise<PendingHitlPromptDetector> | null =
 
 export async function loadPendingHitlPromptDetector(baseDir: string = CORE_MODULE_BASE_DIR): Promise<PendingHitlPromptDetector> {
   if (!cachedPendingHitlPromptDetector || baseDir !== CORE_MODULE_BASE_DIR) {
-    const detectorPromise = importCoreHitlModule(baseDir).then((module) => {
+    const detectorPromise = import('agent-world/core').then((module) => {
       if (typeof module?.listPendingHitlPromptEventsFromMessages !== 'function') {
         throw new Error('Core HITL module does not export listPendingHitlPromptEventsFromMessages.');
       }

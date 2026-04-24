@@ -85,11 +85,11 @@ vi.mock('dns/promises', () => ({
   lookup: vi.fn(() => Promise.resolve([{ address: '93.184.216.34', family: 4 }])),
 }));
 
-import { createWriteFileToolDefinition } from '../../core/file-tools.js';
-import { createWebFetchToolDefinition } from '../../core/web-fetch-tool.js';
-import { createShellCmdToolDefinition } from '../../core/shell-cmd-tool.js';
+import { executeWriteFileWithHostSemantics } from '../../core/file-tools.js';
+import { executeWebFetchWithHostSemantics } from '../../core/web-fetch-tool.js';
+import { executeShellCmdWithHostSemantics } from '../../core/shell-cmd-tool.js';
 import { createCreateAgentToolDefinition } from '../../core/create-agent-tool.js';
-import { createLoadSkillToolDefinition } from '../../core/load-skill-tool.js';
+import { executeLoadSkillWithHostSemantics } from '../../core/load-skill-tool.js';
 import {
   getSkill,
   getSkillSourcePath,
@@ -163,11 +163,8 @@ describe('tool_permission enforcement via world.variables', () => {
 
   describe('write_file', () => {
     it('blocks file writes when tool_permission=read', async () => {
-      const tool = createWriteFileToolDefinition();
-      const result = await tool.execute(
+      const result = await executeWriteFileWithHostSemantics(
         { filePath: 'test.txt', content: 'hello' },
-        undefined,
-        undefined,
         {
           workingDirectory: '/workspace',
           world: { variables: 'tool_permission=read' },
@@ -180,11 +177,8 @@ describe('tool_permission enforcement via world.variables', () => {
     });
 
     it('requires HITL approval before file writes when tool_permission=ask', async () => {
-      const tool = createWriteFileToolDefinition();
-      const result = await tool.execute(
+      const result = await executeWriteFileWithHostSemantics(
         { filePath: 'test.txt', content: 'hello ask' },
-        undefined,
-        undefined,
         {
           workingDirectory: '/workspace',
           world: { variables: 'tool_permission=ask' },
@@ -198,11 +192,8 @@ describe('tool_permission enforcement via world.variables', () => {
     });
 
     it('proceeds to write when tool_permission=auto', async () => {
-      const tool = createWriteFileToolDefinition();
-      const result = await tool.execute(
+      const result = await executeWriteFileWithHostSemantics(
         { filePath: 'test.txt', content: 'hello auto' },
-        undefined,
-        undefined,
         {
           workingDirectory: '/workspace',
           world: { variables: '' },
@@ -230,11 +221,8 @@ describe('tool_permission enforcement via world.variables', () => {
       }));
       vi.stubGlobal('fetch', fetchMock);
 
-      const tool = createWebFetchToolDefinition();
-      const result = await tool.execute(
+      const result = await executeWebFetchWithHostSemantics(
         { url: 'https://example.com' },
-        undefined,
-        undefined,
         { world: { id: 'world-1', variables } as any },
       );
 
@@ -247,8 +235,7 @@ describe('tool_permission enforcement via world.variables', () => {
 
   describe('shell_cmd', () => {
     it('blocks command execution when tool_permission=read', async () => {
-      const tool = createShellCmdToolDefinition();
-      const result = await tool.execute(
+      const result = await executeShellCmdWithHostSemantics(
         { command: 'echo', parameters: ['hello'] },
         undefined,
         undefined,
@@ -269,9 +256,8 @@ describe('tool_permission enforcement via world.variables', () => {
         source: 'user',
       });
 
-      const tool = createShellCmdToolDefinition();
       await expect(
-        tool.execute(
+        executeShellCmdWithHostSemantics(
           { command: 'pwd', parameters: [] },
           undefined,
           undefined,
@@ -287,8 +273,7 @@ describe('tool_permission enforcement via world.variables', () => {
     });
 
     it('executes low-risk commands without HITL when tool_permission=auto', async () => {
-      const tool = createShellCmdToolDefinition();
-      const result = await tool.execute(
+      const result = await executeShellCmdWithHostSemantics(
         { command: 'pwd', parameters: [] },
         undefined,
         undefined,
@@ -311,9 +296,8 @@ describe('tool_permission enforcement via world.variables', () => {
         source: 'user',
       });
 
-      const tool = createShellCmdToolDefinition();
       await expect(
-        tool.execute(
+        executeShellCmdWithHostSemantics(
           { command: 'rm', parameters: ['target.txt'] },
           undefined,
           undefined,
@@ -437,11 +421,8 @@ describe('tool_permission enforcement via world.variables', () => {
       mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
       readFileSpy.mockResolvedValue('# Steps\nRun `scripts/setup.sh` before processing.\n' as any);
 
-      const tool = createLoadSkillToolDefinition();
-      const result = await tool.execute(
+      const result = await executeLoadSkillWithHostSemantics(
         { skill_id: 'pdf-extract' },
-        undefined,
-        undefined,
         {
           world: { id: 'world-perm-test', variables: 'tool_permission=read' } as any,
           chatId: 'chat-perm-test',
@@ -474,11 +455,8 @@ describe('tool_permission enforcement via world.variables', () => {
         source: 'user',
       });
 
-      const tool = createLoadSkillToolDefinition();
-      const result = await tool.execute(
+      const result = await executeLoadSkillWithHostSemantics(
         { skill_id: 'pdf-extract' },
-        undefined,
-        undefined,
         {
           world: { id: 'world-perm-test', variables: 'tool_permission=ask' } as any,
           chatId: 'chat-perm-test',
@@ -509,11 +487,8 @@ describe('tool_permission enforcement via world.variables', () => {
         signal: null,
       });
 
-      const tool = createLoadSkillToolDefinition();
-      const result = await tool.execute(
+      const result = await executeLoadSkillWithHostSemantics(
         { skill_id: 'pdf-extract' },
-        undefined,
-        undefined,
         {
           world: { id: 'world-perm-test', variables: '' } as any,
           chatId: 'chat-perm-test',

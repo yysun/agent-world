@@ -297,7 +297,7 @@ function normalizeQuestions(
     const question = String(questionRecord.question || '').trim();
     const options = normalizeOptions(Array.isArray(questionRecord.options)
       ? questionRecord.options
-        .map((option) => {
+        .map<HitlOption | null>((option) => {
           if (!option || typeof option !== 'object' || Array.isArray(option)) {
             return null;
           }

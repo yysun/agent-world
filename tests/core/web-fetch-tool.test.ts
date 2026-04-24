@@ -13,7 +13,8 @@
  * Recent Changes:
  * - 2026-03-21: Added durable tool-envelope coverage for persisted `web_fetch` success and failure paths.
  * - 2026-03-12: Added regression coverage for blocked private targets without world context so execute never falls through to an uncontrolled network fetch.
- * - 2026-02-28: Added initial unit coverage for built-in web_fetch tool.
+ * - 2026-04-24: Retargeted execution coverage to the host-semantics entrypoint after deleting the dead public factory wrapper.
+ * - 2026-02-28: Added initial unit coverage for web_fetch host semantics.
  * - 2026-03-01: Added coverage for includeLinks=false behavior to ensure anchor text is preserved without markdown links.
  * - 2026-03-05: Added timeout-abort coverage to enforce deterministic `timeout_error` mapping.
  */
@@ -32,7 +33,14 @@ vi.mock('../../core/hitl.js', () => ({
   requestWorldOption: mockRequestWorldOption,
 }));
 
-import { createWebFetchToolDefinition } from '../../core/web-fetch-tool.js';
+import { executeWebFetchWithHostSemantics } from '../../core/web-fetch-tool.js';
+
+function createWebFetchToolSubject() {
+  return {
+    execute: async (args: any, _sequenceId?: string, _parentToolCall?: string, context?: any) =>
+      await executeWebFetchWithHostSemantics(args, context),
+  };
+}
 
 describe('web_fetch tool', () => {
   beforeEach(() => {
@@ -52,7 +60,7 @@ describe('web_fetch tool', () => {
   });
 
   it('rejects unsupported URL schemes', async () => {
-    const tool = createWebFetchToolDefinition();
+    const tool = createWebFetchToolSubject();
     const result = await tool.execute({ url: 'ftp://example.com/data' });
 
     expect(String(result)).toContain('Error: web_fetch failed - unsupported_scheme');
@@ -84,7 +92,7 @@ describe('web_fetch tool', () => {
       )
     );
 
-    const tool = createWebFetchToolDefinition();
+    const tool = createWebFetchToolSubject();
     const raw = await tool.execute({ url: 'https://example.com', maxChars: 20000 });
 
     expect(typeof raw).toBe('string');
@@ -114,7 +122,7 @@ describe('web_fetch tool', () => {
       )
     );
 
-    const tool = createWebFetchToolDefinition();
+    const tool = createWebFetchToolSubject();
     const raw = await tool.execute(
       { url: 'https://example.com/envelope' },
       undefined,
@@ -150,7 +158,7 @@ describe('web_fetch tool', () => {
       )
     );
 
-    const tool = createWebFetchToolDefinition();
+    const tool = createWebFetchToolSubject();
     const raw = await tool.execute({ url: 'https://example.com', includeLinks: false });
     const parsed = JSON.parse(String(raw));
 
@@ -162,21 +170,21 @@ describe('web_fetch tool', () => {
   it('blocks private network targets resolved from DNS', async () => {
     mockLookup.mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
 
-    const tool = createWebFetchToolDefinition();
+    const tool = createWebFetchToolSubject();
     const result = await tool.execute({ url: 'https://internal.example.com' });
 
     expect(String(result)).toContain('Error: web_fetch failed - blocked_target');
   });
 
   it('blocks localhost targets when no world context is available for approval', async () => {
-    const tool = createWebFetchToolDefinition();
+    const tool = createWebFetchToolSubject();
     const result = await tool.execute({ url: 'http://localhost:3000' });
 
     expect(String(result)).toContain('Error: web_fetch failed - blocked_target: local/private hostnames are not allowed');
   });
 
   it('wraps persisted web_fetch failures in a durable tool envelope', async () => {
-    const tool = createWebFetchToolDefinition();
+    const tool = createWebFetchToolSubject();
     const raw = await tool.execute(
       { url: 'http://localhost:3000' },
       undefined,
@@ -206,7 +214,7 @@ describe('web_fetch tool', () => {
       )
     );
 
-    const tool = createWebFetchToolDefinition();
+    const tool = createWebFetchToolSubject();
     const raw = await tool.execute(
       { url: 'http://localhost:3000' },
       undefined,
@@ -234,7 +242,7 @@ describe('web_fetch tool', () => {
       source: 'user',
     });
 
-    const tool = createWebFetchToolDefinition();
+    const tool = createWebFetchToolSubject();
     const result = await tool.execute(
       { url: 'http://127.0.0.1:8080' },
       undefined,
@@ -261,7 +269,7 @@ describe('web_fetch tool', () => {
     }));
 
     const messages: Array<Record<string, unknown>> = [];
-    const tool = createWebFetchToolDefinition();
+    const tool = createWebFetchToolSubject();
     const result = await tool.execute(
       { url: 'http://127.0.0.1:8080' },
       undefined,
@@ -287,24 +295,34 @@ describe('web_fetch tool', () => {
 
     const promptArgs = JSON.parse(String((messages[0] as any).tool_calls[0].function.arguments));
     expect(promptArgs).toMatchObject({
-      title: 'Allow local/private web_fetch access?',
-      defaultOptionId: 'no',
-      defaultOption: 'No',
+      type: 'single-select',
+      allowSkip: false,
       metadata: {
         tool: 'web_fetch',
         toolCallId: 'web-fetch-call-1',
       },
     });
-    expect(promptArgs.options).toEqual([
+    expect(promptArgs.questions).toEqual([
       {
-        id: 'yes',
-        label: 'Yes',
-        description: 'Allow this local/private fetch request.',
-      },
-      {
-        id: 'no',
-        label: 'No',
-        description: 'Keep blocking this request.',
+        id: 'question-1',
+        header: 'Allow local/private web_fetch access?',
+        question: [
+          'web_fetch requested URL: http://127.0.0.1:8080/',
+          'Blocked by default because: private network targets are not allowed',
+          'Allow this request to proceed?',
+        ].join('\n'),
+        options: [
+          {
+            id: 'yes',
+            label: 'Yes',
+            description: 'Allow this local/private fetch request.',
+          },
+          {
+            id: 'no',
+            label: 'No',
+            description: 'Keep blocking this request.',
+          },
+        ],
       },
     ]);
 
@@ -318,7 +336,7 @@ describe('web_fetch tool', () => {
   });
 
   it('does not infer chatId from world context for localhost approval', async () => {
-    const tool = createWebFetchToolDefinition();
+    const tool = createWebFetchToolSubject();
     const result = await tool.execute(
       { url: 'http://127.0.0.1:8080' },
       undefined,
@@ -348,7 +366,7 @@ describe('web_fetch tool', () => {
         ),
       );
 
-      const tool = createWebFetchToolDefinition();
+      const tool = createWebFetchToolSubject();
       const pending = tool.execute({ url: 'https://example.com/slow', timeoutMs: 1000 });
       await vi.advanceTimersByTimeAsync(1000);
 

@@ -34,7 +34,10 @@ describe('web api hitl response', () => {
       },
       body: JSON.stringify({
         requestId: 'req-1',
-        optionId: 'yes_once',
+        answers: [{
+          questionId: 'question-1',
+          optionIds: ['yes_once'],
+        }],
         chatId: 'chat-1',
       }),
     });

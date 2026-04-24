@@ -296,17 +296,19 @@ export function filterAndHandleEmptyNamedFunctionCalls(
       });
 
       try {
-        publishToolEvent(world, {
-          agentName: agent.id || agent.name || 'unknown',
-          type: 'tool-error',
-          messageId,
-          chatId,
-          toolExecution: {
-            toolName,
-            toolCallId,
-            error: 'empty tool name from LLM',
-          },
-        });
+        if (typeof chatId === 'string' && chatId.trim()) {
+          publishToolEvent(world, {
+            agentName: agent.id || agent.name || 'unknown',
+            type: 'tool-error',
+            messageId,
+            chatId,
+            toolExecution: {
+              toolName,
+              toolCallId,
+              error: 'empty tool name from LLM',
+            },
+          });
+        }
       } catch (error) {
         console.error('Failed to publish tool-error event:', error);
       }

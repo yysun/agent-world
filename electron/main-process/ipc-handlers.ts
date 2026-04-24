@@ -303,7 +303,14 @@ interface MainIpcHandlerFactoryDependencies {
   newChat: (worldId: string) => Promise<any>;
   branchChatFromMessage: (worldId: string, sourceChatId: string, messageId: string) => Promise<any>;
   enqueueAndProcessUserTurn: (worldId: string, chatId: string, content: string, sender: string, targetWorld?: any) => Promise<any>;
-  submitWorldHitlResponse: (params: { worldId: string; requestId: string; optionId: string; chatId?: string | null }) => {
+  submitWorldHitlResponse: (params: {
+    worldId: string;
+    requestId: string;
+    optionId?: string;
+    answers?: Array<{ questionId: string; optionIds: string[] }>;
+    skipped?: boolean;
+    chatId?: string | null;
+  }) => {
     accepted: boolean;
     reason?: string;
   };

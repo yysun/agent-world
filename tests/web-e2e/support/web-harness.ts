@@ -44,6 +44,9 @@
  *   reloads the world page so messages are restored from the backend DB, then retries.
  * - 2026-03-12: Added a deterministic slow-shell prompt path and tool-summary wait helpers for live web shell status E2E coverage.
  * - 2026-03-12: Added `setWorldToolPermission` helper to update the world-level tool_permission env key via the REST API.
+ * - 2026-04-24: Hardened sendComposerMessage so delayed error overlays after a successful click do not trigger a false retry into a composer-less error page.
+ * - 2026-04-24: Treat composer send error states as explicit failures instead of successful sends so web E2E cannot silently pass on unsent messages.
+ * - 2026-04-24: Added an explicit timeout parameter for error-state waits so async queue-failure browser flows can use a larger budget than the suite default.
  * - 2026-03-12: Updated error waiting helpers to accept inline system error messages in addition to the legacy page-level error panel.
  */
 
@@ -99,7 +102,33 @@ type WorldStatus = {
 };
 
 const COMPOSER_ACTION_RETRY_COUNT = 3;
-const COMPOSER_ACTION_SETTLE_TIMEOUT_MS = 1_500;
+const COMPOSER_ACTION_SETTLE_TIMEOUT_MS = 5_000;
+
+type ComposerSendSettleSnapshot = {
+  messageCount: number;
+  hasWorldErrorState: boolean;
+  hasConversationErrorIndicator: boolean;
+  hasRenderableSystemError: boolean;
+};
+
+export function classifyComposerSendSettleState(
+  snapshot: ComposerSendSettleSnapshot,
+  expectedCount: number,
+): 'sent' | 'error' | null {
+  if (snapshot.messageCount > expectedCount) {
+    return 'sent';
+  }
+
+  if (
+    snapshot.hasWorldErrorState
+    || snapshot.hasConversationErrorIndicator
+    || snapshot.hasRenderableSystemError
+  ) {
+    return 'error';
+  }
+
+  return null;
+}
 
 function requireGoogleApiKey(): void {
   if (String(process.env.GOOGLE_API_KEY || '').trim()) {
@@ -576,19 +605,52 @@ export async function sendComposerMessage(page: Page, content: string): Promise<
     await page.getByTestId('composer-action').click();
 
     try {
-      await page.waitForFunction(
-        ({ expectedCount }) => {
+      const settleStateHandle = await page.waitForFunction(
+        ({ expectedCount, patterns }) => {
           const messageCount = document.querySelectorAll('[data-testid^="message-row-"]').length;
-          if (messageCount > expectedCount) {
-            return true;
+
+          const hasWorldErrorState = Boolean(document.querySelector('[data-testid="world-error-state"]'));
+          const hasConversationErrorIndicator = Boolean(
+            document.querySelector('[data-testid="conversation-area"] .error-indicator'),
+          );
+          const systemRows = Array.from(
+            document.querySelectorAll('[data-testid="conversation-area"] [data-message-role="system"]'),
+          );
+          const hasRenderableSystemError = systemRows.some((row) => {
+            const text = (row.textContent || '').trim().toLowerCase();
+            return patterns.some((pattern: string) => text.includes(pattern));
+          });
+
+          if (messageCount > expectedCount || hasWorldErrorState || hasConversationErrorIndicator || hasRenderableSystemError) {
+            return {
+              messageCount,
+              hasWorldErrorState,
+              hasConversationErrorIndicator,
+              hasRenderableSystemError,
+            };
           }
-          return Boolean(document.querySelector('[data-testid="world-error-state"]'));
+
+          return false;
         },
-        { expectedCount: initialMessageCount },
+        { expectedCount: initialMessageCount, patterns: renderableSystemErrorTextPatterns },
         { timeout: COMPOSER_ACTION_SETTLE_TIMEOUT_MS },
       );
-      return;
+
+      const settleState = classifyComposerSendSettleState(
+        await settleStateHandle.jsonValue() as ComposerSendSettleSnapshot,
+        initialMessageCount,
+      );
+
+      if (settleState === 'sent') {
+        return;
+      }
+
+      throw new Error('Composer send entered an error state before a message row appeared.');
     } catch (error) {
+      if (error instanceof Error && error.message.includes('entered an error state')) {
+        throw error;
+      }
+
       if (attempt === COMPOSER_ACTION_RETRY_COUNT - 1) {
         throw error;
       }
@@ -664,7 +726,7 @@ export async function editLatestUserMessage(page: Page, nextText: string): Promi
   await page.getByTestId('message-edit-save').click();
 }
 
-export async function waitForErrorState(page: Page): Promise<void> {
+export async function waitForErrorState(page: Page, timeoutMs: number = 15_000): Promise<void> {
   await page.waitForFunction(
     ({ patterns }) => {
       if (document.querySelector('[data-testid="world-error-state"]')) {
@@ -685,6 +747,7 @@ export async function waitForErrorState(page: Page): Promise<void> {
       });
     },
     { patterns: renderableSystemErrorTextPatterns },
+    { timeout: timeoutMs },
   );
 }
 

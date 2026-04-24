@@ -14,6 +14,7 @@
  * - Avoids any real provider/tool execution and filesystem-backed state.
  *
  * Recent Changes:
+ * - 2026-04-24: Updated tool-resolution mocks to target the canonical runtime-backed resolver rather than the mixed MCP registry surface.
  * - 2026-04-23: Added streaming regression coverage to discard provisional
  *   assistant text when a duplicate continuation `load_skill` call is suppressed.
  * - 2026-03-29: Updated continuation guard coverage for the extracted `runAgentTurnLoop(...)` runner and preserved retry-state assertions across continuation re-entry.
@@ -66,12 +67,9 @@ vi.mock('../../../core/llm-runtime.js', async () => {
     ...actual,
     generateAgentResponse: mocks.generateAgentResponse,
     streamAgentResponse: mocks.streamAgentResponse,
+    getRuntimeToolsForWorld: mocks.getMCPToolsForWorld,
   };
 });
-
-vi.mock('../../../core/mcp-server-registry.js', () => ({
-  getMCPToolsForWorld: mocks.getMCPToolsForWorld,
-}));
 
 vi.mock('../../../core/events/publishers.js', () => ({
   publishMessage: vi.fn(),
@@ -523,7 +521,7 @@ describe('continueLLMAfterToolExecution guard', () => {
     await continueLLMAfterToolExecution(world, agent, 'chat-1');
 
     expect(shellExecute).toHaveBeenCalledTimes(1);
-    const shellContext = shellExecute.mock.calls[0]?.[3];
+    const shellContext = shellExecute.mock.calls[0]?.[1];
     expect(shellContext).toBeDefined();
     expect(shellContext.llmResultMode).toBe('minimal');
     expect(mocks.publishMessageWithId).toHaveBeenCalledTimes(1);
@@ -585,7 +583,7 @@ describe('continueLLMAfterToolExecution guard', () => {
     await continueLLMAfterToolExecution(world, agent, 'chat-1');
 
     expect(shellExecute).toHaveBeenCalledTimes(1);
-    const shellContext = shellExecute.mock.calls[0]?.[3];
+    const shellContext = shellExecute.mock.calls[0]?.[1];
     expect(shellContext).toBeDefined();
     expect(shellContext.llmResultMode).toBe('minimal');
     expect(mocks.publishMessageWithId).toHaveBeenCalledTimes(1);

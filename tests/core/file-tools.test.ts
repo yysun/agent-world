@@ -21,7 +21,8 @@
  * - 2026-03-01: Added regression coverage for `read_file` when mocked `fs.readFile` resolves `undefined` (should return empty content, not error).
  * - 2026-03-01: Added read_file regression coverage for missing cwd script paths that should resolve under loaded skill roots.
  * - 2026-03-01: Added regression coverage for `list_files` against symlinked `.agents/skills/*` paths that validate as out-of-scope after canonicalization.
- * - 2026-02-28: Added initial unit coverage for new built-in `write_file` tool.
+ * - 2026-04-24: Retargeted `write_file` execution coverage to the host-semantics entrypoint after deleting the dead public factory wrapper.
+ * - 2026-02-28: Added initial unit coverage for `write_file` host semantics.
  */
 
 import * as fs from 'fs';
@@ -61,8 +62,15 @@ vi.mock('../../core/skill-registry.js', () => ({
   getSkillSourcePath: vi.fn(() => undefined),
 }));
 
-import { createGrepToolDefinition, createListFilesToolDefinition, createReadFileToolDefinition, createWriteFileToolDefinition } from '../../core/file-tools.js';
+import { createGrepToolDefinition, createListFilesToolDefinition, createReadFileToolDefinition, executeWriteFileWithHostSemantics } from '../../core/file-tools.js';
 import { getSkillSourcePath, getSkills } from '../../core/skill-registry.js';
+
+function createWriteFileToolSubject() {
+  return {
+    execute: async (args: any, _sequenceId?: string, _parentToolCall?: string, context?: any) =>
+      await executeWriteFileWithHostSemantics(args, context),
+  };
+}
 
 const mockedGetSkills = vi.mocked(getSkills);
 const mockedGetSkillSourcePath = vi.mocked(getSkillSourcePath);
@@ -108,7 +116,7 @@ describe('file-tools write_file', () => {
   });
 
   it('writes a new in-scope file and returns deterministic metadata', async () => {
-    const writeFileTool = createWriteFileToolDefinition();
+    const writeFileTool = createWriteFileToolSubject();
 
     const result = await writeFileTool.execute(
       {
@@ -142,7 +150,7 @@ describe('file-tools write_file', () => {
   it('fails create mode when target file already exists', async () => {
     existingFiles.add('/workspace/existing.txt');
 
-    const writeFileTool = createWriteFileToolDefinition();
+    const writeFileTool = createWriteFileToolSubject();
     const result = await writeFileTool.execute(
       {
         filePath: 'existing.txt',
@@ -165,7 +173,7 @@ describe('file-tools write_file', () => {
       throw error;
     });
 
-    const writeFileTool = createWriteFileToolDefinition();
+    const writeFileTool = createWriteFileToolSubject();
     const result = await writeFileTool.execute(
       {
         filePath: 'race.txt',
@@ -181,7 +189,7 @@ describe('file-tools write_file', () => {
   });
 
   it('rejects out-of-scope paths using trusted-directory validation', async () => {
-    const writeFileTool = createWriteFileToolDefinition();
+    const writeFileTool = createWriteFileToolSubject();
 
     const result = await writeFileTool.execute(
       {
@@ -198,7 +206,7 @@ describe('file-tools write_file', () => {
   });
 
   it('rejects invalid input when content is missing', async () => {
-    const writeFileTool = createWriteFileToolDefinition();
+    const writeFileTool = createWriteFileToolSubject();
 
     const result = await writeFileTool.execute(
       {
@@ -216,7 +224,7 @@ describe('file-tools write_file', () => {
   it('rejects writes when the target path is an existing directory', async () => {
     existingDirectories.add('/workspace/reports');
 
-    const writeFileTool = createWriteFileToolDefinition();
+    const writeFileTool = createWriteFileToolSubject();
 
     const result = await writeFileTool.execute(
       {

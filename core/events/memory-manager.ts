@@ -20,6 +20,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-04-24: Removed restore-time prefetching from the mixed MCP registry surface; pending tool resumes now flow through the shared tool-action runtime resolver.
  * - 2026-04-23: Discard streamed assistant replies when duplicate `load_skill`
  *   continuation calls are suppressed so provisional text does not linger in UI.
  * - 2026-04-12: Scoped continuation intent-only rejection to execution-oriented turns and reset validation correction budgets after non-validation progress.
@@ -647,8 +648,6 @@ export async function resumePendingToolCallsForChat(
     targetAssistantMessageId: targetAssistantMessageId || null,
   });
 
-  const { getMCPToolsForWorld } = await import('../mcp-server-registry.js');
-  const mcpTools = await getMCPToolsForWorld(world.id);
   const storage = await getStorageWrappers();
 
   let resumedCount = 0;

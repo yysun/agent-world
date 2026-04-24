@@ -2352,376 +2352,326 @@ export function formatResultForLLM(
   return parts.join('\n');
 }
 
-/**
- * Create MCP-compatible tool definition for shell_cmd
- * This tool can be registered with the MCP system for LLM use
- * 
- * @returns MCP tool definition object
- */
-export function createShellCmdToolDefinition() {
-  return {
-    description: 'Execute a user-requested shell command and capture output. Use this only when the user explicitly asks to run a command. Contract: `command` must be a single executable token, and each argument must be a separate `parameters` token (no mini-scripts in `command`). Working directory is resolved from trusted world context (`working_directory`) and defaults to the core default working directory (user home by default) when unset. Optional `directory` is allowed only when it resolves inside trusted scope; outside-scope requests are rejected. Path-like command arguments are scope-validated. Shell control syntax is blocked (`&&`, `||`, pipes, redirects, command substitution, backgrounding), and inline eval modes (for example `sh -c`, `node -e`, `python -c`, `powershell -Command`) are blocked. Execution uses OS shell mode (`shell: true`), so do not pass untrusted text as command content. Optional `output_format` supports `markdown` (default) and `json`; `output_detail` defaults to `minimal` to return minimum necessary output and can be set to `full`; `artifact_paths` can include files to hash and report in output metadata.',
-
-    parameters: {
-      type: 'object',
-      properties: {
-        command: {
-          type: 'string',
-          description: 'The shell command to execute (e.g., "ls", "echo", "cat", "grep")'
-        },
-        parameters: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Array of parameters/arguments for the command (e.g., ["-la", "./src"]). Pass each argument as a separate token.'
-        },
-        directory: {
-          type: 'string',
-          description: 'Optional model-provided target directory. Runtime allows this only when it resolves inside trusted world working-directory scope; outside-scope requests are rejected. If user asks for a target folder, set it here.'
-        },
-        timeout: {
-          type: 'number',
-          description: 'Timeout in milliseconds (default: 600000 = 10 minutes). Command will be terminated if it exceeds this time.'
-        },
-        output_format: {
-          type: 'string',
-          enum: ['markdown', 'json'],
-          description: 'Output format for tool result. Use "markdown" (default) for human-readable output or "json" for structured output.'
-        },
-        output_detail: {
-          type: 'string',
-          enum: ['minimal', 'full'],
-          description: 'Output detail level. `minimal` (default) returns bounded previews and essential metadata only; `full` returns complete stdout/stderr and timestamp fields.'
-        },
-        artifact_paths: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Optional file paths (within trusted working-directory scope) to include as hashed artifacts in result output.'
-        }
+export async function executeShellCmdWithHostSemantics(args: any, _sequenceId?: string, _parentToolCall?: string, context?: any): Promise<string> {
+  // Universal parameter validation
+  const toolSchema = {
+    type: 'object',
+    properties: {
+      command: {
+        type: 'string',
+        description: 'The shell command to execute (e.g., "ls", "echo", "cat", "grep")'
       },
-      required: ['command'],
-      additionalProperties: false
+      parameters: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Array of parameters/arguments for the command (e.g., ["-la", "./src"]). Pass each argument as a separate token.'
+      },
+      directory: {
+        type: 'string',
+        description: 'Optional model-provided target directory. Runtime allows this only when it resolves inside trusted world working-directory scope; outside-scope requests are rejected. If user asks for a target folder, set it here.'
+      },
+      timeout: {
+        type: 'number',
+        description: 'Timeout in milliseconds (default: 600000 = 10 minutes). Command will be terminated if it exceeds this time.'
+      },
+      output_format: {
+        type: 'string',
+        enum: ['markdown', 'json'],
+        description: 'Output format for tool result. Use "markdown" (default) for human-readable output or "json" for structured output.'
+      },
+      output_detail: {
+        type: 'string',
+        enum: ['minimal', 'full'],
+        description: 'Output detail level. `minimal` (default) returns bounded previews and essential metadata only; `full` returns complete stdout/stderr and timestamp fields.'
+      },
+      artifact_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional file paths (within trusted working-directory scope) to include as hashed artifacts in result output.'
+      }
     },
-    execute: async (args: any, sequenceId?: string, parentToolCall?: string, context?: any) => {
-      // Universal parameter validation
-      const toolSchema = {
-        type: 'object',
-        properties: {
-          command: {
-            type: 'string',
-            description: 'The shell command to execute (e.g., "ls", "echo", "cat", "grep")'
-          },
-          parameters: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Array of parameters/arguments for the command (e.g., ["-la", "./src"]). Pass each argument as a separate token.'
-          },
-          directory: {
-            type: 'string',
-            description: 'Optional model-provided target directory. Runtime allows this only when it resolves inside trusted world working-directory scope; outside-scope requests are rejected. If user asks for a target folder, set it here.'
-          },
-          timeout: {
-            type: 'number',
-            description: 'Timeout in milliseconds (default: 600000 = 10 minutes). Command will be terminated if it exceeds this time.'
-          },
-          output_format: {
-            type: 'string',
-            enum: ['markdown', 'json'],
-            description: 'Output format for tool result. Use "markdown" (default) for human-readable output or "json" for structured output.'
-          },
-          output_detail: {
-            type: 'string',
-            enum: ['minimal', 'full'],
-            description: 'Output detail level. `minimal` (default) returns bounded previews and essential metadata only; `full` returns complete stdout/stderr and timestamp fields.'
-          },
-          artifact_paths: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Optional file paths (within trusted working-directory scope) to include as hashed artifacts in result output.'
-          }
-        },
-        required: ['command']
-      };
-
-      const llmResultMode = typeof context?.llmResultMode === 'string'
-        ? context.llmResultMode === 'verbose' ? 'verbose' : 'minimal'
-        : 'verbose';
-      const persistToolEnvelope = context?.persistToolEnvelope === true;
-
-      const validation = validateToolParameters(args, toolSchema, 'shell_cmd');
-      if (!validation.valid) {
-        const validationResult: CommandExecutionResult = {
-          executionId: 'validation-error',
-          command: args?.command || '<invalid>',
-          parameters: [],
-          exitCode: null,
-          signal: null,
-          error: validation.error,
-          failureReason: 'validation_error',
-          stdout: '',
-          stderr: '',
-          executedAt: new Date(),
-          duration: 0
-        };
-        const validationOutputFormat = validation.correctedArgs?.output_format === 'json' ? 'json' : 'markdown';
-        return formatShellToolReturnContent(validationResult, {
-          llmResultMode,
-          outputFormat: validationOutputFormat,
-          outputDetail: 'minimal',
-          toolCallId: typeof context?.toolCallId === 'string' ? context.toolCallId : undefined,
-          persistToolEnvelope,
-          worldId: typeof context?.world?.id === 'string' ? context.world.id : undefined,
-        });
-      }
-
-      const {
-        command,
-        parameters = [],
-        timeout,
-        output_format: outputFormat = 'markdown',
-        output_detail: outputDetail = 'minimal',
-        artifact_paths: artifactPaths = []
-      } = validation.correctedArgs;
-
-      // Ensure parameters is always an array
-      const rawParameters = Array.isArray(parameters) ?
-        parameters.filter((p: any) => typeof p === 'string') :
-        [];
-
-      const chatIdRaw = typeof context?.chatId === 'string' ? context.chatId.trim() : '';
-      const chatId = chatIdRaw || undefined;
-
-      // Resolve skill-relative script paths in both the executable and argv.
-      const resolvedDirectory = resolveTrustedShellWorkingDirectory(context);
-      const runtimeSkillsRoot = getCanonicalProjectSkillRoot(resolveDirectory(resolvedDirectory));
-      const activeSkillContexts = getActiveSkillContexts(context?.messages, chatId);
-      const skillOriginatedRequest = activeSkillContexts.length > 0;
-      const skillResolutionOptions = {
-        allowBareScriptsResolution: skillOriginatedRequest,
-        activeSkillContexts,
-      };
-      const { resolvedCommand: validCommand, skillRoots: commandSkillRoots } = resolveSkillScriptCommand(
-        command,
-        runtimeSkillsRoot,
-        skillResolutionOptions,
-      );
-      const { resolvedParameters: validParameters, skillRoots: parameterSkillRoots } = resolveSkillScriptParameters(
-        rawParameters,
-        runtimeSkillsRoot,
-        skillResolutionOptions,
-      );
-      const skillRoots = [...new Set([...commandSkillRoots, ...parameterSkillRoots])];
-      const riskAssessment = classifyShellCommandRisk(validCommand, validParameters);
-
-      if (riskAssessment.tier === 'block') {
-        throw new Error(
-          `Blocked dangerous operation: ${riskAssessment.reason}. This shell command cannot be executed.`
-        );
-      }
-
-      // Extract world and messageId from context for streaming
-      const world = context?.world;
-      const currentMessageId = context?.toolCallId;
-      const abortSignal = context?.abortSignal as AbortSignal | undefined;
-      const streamAgentName = typeof context?.agentName === 'string' && context.agentName.trim()
-        ? context.agentName.trim()
-        : 'assistant';
-      const hasToolStreamContext = Boolean(
-        world
-        && chatId
-        && typeof currentMessageId === 'string'
-        && currentMessageId.trim()
-      );
-      const streamBaseMessageId = hasToolStreamContext ? String(currentMessageId).trim() : '';
-      const stdoutMessageId = streamBaseMessageId ? `${streamBaseMessageId}-stdout` : '';
-      const directoryValidation = validateShellDirectoryRequest(
-        validation.correctedArgs.directory,
-        resolvedDirectory,
-        skillRoots,
-      );
-      if (!directoryValidation.valid) {
-        throw new Error(directoryValidation.error);
-      }
-      const commandScopeValidation = validateResolvedCommandExecutableScope(
-        validCommand,
-        command,
-        resolvedDirectory,
-        skillRoots,
-      );
-      if (!commandScopeValidation.valid) {
-        throw new Error(commandScopeValidation.error);
-      }
-      const scopeValidation = validateShellCommandScope(
-        validCommand,
-        validParameters,
-        resolvedDirectory,
-        skillRoots
-      );
-      if (!scopeValidation.valid) {
-        throw new Error(scopeValidation.error);
-      }
-
-      // Check world-level tool permission
-      const toolPermission = getEnvValueFromText(world?.variables, 'tool_permission') ?? 'auto';
-      if (toolPermission === 'read') {
-        const blockedResult: CommandExecutionResult = {
-          executionId: 'permission-blocked',
-          command: validCommand,
-          parameters: validParameters,
-          exitCode: null,
-          signal: null,
-          error: 'shell_cmd is blocked by the current permission level (read).',
-          failureReason: 'validation_error',
-          stdout: '',
-          stderr: '',
-          executedAt: new Date(),
-          duration: 0,
-        };
-        return formatShellToolReturnContent(blockedResult, {
-          llmResultMode,
-          outputFormat: outputFormat === 'json' ? 'json' : 'markdown',
-          outputDetail: 'minimal',
-          toolCallId: typeof currentMessageId === 'string' ? currentMessageId : undefined,
-          persistToolEnvelope,
-          worldId: typeof world?.id === 'string' ? world.id : undefined,
-        });
-      }
-
-      // At 'ask' level, every shell_cmd invocation requires HITL approval regardless of risk tier.
-      if (toolPermission === 'ask' && riskAssessment.tier !== 'hitl_required') {
-        if (!world) {
-          throw new Error(
-            'Approval required: world-level permission is "ask" but HITL approval context is unavailable.'
-          );
-        }
-        const askApproval = await requestShellCommandRiskApproval({
-          world,
-          chatId: chatId ?? null,
-          command: validCommand,
-          parameters: validParameters,
-          resolvedDirectory,
-          risk: { tier: 'hitl_required', reason: 'world permission level is "ask"', tags: ['ask-permission'] },
-          toolCallId: typeof currentMessageId === 'string' ? currentMessageId : undefined,
-          agentName: streamAgentName,
-          messages: Array.isArray(context?.messages) ? context.messages as AgentMessage[] : undefined,
-        });
-        if (!askApproval.approved) {
-          throw new Error(
-            `Command not executed: world permission is "ask" and the request was not approved (${askApproval.reason}).`
-          );
-        }
-      }
-
-      if (riskAssessment.tier === 'hitl_required') {
-        if (!world) {
-          throw new Error(
-            `Approval required: command classified as ${riskAssessment.reason}. HITL approval context is unavailable.`
-          );
-        }
-
-        const approval = await requestShellCommandRiskApproval({
-          world,
-          chatId: chatId ?? null,
-          command: validCommand,
-          parameters: validParameters,
-          resolvedDirectory,
-          risk: riskAssessment,
-          toolCallId: typeof currentMessageId === 'string' ? currentMessageId : undefined,
-          agentName: streamAgentName,
-          messages: Array.isArray(context?.messages) ? context.messages as AgentMessage[] : undefined,
-        });
-
-        if (!approval.approved) {
-          throw new Error(
-            `Command not executed: approval required for ${riskAssessment.reason} and request was not approved (${approval.reason}).`
-          );
-        }
-      }
-
-      let stdoutStartEmitted = false;
-      const emitStdoutToolStreamChunk = (chunk: string) => {
-        if (!hasToolStreamContext) return;
-        if (!chunk) return;
-        if (!stdoutMessageId) return;
-        if (!stdoutStartEmitted) {
-          publishSSE(world, {
-            type: 'start',
-            toolName: 'shell_cmd',
-            messageId: stdoutMessageId,
-            agentName: streamAgentName,
-            chatId
-          });
-          stdoutStartEmitted = true;
-        }
-        publishSSE(world, {
-          type: 'chunk',
-          toolName: 'shell_cmd',
-          content: chunk,
-          stream: 'stdout',
-          messageId: stdoutMessageId,
-          agentName: streamAgentName,
-          chatId
-        });
-      };
-
-      const emitStderrToolStreamChunk = (chunk: string) => {
-        if (!world || !chatId || !chunk) return;
-        publishSSE(world, {
-          type: 'tool-stream',
-          toolName: 'shell_cmd',
-          content: chunk,
-          stream: 'stderr',
-          messageId: currentMessageId,
-          agentName: 'shell_cmd',
-          chatId
-        });
-      };
-
-      // Execute command with tool-streaming callbacks when world context is available
-      const result = await executeShellCommand(validCommand, validParameters, resolvedDirectory, {
-        timeout,
-        abortSignal,
-        worldId: world?.id,
-        chatId,
-        trustedWorkingDirectory: resolvedDirectory,
-        onStdout: hasToolStreamContext ? (chunk) => {
-          emitStdoutToolStreamChunk(chunk);
-        } : undefined,
-        onStderr: world ? (chunk) => {
-          emitStderrToolStreamChunk(chunk);
-        } : undefined
-      });
-
-      if (isCommandExecutionCanceled(result)) {
-        throw new DOMException('Shell command execution canceled by user', 'AbortError');
-      }
-
-      // Emit SSE end only. Durable completion state now comes from the final tool result.
-      if (hasToolStreamContext && stdoutMessageId && stdoutStartEmitted) {
-        publishSSE(world, {
-          type: 'end',
-          toolName: 'shell_cmd',
-          messageId: stdoutMessageId,
-          agentName: streamAgentName,
-          chatId
-        });
-      }
-
-      const validatedArtifactPaths = Array.isArray(artifactPaths)
-        ? artifactPaths.filter((artifactPath: any) => typeof artifactPath === 'string')
-        : [];
-      const artifacts = llmResultMode === 'minimal'
-        ? []
-        : await collectCommandArtifacts(validatedArtifactPaths, resolvedDirectory);
-
-      return formatShellToolReturnContent(result, {
-        llmResultMode,
-        outputFormat,
-        outputDetail,
-        toolCallId: typeof context?.toolCallId === 'string' ? context.toolCallId : undefined,
-        persistToolEnvelope,
-        artifacts,
-        worldId: typeof context?.world?.id === 'string' ? context.world.id : undefined,
-      });
-    }
+    required: ['command']
   };
+
+  const llmResultMode = typeof context?.llmResultMode === 'string'
+    ? context.llmResultMode === 'verbose' ? 'verbose' : 'minimal'
+    : 'verbose';
+  const persistToolEnvelope = context?.persistToolEnvelope === true;
+
+  const validation = validateToolParameters(args, toolSchema, 'shell_cmd');
+  if (!validation.valid) {
+    const validationResult: CommandExecutionResult = {
+      executionId: 'validation-error',
+      command: args?.command || '<invalid>',
+      parameters: [],
+      exitCode: null,
+      signal: null,
+      error: validation.error,
+      failureReason: 'validation_error',
+      stdout: '',
+      stderr: '',
+      executedAt: new Date(),
+      duration: 0
+    };
+    const validationOutputFormat = validation.correctedArgs?.output_format === 'json' ? 'json' : 'markdown';
+    return formatShellToolReturnContent(validationResult, {
+      llmResultMode,
+      outputFormat: validationOutputFormat,
+      outputDetail: 'minimal',
+      toolCallId: typeof context?.toolCallId === 'string' ? context.toolCallId : undefined,
+      persistToolEnvelope,
+      worldId: typeof context?.world?.id === 'string' ? context.world.id : undefined,
+    });
+  }
+
+  const {
+    command,
+    parameters = [],
+    timeout,
+    output_format: outputFormat = 'markdown',
+    output_detail: outputDetail = 'minimal',
+    artifact_paths: artifactPaths = []
+  } = validation.correctedArgs;
+
+  // Ensure parameters is always an array
+  const rawParameters = Array.isArray(parameters) ?
+    parameters.filter((p: any) => typeof p === 'string') :
+    [];
+
+  const chatIdRaw = typeof context?.chatId === 'string' ? context.chatId.trim() : '';
+  const chatId = chatIdRaw || undefined;
+
+  // Resolve skill-relative script paths in both the executable and argv.
+  const resolvedDirectory = resolveTrustedShellWorkingDirectory(context);
+  const runtimeSkillsRoot = getCanonicalProjectSkillRoot(resolveDirectory(resolvedDirectory));
+  const activeSkillContexts = getActiveSkillContexts(context?.messages, chatId);
+  const skillOriginatedRequest = activeSkillContexts.length > 0;
+  const skillResolutionOptions = {
+    allowBareScriptsResolution: skillOriginatedRequest,
+    activeSkillContexts,
+  };
+  const { resolvedCommand: validCommand, skillRoots: commandSkillRoots } = resolveSkillScriptCommand(
+    command,
+    runtimeSkillsRoot,
+    skillResolutionOptions,
+  );
+  const { resolvedParameters: validParameters, skillRoots: parameterSkillRoots } = resolveSkillScriptParameters(
+    rawParameters,
+    runtimeSkillsRoot,
+    skillResolutionOptions,
+  );
+  const skillRoots = [...new Set([...commandSkillRoots, ...parameterSkillRoots])];
+  const riskAssessment = classifyShellCommandRisk(validCommand, validParameters);
+
+  if (riskAssessment.tier === 'block') {
+    throw new Error(
+      `Blocked dangerous operation: ${riskAssessment.reason}. This shell command cannot be executed.`
+    );
+  }
+
+  // Extract world and messageId from context for streaming
+  const world = context?.world;
+  const currentMessageId = context?.toolCallId;
+  const abortSignal = context?.abortSignal as AbortSignal | undefined;
+  const streamAgentName = typeof context?.agentName === 'string' && context.agentName.trim()
+    ? context.agentName.trim()
+    : 'assistant';
+  const hasToolStreamContext = Boolean(
+    world
+    && chatId
+    && typeof currentMessageId === 'string'
+    && currentMessageId.trim()
+  );
+  const streamBaseMessageId = hasToolStreamContext ? String(currentMessageId).trim() : '';
+  const stdoutMessageId = streamBaseMessageId ? `${streamBaseMessageId}-stdout` : '';
+  const directoryValidation = validateShellDirectoryRequest(
+    validation.correctedArgs.directory,
+    resolvedDirectory,
+    skillRoots,
+  );
+  if (!directoryValidation.valid) {
+    throw new Error(directoryValidation.error);
+  }
+  const commandScopeValidation = validateResolvedCommandExecutableScope(
+    validCommand,
+    command,
+    resolvedDirectory,
+    skillRoots,
+  );
+  if (!commandScopeValidation.valid) {
+    throw new Error(commandScopeValidation.error);
+  }
+  const scopeValidation = validateShellCommandScope(
+    validCommand,
+    validParameters,
+    resolvedDirectory,
+    skillRoots
+  );
+  if (!scopeValidation.valid) {
+    throw new Error(scopeValidation.error);
+  }
+
+  // Check world-level tool permission
+  const toolPermission = getEnvValueFromText(world?.variables, 'tool_permission') ?? 'auto';
+  if (toolPermission === 'read') {
+    const blockedResult: CommandExecutionResult = {
+      executionId: 'permission-blocked',
+      command: validCommand,
+      parameters: validParameters,
+      exitCode: null,
+      signal: null,
+      error: 'shell_cmd is blocked by the current permission level (read).',
+      failureReason: 'validation_error',
+      stdout: '',
+      stderr: '',
+      executedAt: new Date(),
+      duration: 0,
+    };
+    return formatShellToolReturnContent(blockedResult, {
+      llmResultMode,
+      outputFormat: outputFormat === 'json' ? 'json' : 'markdown',
+      outputDetail: 'minimal',
+      toolCallId: typeof currentMessageId === 'string' ? currentMessageId : undefined,
+      persistToolEnvelope,
+      worldId: typeof world?.id === 'string' ? world.id : undefined,
+    });
+  }
+
+  // At 'ask' level, every shell_cmd invocation requires HITL approval regardless of risk tier.
+  if (toolPermission === 'ask' && riskAssessment.tier !== 'hitl_required') {
+    if (!world) {
+      throw new Error(
+        'Approval required: world-level permission is "ask" but HITL approval context is unavailable.'
+      );
+    }
+    const askApproval = await requestShellCommandRiskApproval({
+      world,
+      chatId: chatId ?? null,
+      command: validCommand,
+      parameters: validParameters,
+      resolvedDirectory,
+      risk: { tier: 'hitl_required', reason: 'world permission level is "ask"', tags: ['ask-permission'] },
+      toolCallId: typeof currentMessageId === 'string' ? currentMessageId : undefined,
+      agentName: streamAgentName,
+      messages: Array.isArray(context?.messages) ? context.messages as AgentMessage[] : undefined,
+    });
+    if (!askApproval.approved) {
+      throw new Error(
+        `Command not executed: world permission is "ask" and the request was not approved (${askApproval.reason}).`
+      );
+    }
+  }
+
+  if (riskAssessment.tier === 'hitl_required') {
+    if (!world) {
+      throw new Error(
+        `Approval required: command classified as ${riskAssessment.reason}. HITL approval context is unavailable.`
+      );
+    }
+
+    const approval = await requestShellCommandRiskApproval({
+      world,
+      chatId: chatId ?? null,
+      command: validCommand,
+      parameters: validParameters,
+      resolvedDirectory,
+      risk: riskAssessment,
+      toolCallId: typeof currentMessageId === 'string' ? currentMessageId : undefined,
+      agentName: streamAgentName,
+      messages: Array.isArray(context?.messages) ? context.messages as AgentMessage[] : undefined,
+    });
+
+    if (!approval.approved) {
+      throw new Error(
+        `Command not executed: approval required for ${riskAssessment.reason} and request was not approved (${approval.reason}).`
+      );
+    }
+  }
+
+  let stdoutStartEmitted = false;
+  const emitStdoutToolStreamChunk = (chunk: string) => {
+    if (!hasToolStreamContext) return;
+    if (!chunk) return;
+    if (!stdoutMessageId) return;
+    if (!stdoutStartEmitted) {
+      publishSSE(world, {
+        type: 'start',
+        toolName: 'shell_cmd',
+        messageId: stdoutMessageId,
+        agentName: streamAgentName,
+        chatId
+      });
+      stdoutStartEmitted = true;
+    }
+    publishSSE(world, {
+      type: 'chunk',
+      toolName: 'shell_cmd',
+      content: chunk,
+      stream: 'stdout',
+      messageId: stdoutMessageId,
+      agentName: streamAgentName,
+      chatId
+    });
+  };
+
+  const emitStderrToolStreamChunk = (chunk: string) => {
+    if (!world || !chatId || !chunk) return;
+    publishSSE(world, {
+      type: 'tool-stream',
+      toolName: 'shell_cmd',
+      content: chunk,
+      stream: 'stderr',
+      messageId: currentMessageId,
+      agentName: 'shell_cmd',
+      chatId
+    });
+  };
+
+  // Execute command with tool-streaming callbacks when world context is available
+  const result = await executeShellCommand(validCommand, validParameters, resolvedDirectory, {
+    timeout,
+    abortSignal,
+    worldId: world?.id,
+    chatId,
+    trustedWorkingDirectory: resolvedDirectory,
+    onStdout: hasToolStreamContext ? (chunk) => {
+      emitStdoutToolStreamChunk(chunk);
+    } : undefined,
+    onStderr: world ? (chunk) => {
+      emitStderrToolStreamChunk(chunk);
+    } : undefined
+  });
+
+  if (isCommandExecutionCanceled(result)) {
+    throw new DOMException('Shell command execution canceled by user', 'AbortError');
+  }
+
+  // Emit SSE end only. Durable completion state now comes from the final tool result.
+  if (hasToolStreamContext && stdoutMessageId && stdoutStartEmitted) {
+    publishSSE(world, {
+      type: 'end',
+      toolName: 'shell_cmd',
+      messageId: stdoutMessageId,
+      agentName: streamAgentName,
+      chatId
+    });
+  }
+
+  const validatedArtifactPaths = Array.isArray(artifactPaths)
+    ? artifactPaths.filter((artifactPath: any) => typeof artifactPath === 'string')
+    : [];
+  const artifacts = llmResultMode === 'minimal'
+    ? []
+    : await collectCommandArtifacts(validatedArtifactPaths, resolvedDirectory);
+
+  return formatShellToolReturnContent(result, {
+    llmResultMode,
+    outputFormat,
+    outputDetail,
+    toolCallId: typeof context?.toolCallId === 'string' ? context.toolCallId : undefined,
+    persistToolEnvelope,
+    artifacts,
+    worldId: typeof context?.world?.id === 'string' ? context.world.id : undefined,
+  });
 }
+

@@ -109,6 +109,14 @@ async function expectSessionIndicatorPending(
   }).toMatch(/bg-amber-(300|400)/);
 }
 
+function buildPlainTextSetupPrompt(token: string): string {
+  return [
+    `Setup token ${token}.`,
+    'Reply in plain text only.',
+    'Do not call any tools, skills, or approval flows.',
+  ].join(' ');
+}
+
 async function expectSessionIndicatorPendingById(
   page: Page,
   chatId: string,
@@ -168,7 +176,7 @@ test.describe('Loaded Current Chat', () => {
 
   test('edit success', async ({ page }) => {
     await launchAndPrepare(page);
-    await sendComposerMessage(page, 'Current edit success setup token current-edit-success-setup');
+    await sendComposerMessage(page, buildPlainTextSetupPrompt('current-edit-success-setup'));
     await waitForAssistantToken(page, 'current-edit-success-setup');
     await editLatestUserMessage(page, 'Edited current chat success token current-edit-success');
     await expectNotificationText(page, 'Message edited successfully');
@@ -177,7 +185,7 @@ test.describe('Loaded Current Chat', () => {
 
   test('edit HITL and resume', async ({ page }) => {
     await launchAndPrepare(page);
-    await sendComposerMessage(page, 'Current edit HITL setup token current-edit-hitl-setup');
+    await sendComposerMessage(page, buildPlainTextSetupPrompt('current-edit-hitl-setup'));
     await waitForAssistantToken(page, 'current-edit-hitl-setup');
     await editLatestUserMessage(page, buildShellHitlPrompt('loaded current chat edit'));
     await respondToHitlPrompt(page, 'Approve', 60_000);
@@ -187,7 +195,7 @@ test.describe('Loaded Current Chat', () => {
   test('re-editing a pending HITL turn clears the stale prompt and prevents replay', async ({ page }) => {
     await launchAndPrepare(page);
     await selectSessionByName(page, CHAT_NAMES.current);
-    await sendComposerMessage(page, 'Current edit clear HITL setup token current-edit-clear-hitl-setup');
+    await sendComposerMessage(page, buildPlainTextSetupPrompt('current-edit-clear-hitl-setup'));
     await waitForAssistantToken(page, 'current-edit-clear-hitl-setup');
 
     await editLatestUserMessage(page, buildShellHitlPrompt('loaded current chat re-edit clear'));
@@ -209,7 +217,7 @@ test.describe('Loaded Current Chat', () => {
     await launchAndPrepare(page);
     // Explicitly select this chat since the world-load default may differ.
     await selectSessionByName(page, CHAT_NAMES.current);
-    await sendComposerMessage(page, 'Current edit error setup token current-edit-error-setup');
+    await sendComposerMessage(page, buildPlainTextSetupPrompt('current-edit-error-setup'));
     await waitForAssistantToken(page, 'current-edit-error-setup');
     await deleteAllAgents(page);
     await editLatestUserMessage(page, 'Edited current chat error token current-edit-error');
@@ -327,7 +335,7 @@ test.describe('Switched Chat', () => {
   test('edit success after switching chats', async ({ page }) => {
     await launchAndPrepare(page);
     await selectSessionByName(page, CHAT_NAMES.switched);
-    await sendComposerMessage(page, 'Switched edit success setup token switched-edit-success-setup');
+    await sendComposerMessage(page, buildPlainTextSetupPrompt('switched-edit-success-setup'));
     await waitForAssistantToken(page, 'switched-edit-success-setup');
     await editLatestUserMessage(page, 'Edited switched chat success token switched-edit-success');
     await expectNotificationText(page, 'Message edited successfully');
@@ -350,7 +358,7 @@ test.describe('Switched Chat', () => {
   test('edit error after switching chats and responders are unavailable', async ({ page }) => {
     await launchAndPrepare(page);
     await selectSessionByName(page, CHAT_NAMES.switched);
-    await sendComposerMessage(page, 'Switched edit error setup token switched-edit-error-setup');
+    await sendComposerMessage(page, buildPlainTextSetupPrompt('switched-edit-error-setup'));
     await waitForAssistantToken(page, 'switched-edit-error-setup');
     await deleteAllAgents(page);
     await editLatestUserMessage(page, 'Edited switched chat error token switched-edit-error');
@@ -361,7 +369,7 @@ test.describe('Switched Chat', () => {
   test('edit HITL and resume after switching chats', async ({ page }) => {
     await launchAndPrepare(page);
     await selectSessionByName(page, CHAT_NAMES.switched);
-    await sendComposerMessage(page, 'Switched edit HITL setup token switched-edit-hitl-setup');
+    await sendComposerMessage(page, buildPlainTextSetupPrompt('switched-edit-hitl-setup'));
     await waitForAssistantToken(page, 'switched-edit-hitl-setup');
     await editLatestUserMessage(page, buildShellHitlPrompt('switched chat edit'));
     await respondToHitlPrompt(page, 'Approve', 60_000);
@@ -494,7 +502,7 @@ test.describe('New Chat', () => {
   test('create new chat and edit success', async ({ page }) => {
     await launchAndPrepare(page);
     await createNewSession(page);
-    await sendComposerMessage(page, 'New chat edit setup token new-edit-setup');
+    await sendComposerMessage(page, buildPlainTextSetupPrompt('new-edit-setup'));
     await waitForAssistantToken(page, 'new-edit-setup');
     await editLatestUserMessage(page, 'Edited new chat success token new-edit-success');
     await expectNotificationText(page, 'Message edited successfully');
@@ -504,7 +512,7 @@ test.describe('New Chat', () => {
   test('create new chat and edit error when responders are unavailable', async ({ page }) => {
     await launchAndPrepare(page);
     await createNewSession(page);
-    await sendComposerMessage(page, 'New chat edit error setup token new-edit-error-setup');
+    await sendComposerMessage(page, buildPlainTextSetupPrompt('new-edit-error-setup'));
     await waitForAssistantToken(page, 'new-edit-error-setup');
     await deleteAllAgents(page);
     await editLatestUserMessage(page, 'Edited new chat error token new-edit-error');
@@ -526,7 +534,7 @@ test.describe('New Chat', () => {
   test('create new chat and edit HITL', async ({ page }) => {
     await launchAndPrepare(page);
     await createNewSession(page);
-    await sendComposerMessage(page, 'New chat edit HITL setup token new-edit-hitl-setup');
+    await sendComposerMessage(page, buildPlainTextSetupPrompt('new-edit-hitl-setup'));
     await waitForAssistantToken(page, 'new-edit-hitl-setup');
     await editLatestUserMessage(page, buildShellHitlPrompt('new chat edit'));
     await respondToHitlPrompt(page, 'Approve', 60_000);

@@ -155,10 +155,12 @@ export {
   GitHubWorldImportError,
   listGitHubDirectoryNames,
   stageGitHubWorldFromShorthand,
+  stageGitHubFolderFromRepo,
   type GitHubWorldImportErrorCode,
   type GitHubDirectoryListingResult,
   type ResolvedGitHubWorldSource,
   type StagedGitHubWorldResult,
+  type StagedGitHubFolderResult,
 } from './storage/github-world-import.js';
 
 // === CHAT MANAGEMENT ===
@@ -235,7 +237,11 @@ export {
   type WorldRuntimeStorageContext,
 } from './world-registry.js';
 
-export { getDefaultRootPath } from './storage/storage-factory.js';
+export {
+  createStorage,
+  createStorageFromEnv,
+  getDefaultRootPath,
+} from './storage/storage-factory.js';
 
 // === MIGRATION SYSTEM (for advanced usage) ===
 export {

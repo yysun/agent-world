@@ -14,6 +14,7 @@
  * - Assertions still target visible desktop behavior in the actual Electron window.
  *
  * Recent Changes:
+ * - 2026-04-24: Added `resumeCurrentChatQueue` so Electron queue E2E can deterministically seed paused backlog before asserting on the floating queue panel.
  * - 2026-04-11: Route Playwright launches through a CommonJS shim so the Electron E2E
  *   harness can load the compiled ESM desktop main entry with top-level `await`.
  * - 2026-03-24: Added `waitForAssistantTokenOrHitlPrompt` so Electron E2E flows can
@@ -227,6 +228,18 @@ export function getElectronLaunchOptions(): {
       AGENT_WORLD_E2E_USER_DATA_PATH: electronUserDataPath,
     },
   };
+}
+
+export async function getFirstElectronWindow(
+  app: ElectronApplication,
+  timeoutMs = 60_000,
+): Promise<Page> {
+  const existingWindows = app.windows();
+  if (existingWindows.length > 0) {
+    return existingWindows[0];
+  }
+
+  return await app.firstWindow({ timeout: timeoutMs });
 }
 
 export async function waitForAppShell(page: Page): Promise<void> {
@@ -677,6 +690,18 @@ export async function pauseCurrentChatQueue(page: Page): Promise<void> {
   await page.evaluate(async ({ worldId, chatId }) => {
     const api = (window as any).agentWorldDesktop;
     await api.pauseChatQueue(worldId, chatId);
+  }, { worldId: state.worldId, chatId: state.currentChatId });
+}
+
+export async function resumeCurrentChatQueue(page: Page): Promise<void> {
+  const state = await getDesktopState(page);
+  if (!state.worldId || !state.currentChatId) {
+    throw new Error('Unable to resolve the current world/chat for queue resume.');
+  }
+
+  await page.evaluate(async ({ worldId, chatId }) => {
+    const api = (window as any).agentWorldDesktop;
+    await api.resumeChatQueue(worldId, chatId);
   }, { worldId: state.worldId, chatId: state.currentChatId });
 }
 

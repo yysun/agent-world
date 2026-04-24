@@ -74,6 +74,8 @@ export default defineConfig({
   // Path resolution — array form ensures specific aliases take priority over shorter prefixes
   resolve: {
     alias: [
+      // Keep self-reference package imports tied to the working tree during unit tests.
+      { find: 'agent-world/core', replacement: new URL('./core/index.ts', import.meta.url).pathname },
       { find: 'react/jsx-dev-runtime', replacement: new URL('./electron/node_modules/react/jsx-dev-runtime.js', import.meta.url).pathname },
       { find: 'react/jsx-runtime', replacement: new URL('./electron/node_modules/react/jsx-runtime.js', import.meta.url).pathname },
       // Unify react resolution so vi.mock('react') intercepts electron workspace imports

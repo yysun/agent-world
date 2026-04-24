@@ -58,11 +58,15 @@ import {
 } from 'llm-runtime';
 import { createCreateAgentToolDefinition } from './create-agent-tool.js';
 import { createSendMessageToolDefinition } from './send-message-tool.js';
+import { executeWriteFileWithHostSemantics } from './file-tools.js';
+import { executeLoadSkillWithHostSemantics } from './load-skill-tool.js';
+import { executeShellCmdWithHostSemantics } from './shell-cmd-tool.js';
 import { wrapToolWithValidation } from './tool-utils.js';
 import { RELIABILITY_CONFIG } from './reliability-config.js';
 import { createCategoryLogger } from './logger.js';
 import { filterClientSideMessages } from './message-prep.js';
 import { resolveSkillRootDescriptors } from './skill-root-contract.js';
+import { executeWebFetchWithHostSemantics } from './web-fetch-tool.js';
 import {
   buildToolUsagePromptSection,
   generateId,
@@ -394,6 +398,39 @@ function getHostToolMap(): Record<string, LLMToolDefinition> {
   return Object.fromEntries(getHostToolDefinitions().map((tool) => [tool.name, tool]));
 }
 
+function applyHostRichToolExecutionOverrides(
+  resolvedTools: Record<string, LLMToolDefinition>,
+): Record<string, LLMToolDefinition> {
+  const overrides: Partial<Record<string, (args: Record<string, unknown>, context?: LLMToolExecutionContext) => Promise<unknown>>> = {
+    shell_cmd: async (args, context) => await executeShellCmdWithHostSemantics(
+      args,
+      context?.sequenceId,
+      context?.parentToolCallId,
+      context,
+    ),
+    web_fetch: async (args, context) => await executeWebFetchWithHostSemantics(args as any, context as any),
+    load_skill: async (args, context) => await executeLoadSkillWithHostSemantics(args as any, context as any),
+    write_file: async (args, context) => await executeWriteFileWithHostSemantics(args as any, context as any),
+  };
+
+  const wrappedTools: Record<string, LLMToolDefinition> = { ...resolvedTools };
+  for (const [toolName, overrideExecute] of Object.entries(overrides)) {
+    if (!overrideExecute) {
+      continue;
+    }
+    const toolDefinition = resolvedTools[toolName];
+    if (!toolDefinition) {
+      continue;
+    }
+    wrappedTools[toolName] = {
+      ...toolDefinition,
+      execute: async (args, context) => await overrideExecute(args, context),
+    };
+  }
+
+  return wrappedTools;
+}
+
 function getSkillRootsForWorld(world: World | null | undefined): string[] {
   if (!world) {
     return [];
@@ -458,17 +495,17 @@ function wrapToolDefinitionForHost(toolDefinition: LLMToolDefinition): LLMToolDe
 export async function getRuntimeToolsForWorld(world: World | null | undefined): Promise<Record<string, LLMToolDefinition>> {
   const runtimeResolveTools = await loadRuntimeResolveToolsExports();
   if (!world) {
-    return runtimeResolveTools.resolveTools({
+    return applyHostRichToolExecutionOverrides(runtimeResolveTools.resolveTools({
       skillRoots: getSkillRootsForWorld(world),
       tools: getHostToolMap(),
-    });
+    }));
   }
 
-  return await runtimeResolveTools.resolveToolsAsync({
+  return applyHostRichToolExecutionOverrides(await runtimeResolveTools.resolveToolsAsync({
     mcpConfig: parseMCPConfigJson(world.mcpConfig ?? null),
     skillRoots: getSkillRootsForWorld(world),
     tools: getHostToolMap(),
-  });
+  }));
 }
 
 export function appendToolRulesToSystemMessage(

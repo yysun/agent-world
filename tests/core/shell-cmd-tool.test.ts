@@ -26,6 +26,7 @@
  * - 2026-02-14: Added inline-script guard coverage (`sh -c`) and short-option path-prefix checks (`-I/path`).
  * - 2026-02-14: Added scope-regression tests for relative escape paths (`./../../...`) and option assignment paths (`--flag=/...`).
  * - 2026-02-13: Added directory-request scope validation coverage (inside world cwd allowed, outside rejected).
+ * - 2026-04-24: Retargeted rich-tool execution coverage to the host-semantics entrypoint after deleting the dead public factory wrapper.
  * - 2026-02-08: Initial test suite for streaming callback functionality
  */
 
@@ -53,7 +54,7 @@ vi.mock('../../core/hitl.js', async () => {
 });
 
 import {
-  createShellCmdToolDefinition,
+  executeShellCmdWithHostSemantics,
   executeShellCommand,
   formatPreviewShellResultForLLM,
   formatResultForLLM,
@@ -79,6 +80,13 @@ beforeEach(() => {
     source: 'user',
   });
 });
+
+function createShellCmdToolSubject() {
+  return {
+    execute: async (args: any, _sequenceId?: string, _parentToolCall?: string, context?: any) =>
+      await executeShellCmdWithHostSemantics(args, undefined, undefined, context),
+  };
+}
 
 describe('shell command execution', () => {
   test('should not classify top-level json stdout as directly displayable when nested strings contain markdown markers', () => {
@@ -148,7 +156,7 @@ describe('shell command execution', () => {
 
 describe('shell command durable approvals', () => {
   test('blocks catastrophic commands before path scope validation', async () => {
-    const tool = createShellCmdToolDefinition();
+    const tool = createShellCmdToolSubject();
 
     await expect(
       tool.execute(
@@ -175,7 +183,7 @@ describe('shell command durable approvals', () => {
     }));
 
     const messages: Array<Record<string, unknown>> = [];
-    const tool = createShellCmdToolDefinition();
+    const tool = createShellCmdToolSubject();
 
     await expect(
       tool.execute(
@@ -207,23 +215,35 @@ describe('shell command durable approvals', () => {
 
     const promptArgs = JSON.parse(String((messages[0] as any).tool_calls[0].function.arguments));
     expect(promptArgs).toMatchObject({
-      title: 'Approve risky shell command?',
-      defaultOptionId: 'deny',
+      type: 'single-select',
+      allowSkip: false,
       metadata: {
         tool: 'shell_cmd',
         toolCallId: 'shell-call-1',
       },
     });
-    expect(promptArgs.options).toEqual([
+    expect(promptArgs.questions).toEqual([
       {
-        id: 'approve',
-        label: 'Approve',
-        description: 'Run this command once.',
-      },
-      {
-        id: 'deny',
-        label: 'Deny',
-        description: 'Do not run this command.',
+        id: 'question-1',
+        header: 'Approve risky shell command?',
+        question: [
+          'Command: rm -rf ./build',
+          'Risk: destructive_delete',
+          'Trusted directory: /tmp/project',
+          'Proceed with this command?',
+        ].join('\n'),
+        options: [
+          {
+            id: 'approve',
+            label: 'Approve',
+            description: 'Run this command once.',
+          },
+          {
+            id: 'deny',
+            label: 'Deny',
+            description: 'Do not run this command.',
+          },
+        ],
       },
     ]);
 
@@ -239,7 +259,7 @@ describe('shell command durable approvals', () => {
 
 describe('shell command skill-context resolution', () => {
   test('keeps direct tool-call relative executables resolved against cwd', async () => {
-    const tool = createShellCmdToolDefinition();
+    const tool = createShellCmdToolSubject();
     const result = await tool.execute(
       {
         command: './echo',
@@ -273,7 +293,7 @@ describe('shell command skill-context resolution', () => {
     );
     mockedExistsSync.mockImplementation((candidatePath) => isMatchingPath(candidatePath, '/bin/echo'));
 
-    const tool = createShellCmdToolDefinition();
+    const tool = createShellCmdToolSubject();
     const result = await tool.execute(
       {
         command: './echo',
@@ -329,7 +349,7 @@ describe('shell command skill-context resolution', () => {
       isMatchingPath(candidatePath, '/Users/esun/.agents/skills/music-to-svg/scripts/convert.py')
     );
 
-    const tool = createShellCmdToolDefinition();
+    const tool = createShellCmdToolSubject();
     const result = await tool.execute(
       {
         command: 'echo',
@@ -387,7 +407,7 @@ describe('shell command skill-context resolution', () => {
       isMatchingPath(candidatePath, '/Users/esun/.agents/skills/music-to-svg/scripts/convert.py')
     );
 
-    const tool = createShellCmdToolDefinition();
+    const tool = createShellCmdToolSubject();
     const result = await tool.execute(
       {
         command: 'echo',
@@ -433,7 +453,7 @@ describe('shell command skill-context resolution', () => {
   });
 
   test('does not trust non-load_skill envelopes to authorize a skill-root directory', async () => {
-    const tool = createShellCmdToolDefinition();
+    const tool = createShellCmdToolSubject();
 
     await expect(tool.execute(
       {
@@ -495,7 +515,7 @@ describe('shell command skill-context resolution', () => {
       'utf8',
     );
 
-    const tool = createShellCmdToolDefinition();
+    const tool = createShellCmdToolSubject();
     const baseContext = {
       world: {
         id: 'world-1',

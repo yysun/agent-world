@@ -21,7 +21,7 @@
  */
 
 import { test as base, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
-import { bootstrapWorkspace, closeElectronApp, getElectronLaunchOptions, waitForAppShell } from './electron-harness.js';
+import { bootstrapWorkspace, closeElectronApp, getElectronLaunchOptions, getFirstElectronWindow, waitForAppShell } from './electron-harness.js';
 
 type ElectronFixtures = {
   electronApp: ElectronApplication;
@@ -29,7 +29,7 @@ type ElectronFixtures = {
 };
 
 export const test = base.extend<ElectronFixtures>({
-  electronApp: async ({}, use) => {
+  electronApp: async ({ }, use) => {
     await bootstrapWorkspace();
     const app = await electron.launch(getElectronLaunchOptions());
     try {
@@ -39,7 +39,7 @@ export const test = base.extend<ElectronFixtures>({
     }
   },
   page: async ({ electronApp }, use) => {
-    const page = await electronApp.firstWindow({ timeout: 60_000 });
+    const page = await getFirstElectronWindow(electronApp, 60_000);
     await waitForAppShell(page);
     await use(page);
   },

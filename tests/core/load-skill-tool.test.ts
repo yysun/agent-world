@@ -29,14 +29,15 @@
  * - 2026-02-14: Added coverage ensuring `<active_resources>` is omitted when no instruction-referenced scripts are present.
  * - 2026-02-14: Added coverage for skill-level HITL gating when skills have no local script references.
  * - 2026-02-14: Added HITL approval + script execution coverage for `load_skill` active resource outputs.
- * - 2026-02-14: Added initial unit coverage for the built-in `load_skill` tool.
+ * - 2026-04-24: Retargeted execution coverage to the host-semantics entrypoint after deleting the dead public factory wrapper.
+ * - 2026-02-14: Added initial unit coverage for `load_skill` host semantics.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fsModule from 'fs';
 import {
   clearChatSkillApprovals,
-  createLoadSkillToolDefinition,
+  executeLoadSkillWithHostSemantics,
   reconstructSkillApprovalsFromMessages,
 } from '../../core/load-skill-tool.js';
 import { requestWorldOption } from '../../core/hitl.js';
@@ -89,6 +90,13 @@ vi.mock('../../core/shell-cmd-tool.js', () => ({
   formatResultForLLM: vi.fn(() => 'formatted script output'),
   validateShellCommandScope: vi.fn(() => ({ valid: true })),
 }));
+
+function createLoadSkillToolSubject() {
+  return {
+    execute: async (args: any, _sequenceId?: string, _parentToolCall?: string, context?: any) =>
+      await executeLoadSkillWithHostSemantics(args, context),
+  };
+}
 
 const fs = vi.mocked(fsModule.promises);
 const mockedGetSkill = vi.mocked(getSkill);
@@ -172,7 +180,7 @@ describe('core/load-skill-tool', () => {
     mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
     vi.mocked(fs.readFile).mockResolvedValue('# PDF Extraction Instructions\n1. Use tool X...\n' as any);
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const result = await tool.execute({ skill_id: 'pdf-extract' });
 
     expect(mockedWaitForInitialSkillSync).toHaveBeenCalledTimes(1);
@@ -202,7 +210,7 @@ describe('core/load-skill-tool', () => {
     mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
     vi.mocked(fs.readFile).mockResolvedValue('# PDF Extraction Instructions\n1. Use tool X...\n' as any);
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const result = await tool.execute({ skill_id: 'pdf-extract' });
 
     expect(result).toContain('The skill "pdf-extract" is now loaded for this turn.');
@@ -226,7 +234,7 @@ describe('core/load-skill-tool', () => {
       throw new Error('ENOENT');
     });
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const result = await tool.execute(
       { skill_id: 'pdf-extract' },
       undefined,
@@ -295,7 +303,7 @@ describe('core/load-skill-tool', () => {
       }
       throw new Error(`ENOENT: ${normalizedTarget}`);
     });
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const result = await tool.execute(
       { skill_id: 'pdf-extract' },
       undefined,
@@ -333,7 +341,7 @@ describe('core/load-skill-tool', () => {
     mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
     vi.mocked(fs.readFile).mockResolvedValue('# PDF Extraction Instructions\n1. Use tool X...\n' as any);
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const result = await tool.execute(
       { skill_id: 'pdf-extract' },
       undefined,
@@ -351,7 +359,7 @@ describe('core/load-skill-tool', () => {
     mockedGetSkill.mockReturnValue(undefined);
     mockedGetSkillSourcePath.mockReturnValue(undefined);
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const result = await tool.execute({ skill_id: 'missing-skill' });
 
     expect(result).toContain('<skill_context id="missing-skill">');
@@ -370,7 +378,7 @@ describe('core/load-skill-tool', () => {
     });
     mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const result = await tool.execute({ skill_id: 'pdf-extract' });
 
     expect(result).toContain('is disabled by current system settings');
@@ -388,7 +396,7 @@ describe('core/load-skill-tool', () => {
     });
     mockedGetSkillSourcePath.mockReturnValue('/skills/find-skills/SKILL.md');
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const result = await tool.execute({ skill_id: 'find-skills' });
 
     expect(result).toContain('is disabled by current system settings');
@@ -405,7 +413,7 @@ describe('core/load-skill-tool', () => {
     mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
     vi.mocked(fs.readFile).mockRejectedValue(new Error('EACCES: permission denied'));
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const result = await tool.execute({ skill_id: 'pdf-extract' });
 
     expect(result).toContain('<skill_context id="pdf-extract">');
@@ -433,7 +441,7 @@ describe('core/load-skill-tool', () => {
       throw new Error('ENOENT');
     });
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const result = await tool.execute(
       { skill_id: 'pdf-extract' },
       undefined,
@@ -482,7 +490,7 @@ describe('core/load-skill-tool', () => {
       throw new Error('ENOENT');
     });
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const result = await tool.execute(
       { skill_id: 'pdf-extract' },
       undefined,
@@ -526,7 +534,7 @@ describe('core/load-skill-tool', () => {
       throw new Error('ENOENT');
     });
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const result = await tool.execute(
       { skill_id: 'pdf-extract' },
       undefined,
@@ -566,7 +574,7 @@ describe('core/load-skill-tool', () => {
       throw new Error('ENOENT');
     });
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const result = await tool.execute(
       { skill_id: 'pdf-extract' },
       undefined,
@@ -602,7 +610,7 @@ describe('core/load-skill-tool', () => {
       source: 'user',
     });
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const result = await tool.execute(
       { skill_id: 'pdf-extract' },
       undefined,
@@ -635,7 +643,7 @@ describe('core/load-skill-tool', () => {
       source: 'user',
     });
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const result = await tool.execute(
       { skill_id: 'pdf-extract' },
       undefined,
@@ -675,7 +683,7 @@ describe('core/load-skill-tool', () => {
       source: 'user',
     });
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const result = await tool.execute(
       { skill_id: 'pdf-extract' },
       undefined,
@@ -715,7 +723,7 @@ describe('core/load-skill-tool', () => {
       'Use the available catalog to choose a skill.',
     ].join('\n') as any);
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const result = await tool.execute({ skill_id: 'find-skills' });
 
     expect(result).toContain('<instructions>');
@@ -745,7 +753,7 @@ describe('core/load-skill-tool', () => {
       throw new Error('ENOENT');
     });
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const result = await tool.execute(
       { skill_id: 'pdf-extract' },
       undefined,
@@ -781,7 +789,7 @@ describe('core/load-skill-tool', () => {
       source: 'user',
     });
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const result = await tool.execute(
       { skill_id: 'pdf-extract' },
       undefined,
@@ -832,7 +840,7 @@ describe('core/load-skill-tool', () => {
       toolCallId: 'load-skill-call-1',
     };
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const firstResult = await tool.execute({ skill_id: 'skill-installer' }, undefined, undefined, context);
 
     messages.push(
@@ -892,7 +900,7 @@ describe('core/load-skill-tool', () => {
       agentName: 'a1',
     };
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const firstCall = tool.execute({ skill_id: 'skill-installer' }, undefined, undefined, context);
     const secondCall = tool.execute({ skill_id: 'skill-installer' }, undefined, undefined, context);
 
@@ -953,7 +961,7 @@ describe('core/load-skill-tool', () => {
       agentName: 'a1',
     };
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const firstResult = await tool.execute({ skill_id: 'skill-installer' }, undefined, undefined, context);
     const secondResult = await tool.execute({ skill_id: 'skill-installer' }, undefined, undefined, context);
 
@@ -996,7 +1004,7 @@ describe('core/load-skill-tool', () => {
       toolCallId: 'load-skill-call-session',
     };
 
-    const tool = createLoadSkillToolDefinition();
+    const tool = createLoadSkillToolSubject();
     const firstResult = await tool.execute({ skill_id: 'skill-installer' }, undefined, undefined, context);
     expect(firstResult).toContain('<skill_context id="skill-installer">');
     expect(mockedRequestWorldOption).toHaveBeenCalledTimes(1);

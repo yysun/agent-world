@@ -13,6 +13,7 @@
  * - Mocks `requestToolApproval` to keep tests deterministic and avoid interactive HITL prompts.
  *
  * Recent Changes:
+ * - 2026-04-24: Retargeted risk-approval coverage to the host-semantics entrypoint after deleting the dead public factory wrapper.
  * - 2026-02-28: Initial risk approval coverage for shell_cmd SS implementation.
  */
 
@@ -24,7 +25,14 @@ vi.mock('../../core/tool-approval.js', () => ({
   requestToolApproval: mockRequestToolApproval,
 }));
 
-import { createShellCmdToolDefinition } from '../../core/shell-cmd-tool.js';
+import { executeShellCmdWithHostSemantics } from '../../core/shell-cmd-tool.js';
+
+function createShellCmdToolSubject() {
+  return {
+    execute: async (args: any, _sequenceId?: string, _parentToolCall?: string, context?: any) =>
+      await executeShellCmdWithHostSemantics(args, undefined, undefined, context),
+  };
+}
 
 describe('shell_cmd risk approval flow', () => {
   beforeEach(() => {
@@ -39,7 +47,7 @@ describe('shell_cmd risk approval flow', () => {
       source: 'user',
     });
 
-    const tool = createShellCmdToolDefinition();
+    const tool = createShellCmdToolSubject();
 
     await expect(
       tool.execute(
@@ -69,7 +77,7 @@ describe('shell_cmd risk approval flow', () => {
   });
 
   it('fails with non-executed result when approval context is unavailable', async () => {
-    const tool = createShellCmdToolDefinition();
+    const tool = createShellCmdToolSubject();
 
     await expect(
       tool.execute(

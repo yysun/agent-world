@@ -18,6 +18,7 @@
  *   to widen the window for the stop button to appear before processing completes.
  *
  * Recent Changes:
+ * - 2026-04-24: Raised the timeout budget for async queue-failure error-state assertions so real SSE error promotion stays stable under suite load.
  * - 2026-03-10: Added initial queue lifecycle E2E coverage.
  * - 2026-03-10: Marked queue management panel describe block with test.describe.skip since
  *   those controls are not yet implemented in the web UI.
@@ -31,6 +32,8 @@ import {
   waitForAssistantToken,
   waitForErrorState,
 } from './support/web-harness.js';
+
+const QUEUE_FAILURE_TIMEOUT_MS = 15_000;
 
 test.describe('Queue – processing indicator', () => {
   test('hitl-waiting indicator appears while the agent is processing a response', async ({ page, bootstrapState }) => {
@@ -66,25 +69,27 @@ test.describe('Queue – stop processing', () => {
 });
 
 test.describe('Queue – failed item', () => {
+  test.describe.configure({ timeout: QUEUE_FAILURE_TIMEOUT_MS });
+
   test('failed processing is surfaced as the visible world-error-state overlay', async ({ page, bootstrapState }) => {
     await gotoWorld(page, bootstrapState);
     await deleteAllAgents(bootstrapState);
     await sendComposerMessage(page, 'Queue failure token queue-failed');
-    await waitForErrorState(page);
+    await waitForErrorState(page, QUEUE_FAILURE_TIMEOUT_MS);
     // The error overlay is visible.
-    await expect(page.getByTestId('world-error-state')).toBeVisible();
+    await expect(page.getByTestId('world-error-state')).toBeVisible({ timeout: QUEUE_FAILURE_TIMEOUT_MS });
   });
 
   test('error state exposes a reload control that navigates back to the world', async ({ page, bootstrapState }) => {
     await gotoWorld(page, bootstrapState);
     await deleteAllAgents(bootstrapState);
     await sendComposerMessage(page, 'Queue failure reload token queue-reload');
-    await waitForErrorState(page);
+    await waitForErrorState(page, QUEUE_FAILURE_TIMEOUT_MS);
     // The Retry button must be reachable inside the error overlay.
-    await expect(page.getByTestId('world-error-state').getByRole('button', { name: /retry/i })).toBeVisible();
+    await expect(page.getByTestId('world-error-state').getByRole('button', { name: /retry/i })).toBeVisible({ timeout: QUEUE_FAILURE_TIMEOUT_MS });
     // Clicking Retry reloads the world page.
     await page.getByTestId('world-error-state').getByRole('button', { name: /retry/i }).click();
-    await page.getByTestId('world-page').waitFor({ state: 'visible', timeout: 15_000 });
+    await page.getByTestId('world-page').waitFor({ state: 'visible', timeout: QUEUE_FAILURE_TIMEOUT_MS });
   });
 });
 

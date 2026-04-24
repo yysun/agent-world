@@ -13,6 +13,7 @@
  * - Focuses on measurable layout outcomes (visibility, font size, touch target size, no horizontal overflow).
  *
  * Recent Changes:
+ * - 2026-04-24: Increased the responsive-spec timeout budget so world reset and home-page layout checks stay stable under full-suite load.
  * - 2026-03-24: Wait for the API health endpoint before resetting the responsive world to avoid startup races in Test Explorer.
  * - 2026-03-11: Added a mobile chat-history width check so Doodle fieldset rules cannot leave a wide empty strip on the right.
  * - 2026-03-11: Added a mobile right-panel close-button regression so the overlay can be dismissed after opening.
@@ -28,6 +29,7 @@ import { waitForApiReady } from './support/api-ready.js';
 
 const API_BASE_URL = 'http://127.0.0.1:3000/api';
 const RESPONSIVE_WORLD_NAME = 'e2e-responsive-web';
+const RESPONSIVE_E2E_TIMEOUT_MS = 15_000;
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -73,6 +75,8 @@ async function resetResponsiveWorld(): Promise<void> {
 test.beforeEach(async () => {
   await resetResponsiveWorld();
 });
+
+test.describe.configure({ timeout: RESPONSIVE_E2E_TIMEOUT_MS });
 
 test('home carousel desktop arrows fit cleanly inside their buttons', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });

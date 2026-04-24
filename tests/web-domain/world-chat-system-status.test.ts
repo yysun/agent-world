@@ -13,6 +13,7 @@
  * - Avoids DOM mounting and transcript rendering concerns.
  *
  * Summary of Recent Changes:
+ * - 2026-04-24: Added queue-dispatch promotion coverage for the no-agents-available failure payload used by web E2E teardown paths.
  * - 2026-03-12: Added legend-title system-status coverage for web parity.
  */
 
@@ -106,6 +107,16 @@ describe('web world-chat legend system status', () => {
         eventType: 'error',
         failureKind: 'queue-dispatch',
         message: 'Queue failed to dispatch user message: no agent "@composer" found in this world.',
+      },
+    })).toBe(true);
+  });
+
+  it('promotes no-agent queue-dispatch failures into the world error overlay flow', () => {
+    expect(shouldPromoteSystemErrorToWorldError({
+      content: {
+        eventType: 'error',
+        failureKind: 'queue-dispatch',
+        message: 'Queue failed to dispatch user message: this world has no agents available.',
       },
     })).toBe(true);
   });

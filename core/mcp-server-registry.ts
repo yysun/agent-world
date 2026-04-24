@@ -12,6 +12,7 @@
  * - LOG_MCP=debug - Enable all MCP logs
  *
  * Recent Changes:
+ * - 2026-04-24: Removed public built-in tool ownership so the registry now exposes only MCP-discovered tools while executable built-ins resolve through `llm-runtime`.
  * - 2026-04-23: Registered `ask_user_input` as an execution alias of the core HITL built-in so the preferred llm-runtime alias resolves through the host tool runtime.
  * - 2026-03-17: Tightened remote MCP header validation so world config JSON accepts only string-to-string HTTP header maps.
  * - 2026-03-06: Removed `world.currentChatId` fallback from retry-status routing; MCP retry status emits only when `context.chatId` is explicit.
@@ -129,20 +130,6 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getWorld } from './managers.js';
 import { createCategoryLogger } from './logger.js';
-import { createCreateAgentToolDefinition } from './create-agent-tool.js';
-import { createHitlToolDefinition } from './hitl-tool.js';
-import { createSendMessageToolDefinition } from './send-message-tool.js';
-import { getRuntimeToolsForWorld } from './llm-runtime.js';
-import {
-  createReadFileToolDefinition,
-  createWriteFileToolDefinition,
-  createListFilesToolDefinition,
-  createGrepToolDefinition,
-} from './file-tools.js';
-import { createLoadSkillToolDefinition } from './load-skill-tool.js';
-import { createWebFetchToolDefinition } from './web-fetch-tool.js';
-import { createShellCmdToolDefinition } from './shell-cmd-tool.js';
-import { wrapToolWithValidation } from './tool-utils.js';
 import { type World } from './types.js';
 import { RELIABILITY_CONFIG } from './reliability-config.js';
 import { startChatScopedWaitStatusEmitter } from './reliability-runtime.js';
@@ -1687,83 +1674,30 @@ export async function updateMCPServersForWorld(worldId: string, newMcpConfig: st
 }
 
 /**
- * Get built-in tools that are always available to all worlds
- * These tools don't require MCP server configuration
- * Built-in tools:
- * - shell_cmd: Execute shell commands
- * - load_skill: Load full SKILL.md instructions by registry skill_id
- * - create_agent: Create a new agent after explicit user approval
- * - human_intervention_request: Ask a human question with options (single-step selection)
- * - ask_user_input: Preferred alias for the built-in human question tool
- * - send_message: Dispatch message arrays to the active world/chat context
- * - web_fetch: Fetch URL content and convert to markdown
- * - read_file: Read file contents with pagination controls
- * - write_file: Write text content into files within trusted scope
- * - list_files: List directory entries
- * - grep: Recursive text search across files
- * 
- * @returns Record of built-in tool definitions
- */
-function getBuiltInTools(): Record<string, any> {
-  const shellCmdTool = createShellCmdToolDefinition();
-  const loadSkillTool = createLoadSkillToolDefinition();
-  const createAgentTool = createCreateAgentToolDefinition();
-  const hitlTool = createHitlToolDefinition();
-  const askUserInputTool = {
-    ...hitlTool,
-    name: 'ask_user_input',
-  };
-  const sendMessageTool = createSendMessageToolDefinition();
-  const webFetchTool = createWebFetchToolDefinition();
-  const readFileTool = createReadFileToolDefinition();
-  const writeFileTool = createWriteFileToolDefinition();
-  const listFilesTool = createListFilesToolDefinition();
-  const grepTool = createGrepToolDefinition();
-
-  return {
-    'shell_cmd': wrapToolWithValidation(shellCmdTool, 'shell_cmd'),
-    'load_skill': wrapToolWithValidation(loadSkillTool, 'load_skill'),
-    'create_agent': wrapToolWithValidation(createAgentTool, 'create_agent'),
-    'human_intervention_request': wrapToolWithValidation(hitlTool, 'human_intervention_request'),
-    'ask_user_input': wrapToolWithValidation(askUserInputTool, 'ask_user_input'),
-    'send_message': wrapToolWithValidation(sendMessageTool, 'send_message'),
-    'web_fetch': wrapToolWithValidation(webFetchTool, 'web_fetch'),
-    'read_file': wrapToolWithValidation(readFileTool, 'read_file'),
-    'write_file': wrapToolWithValidation(writeFileTool, 'write_file'),
-    'list_files': wrapToolWithValidation(listFilesTool, 'list_files'),
-    'grep': wrapToolWithValidation(grepTool, 'grep'),
-  };
-}
-
-/**
- * Get MCP tools available for a world with on-demand server startup
- */
-/**
  * Get MCP tools available for a world with registry-level caching
  * Uses cache-first strategy to avoid repeated tool fetching during ephemeral connections
- * Includes built-in tools (`shell_cmd`, `load_skill`, `create_agent`) in addition to MCP server tools
+ * Returns only MCP-discovered tools; runtime-owned built-ins resolve through `llm-runtime`
  */
 export async function getMCPToolsForWorld(worldId: string): Promise<Record<string, any>> {
   const startTime = performance.now();
 
   const world = await getWorld(worldId);
 
-  // Start with built-in tools
-  const allTools: Record<string, any> = getBuiltInTools();
+  const allTools: Record<string, any> = {};
 
   if (!world?.mcpConfig) {
-    logger.debug(`No MCP config for world: ${worldId}, returning built-in tools only`, {
+    logger.debug(`No MCP config for world: ${worldId}, returning MCP tools only`, {
       worldId,
-      builtInToolCount: Object.keys(allTools).length
+      toolCount: Object.keys(allTools).length
     });
     return allTools;
   }
 
   const config = parseMCPConfig(world.mcpConfig);
   if (!config) {
-    logger.error(`Invalid MCP config for world: ${worldId}, returning built-in tools only`, {
+    logger.error(`Invalid MCP config for world: ${worldId}, returning MCP tools only`, {
       worldId,
-      builtInToolCount: Object.keys(allTools).length
+      toolCount: Object.keys(allTools).length
     });
     return allTools;
   }
@@ -1830,15 +1764,11 @@ export async function getMCPToolsForWorld(worldId: string): Promise<Record<strin
   await Promise.allSettled(serverPromises);
 
   const totalTools = Object.keys(allTools).length;
-  const builtInToolCount = Object.keys(getBuiltInTools()).length;
-  const mcpToolCount = totalTools - builtInToolCount;
   const duration = performance.now() - startTime;
 
-  logger.info(`Retrieved ${totalTools} total tools for world: ${worldId} (${builtInToolCount} built-in, ${mcpToolCount} from MCP)`, {
+  logger.info(`Retrieved ${totalTools} MCP tools for world: ${worldId}`, {
     worldId,
     totalTools,
-    builtInToolCount,
-    mcpToolCount,
     cacheHits,
     cacheMisses,
     cacheHitRate: cacheHits + cacheMisses > 0 ? Math.round((cacheHits / (cacheHits + cacheMisses)) * 100) : 0,

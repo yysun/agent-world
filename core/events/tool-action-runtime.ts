@@ -15,12 +15,13 @@
  * - Direct/continuation/restore callers still decide follow-up continuation, handoff terminality, and duplicate-suppression policy.
  *
  * Recent Changes:
+ * - 2026-04-24: Switched executable tool lookup to the canonical runtime-backed resolver so non-LLM execution no longer depends on the mixed MCP registry surface.
  * - 2026-03-29: Initial shared runtime module extracted from orchestrator and memory-manager tool execution paths.
  */
 
 import type { Agent, AgentMessage, World } from '../types.js';
 import { generateId } from '../utils.js';
-import { getMCPToolsForWorld } from '../mcp-server-registry.js';
+import { getRuntimeToolsForWorld } from '../llm-runtime.js';
 import { formatShellToolErrorEnvelopeContent } from '../shell-cmd-tool.js';
 import {
   createTextToolPreview,
@@ -366,8 +367,8 @@ export async function executeToolActionStep(options: {
   shouldPersistExecutionError?: (error: unknown) => boolean;
 }): Promise<ExecuteToolActionStepResult> {
   const toolName = options.toolCall.function.name;
-  const mcpTools = await getMCPToolsForWorld(options.world.id);
-  const toolDef = mcpTools[toolName];
+  const executableTools = await getRuntimeToolsForWorld(options.world);
+  const toolDef = executableTools[toolName];
 
   if (!toolDef) {
     const serializedToolResult = formatToolErrorContent({
@@ -419,10 +420,49 @@ export async function executeToolActionStep(options: {
     },
   });
 
+  const executeTool = toolDef.execute;
+  if (typeof executeTool !== 'function') {
+    const serializedToolResult = formatToolErrorContent({
+      toolName,
+      toolCallId: options.toolCall.id,
+      toolArgs: options.toolArgs,
+      error: `Tool is not executable: ${toolName}`,
+      failureReason: 'execution_error',
+    });
+    const toolResultMessage = appendToolMessage({
+      world: options.world,
+      agent: options.agent,
+      assistantToolCallMessage: options.assistantToolCallMessage,
+      toolCallId: options.toolCall.id,
+      content: serializedToolResult,
+      chatId: options.chatId,
+    });
+    setCompletedToolCallStatus(options.assistantToolCallMessage, options.toolCall.id, serializedToolResult);
+    publishToolEvent(options.world, {
+      agentName: options.agent.id,
+      type: 'tool-error',
+      messageId: options.toolCall.id,
+      chatId: options.chatId,
+      toolExecution: {
+        toolName,
+        toolCallId: options.toolCall.id,
+        input: options.toolEventInput ?? options.toolArgs,
+        error: `Tool is not executable: ${toolName}`,
+      },
+    });
+    return {
+      status: 'error',
+      toolArgs: options.toolArgs,
+      error: new Error(`Tool is not executable: ${toolName}`),
+      serializedToolResult,
+      toolResultMessage,
+    };
+  }
+
   try {
     const toolContext = {
       world: options.world,
-      messages: options.agent.memory,
+      messages: options.agent.memory as unknown as Array<Record<string, unknown>>,
       toolCallId: options.toolCall.id,
       chatId: options.chatId,
       abortSignal: options.abortSignal,
@@ -433,7 +473,7 @@ export async function executeToolActionStep(options: {
       suppressValidationErrorEvent: options.suppressValidationErrorEvent === true,
     };
 
-    const toolResult = await toolDef.execute(options.toolArgs, undefined, undefined, toolContext);
+    const toolResult = await executeTool(options.toolArgs, toolContext as any);
     const serializedToolResult = typeof toolResult === 'string'
       ? toolResult
       : JSON.stringify(toolResult) ?? String(toolResult);

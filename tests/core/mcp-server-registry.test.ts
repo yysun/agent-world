@@ -15,7 +15,7 @@
  * - Avoids network/process side effects while preserving runtime code paths.
  *
  * Recent changes:
- * - 2026-04-23: Added coverage that the execution registry exposes the preferred `ask_user_input` HITL alias alongside the legacy built-in name.
+ * - 2026-04-24: Updated registry coverage to assert that only MCP-discovered tools are exposed; executable built-ins now resolve through `llm-runtime`.
  * - 2026-03-29: Removed temporary package-backed HITL bridge coverage after restoring core-owned built-ins.
  * - 2026-03-17: Added remote MCP header validation, transport propagation, and registry-isolation coverage.
  * - 2026-03-05: Added deterministic MCP tool-discovery timeout coverage for hanging `listTools()` calls.
@@ -30,7 +30,6 @@ const {
   mockClientClose,
   mockClientCallTool,
   mockClientListTools,
-  mockCreateLoadSkillToolDefinition,
   failConnectCommands,
   listToolsPayload,
 } = vi.hoisted(() => ({
@@ -39,11 +38,6 @@ const {
   mockClientClose: vi.fn(),
   mockClientCallTool: vi.fn(),
   mockClientListTools: vi.fn(),
-  mockCreateLoadSkillToolDefinition: vi.fn(() => ({
-    description: 'load',
-    parameters: { type: 'object', properties: {} },
-    execute: vi.fn(),
-  })),
   failConnectCommands: new Set<string>(),
   listToolsPayload: [] as any[],
 }));
@@ -120,18 +114,6 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
   },
 }));
 
-vi.mock('../../core/shell-cmd-tool.js', () => ({
-  createShellCmdToolDefinition: vi.fn(() => ({
-    description: 'shell',
-    parameters: { type: 'object', properties: {} },
-    execute: vi.fn(),
-  })),
-}));
-
-vi.mock('../../core/load-skill-tool.js', () => ({
-  createLoadSkillToolDefinition: mockCreateLoadSkillToolDefinition,
-}));
-
 vi.mock('../../core/create-agent-tool.js', () => ({
   createCreateAgentToolDefinition: vi.fn(() => ({
     description: 'create-agent',
@@ -148,40 +130,9 @@ vi.mock('../../core/hitl-tool.js', () => ({
   })),
 }));
 
-vi.mock('../../core/web-fetch-tool.js', () => ({
-  createWebFetchToolDefinition: vi.fn(() => ({
-    description: 'web-fetch',
-    parameters: { type: 'object', properties: {} },
-    execute: vi.fn(),
-  })),
-}));
-
 vi.mock('../../core/send-message-tool.js', () => ({
   createSendMessageToolDefinition: vi.fn(() => ({
     description: 'send-message',
-    parameters: { type: 'object', properties: {} },
-    execute: vi.fn(),
-  })),
-}));
-
-vi.mock('../../core/file-tools.js', () => ({
-  createReadFileToolDefinition: vi.fn(() => ({
-    description: 'read-file',
-    parameters: { type: 'object', properties: {} },
-    execute: vi.fn(),
-  })),
-  createWriteFileToolDefinition: vi.fn(() => ({
-    description: 'write-file',
-    parameters: { type: 'object', properties: {} },
-    execute: vi.fn(),
-  })),
-  createListFilesToolDefinition: vi.fn(() => ({
-    description: 'list-files',
-    parameters: { type: 'object', properties: {} },
-    execute: vi.fn(),
-  })),
-  createGrepToolDefinition: vi.fn(() => ({
-    description: 'grep',
     parameters: { type: 'object', properties: {} },
     execute: vi.fn(),
   })),
@@ -675,13 +626,13 @@ describe('mcp-server-registry behavior', () => {
     });
 
     const toolsFirst = await getMCPToolsForWorld('world-1');
-    expect(toolsFirst).toHaveProperty('shell_cmd');
-    expect(toolsFirst).toHaveProperty('load_skill');
-    expect(toolsFirst).toHaveProperty('human_intervention_request');
-    expect(toolsFirst).toHaveProperty('ask_user_input');
-    expect(toolsFirst).toHaveProperty('send_message');
-    expect(toolsFirst).toHaveProperty('web_fetch');
-    expect(toolsFirst).toHaveProperty('write_file');
+    expect(toolsFirst).not.toHaveProperty('shell_cmd');
+    expect(toolsFirst).not.toHaveProperty('load_skill');
+    expect(toolsFirst).not.toHaveProperty('human_intervention_request');
+    expect(toolsFirst).not.toHaveProperty('ask_user_input');
+    expect(toolsFirst).not.toHaveProperty('send_message');
+    expect(toolsFirst).not.toHaveProperty('web_fetch');
+    expect(toolsFirst).not.toHaveProperty('write_file');
     expect(toolsFirst).toHaveProperty('demo_lookup');
     expect(mockClientListTools).toHaveBeenCalledTimes(1);
 

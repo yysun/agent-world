@@ -660,6 +660,26 @@ describe('createMainIpcHandlers.respondHitlOption', () => {
     expect(result).toEqual({ accepted: true });
   });
 
+  it('delegates structured HITL answers without requiring optionId', async () => {
+    const submitWorldHitlResponse = vi.fn(() => ({ accepted: true }));
+    const { handlers } = await createHandlers({ submitWorldHitlResponse });
+
+    const result = await handlers.respondHitlOption({
+      worldId: 'world-1',
+      requestId: 'req-answers',
+      answers: [{ questionId: 'question-1', optionIds: ['yes_once'] }],
+      chatId: 'chat-1'
+    });
+
+    expect(submitWorldHitlResponse).toHaveBeenCalledWith({
+      worldId: 'world-1',
+      requestId: 'req-answers',
+      answers: [{ questionId: 'question-1', optionIds: ['yes_once'] }],
+      chatId: 'chat-1'
+    });
+    expect(result).toEqual({ accepted: true });
+  });
+
 });
 
 describe('createMainIpcHandlers.listSkillRegistry', () => {
