@@ -720,6 +720,7 @@ export default function MessageListPanel({
   activeHitlPrompt,
   submittingHitlRequestId,
   onRespondHitlOption,
+  onSkipHitlPrompt,
 }) {
   const normalizedWorldViewMode = normalizeWorldViewMode(worldViewMode);
   const showChatMessageChrome = shouldShowMessageChrome(normalizedWorldViewMode);
@@ -1229,6 +1230,17 @@ export default function MessageListPanel({
                     {option.label}
                   </button>
                 ))}
+                {activeHitlPrompt.allowSkip ? (
+                  <button
+                    type="button"
+                    disabled={submittingHitlRequestId === activeHitlPrompt.requestId}
+                    onClick={() => onSkipHitlPrompt(activeHitlPrompt)}
+                    className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-60"
+                    data-testid="hitl-skip"
+                  >
+                    Skip
+                  </button>
+                ) : null}
               </div>
             </article>
           </div>

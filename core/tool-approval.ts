@@ -90,25 +90,14 @@ function resolveOwningToolCallId(request: ToolApprovalRequest, requestId: string
   return requestId;
 }
 
-function resolveApprovalDefaultOptionLabel(request: ToolApprovalRequest): string | undefined {
-  const defaultOptionId = String(request.defaultOptionId || '').trim();
-  if (!defaultOptionId) {
-    return undefined;
-  }
-
-  const match = request.options.find((option) => String(option?.id || '').trim() === defaultOptionId);
-  const label = String(match?.label || '').trim();
-  return label || undefined;
-}
-
 function buildApprovalAssistantContent(metadata: Record<string, unknown> | undefined): string {
   const source = typeof metadata?.source === 'string' ? metadata.source.trim() : '';
   const skillId = typeof metadata?.skillId === 'string' ? metadata.skillId.trim() : '';
   if (source === 'load_skill' && skillId) {
-    return `Calling tool: human_intervention_request (skill_id: "${skillId}")`;
+    return `Calling tool: ask_user_input (skill_id: "${skillId}")`;
   }
 
-  return 'Calling tool: human_intervention_request';
+  return 'Calling tool: ask_user_input';
 }
 
 async function persistApprovalAgentMemoryIfAvailable(request: ToolApprovalRequest): Promise<void> {
@@ -154,19 +143,20 @@ async function persistApprovalPromptMessage(options: {
     toolCallId: options.toolCallId,
   };
   const promptArguments = {
-    title: options.request.title,
-    question: options.request.message,
-    options: options.request.options.map((option) => ({
-      id: option.id,
-      label: option.label,
-      ...(typeof option.description === 'string' && option.description.trim()
-        ? { description: option.description.trim() }
-        : {}),
-    })),
-    defaultOptionId: options.request.defaultOptionId,
-    ...(resolveApprovalDefaultOptionLabel(options.request)
-      ? { defaultOption: resolveApprovalDefaultOptionLabel(options.request) }
-      : {}),
+    type: 'single-select',
+    allowSkip: false,
+    questions: [{
+      id: 'question-1',
+      header: options.request.title,
+      question: options.request.message,
+      options: options.request.options.map((option) => ({
+        id: option.id,
+        label: option.label,
+        ...(typeof option.description === 'string' && option.description.trim()
+          ? { description: option.description.trim() }
+          : {}),
+      })),
+    }],
     metadata: approvalMetadata,
   };
 
@@ -177,7 +167,7 @@ async function persistApprovalPromptMessage(options: {
       id: options.requestId,
       type: 'function',
       function: {
-        name: 'human_intervention_request',
+        name: 'ask_user_input',
         arguments: JSON.stringify(promptArguments),
       },
     }],
@@ -218,6 +208,11 @@ async function persistApprovalResolutionMessage(options: {
     requestId: options.requestId,
     toolCallId: options.toolCallId,
     tool: toolName,
+    skipped: false,
+    answers: [{
+      questionId: 'question-1',
+      optionIds: [options.result.optionId],
+    }],
     optionId: options.result.optionId,
     source: options.result.source,
     reason: options.result.reason,

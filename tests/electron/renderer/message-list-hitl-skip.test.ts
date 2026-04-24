@@ -1,19 +1,15 @@
 /**
- * MessageListPanel Editing Control Tests
+ * MessageListPanel HITL Skip Tests
  *
  * Purpose:
- * - Verify inline message editing uses the shared textarea primitive and preserves setter wiring.
+ * - Verify the Electron HITL prompt exposes a Skip action when `allowSkip` is enabled.
  *
  * Key Features:
- * - Asserts the edit surface renders through the Textarea primitive.
- * - Confirms edit text updates still flow through the provided setter callback.
+ * - Confirms the Skip button is rendered only for skip-capable prompts.
+ * - Confirms the provided skip callback receives the active prompt.
  *
  * Implementation Notes:
- * - Uses JSX-runtime mocks and inspects the returned element tree directly.
- * - Keeps the message fixture minimal to exercise only the inline edit branch.
- *
- * Recent Changes:
- * - 2026-03-23: Added after rewiring the inline message editor to the generic Textarea primitive.
+ * - Uses the renderer's direct element-tree testing pattern with JSX mocks.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -43,7 +39,6 @@ vi.mock('react/jsx-dev-runtime', () => ({
 }), { virtual: true });
 
 import { MessageListPanel } from '../../../electron/renderer/src/features/chat';
-import { Textarea } from '../../../electron/renderer/src/design-system/primitives';
 
 function allDescendants(node: any): any[] {
   if (Array.isArray(node)) {
@@ -55,15 +50,17 @@ function allDescendants(node: any): any[] {
   return [node, ...childArray.flatMap(allDescendants)];
 }
 
-describe('MessageListPanel editing controls', () => {
-  it('renders the inline edit surface with the shared Textarea primitive and setter wiring', () => {
-    const setEditingText = vi.fn();
-    const message = {
-      messageId: 'message-1',
-      role: 'user',
-      sender: 'user',
-      content: 'Original text',
-      timestamp: '2026-03-23T00:00:00.000Z',
+describe('MessageListPanel HITL skip action', () => {
+  it('renders and wires a skip button when the active prompt allows skipping', () => {
+    const onSkipHitlPrompt = vi.fn();
+    const prompt = {
+      requestId: 'req-skip-1',
+      chatId: 'chat-1',
+      title: 'Optional action',
+      message: 'You can skip this prompt.',
+      mode: 'option' as const,
+      allowSkip: true,
+      options: [{ id: 'approve', label: 'Approve' }],
     };
 
     const tree: any = MessageListPanel({
@@ -78,13 +75,13 @@ describe('MessageListPanel editing controls', () => {
       visibleSkillRegistryEntries: [],
       skillRegistryError: '',
       showToolMessages: true,
-      messages: [message],
+      messages: [],
       messagesById: {},
       worldAgentsById: new Map(),
       worldAgentsByName: new Map(),
-      editingText: 'Edited text',
-      setEditingText,
-      editingMessageId: 'message-1',
+      editingText: '',
+      setEditingText: () => undefined,
+      editingMessageId: null,
       deletingMessageId: null,
       onCancelEditMessage: () => undefined,
       onSaveEditMessage: () => undefined,
@@ -94,19 +91,17 @@ describe('MessageListPanel editing controls', () => {
       onCopyRawMarkdownFromMessage: () => undefined,
       showInlineWorkingIndicator: false,
       inlineWorkingIndicatorState: null,
-      activeHitlPrompt: null,
+      activeHitlPrompt: prompt,
       submittingHitlRequestId: null,
       onRespondHitlOption: () => undefined,
-      onSkipHitlPrompt: () => undefined,
+      onSkipHitlPrompt,
     });
 
     const nodes = allDescendants(tree);
-    const editTextarea = nodes.find((node: any) => node?.type === Textarea && node?.props?.placeholder === 'Edit your message...');
+    const skipButton = nodes.find((node: any) => node?.type === 'button' && node?.props?.['data-testid'] === 'hitl-skip');
 
-    expect(editTextarea).toBeDefined();
-    expect(editTextarea.props.value).toBe('Edited text');
-
-    editTextarea.props.onChange({ target: { value: 'Updated text' } });
-    expect(setEditingText).toHaveBeenCalledWith('Updated text');
+    expect(skipButton).toBeDefined();
+    skipButton.props.onClick();
+    expect(onSkipHitlPrompt).toHaveBeenCalledWith(prompt);
   });
 });

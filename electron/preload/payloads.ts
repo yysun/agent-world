@@ -13,6 +13,7 @@
  * - Main-process handlers remain responsible for hard validation.
  *
  * Recent Changes:
+ * - 2026-04-24: Added structured HITL input payload helper so Electron can submit skipped HITL prompts without synthesizing option IDs.
  * - 2026-03-06: Added heartbeat payload helper that omits `chatId` when none is provided.
  * - 2026-02-16: Added branch-session payload helper (`toBranchSessionPayload`) for session branching from a target message.
  * - 2026-02-20: Enforced options-only HITL payload helpers.
@@ -26,6 +27,7 @@ import type {
   BranchSessionFromMessagePayload,
   ExternalLinkPayload,
   HeartbeatJobPayload,
+  HitlAnswerPayload,
   HitlResponsePayload,
   MessageEditPayload,
   ChatSubscribePayload,
@@ -141,6 +143,44 @@ export function toHitlResponsePayload(
     requestId: toId(requestId),
     optionId: toId(optionId),
     chatId: typeof chatId === 'undefined' ? undefined : toId(chatId) || null
+  };
+}
+
+export function toHitlInputResponsePayload(
+  worldId: unknown,
+  requestId: unknown,
+  answers: unknown,
+  chatId?: unknown,
+  skipped?: unknown,
+): HitlResponsePayload {
+  const normalizedAnswers = Array.isArray(answers)
+    ? answers
+      .map((answer): HitlAnswerPayload | null => {
+        if (!answer || typeof answer !== 'object' || Array.isArray(answer)) {
+          return null;
+        }
+        const answerRecord = answer as Record<string, unknown>;
+        const questionId = toId(answerRecord.questionId);
+        const optionIds = Array.isArray(answerRecord.optionIds)
+          ? answerRecord.optionIds.map((optionId) => toId(optionId)).filter(Boolean)
+          : [];
+        if (!questionId || optionIds.length === 0) {
+          return null;
+        }
+        return {
+          questionId,
+          optionIds,
+        };
+      })
+      .filter((answer): answer is HitlAnswerPayload => answer !== null)
+    : [];
+
+  return {
+    worldId: toId(worldId),
+    requestId: toId(requestId),
+    ...(normalizedAnswers.length > 0 ? { answers: normalizedAnswers } : {}),
+    ...(skipped === true ? { skipped: true } : {}),
+    chatId: typeof chatId === 'undefined' ? undefined : toId(chatId) || null,
   };
 }
 

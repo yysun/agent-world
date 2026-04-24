@@ -83,7 +83,7 @@ describe('electron harness seeded agent helper', () => {
     );
     expect(prompt).toContain('Never reply with text like "I need the file path and content."');
     expect(prompt).toContain(
-      `If a user message includes the exact filename "${HITL_DELETE_TARGET}" and asks to use shell_cmd, never call human_intervention_request`,
+      `If a user message includes the exact filename "${HITL_DELETE_TARGET}" and asks to use shell_cmd, never call ask_user_input`,
     );
   });
 

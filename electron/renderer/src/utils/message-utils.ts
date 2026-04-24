@@ -26,6 +26,7 @@
  * - 2026-02-28: Added tool-message status border helper so completed tool cards use green/red left borders while pending states keep amber.
  * - 2026-02-28: Added `resolveToolNameForMessage` helper and fixed assistant tool-request name resolution to prefer current message `tool_calls` before history fallback.
  * - 2026-02-28: Added tool-request lookup helper to map tool-result rows back to matching assistant `tool_calls` by `tool_call_id`.
+ * - 2026-04-24: Hidden assistant `Calling tool: ask_user_input` placeholder rows from transcript rendering while keeping the legacy alias hidden too.
  * - 2026-02-28: Hidden assistant `Calling tool: human_intervention_request` placeholder rows from transcript rendering so only HITL prompt cards remain visible.
  * - 2026-02-27: Stopped classifying assistant tool-call request messages as tool cards so assistant bubbles stay visible during tool phases.
  * - 2026-02-27: Excluded realtime log rows (`type='log'` / `logEvent`) from renderable chat entries so logs appear only in the logs panel.
@@ -46,14 +47,14 @@ function isHitlToolCallPlaceholderMessage(message) {
   }
 
   const content = String(message?.content || '').trim();
-  if (/^calling tool(?::|\s)\s*human_intervention_request\b/i.test(content)) {
+  if (/^calling tool(?::|\s)\s*(?:human_intervention_request|ask_user_input)\b/i.test(content)) {
     return true;
   }
 
   const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
   return toolCalls.some((toolCall) => {
     const toolName = String(toolCall?.function?.name || toolCall?.name || '').trim().toLowerCase();
-    return toolName === 'human_intervention_request';
+    return toolName === 'human_intervention_request' || toolName === 'ask_user_input';
   });
 }
 

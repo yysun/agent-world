@@ -126,6 +126,7 @@ export default function WorldDashboard(props: WorldDashboardProps) {
   const inputPlaceholder = isWaiting
     ? 'Agents are working...'
     : 'Type a message...';
+  const primaryHitlQuestion = activeHitlPrompt?.questions?.[0] || null;
 
   return (
     <fieldset className="world-dashboard-fieldset">
@@ -185,9 +186,9 @@ export default function WorldDashboard(props: WorldDashboardProps) {
                 {activeHitlPrompt ? (
                   <div className="hitl-inline-actions hitl-inline-option-actions">
                     <span className="text-xs text-gray-600 mr-2">
-                      {activeHitlPrompt.title || 'Human input required'}
+                      {primaryHitlQuestion?.header || 'Human input required'}
                     </span>
-                    {(activeHitlPrompt.options || []).map((option: any) => {
+                    {(primaryHitlQuestion?.options || []).map((option: any) => {
                       const isSubmitting = submittingHitlRequestId === activeHitlPrompt.requestId;
                       return (
                         <ActionButton
@@ -196,7 +197,10 @@ export default function WorldDashboard(props: WorldDashboardProps) {
                           disabled={isSubmitting}
                           $onclick={['respond-hitl-option', {
                             requestId: activeHitlPrompt.requestId,
-                            optionId: option.id,
+                            answers: [{
+                              questionId: primaryHitlQuestion?.id || 'question-1',
+                              optionIds: [option.id]
+                            }],
                             chatId: activeHitlPrompt.chatId
                           }]}
                         >
@@ -204,6 +208,19 @@ export default function WorldDashboard(props: WorldDashboardProps) {
                         </ActionButton>
                       );
                     })}
+                    {activeHitlPrompt.allowSkip ? (
+                      <ActionButton
+                        className="btn-secondary px-3 py-1 rounded shrink-0"
+                        disabled={submittingHitlRequestId === activeHitlPrompt.requestId}
+                        $onclick={['respond-hitl-option', {
+                          requestId: activeHitlPrompt.requestId,
+                          skipped: true,
+                          chatId: activeHitlPrompt.chatId
+                        }]}
+                      >
+                        Skip
+                      </ActionButton>
+                    ) : null}
                   </div>
                 ) : null}
               </div>

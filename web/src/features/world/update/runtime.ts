@@ -1096,7 +1096,18 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   ): AsyncGenerator<WorldComponentState> {
     const requestId = String(payload?.requestId || '').trim();
     const optionId = String(payload?.optionId || '').trim();
-    if (!requestId || !optionId) {
+    const answers = Array.isArray(payload?.answers)
+      ? payload.answers
+        .map((answer) => ({
+          questionId: String(answer?.questionId || '').trim(),
+          optionIds: Array.isArray(answer?.optionIds)
+            ? answer.optionIds.map((candidate) => String(candidate || '').trim()).filter(Boolean)
+            : [],
+        }))
+        .filter((answer) => answer.questionId && answer.optionIds.length > 0)
+      : [];
+    const skipped = payload?.skipped === true;
+    if (!requestId || (!optionId && answers.length === 0 && !skipped)) {
       yield {
         ...state,
         error: 'Invalid HITL response payload.'
@@ -1120,12 +1131,27 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     };
 
     try {
-      const result = await api.respondHitlOption(
-        state.worldName,
-        requestId,
-        optionId,
-        payload?.chatId ?? prompt.chatId ?? null
-      );
+      const result = skipped
+        ? await api.respondHitlInput(
+          state.worldName,
+          requestId,
+          [],
+          payload?.chatId ?? prompt.chatId ?? null,
+          true,
+        )
+        : answers.length > 0
+          ? await api.respondHitlInput(
+            state.worldName,
+            requestId,
+            answers,
+            payload?.chatId ?? prompt.chatId ?? null,
+          )
+          : await api.respondHitlOption(
+            state.worldName,
+            requestId,
+            optionId,
+            payload?.chatId ?? prompt.chatId ?? null,
+          );
       if (!result?.accepted) {
         yield {
           ...state,

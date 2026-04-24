@@ -630,16 +630,20 @@ async function persistLoadSkillApprovalPromptMessage(options: {
 
   const question = `Skill "${options.skillId}" requested loading.${options.scriptPaths.length > 0 ? ` Referenced scripts for later execution:\n${options.scriptPaths.map((scriptPath) => `- ${scriptPath}`).join('\n')}` : ''}\n\nApprove loading and applying this skill now?`;
   const toolArguments = {
-    question,
-    options: [
-      { id: APPROVAL_OPTION_YES_ONCE, label: 'Yes once' },
-      { id: APPROVAL_OPTION_YES_IN_SESSION, label: 'Yes in this session' },
-      { id: APPROVAL_OPTION_NO, label: 'No' },
-    ],
-    defaultOptionId: APPROVAL_OPTION_NO,
-    defaultOption: 'No',
+    type: 'single-select',
+    allowSkip: false,
+    questions: [{
+      id: 'question-1',
+      header: `Run skill ${options.skillId}?`,
+      question,
+      options: [
+        { id: APPROVAL_OPTION_YES_ONCE, label: 'Yes once' },
+        { id: APPROVAL_OPTION_YES_IN_SESSION, label: 'Yes in this session' },
+        { id: APPROVAL_OPTION_NO, label: 'No' },
+      ],
+    }],
     metadata: {
-      tool: 'human_intervention_request',
+      tool: 'ask_user_input',
       toolCallId: options.requestId,
       source: 'load_skill',
       skillId: options.skillId,
@@ -654,12 +658,12 @@ async function persistLoadSkillApprovalPromptMessage(options: {
   const agentName = String(options.context?.agentName || '').trim() || 'assistant';
   messages.push({
     role: 'assistant',
-    content: `Calling tool: human_intervention_request (skill_id: "${options.skillId}")`,
+    content: `Calling tool: ask_user_input (skill_id: "${options.skillId}")`,
     tool_calls: [{
       id: options.requestId,
       type: 'function',
       function: {
-        name: 'human_intervention_request',
+        name: 'ask_user_input',
         arguments: JSON.stringify(toolArguments),
       },
     }],
@@ -706,6 +710,11 @@ async function persistLoadSkillApprovalResolutionMessage(options: {
   const agentName = String(options.context?.agentName || '').trim() || 'assistant';
   const payload = {
     requestId: options.resolution.requestId,
+    skipped: false,
+    answers: [{
+      questionId: 'question-1',
+      optionIds: [options.resolution.optionId],
+    }],
     optionId: options.resolution.optionId,
     source: options.resolution.source,
     skillId: options.skillId,
@@ -801,7 +810,7 @@ async function requestSkillExecutionApproval(options: {
       ],
       approvedOptionIds: [APPROVAL_OPTION_YES_ONCE, APPROVAL_OPTION_YES_IN_SESSION],
       metadata: {
-        tool: 'human_intervention_request',
+        tool: 'ask_user_input',
         toolCallId: requestId,
         source: 'load_skill',
         skillId: options.skillId,

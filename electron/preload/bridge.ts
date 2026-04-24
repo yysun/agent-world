@@ -14,6 +14,7 @@
  * - Payload normalization helpers preserve existing invoke payload formats.
  *
  * Recent Changes:
+ * - 2026-04-24: Added `respondHitlInput()` bridge wiring so Electron can submit skipped HITL prompts without synthesizing option IDs.
  * - 2026-04-14: Added `saveProjectFileContent()` bridge wiring for editable project files in the composer project viewer.
  * - 2026-04-14: Added `readProjectFolderStructure()` and `readProjectFileContent()` bridge wiring for the composer project viewer.
  * - 2026-04-11: Added `listLocalSkills()` bridge wiring for scanning a chosen local root for installable skills.
@@ -64,6 +65,7 @@ import {
   toBranchSessionPayload,
   toExternalLinkPayload,
   toHeartbeatJobPayload,
+  toHitlInputResponsePayload,
   toHitlResponsePayload,
   toMessageEditPayload,
   toMessageDeletePayload,
@@ -284,6 +286,12 @@ export function createDesktopApi(ipcRendererLike?: IpcRendererLike): DesktopApi 
         activeIpcRenderer,
         DESKTOP_INVOKE_CHANNELS.HITL_RESPOND,
         toHitlResponsePayload(worldId, requestId, optionId, chatId)
+      ),
+    respondHitlInput: (worldId, requestId, answers, chatId, skipped) =>
+      invokeDesktopChannel(
+        activeIpcRenderer,
+        DESKTOP_INVOKE_CHANNELS.HITL_RESPOND,
+        toHitlInputResponsePayload(worldId, requestId, answers, chatId, skipped)
       ),
     stopMessage: (worldId, chatId) =>
       invokeDesktopChannel(

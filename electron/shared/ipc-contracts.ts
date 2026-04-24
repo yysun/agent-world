@@ -15,6 +15,7 @@
  * - Runtime validation remains in main-process handlers for behavior parity.
  *
  * Recent Changes:
+ * - 2026-04-24: Added structured HITL response payload support so Electron can submit skipped prompts while keeping option-response compatibility.
  * - 2026-04-14: Added `project:saveFileContent` contracts so the project folder viewer can edit and save text files.
  * - 2026-04-14: Added `project:readFolderStructure` and `project:readFileContent` contracts for the composer project-folder viewer.
  * - 2026-04-11: Added `skill:listLocalSkills` plus `LocalSkillSummary` for scanning a chosen local root for installable skills.
@@ -224,9 +225,16 @@ export interface ChatSendMessagePayload extends WorldChatPayload {
   };
 }
 
+export interface HitlAnswerPayload {
+  questionId: string;
+  optionIds: string[];
+}
+
 export interface HitlResponsePayload extends WorldIdPayload {
   requestId: string;
-  optionId: string;
+  optionId?: string;
+  answers?: HitlAnswerPayload[];
+  skipped?: boolean;
   chatId?: string | null;
 }
 
@@ -391,6 +399,7 @@ export interface DesktopApi {
   sendMessage: (payload: ChatSendMessagePayload) => Promise<unknown>;
   editMessage: (worldId: string, messageId: string, newContent: string, chatId: string) => Promise<unknown>;
   respondHitlOption: (worldId: string, requestId: string, optionId: string, chatId?: string | null) => Promise<unknown>;
+  respondHitlInput: (worldId: string, requestId: string, answers: HitlAnswerPayload[], chatId?: string | null, skipped?: boolean) => Promise<unknown>;
   stopMessage: (worldId: string, chatId: string) => Promise<unknown>;
   deleteMessage: (worldId: string, messageId: string, chatId: string) => Promise<unknown>;
   subscribeChatEvents: (worldId: string, chatId: string, subscriptionId: string) => Promise<unknown>;

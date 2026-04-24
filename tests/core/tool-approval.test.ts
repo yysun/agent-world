@@ -130,30 +130,35 @@ describe('tool approval helper', () => {
       tool_calls: [
         expect.objectContaining({
           id: 'shell-call-1::approval',
-          function: expect.objectContaining({ name: 'human_intervention_request' }),
+          function: expect.objectContaining({ name: 'ask_user_input' }),
         }),
       ],
     });
 
     const promptArgs = JSON.parse(messages[0].tool_calls[0].function.arguments);
     expect(promptArgs).toMatchObject({
-      title: 'Approve shell command?',
-      question: 'Run rm test.txt?',
-      defaultOptionId: 'no',
-      defaultOption: 'No',
+      type: 'single-select',
+      allowSkip: false,
       metadata: {
         tool: 'shell_cmd',
         toolCallId: 'shell-call-1',
       },
     });
-    expect(promptArgs.options).toEqual([
+    expect(promptArgs.questions).toEqual([
       {
-        id: 'yes',
-        label: 'Yes',
-      },
-      {
-        id: 'no',
-        label: 'No',
+        id: 'question-1',
+        header: 'Approve shell command?',
+        question: 'Run rm test.txt?',
+        options: [
+          {
+            id: 'yes',
+            label: 'Yes',
+          },
+          {
+            id: 'no',
+            label: 'No',
+          },
+        ],
       },
     ]);
 

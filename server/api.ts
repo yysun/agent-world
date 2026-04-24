@@ -483,11 +483,21 @@ const StopMessageProcessingSchema = z.object({
   chatId: z.string().min(1)
 });
 
+const HitlAnswerSchema = z.object({
+  questionId: z.string().min(1),
+  optionIds: z.array(z.string().min(1)).min(1),
+});
+
 const HitlResponseSchema = z.object({
   requestId: z.string().min(1),
-  optionId: z.string().min(1),
+  optionId: z.string().min(1).optional(),
+  answers: z.array(HitlAnswerSchema).optional(),
+  skipped: z.boolean().optional(),
   chatId: z.string().nullable().optional()
-});
+}).refine(
+  (value) => value.skipped === true || Boolean(value.optionId) || (Array.isArray(value.answers) && value.answers.length > 0),
+  { message: 'optionId, answers, or skipped=true is required.' },
+);
 
 const ToolArtifactQuerySchema = z.object({
   path: z.string().min(1),
@@ -1422,11 +1432,13 @@ router.post('/worlds/:worldName/hitl/respond', validateWorld, async (req: Reques
     }
 
     const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
-    const { requestId, optionId, chatId } = validation.data;
+    const { requestId, optionId, answers, skipped, chatId } = validation.data;
     const result = submitWorldHitlResponse({
       worldId: worldCtx.id,
       requestId,
-      optionId,
+      ...(optionId ? { optionId } : {}),
+      ...(Array.isArray(answers) ? { answers } : {}),
+      ...(skipped === true ? { skipped: true } : {}),
       ...(chatId !== undefined ? { chatId } : {}),
     });
 

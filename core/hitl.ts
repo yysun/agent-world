@@ -2,13 +2,13 @@
  * Human-in-the-Loop (HITL) Runtime
  *
  * Purpose:
- * - Provide a world-scoped request/response flow for option-based HITL prompts.
+ * - Provide a world-scoped request/response flow for structured `ask_user_input` prompts.
  *
  * Key Features:
- * - Emits structured tool-progress events carrying HITL prompt payloads.
- * - Resolves pending requests when renderer/API submits an option response.
- * - Exposes unresolved option prompts through a deterministic read model.
- * - Maintains pending request map for validation and lifecycle cleanup.
+ * - Emits structured tool-progress events carrying `questions[]` HITL payloads.
+ * - Resolves pending requests when renderer/API submits structured answers.
+ * - Exposes unresolved prompts through a deterministic read model.
+ * - Maintains a compatibility wrapper for older single-option approval callers.
  *
  * Implementation Notes:
  * - Requests are keyed by `(worldId, requestId)` to avoid cross-world collisions.
@@ -16,6 +16,7 @@
  * - Runtime is in-memory and process-local by design.
  *
  * Recent Changes:
+ * - 2026-04-24: Migrated the runtime prompt model to llm-runtime-compatible `ask_user_input` questions/answers while keeping legacy single-option compatibility helpers.
  * - 2026-03-12: Relaxed the hard `requestId === toolCallId` invariant so durable approval prompts can keep distinct request and owning-tool identities.
  * - 2026-03-06: Removed `world.currentChatId` fallback from HITL option requests; interactive requests now require explicit `chatId`.
  * - 2026-02-26: Replaced direct `[hitl]` console traces with categorized structured logger events (`hitl`) for env-controlled filtering.
@@ -38,6 +39,30 @@ export interface HitlOption {
   description?: string;
 }
 
+export type HitlPromptType = 'single-select' | 'multiple-select';
+
+export interface HitlQuestion {
+  id: string;
+  header: string;
+  question: string;
+  options: HitlOption[];
+}
+
+export interface HitlAnswer {
+  questionId: string;
+  optionIds: string[];
+}
+
+export interface HitlInputRequest {
+  requestId?: string;
+  type?: HitlPromptType;
+  allowSkip?: boolean;
+  questions: HitlQuestion[];
+  chatId?: string | null;
+  metadata?: Record<string, unknown>;
+  agentName?: string | null;
+}
+
 export interface HitlOptionRequest {
   requestId?: string;
   title: string;
@@ -55,6 +80,8 @@ export interface HitlOptionResolution {
   worldId: string;
   chatId: string | null;
   optionId: string;
+  answers: HitlAnswer[];
+  skipped: boolean;
   source: 'user' | 'timeout';
 }
 
@@ -62,7 +89,9 @@ export type HitlResponseResolution = {
   requestId: string;
   worldId: string;
   chatId: string | null;
-  optionId: string;
+  answers: HitlAnswer[];
+  optionId: string | null;
+  skipped: boolean;
   source: 'user' | 'timeout';
 };
 
@@ -70,14 +99,14 @@ interface PendingHitlOptionRequest {
   worldId: string;
   requestId: string;
   chatId: string | null;
-  optionIds: Set<string>;
+  questionIds: Set<string>;
+  optionIdsByQuestion: Map<string, Set<string>>;
   sequence: number;
   prompt: {
     requestId: string;
-    title: string;
-    message: string;
-    options: HitlOption[];
-    defaultOptionId: string;
+    type: HitlPromptType;
+    allowSkip: boolean;
+    questions: HitlQuestion[];
     metadata: Record<string, unknown> | null;
     agentName: string | null;
     toolName: string;
@@ -112,21 +141,6 @@ function normalizeOptions(options: HitlOption[]): HitlOption[] {
     });
   }
   return normalized;
-}
-
-function resolveDefaultOptionId(
-  options: HitlOption[],
-  preferredDefaultOptionId?: string,
-): string {
-  const preferred = String(preferredDefaultOptionId || '').trim();
-  if (preferred && options.some((option) => option.id === preferred)) {
-    return preferred;
-  }
-  const explicitNo = options.find((option) => option.id === 'no');
-  if (explicitNo) {
-    return explicitNo.id;
-  }
-  return options[0]?.id || 'no';
 }
 
 function normalizeExplicitChatId(chatId: string | null | undefined): string | null {
@@ -175,13 +189,13 @@ function emitPendingRequest(world: World, pending: PendingHitlOptionRequest): vo
     ...(metadata && typeof metadata === 'object' ? metadata : {}),
     hitlPrompt: {
       requestId: pending.prompt.requestId,
-      title: pending.prompt.title,
-      message: pending.prompt.message,
-      options: pending.prompt.options,
-      defaultOptionId: pending.prompt.defaultOptionId,
+      type: pending.prompt.type,
+      allowSkip: pending.prompt.allowSkip,
+      questions: pending.prompt.questions,
       metadata,
       agentName: pending.prompt.agentName,
       chatId: pending.chatId,
+      toolCallId: pending.prompt.toolCallId,
     },
   };
 
@@ -255,18 +269,183 @@ function validateResponseScope(
   return { valid: true };
 }
 
-export async function requestWorldOption(
+function normalizePromptType(value: unknown): HitlPromptType {
+  return value === 'multiple-select' ? 'multiple-select' : 'single-select';
+}
+
+function normalizeQuestions(
+  questions: unknown,
+  fallbackHeader = 'Human input required',
+): HitlQuestion[] {
+  const source = Array.isArray(questions) ? questions : [];
+  const normalized: HitlQuestion[] = [];
+  const seenQuestionIds = new Set<string>();
+
+  for (let index = 0; index < source.length; index += 1) {
+    const rawQuestion = source[index];
+    if (!rawQuestion || typeof rawQuestion !== 'object' || Array.isArray(rawQuestion)) {
+      continue;
+    }
+
+    const questionRecord = rawQuestion as Record<string, unknown>;
+    const questionId = String(questionRecord.id || '').trim() || `question-${index + 1}`;
+    if (seenQuestionIds.has(questionId)) {
+      continue;
+    }
+
+    const header = String(questionRecord.header || fallbackHeader).trim() || fallbackHeader;
+    const question = String(questionRecord.question || '').trim();
+    const options = normalizeOptions(Array.isArray(questionRecord.options)
+      ? questionRecord.options
+        .map((option) => {
+          if (!option || typeof option !== 'object' || Array.isArray(option)) {
+            return null;
+          }
+          const optionRecord = option as Record<string, unknown>;
+          return {
+            id: String(optionRecord.id || '').trim(),
+            label: String(optionRecord.label || '').trim(),
+            description: typeof optionRecord.description === 'string'
+              ? optionRecord.description
+              : undefined,
+          } satisfies HitlOption;
+        })
+        .filter((option): option is HitlOption => option !== null)
+      : []);
+
+    if (!question || options.length === 0) {
+      continue;
+    }
+
+    seenQuestionIds.add(questionId);
+    normalized.push({
+      id: questionId,
+      header,
+      question,
+      options,
+    });
+  }
+
+  return normalized;
+}
+
+function normalizeLegacyPromptIntoQuestions(request: HitlOptionRequest): HitlQuestion[] {
+  const options = normalizeOptions(Array.isArray(request.options) ? request.options : []);
+  if (options.length === 0) {
+    return [];
+  }
+
+  return [{
+    id: 'question-1',
+    header: String(request.title || '').trim() || 'Human input required',
+    question: String(request.message || '').trim(),
+    options,
+  }];
+}
+
+function buildHitlAnswer(questionId: string, optionIds: string[]): HitlAnswer {
+  return {
+    questionId,
+    optionIds,
+  };
+}
+
+function normalizeSubmittedAnswers(params: {
+  pending: PendingHitlOptionRequest;
+  answers?: HitlAnswer[];
+  optionId?: string;
+  skipped?: boolean;
+}): { valid: true; answers: HitlAnswer[]; skipped: boolean } | { valid: false; reason: string } {
+  const { pending } = params;
+  const skipped = params.skipped === true;
+
+  if (skipped) {
+    if (!pending.prompt.allowSkip) {
+      return { valid: false, reason: `Request '${pending.requestId}' does not allow skipping.` };
+    }
+    return { valid: true, answers: [], skipped: true };
+  }
+
+  let submittedAnswers = Array.isArray(params.answers) ? params.answers : [];
+  if (submittedAnswers.length === 0) {
+    const optionId = String(params.optionId || '').trim();
+    const firstQuestion = pending.prompt.questions[0];
+    if (!optionId || !firstQuestion) {
+      return {
+        valid: false,
+        reason: 'answers are required when skipped is false.',
+      };
+    }
+    submittedAnswers = [buildHitlAnswer(firstQuestion.id, [optionId])];
+  }
+
+  const answerByQuestion = new Map<string, string[]>();
+  for (const answer of submittedAnswers) {
+    const questionId = String(answer?.questionId || '').trim();
+    if (!questionId) {
+      return { valid: false, reason: 'Each HITL answer requires a questionId.' };
+    }
+    if (!pending.questionIds.has(questionId)) {
+      return { valid: false, reason: `Invalid questionId '${questionId}' for requestId '${pending.requestId}'.` };
+    }
+    if (answerByQuestion.has(questionId)) {
+      return { valid: false, reason: `Duplicate answer for questionId '${questionId}'.` };
+    }
+
+    const optionIds = Array.isArray(answer.optionIds)
+      ? answer.optionIds.map((optionId) => String(optionId || '').trim()).filter(Boolean)
+      : [];
+    if (optionIds.length === 0) {
+      return { valid: false, reason: `Answer for questionId '${questionId}' requires at least one optionId.` };
+    }
+
+    const dedupedOptionIds = [...new Set(optionIds)];
+    const allowedOptionIds = pending.optionIdsByQuestion.get(questionId) || new Set<string>();
+    for (const optionId of dedupedOptionIds) {
+      if (!allowedOptionIds.has(optionId)) {
+        return { valid: false, reason: `Invalid option '${optionId}' for questionId '${questionId}'.` };
+      }
+    }
+
+    if (pending.prompt.type === 'single-select' && dedupedOptionIds.length !== 1) {
+      return { valid: false, reason: `Question '${questionId}' accepts exactly one option.` };
+    }
+
+    answerByQuestion.set(questionId, dedupedOptionIds);
+  }
+
+  for (const question of pending.prompt.questions) {
+    if (!answerByQuestion.has(question.id)) {
+      return {
+        valid: false,
+        reason: `Missing answer for questionId '${question.id}'.`,
+      };
+    }
+  }
+
+  return {
+    valid: true,
+    skipped: false,
+    answers: pending.prompt.questions.map((question) => buildHitlAnswer(question.id, answerByQuestion.get(question.id) || [])),
+  };
+}
+
+function getPrimaryOptionId(answers: HitlAnswer[]): string | null {
+  return answers[0]?.optionIds[0] || null;
+}
+
+export async function requestWorldInput(
   world: World,
-  request: HitlOptionRequest,
-): Promise<HitlOptionResolution> {
-  const normalizedOptions = normalizeOptions(Array.isArray(request.options) ? request.options : []);
-  if (normalizedOptions.length === 0) {
-    throw new Error('HITL option request requires at least one valid option.');
+  request: HitlInputRequest,
+): Promise<HitlResponseResolution> {
+  const normalizedQuestions = normalizeQuestions(request.questions);
+  if (normalizedQuestions.length === 0) {
+    throw new Error('HITL input request requires at least one valid question.');
   }
 
   const worldId = String(world.id || '').trim();
   if (!worldId) {
-    throw new Error('Cannot request HITL option without a valid world ID.');
+    throw new Error('Cannot request HITL input without a valid world ID.');
   }
 
   const requestMetadata = request.metadata && typeof request.metadata === 'object'
@@ -280,9 +459,9 @@ export async function requestWorldOption(
   const toolCallId = requestedToolCallId || requestId;
   const chatId = normalizeExplicitChatId(request.chatId);
   if (!chatId) {
-    throw new Error('HITL option request requires an explicit chatId.');
+    throw new Error('HITL input request requires an explicit chatId.');
   }
-  const defaultOptionId = resolveDefaultOptionId(normalizedOptions, request.defaultOptionId);
+
   const pendingKey = getPendingKey(worldId, requestId);
   const sequence = ++pendingRequestSequence;
   const requestedToolName = requestMetadata && typeof requestMetadata.tool === 'string'
@@ -291,34 +470,28 @@ export async function requestWorldOption(
 
   const prompt: PendingHitlOptionRequest['prompt'] = {
     requestId,
-    title: String(request.title || '').trim(),
-    message: String(request.message || '').trim(),
-    options: normalizedOptions,
-    defaultOptionId,
+    type: normalizePromptType(request.type),
+    allowSkip: request.allowSkip === true,
+    questions: normalizedQuestions,
     metadata: requestMetadata,
     agentName: resolveHitlAgentName(world, request.agentName),
-    toolName: requestedToolName || 'human_intervention_request',
+    toolName: requestedToolName || 'ask_user_input',
     toolCallId,
   };
 
-  return await new Promise<HitlOptionResolution>((resolve) => {
+  return await new Promise<HitlResponseResolution>((resolve) => {
     const pending: PendingHitlOptionRequest = {
       worldId,
       requestId,
       chatId,
-      optionIds: new Set(normalizedOptions.map((option) => option.id)),
+      questionIds: new Set(normalizedQuestions.map((question) => question.id)),
+      optionIdsByQuestion: new Map(
+        normalizedQuestions.map((question) => [question.id, new Set(question.options.map((option) => option.id))]),
+      ),
       sequence,
       prompt,
       metadata: requestMetadata,
-      resolve: (resolution) => {
-        resolve({
-          requestId: resolution.requestId,
-          worldId: resolution.worldId,
-          chatId: resolution.chatId,
-          optionId: resolution.optionId,
-          source: resolution.source,
-        });
-      },
+      resolve: (resolution) => resolve(resolution),
     };
 
     pendingHitlRequests.set(pendingKey, pending);
@@ -326,10 +499,41 @@ export async function requestWorldOption(
       worldId,
       chatId: chatId || null,
       requestId,
-      optionCount: normalizedOptions.length,
+      questionCount: normalizedQuestions.length,
+      type: prompt.type,
     });
     emitPendingRequest(world, pending);
   });
+}
+
+export async function requestWorldOption(
+  world: World,
+  request: HitlOptionRequest,
+): Promise<HitlOptionResolution> {
+  const resolution = await requestWorldInput(world, {
+    requestId: request.requestId,
+    type: 'single-select',
+    allowSkip: false,
+    questions: normalizeLegacyPromptIntoQuestions(request),
+    chatId: request.chatId,
+    metadata: request.metadata,
+    agentName: request.agentName,
+  });
+
+  const optionId = getPrimaryOptionId(resolution.answers);
+  if (!optionId) {
+    throw new Error(`HITL option request '${resolution.requestId}' resolved without a selected option.`);
+  }
+
+  return {
+    requestId: resolution.requestId,
+    worldId: resolution.worldId,
+    chatId: resolution.chatId,
+    optionId,
+    answers: resolution.answers,
+    skipped: resolution.skipped,
+    source: resolution.source,
+  };
 }
 
 function parseToolCallArguments(raw: unknown): Record<string, unknown> | null {
@@ -347,27 +551,30 @@ function parseToolCallArguments(raw: unknown): Record<string, unknown> | null {
   }
 }
 
-function normalizeOptionsFromToolArgs(args: Record<string, unknown>): Array<{ id: string; label: string }> {
+function normalizeLegacyOptionsFromToolArgs(args: Record<string, unknown>): HitlOption[] {
   const options = Array.isArray(args.options) ? args.options : [];
-  const normalized: Array<{ id: string; label: string }> = [];
+  const normalized: HitlOption[] = [];
   const seen = new Set<string>();
 
   for (let index = 0; index < options.length; index += 1) {
     const rawOption = options[index];
     if (rawOption && typeof rawOption === 'object' && !Array.isArray(rawOption)) {
-      const label = String((rawOption as Record<string, unknown>).label || '').trim();
-      const id = String((rawOption as Record<string, unknown>).id || '').trim();
+      const optionRecord = rawOption as Record<string, unknown>;
+      const label = String(optionRecord.label || '').trim();
+      const id = String(optionRecord.id || '').trim();
       if (!label || !id) {
         continue;
       }
-
       const dedupeKey = id.toLowerCase();
       if (seen.has(dedupeKey)) {
         continue;
       }
-
       seen.add(dedupeKey);
-      normalized.push({ id, label });
+      normalized.push({
+        id,
+        label,
+        description: typeof optionRecord.description === 'string' ? optionRecord.description : undefined,
+      });
       continue;
     }
 
@@ -391,32 +598,30 @@ function normalizeOptionsFromToolArgs(args: Record<string, unknown>): Array<{ id
   return normalized;
 }
 
-function resolveDefaultOptionFromToolArgs(
-  normalizedOptions: Array<{ id: string; label: string }>,
-  args: Record<string, unknown>,
-): string {
-  const defaultOptionId = String(args.defaultOptionId || '').trim();
-  if (defaultOptionId) {
-    const explicitById = normalizedOptions.find((option) => option.id === defaultOptionId);
-    if (explicitById) {
-      return explicitById.id;
-    }
+function normalizeQuestionsFromToolArgs(args: Record<string, unknown>): HitlQuestion[] {
+  const structuredQuestions = normalizeQuestions(args.questions, String(args.title || 'Human input required').trim() || 'Human input required');
+  if (structuredQuestions.length > 0) {
+    return structuredQuestions;
   }
 
-  const defaultOptionLabel = String(args.defaultOption || '').trim().toLowerCase();
-  if (defaultOptionLabel) {
-    const explicit = normalizedOptions.find((option) => option.label.toLowerCase() === defaultOptionLabel);
-    if (explicit) {
-      return explicit.id;
-    }
+  const legacyOptions = normalizeLegacyOptionsFromToolArgs(args);
+  const question = String(args.question || args.prompt || '').trim();
+  if (!question || legacyOptions.length === 0) {
+    return [];
   }
-  return normalizedOptions.find((option) => option.id === 'no')?.id || normalizedOptions[0]?.id || 'opt_1';
+
+  return [{
+    id: 'question-1',
+    header: String(args.title || 'Human input required').trim() || 'Human input required',
+    question,
+    options: legacyOptions,
+  }];
 }
 
 export function listPendingHitlPromptEventsFromMessages(
   messages: AgentMessage[],
   chatId?: string | null,
-): Array<{ chatId: string | null; prompt: { requestId: string; title: string; message: string; options: Array<{ id: string; label: string }>; defaultOptionId: string; metadata: Record<string, unknown> | null; agentName: string | null; toolName: string; toolCallId: string } }> {
+): Array<{ chatId: string | null; prompt: { requestId: string; type: HitlPromptType; allowSkip: boolean; questions: HitlQuestion[]; metadata: Record<string, unknown> | null; agentName: string | null; toolName: string; toolCallId: string } }> {
   const allMessages = Array.isArray(messages) ? messages : [];
   const resolvedToolCallIds = new Set<string>();
 
@@ -431,7 +636,7 @@ export function listPendingHitlPromptEventsFromMessages(
     resolvedToolCallIds.add(toolCallId);
   }
 
-  const unresolvedById = new Map<string, { chatId: string | null; prompt: { requestId: string; title: string; message: string; options: Array<{ id: string; label: string }>; defaultOptionId: string; metadata: Record<string, unknown> | null; agentName: string | null; toolName: string; toolCallId: string } }>();
+  const unresolvedById = new Map<string, { chatId: string | null; prompt: { requestId: string; type: HitlPromptType; allowSkip: boolean; questions: HitlQuestion[]; metadata: Record<string, unknown> | null; agentName: string | null; toolName: string; toolCallId: string } }>();
 
   for (const message of allMessages) {
     if (message?.role !== 'assistant' || !Array.isArray(message?.tool_calls)) {
@@ -453,8 +658,8 @@ export function listPendingHitlPromptEventsFromMessages(
         continue;
       }
 
-      const options = normalizeOptionsFromToolArgs(args);
-      if (options.length === 0) {
+      const questions = normalizeQuestionsFromToolArgs(args);
+      if (questions.length === 0) {
         continue;
       }
 
@@ -474,10 +679,9 @@ export function listPendingHitlPromptEventsFromMessages(
         chatId: normalizedChatId,
         prompt: {
           requestId: toolCallId,
-          title: String(args.title || 'Human input required').trim() || 'Human input required',
-          message: String(args.question || args.prompt || '').trim(),
-          options,
-          defaultOptionId: resolveDefaultOptionFromToolArgs(options, args),
+          type: normalizePromptType(args.type),
+          allowSkip: args.allowSkip === true,
+          questions,
           metadata,
           agentName: String(message?.sender || '').trim() || null,
           toolName: metadataToolName || toolName,
@@ -536,20 +740,24 @@ export function submitWorldOptionResponse(params: {
 export function submitWorldHitlResponse(params: {
   worldId: string;
   requestId: string;
-  optionId: string;
+  optionId?: string;
+  answers?: HitlAnswer[];
+  skipped?: boolean;
   chatId?: string | null;
 }): { accepted: boolean; reason?: string; metadata?: Record<string, unknown> | null } {
   const worldId = String(params.worldId || '').trim();
   const requestId = String(params.requestId || '').trim();
   const optionId = String(params.optionId || '').trim();
 
-  if (!worldId || !requestId || !optionId) {
+  if (!worldId || !requestId || (!optionId && !Array.isArray(params.answers) && params.skipped !== true)) {
     loggerHitl.warn('HITL response rejected: invalid payload', {
       worldId: worldId || null,
       requestId: requestId || null,
       optionId: optionId || null,
+      answerCount: Array.isArray(params.answers) ? params.answers.length : 0,
+      skipped: params.skipped === true,
     });
-    return { accepted: false, reason: 'worldId, requestId, and optionId are required.' };
+    return { accepted: false, reason: 'worldId, requestId, and either answers, skipped, or optionId are required.' };
   }
 
   const pendingKey = getPendingKey(worldId, requestId);
@@ -576,13 +784,20 @@ export function submitWorldHitlResponse(params: {
     return { accepted: false, reason: scopeValidation.reason };
   }
 
-  if (!pending.optionIds.has(optionId)) {
+  const normalizedAnswers = normalizeSubmittedAnswers({
+    pending,
+    answers: params.answers,
+    optionId,
+    skipped: params.skipped,
+  });
+  if (!normalizedAnswers.valid) {
     loggerHitl.warn('HITL response rejected: invalid option', {
       worldId,
       requestId,
-      optionId,
+      optionId: optionId || null,
+      reason: normalizedAnswers.reason,
     });
-    return { accepted: false, reason: `Invalid option '${optionId}' for requestId '${requestId}'.` };
+    return { accepted: false, reason: normalizedAnswers.reason };
   }
 
   resolvePendingRequest({
@@ -592,7 +807,9 @@ export function submitWorldHitlResponse(params: {
       requestId,
       worldId,
       chatId: pending.chatId,
-      optionId,
+      answers: normalizedAnswers.answers,
+      optionId: getPrimaryOptionId(normalizedAnswers.answers),
+      skipped: normalizedAnswers.skipped,
       source: 'user',
     },
   });
@@ -601,7 +818,8 @@ export function submitWorldHitlResponse(params: {
     worldId,
     chatId: pending.chatId || null,
     requestId,
-    optionId,
+    optionId: getPrimaryOptionId(normalizedAnswers.answers),
+    skipped: normalizedAnswers.skipped,
   });
 
   return { accepted: true, metadata: pending.metadata };

@@ -2,7 +2,7 @@
  * Web HITL Domain Helpers
  *
  * Purpose:
- * - Provide pure helper functions for parsing and managing HITL option prompts
+ * - Provide pure helper functions for parsing and managing structured HITL prompts
  *   from tool-event payloads and pending HITL read-model payloads.
  *
  * Key Features:
@@ -11,8 +11,8 @@
  * - Remove resolved prompts from queue.
  *
  * Implementation Notes:
- * - Parsing is strict about required fields (`requestId`, option ids/labels).
- * - Default option falls back to `no` when present, otherwise first option.
+ * - Parsing is strict about required fields (`requestId`, `questions[]`, option ids/labels).
+ * - Legacy flat `question/options` payloads are normalized for replay compatibility.
  *
  * Recent Changes:
  * - 2026-03-11: Added chat-scoped prompt selection helpers so pending HITL state can survive chat switches without
@@ -21,7 +21,7 @@
  * - 2026-02-14: Added initial HITL prompt parsing/queue helpers for web client flows.
  */
 
-import type { HitlPromptOption, HitlPromptRequest } from '../types';
+import type { HitlPromptOption, HitlPromptQuestion, HitlPromptRequest } from '../types';
 
 function normalizeHitlPrompt(promptLike: Record<string, unknown>, fallbackChatId: string | null): HitlPromptRequest | null {
   const requestId = String(promptLike.requestId || '').trim();
@@ -29,29 +29,10 @@ function normalizeHitlPrompt(promptLike: Record<string, unknown>, fallbackChatId
     return null;
   }
 
-  const options = Array.isArray(promptLike.options)
-    ? promptLike.options
-      .map((option): HitlPromptOption => {
-        const optionRecord = option && typeof option === 'object'
-          ? (option as Record<string, unknown>)
-          : null;
-        return {
-          id: String(optionRecord?.id || '').trim(),
-          label: String(optionRecord?.label || '').trim(),
-          description: optionRecord?.description ? String(optionRecord.description) : undefined
-        };
-      })
-      .filter((option) => option.id.length > 0 && option.label.length > 0)
-    : [];
-
-  if (options.length === 0) {
+  const questions = normalizeQuestions(promptLike);
+  if (questions.length === 0) {
     return null;
   }
-
-  const preferredDefault = String(promptLike.defaultOptionId || '').trim();
-  const defaultOptionId = options.some((option) => option.id === preferredDefault)
-    ? preferredDefault
-    : (options.find((option) => option.id === 'no')?.id || options[0].id);
 
   const metadata = promptLike.metadata && typeof promptLike.metadata === 'object'
     ? {
@@ -65,13 +46,82 @@ function normalizeHitlPrompt(promptLike: Record<string, unknown>, fallbackChatId
   return {
     requestId,
     chatId: fallbackChatId,
-    title: String(promptLike.title || 'Approval required').trim() || 'Approval required',
-    message: String(promptLike.message || '').trim(),
-    mode: 'option',
-    options,
-    ...(defaultOptionId ? { defaultOptionId } : {}),
+    type: promptLike.type === 'multiple-select' ? 'multiple-select' : 'single-select',
+    allowSkip: promptLike.allowSkip === true,
+    questions,
+    ...(typeof promptLike.toolCallId === 'string' && promptLike.toolCallId.trim()
+      ? { toolCallId: promptLike.toolCallId.trim() }
+      : {}),
     ...(metadata ? { metadata } : {}),
   };
+}
+
+function normalizeOptions(optionsLike: unknown): HitlPromptOption[] {
+  return Array.isArray(optionsLike)
+    ? optionsLike
+      .map((option, index): HitlPromptOption | null => {
+        const optionRecord = option && typeof option === 'object'
+          ? (option as Record<string, unknown>)
+          : null;
+        const id = String(optionRecord?.id || '').trim();
+        const label = optionRecord
+          ? String(optionRecord?.label || '').trim()
+          : String(option || '').trim();
+        if (!id || !label) {
+          if (!optionRecord && label) {
+            return {
+              id: `opt_${index + 1}`,
+              label,
+            };
+          }
+          return null;
+        }
+        return {
+          id,
+          label,
+          description: optionRecord?.description ? String(optionRecord.description) : undefined,
+        };
+      })
+      .filter((option): option is HitlPromptOption => option !== null)
+    : [];
+}
+
+function normalizeQuestions(promptLike: Record<string, unknown>): HitlPromptQuestion[] {
+  const structuredQuestions = Array.isArray(promptLike.questions)
+    ? promptLike.questions
+      .map((entry, index): HitlPromptQuestion | null => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+          return null;
+        }
+        const questionRecord = entry as Record<string, unknown>;
+        const id = String(questionRecord.id || '').trim() || `question-${index + 1}`;
+        const header = String(questionRecord.header || 'Human input required').trim() || 'Human input required';
+        const question = String(questionRecord.question || '').trim();
+        const options = normalizeOptions(questionRecord.options);
+        if (!question || options.length === 0) {
+          return null;
+        }
+        return { id, header, question, options };
+      })
+      .filter((question): question is HitlPromptQuestion => question !== null)
+    : [];
+
+  if (structuredQuestions.length > 0) {
+    return structuredQuestions;
+  }
+
+  const legacyQuestion = String(promptLike.question || promptLike.message || promptLike.prompt || '').trim();
+  const legacyOptions = normalizeOptions(promptLike.options);
+  if (!legacyQuestion || legacyOptions.length === 0) {
+    return [];
+  }
+
+  return [{
+    id: 'question-1',
+    header: String(promptLike.title || 'Human input required').trim() || 'Human input required',
+    question: legacyQuestion,
+    options: legacyOptions,
+  }];
 }
 
 export function parseHitlPromptRequest(eventData: unknown): HitlPromptRequest | null {
@@ -174,41 +224,6 @@ function parseToolCallArgs(raw: unknown): Record<string, unknown> | null {
   }
 }
 
-function normalizeOptionsFromArgs(args: Record<string, unknown>): HitlPromptOption[] {
-  const source = Array.isArray(args.options) ? args.options : [];
-  const seen = new Set<string>();
-  const normalized: HitlPromptOption[] = [];
-
-  for (const entry of source) {
-    const label = String(entry || '').trim();
-    if (!label) {
-      continue;
-    }
-    const key = label.toLowerCase();
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    normalized.push({
-      id: `opt_${normalized.length + 1}`,
-      label,
-    });
-  }
-
-  return normalized;
-}
-
-function resolveDefaultOptionIdFromArgs(options: HitlPromptOption[], args: Record<string, unknown>): string {
-  const preferredLabel = String(args.defaultOption || '').trim().toLowerCase();
-  if (preferredLabel) {
-    const matched = options.find((option) => option.label.toLowerCase() === preferredLabel);
-    if (matched) {
-      return matched.id;
-    }
-  }
-  return options.find((option) => option.id === 'no')?.id || options[0]?.id || 'opt_1';
-}
-
 export function reconstructPendingHitlPromptsFromMessages(
   messages: Array<Record<string, unknown>>,
   fallbackChatId: string | null
@@ -243,7 +258,7 @@ export function reconstructPendingHitlPromptsFromMessages(
     for (const toolCall of toolCalls) {
       const toolName = String((toolCall?.function as Record<string, unknown> | undefined)?.name || '').trim();
       const toolCallId = String(toolCall?.id || '').trim();
-      if (!toolCallId || toolName !== 'human_intervention_request') {
+      if (!toolCallId || (toolName !== 'human_intervention_request' && toolName !== 'ask_user_input')) {
         continue;
       }
       if (resolved.has(toolCallId) || seenRequestIds.has(toolCallId)) {
@@ -256,8 +271,8 @@ export function reconstructPendingHitlPromptsFromMessages(
         continue;
       }
 
-      const options = normalizeOptionsFromArgs(args);
-      if (options.length === 0) {
+      const questions = normalizeQuestions(args);
+      if (questions.length === 0) {
         continue;
       }
 
@@ -265,11 +280,9 @@ export function reconstructPendingHitlPromptsFromMessages(
       const prompt: HitlPromptRequest = {
         requestId: toolCallId,
         chatId,
-        title: 'Human input required',
-        message: String(args.question || args.prompt || '').trim(),
-        mode: 'option',
-        options,
-        defaultOptionId: resolveDefaultOptionIdFromArgs(options, args),
+        type: args.type === 'multiple-select' ? 'multiple-select' : 'single-select',
+        allowSkip: args.allowSkip === true,
+        questions,
       };
 
       const metadata = args.metadata && typeof args.metadata === 'object' && !Array.isArray(args.metadata)

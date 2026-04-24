@@ -2,37 +2,43 @@
  * HITL Request Tool Module - Built-in tool for generic human-in-the-loop input
  *
  * Purpose:
- * - Expose a built-in `human_intervention_request` tool that lets the model ask questions and offer options.
+ * - Expose a built-in `ask_user_input` / `human_intervention_request` tool that mirrors llm-runtime's structured HITL schema.
  *
  * Key Features:
- * - Supports option-only response mode for deterministic user selection.
- * - Uses existing world-scoped HITL option runtime.
- * - Returns structured JSON payloads for stable downstream model parsing.
+ * - Accepts `type`, `allowSkip`, and structured `questions[]` arguments.
+ * - Uses the shared world-scoped HITL runtime.
+ * - Returns structured JSON payloads with compatibility summary fields.
  *
  * Implementation Notes:
- * - Option values are normalized and deduplicated as display labels.
- * - Free-text path is intentionally disabled to keep HITL interactions simple and auditable.
+ * - Legacy flat `question/options` callers are normalized locally for backwards compatibility.
  * - Tool execution requires world context; no external side effects beyond HITL events.
  *
  * Recent Changes:
+ * - 2026-04-24: Migrated the built-in HITL tool contract to llm-runtime-compatible `ask_user_input` questions/answers while preserving compatibility summary fields.
  * - 2026-03-06: Removed `world.currentChatId` fallback from HITL approval routing; interactive requests now require explicit `context.chatId`.
- * - 2026-02-28: Added shorthand default-option resolution so values like "No" can map to a single matching option label.
  * - 2026-02-27: Removed built-in post-selection confirmation stage and removed deprecated confirmation parameters from the tool contract.
  * - 2026-02-20: Removed free-text mode from `human_intervention_request`; tool now enforces options-only interactions.
  * - 2026-02-20: Added initial built-in `human_intervention_request` tool implementation.
  */
 
-import { requestWorldOption, type HitlOption } from './hitl.js';
+import {
+  requestWorldInput,
+  type HitlAnswer,
+  type HitlInputRequest,
+  type HitlOption,
+  type HitlPromptType,
+  type HitlQuestion,
+} from './hitl.js';
 import { type World } from './types.js';
 
-const MODE_OPTION = 'option';
 const DEFAULT_TIMEOUT_MESSAGE = 'HITL request timed out before user selection.';
 
 type HitlRequestToolArgs = {
+  type?: unknown;
+  allowSkip?: unknown;
+  questions?: unknown;
   question?: unknown;
   options?: unknown;
-  timeoutMs?: unknown;
-  defaultOption?: unknown;
   metadata?: unknown;
 };
 
@@ -44,15 +50,16 @@ type HitlRequestToolContext = {
 };
 
 type NormalizedHitlRequestArgs = {
-  question: string;
-  options: string[];
-  timeoutMs: number | null;
-  defaultOption: string | null;
+  type: HitlPromptType;
+  allowSkip: boolean;
+  questions: HitlQuestion[];
   metadata: Record<string, unknown> | null;
 };
 
 type PrimaryResolution = {
   requestId: string;
+  answers: HitlAnswer[];
+  skipped: boolean;
   selectedOption: string | null;
   source: 'user' | 'timeout';
 };
@@ -65,73 +72,90 @@ function normalizeQuestion(question: unknown): string {
   return String(question || '').trim();
 }
 
-function normalizeOptionList(options: unknown): string[] {
+function normalizePromptType(value: unknown): HitlPromptType {
+  return value === 'multiple-select' ? 'multiple-select' : 'single-select';
+}
+
+function normalizeOptions(options: unknown): HitlOption[] {
   if (!Array.isArray(options)) {
     return [];
   }
+  const normalized: HitlOption[] = [];
   const seen = new Set<string>();
-  const normalized: string[] = [];
-  for (const option of options) {
-    const value = String(option || '').trim();
-    if (!value) {
+  for (let index = 0; index < options.length; index += 1) {
+    const rawOption = options[index];
+    if (rawOption && typeof rawOption === 'object' && !Array.isArray(rawOption)) {
+      const optionRecord = rawOption as Record<string, unknown>;
+      const id = String(optionRecord.id || '').trim();
+      const label = String(optionRecord.label || '').trim();
+      if (!id || !label || seen.has(id.toLowerCase())) {
+        continue;
+      }
+      seen.add(id.toLowerCase());
+      normalized.push({
+        id,
+        label,
+        description: typeof optionRecord.description === 'string' ? optionRecord.description : undefined,
+      });
       continue;
     }
-    const key = value.toLowerCase();
-    if (seen.has(key)) {
+
+    const label = String(rawOption || '').trim();
+    if (!label || seen.has(label.toLowerCase())) {
       continue;
     }
-    seen.add(key);
-    normalized.push(value);
+    seen.add(label.toLowerCase());
+    normalized.push({
+      id: `opt_${normalized.length + 1}`,
+      label,
+    });
   }
   return normalized;
 }
 
-function normalizeTimeoutMs(value: unknown): number | null {
-  if (value === undefined || value === null || value === '') {
-    return null;
+function normalizeQuestions(questions: unknown): HitlQuestion[] {
+  if (!Array.isArray(questions)) {
+    return [];
   }
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return null;
+
+  const normalized: HitlQuestion[] = [];
+  const seen = new Set<string>();
+  for (let index = 0; index < questions.length; index += 1) {
+    const rawQuestion = questions[index];
+    if (!rawQuestion || typeof rawQuestion !== 'object' || Array.isArray(rawQuestion)) {
+      continue;
+    }
+    const questionRecord = rawQuestion as Record<string, unknown>;
+    const id = String(questionRecord.id || '').trim() || `question-${index + 1}`;
+    if (seen.has(id)) {
+      continue;
+    }
+    const header = String(questionRecord.header || 'Human input required').trim() || 'Human input required';
+    const question = String(questionRecord.question || '').trim();
+    const options = normalizeOptions(questionRecord.options);
+    if (!question || options.length === 0) {
+      continue;
+    }
+    seen.add(id);
+    normalized.push({ id, header, question, options });
   }
-  return Math.floor(parsed);
+
+  return normalized;
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function resolveDefaultOptionLabel(options: string[], defaultOption: string): {
-  matchedOption: string | null;
-  error: string | null;
-} {
-  const normalizedDefaultOption = defaultOption.trim().toLowerCase();
-  if (!normalizedDefaultOption) {
-    return { matchedOption: null, error: null };
+function normalizeLegacyQuestions(args: HitlRequestToolArgs): HitlQuestion[] {
+  const question = normalizeQuestion(args.question);
+  const options = normalizeOptions(args.options);
+  if (!question || options.length === 0) {
+    return [];
   }
 
-  const explicitMatch = options.find((option) => option.toLowerCase() === normalizedDefaultOption);
-  if (explicitMatch) {
-    return { matchedOption: explicitMatch, error: null };
-  }
-
-  const shorthandPattern = new RegExp(`^${escapeRegExp(normalizedDefaultOption)}(?:\\b|[\\s,;:()\\-])`, 'i');
-  const shorthandMatches = options.filter((option) => shorthandPattern.test(option));
-  if (shorthandMatches.length === 1) {
-    return { matchedOption: shorthandMatches[0]!, error: null };
-  }
-
-  if (shorthandMatches.length > 1) {
-    return {
-      matchedOption: null,
-      error: `defaultOption '${defaultOption}' is ambiguous across provided options.`,
-    };
-  }
-
-  return {
-    matchedOption: null,
-    error: `defaultOption '${defaultOption}' does not match any provided option.`,
-  };
+  return [{
+    id: 'question-1',
+    header: 'Human input required',
+    question,
+    options,
+  }];
 }
 
 function validateAndNormalizeArgs(args: HitlRequestToolArgs): {
@@ -141,62 +165,28 @@ function validateAndNormalizeArgs(args: HitlRequestToolArgs): {
   valid: false;
   error: string;
 } {
-  const question = normalizeQuestion(args.question);
-  if (!question) {
-    return { valid: false, error: 'Missing required parameter: question' };
-  }
-
-  const options = normalizeOptionList(args.options);
-  const timeoutMs = normalizeTimeoutMs(args.timeoutMs);
-  const rawDefaultOption = typeof args.defaultOption === 'string' && args.defaultOption.trim()
-    ? args.defaultOption.trim()
-    : null;
+  const questions = normalizeQuestions(args.questions);
+  const normalizedQuestions = questions.length > 0 ? questions : normalizeLegacyQuestions(args);
   const metadata = args.metadata && typeof args.metadata === 'object'
     ? args.metadata as Record<string, unknown>
     : null;
 
-  if (options.length === 0) {
+  if (normalizedQuestions.length === 0) {
     return {
       valid: false,
-      error: 'HITL request requires at least one option.',
-    };
-  }
-
-  const resolvedDefaultOption = rawDefaultOption
-    ? resolveDefaultOptionLabel(options, rawDefaultOption)
-    : { matchedOption: null, error: null };
-  if (resolvedDefaultOption.error) {
-    return {
-      valid: false,
-      error: resolvedDefaultOption.error,
+      error: 'ask_user_input requires at least one valid question with options.',
     };
   }
 
   return {
     valid: true,
     args: {
-      question,
-      options,
-      timeoutMs,
-      defaultOption: resolvedDefaultOption.matchedOption,
+      type: normalizePromptType(args.type),
+      allowSkip: args.allowSkip === true,
+      questions: normalizedQuestions,
       metadata,
     },
   };
-}
-
-function resolveDefaultOptionId(options: HitlOption[], defaultOption: string | null): string | undefined {
-  if (!defaultOption) {
-    return undefined;
-  }
-  const match = options.find((option) => option.label.toLowerCase() === defaultOption.toLowerCase());
-  return match?.id;
-}
-
-function buildOptionPromptOptions(optionLabels: string[]): HitlOption[] {
-  return optionLabels.map((label, index) => ({
-    id: `opt_${index + 1}`,
-    label,
-  }));
 }
 
 async function requestPrimaryResolution(options: {
@@ -207,18 +197,14 @@ async function requestPrimaryResolution(options: {
   toolCallId?: string;
 }): Promise<PrimaryResolution> {
   const { world, chatId, args, agentName } = options;
-  const promptOptions = buildOptionPromptOptions(args.options);
-  const optionResolution = await requestWorldOption(world, {
-    title: 'Human input required',
-    message: args.question,
-    options: promptOptions,
+  const resolution = await requestWorldInput(world, {
+    type: args.type,
+    allowSkip: args.allowSkip,
+    questions: args.questions,
     chatId,
-    timeoutMs: args.timeoutMs ?? undefined,
-    defaultOptionId: resolveDefaultOptionId(promptOptions, args.defaultOption),
     metadata: {
       ...(args.metadata || {}),
-      tool: 'human_intervention_request',
-      mode: MODE_OPTION,
+      tool: 'ask_user_input',
       ...(typeof options.toolCallId === 'string' && options.toolCallId.trim()
         ? { toolCallId: options.toolCallId.trim() }
         : {}),
@@ -226,16 +212,23 @@ async function requestPrimaryResolution(options: {
     agentName: agentName || null,
   });
 
-  const selectedOption = promptOptions.find((option) => option.id === optionResolution.optionId)?.label || null;
+  const firstQuestion = args.questions[0];
+  const selectedOption = firstQuestion
+    ? firstQuestion.options.find((option) => option.id === resolution.answers[0]?.optionIds[0])?.label || null
+    : null;
   return {
-    requestId: optionResolution.requestId,
+    requestId: resolution.requestId,
+    answers: resolution.answers,
+    skipped: resolution.skipped,
     selectedOption,
-    source: optionResolution.source,
+    source: resolution.source,
   };
 }
 
 function buildFinalResult(options: {
   requestId: string;
+  answers: HitlAnswer[];
+  skipped: boolean;
   selectedOption: string | null;
   status: 'confirmed' | 'canceled' | 'timeout' | 'error';
   source: 'user' | 'timeout' | 'system';
@@ -246,6 +239,8 @@ function buildFinalResult(options: {
     ok,
     status: options.status,
     confirmed: ok,
+    skipped: options.skipped,
+    answers: options.answers,
     selectedOption: options.selectedOption,
     source: options.source,
     requestId: options.requestId,
@@ -256,26 +251,45 @@ function buildFinalResult(options: {
 export function createHitlToolDefinition() {
   return {
     description:
-      'Ask a human a question and offer choices; returns after a single option selection.',
+      'Ask a human structured questions with selectable options; mirrors the llm-runtime ask_user_input schema.',
     parameters: {
       type: 'object',
       properties: {
-        question: {
+        type: {
           type: 'string',
-          description: 'Required question shown to the human.',
+          enum: ['single-select', 'multiple-select'],
+          description: 'Selection mode applied to every question in this request.',
         },
-        options: {
+        allowSkip: {
+          type: 'boolean',
+          description: 'Whether the user may skip the prompt without selecting options.',
+        },
+        questions: {
           type: 'array',
-          items: { type: 'string' },
-          description: 'Required list of selectable options.',
-        },
-        timeoutMs: {
-          type: 'number',
-          description: 'Optional timeout for HITL prompts in milliseconds.',
-        },
-        defaultOption: {
-          type: 'string',
-          description: 'Optional default option label for option mode.',
+          description: 'Structured questions presented to the user.',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              header: { type: 'string' },
+              question: { type: 'string' },
+              options: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    label: { type: 'string' },
+                    description: { type: 'string' },
+                  },
+                  required: ['id', 'label'],
+                  additionalProperties: false,
+                },
+              },
+            },
+            required: ['id', 'header', 'question', 'options'],
+            additionalProperties: false,
+          },
         },
         metadata: {
           type: 'object',
@@ -283,7 +297,7 @@ export function createHitlToolDefinition() {
           additionalProperties: true,
         },
       },
-      required: ['question', 'options'],
+      required: ['questions'],
       additionalProperties: false,
     },
     execute: async (rawArgs: HitlRequestToolArgs, _sequenceId?: string, _parentToolCall?: string, context?: HitlRequestToolContext) => {
@@ -291,6 +305,8 @@ export function createHitlToolDefinition() {
       if (!normalized.valid) {
         return buildFinalResult({
           requestId: '',
+          answers: [],
+          skipped: false,
           selectedOption: null,
           status: 'error',
           source: 'system',
@@ -303,10 +319,12 @@ export function createHitlToolDefinition() {
       if (!world || !worldId) {
         return buildFinalResult({
           requestId: '',
+          answers: [],
+          skipped: false,
           selectedOption: null,
           status: 'error',
           source: 'system',
-          message: 'human_intervention_request requires a valid world context.',
+          message: 'ask_user_input requires a valid world context.',
         });
       }
 
@@ -318,10 +336,12 @@ export function createHitlToolDefinition() {
       if (!chatId) {
         return buildFinalResult({
           requestId: '',
+          answers: [],
+          skipped: false,
           selectedOption: null,
           status: 'error',
           source: 'system',
-          message: 'human_intervention_request requires an explicit chatId in the tool execution context.',
+          message: 'ask_user_input requires an explicit chatId in the tool execution context.',
         });
       }
 
@@ -337,6 +357,8 @@ export function createHitlToolDefinition() {
         if (primaryResolution.source === 'timeout') {
           return buildFinalResult({
             requestId: primaryResolution.requestId,
+            answers: primaryResolution.answers,
+            skipped: primaryResolution.skipped,
             selectedOption: primaryResolution.selectedOption,
             status: 'timeout',
             source: 'timeout',
@@ -346,13 +368,17 @@ export function createHitlToolDefinition() {
 
         return buildFinalResult({
           requestId: primaryResolution.requestId,
+          answers: primaryResolution.answers,
+          skipped: primaryResolution.skipped,
           selectedOption: primaryResolution.selectedOption,
-          status: 'confirmed',
+          status: primaryResolution.skipped ? 'canceled' : 'confirmed',
           source: primaryResolution.source,
         });
       } catch (error) {
         return buildFinalResult({
           requestId: '',
+          answers: [],
+          skipped: false,
           selectedOption: null,
           status: 'error',
           source: 'system',

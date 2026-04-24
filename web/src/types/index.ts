@@ -89,14 +89,25 @@ export interface HitlPromptOption {
   description?: string;
 }
 
+export interface HitlPromptQuestion {
+  id: string;
+  header: string;
+  question: string;
+  options: HitlPromptOption[];
+}
+
+export interface HitlPromptAnswer {
+  questionId: string;
+  optionIds: string[];
+}
+
 export interface HitlPromptRequest {
   requestId: string;
   chatId: string | null;
-  title: string;
-  message: string;
-  mode: 'option';
-  options: HitlPromptOption[];
-  defaultOptionId?: string;
+  type: 'single-select' | 'multiple-select';
+  allowSkip?: boolean;
+  questions: HitlPromptQuestion[];
+  toolCallId?: string;
   metadata?: {
     refreshAfterDismiss?: boolean;
     kind?: string;

@@ -36,13 +36,17 @@ describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
           metadata: {
             hitlPrompt: {
               requestId: 'req-1',
-              title: 'Approval required',
-              message: 'Choose one',
-              defaultOptionId: 'no',
-              options: [
-                { id: 'yes', label: 'Yes' },
-                { id: 'no', label: 'No' },
-              ],
+              type: 'single-select',
+              allowSkip: false,
+              questions: [{
+                id: 'question-1',
+                header: 'Approval required',
+                question: 'Choose one',
+                options: [
+                  { id: 'yes', label: 'Yes' },
+                  { id: 'no', label: 'No' },
+                ],
+              }],
               metadata: {
                 kind: 'create_agent_created',
                 refreshAfterDismiss: true,
@@ -59,7 +63,7 @@ describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
       chatId: 'chat-1',
       title: 'Approval required',
       message: 'Choose one',
-      defaultOptionId: 'no',
+      type: 'single-select',
       metadata: {
         kind: 'create_agent_created',
         refreshAfterDismiss: true,
@@ -77,12 +81,15 @@ describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
           metadata: {
             hitlPrompt: {
               requestId: 'req-replay',
-              title: 'Approval required',
-              message: 'First payload',
-              options: [
-                { id: 'yes', label: 'Yes' },
-                { id: 'no', label: 'No' },
-              ],
+              questions: [{
+                id: 'question-1',
+                header: 'Approval required',
+                question: 'First payload',
+                options: [
+                  { id: 'yes', label: 'Yes' },
+                  { id: 'no', label: 'No' },
+                ],
+              }],
             },
           },
         },
@@ -98,12 +105,15 @@ describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
           metadata: {
             hitlPrompt: {
               requestId: 'req-replay',
-              title: 'Approval required (replay)',
-              message: 'Replayed payload',
-              options: [
-                { id: 'yes', label: 'Yes' },
-                { id: 'no', label: 'No' },
-              ],
+              questions: [{
+                id: 'question-1',
+                header: 'Approval required (replay)',
+                question: 'Replayed payload',
+                options: [
+                  { id: 'yes', label: 'Yes' },
+                  { id: 'no', label: 'No' },
+                ],
+              }],
             },
           },
         },

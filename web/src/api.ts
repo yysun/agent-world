@@ -470,18 +470,28 @@ async function editMessage(
 }
 
 /**
- * Submit a user-selected HITL option response for a pending world request.
+ * Submit a structured HITL response for a pending world request.
  */
-async function respondHitlOption(
+async function respondHitlInput(
   worldName: string,
   requestId: string,
-  optionId: string,
-  chatId?: string | null
+  answers: Array<{ questionId: string; optionIds: string[] }>,
+  chatId?: string | null,
+  skipped = false,
 ): Promise<{ accepted: boolean; reason?: string }> {
   const normalizedRequestId = String(requestId || '').trim();
-  const normalizedOptionId = String(optionId || '').trim();
-  if (!worldName || !normalizedRequestId || !normalizedOptionId) {
-    throw new Error('World name, request ID, and optionId are required');
+  const normalizedAnswers = Array.isArray(answers)
+    ? answers
+      .map((answer) => ({
+        questionId: String(answer?.questionId || '').trim(),
+        optionIds: Array.isArray(answer?.optionIds)
+          ? answer.optionIds.map((optionId) => String(optionId || '').trim()).filter(Boolean)
+          : [],
+      }))
+      .filter((answer) => answer.questionId && answer.optionIds.length > 0)
+    : [];
+  if (!worldName || !normalizedRequestId || (!skipped && normalizedAnswers.length === 0)) {
+    throw new Error('World name, request ID, and either answers or skipped=true are required');
   }
 
   const response = await apiRequest(
@@ -490,12 +500,25 @@ async function respondHitlOption(
       method: 'POST',
       body: JSON.stringify({
         requestId: normalizedRequestId,
-        optionId: normalizedOptionId,
+        ...(skipped ? { skipped: true } : { answers: normalizedAnswers }),
         chatId: chatId ?? null
       }),
     }
   );
   return response.json();
+}
+
+async function respondHitlOption(
+  worldName: string,
+  requestId: string,
+  optionId: string,
+  chatId?: string | null
+): Promise<{ accepted: boolean; reason?: string }> {
+  const normalizedOptionId = String(optionId || '').trim();
+  if (!normalizedOptionId) {
+    throw new Error('optionId is required');
+  }
+  return respondHitlInput(worldName, requestId, [{ questionId: 'question-1', optionIds: [normalizedOptionId] }], chatId);
 }
 
 async function sendMessage(
@@ -570,6 +593,7 @@ export default {
   deleteMessage,
   editMessage,
   respondHitlOption,
+  respondHitlInput,
   stopMessageProcessing,
   sendMessage,
 };

@@ -66,6 +66,7 @@ export function createMainContentMessageListProps<T extends PropBag>(input: T) {
     activeHitlPrompt: input.activeHitlPrompt,
     submittingHitlRequestId: input.submittingHitlRequestId,
     onRespondHitlOption: input.onRespondHitlOption,
+    onSkipHitlPrompt: input.onSkipHitlPrompt,
   };
 }
 

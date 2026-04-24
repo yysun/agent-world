@@ -84,10 +84,10 @@ describe('web harness seeded-agent prompt helper', () => {
     expect(shellPrompt).not.toContain('CREATE_AGENT_READ:');
     expect(createAgentPrompt).toContain(`name "${CREATE_AGENT_ASK_NAME}"`);
     expect(createAgentPrompt).toContain(`Do not create "${CREATE_AGENT_AUTO_NAME}" in this branch.`);
-    expect(createAgentPrompt).toContain('Never call write_file, web_fetch, shell_cmd, load_skill, or human_intervention_request before create_agent');
+    expect(createAgentPrompt).toContain('Never call write_file, web_fetch, shell_cmd, load_skill, or ask_user_input before create_agent');
     expect(createAgentPrompt).not.toContain('LOAD_SKILL_READ:');
     expect(loadSkillPrompt).toContain(`skill_id "${TOOL_PERMISSION_SKILL_ID}"`);
-    expect(loadSkillPrompt).toContain('Never call write_file, web_fetch, shell_cmd, create_agent, or human_intervention_request before load_skill');
+    expect(loadSkillPrompt).toContain('Never call write_file, web_fetch, shell_cmd, create_agent, or ask_user_input before load_skill');
     expect(loadSkillPrompt).toContain('Do not reply with "E2E_LOAD_SKILL_AUTO_OK" in this branch.');
     expect(loadSkillPrompt).not.toContain('WRITE_FILE_READ:');
   });

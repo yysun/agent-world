@@ -2,13 +2,13 @@
  * Web HITL Domain Tests
  *
  * Purpose:
- * - Validate parsing and queue-management helpers for web HITL option requests.
+ * - Validate parsing and queue-management helpers for structured web HITL prompts.
  *
  * Coverage:
- * - Pending prompt payload parsing.
- * - Tool-event payload parsing.
- * - Default option fallback behavior.
+ * - Structured pending prompt parsing.
+ * - Structured tool-event payload parsing.
  * - Queue deduplication and removal behavior.
+ * - Legacy transcript reconstruction compatibility.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -23,59 +23,56 @@ import {
 } from '../../web/src/domain/hitl';
 
 describe('web/domain/hitl', () => {
-  it('parses a valid pending-prompt payload', () => {
+  it('parses a valid structured pending-prompt payload', () => {
     const parsed = parseHitlPromptRequest({
       chatId: 'chat-1',
       prompt: {
         requestId: 'req-1',
-        title: 'Run scripts?',
-        message: 'Choose one option.',
-        defaultOptionId: 'yes_once',
-        options: [
-          { id: 'yes_once', label: 'Yes once' },
-          { id: 'yes_in_session', label: 'Yes in this session' },
-          { id: 'no', label: 'No' },
-        ],
+        type: 'single-select',
+        allowSkip: false,
+        questions: [{
+          id: 'question-1',
+          header: 'Run scripts?',
+          question: 'Choose one option.',
+          options: [
+            { id: 'yes_once', label: 'Yes once' },
+            { id: 'yes_in_session', label: 'Yes in this session' },
+            { id: 'no', label: 'No' },
+          ],
+        }],
       },
     });
 
     expect(parsed).toEqual({
       requestId: 'req-1',
       chatId: 'chat-1',
-      title: 'Run scripts?',
-      message: 'Choose one option.',
-      mode: 'option',
-      defaultOptionId: 'yes_once',
-      options: [
-        { id: 'yes_once', label: 'Yes once', description: undefined },
-        { id: 'yes_in_session', label: 'Yes in this session', description: undefined },
-        { id: 'no', label: 'No', description: undefined },
-      ],
-    });
-  });
-
-  it('falls back default option to no when preferred default is invalid', () => {
-    const parsed = parseHitlPromptRequest({
-      prompt: {
-        requestId: 'req-2',
+      type: 'single-select',
+      allowSkip: false,
+      questions: [{
+        id: 'question-1',
+        header: 'Run scripts?',
+        question: 'Choose one option.',
         options: [
-          { id: 'yes_once', label: 'Yes once' },
-          { id: 'no', label: 'No' },
+          { id: 'yes_once', label: 'Yes once', description: undefined },
+          { id: 'yes_in_session', label: 'Yes in this session', description: undefined },
+          { id: 'no', label: 'No', description: undefined },
         ],
-        defaultOptionId: 'missing-option',
-      },
+      }],
     });
-
-    expect(parsed?.defaultOptionId).toBe('no');
   });
 
   it('parses metadata used for refresh-after-dismiss behavior', () => {
     const parsed = parseHitlPromptRequest({
       prompt: {
         requestId: 'req-meta',
-        options: [
-          { id: 'dismiss', label: 'Dismiss' },
-        ],
+        questions: [{
+          id: 'question-1',
+          header: 'Created',
+          question: 'Dismiss this notification?',
+          options: [
+            { id: 'dismiss', label: 'Dismiss' },
+          ],
+        }],
         metadata: {
           kind: 'create_agent_created',
           refreshAfterDismiss: true,
@@ -98,20 +95,24 @@ describe('web/domain/hitl', () => {
     expect(parsed).toBeNull();
   });
 
-  it('parses a valid tool-event HITL prompt payload', () => {
+  it('parses a valid structured tool-event HITL prompt payload', () => {
     const parsed = parseHitlPromptFromToolEvent({
       chatId: 'chat-2',
       toolExecution: {
         metadata: {
           hitlPrompt: {
             requestId: 'req-tool-1',
-            title: 'Need confirmation',
-            message: 'Confirm action',
-            defaultOptionId: 'confirm',
-            options: [
-              { id: 'confirm', label: 'Confirm' },
-              { id: 'cancel', label: 'Cancel' },
-            ],
+            type: 'single-select',
+            allowSkip: true,
+            questions: [{
+              id: 'question-1',
+              header: 'Need confirmation',
+              question: 'Confirm action',
+              options: [
+                { id: 'confirm', label: 'Confirm' },
+                { id: 'cancel', label: 'Cancel' },
+              ],
+            }],
           },
         },
       },
@@ -120,14 +121,17 @@ describe('web/domain/hitl', () => {
     expect(parsed).toEqual({
       requestId: 'req-tool-1',
       chatId: 'chat-2',
-      title: 'Need confirmation',
-      message: 'Confirm action',
-      mode: 'option',
-      defaultOptionId: 'confirm',
-      options: [
-        { id: 'confirm', label: 'Confirm', description: undefined },
-        { id: 'cancel', label: 'Cancel', description: undefined },
-      ],
+      type: 'single-select',
+      allowSkip: true,
+      questions: [{
+        id: 'question-1',
+        header: 'Need confirmation',
+        question: 'Confirm action',
+        options: [
+          { id: 'confirm', label: 'Confirm', description: undefined },
+          { id: 'cancel', label: 'Cancel', description: undefined },
+        ],
+      }],
     });
   });
 
@@ -135,23 +139,17 @@ describe('web/domain/hitl', () => {
     const queue = enqueueHitlPrompt([], {
       requestId: 'req-1',
       chatId: null,
-      title: 'A',
-      message: 'B',
-      mode: 'option',
-      defaultOptionId: 'no',
-      options: [{ id: 'no', label: 'No' }],
+      type: 'single-select',
+      questions: [{ id: 'question-1', header: 'A', question: 'B', options: [{ id: 'no', label: 'No' }] }],
     });
     const deduped = enqueueHitlPrompt(queue, {
       requestId: 'req-1',
       chatId: null,
-      title: 'C',
-      message: 'D',
-      mode: 'option',
-      defaultOptionId: 'no',
-      options: [{ id: 'no', label: 'No' }],
+      type: 'single-select',
+      questions: [{ id: 'question-1', header: 'C', question: 'D', options: [{ id: 'no', label: 'No' }] }],
     });
     expect(deduped).toHaveLength(1);
-    expect(deduped[0]?.title).toBe('A');
+    expect(deduped[0]?.questions[0]?.header).toBe('A');
   });
 
   it('removes only the requested queue entry', () => {
@@ -160,20 +158,14 @@ describe('web/domain/hitl', () => {
         {
           requestId: 'req-1',
           chatId: null,
-          title: 'A',
-          message: 'A',
-          mode: 'option',
-          defaultOptionId: 'no',
-          options: [{ id: 'no', label: 'No' }],
+          type: 'single-select',
+          questions: [{ id: 'question-1', header: 'A', question: 'A', options: [{ id: 'no', label: 'No' }] }],
         },
         {
           requestId: 'req-2',
           chatId: null,
-          title: 'B',
-          message: 'B',
-          mode: 'option',
-          defaultOptionId: 'no',
-          options: [{ id: 'no', label: 'No' }],
+          type: 'single-select',
+          questions: [{ id: 'question-1', header: 'B', question: 'B', options: [{ id: 'no', label: 'No' }] }],
         },
       ],
       'req-1'
@@ -187,20 +179,14 @@ describe('web/domain/hitl', () => {
       {
         requestId: 'req-a',
         chatId: 'chat-a',
-        title: 'A',
-        message: 'A',
-        mode: 'option',
-        defaultOptionId: 'no',
-        options: [{ id: 'no', label: 'No' }],
+        type: 'single-select',
+        questions: [{ id: 'question-1', header: 'A', question: 'A', options: [{ id: 'no', label: 'No' }] }],
       },
       {
         requestId: 'req-b',
         chatId: 'chat-b',
-        title: 'B',
-        message: 'B',
-        mode: 'option',
-        defaultOptionId: 'no',
-        options: [{ id: 'no', label: 'No' }],
+        type: 'single-select',
+        questions: [{ id: 'question-1', header: 'B', question: 'B', options: [{ id: 'no', label: 'No' }] }],
       },
     ], 'chat-b');
 
@@ -212,16 +198,13 @@ describe('web/domain/hitl', () => {
       {
         requestId: 'req-a',
         chatId: 'chat-a',
-        title: 'A',
-        message: 'A',
-        mode: 'option',
-        defaultOptionId: 'no',
-        options: [{ id: 'no', label: 'No' }],
+        type: 'single-select',
+        questions: [{ id: 'question-1', header: 'A', question: 'A', options: [{ id: 'no', label: 'No' }] }],
       },
     ], 'chat-b')).toBe(false);
   });
 
-  it('reconstructs unresolved HITL prompts from persisted request/response message pairs', () => {
+  it('reconstructs unresolved structured HITL prompts from persisted request/response message pairs', () => {
     const reconstructed = reconstructPendingHitlPromptsFromMessages([
       {
         role: 'assistant',
@@ -232,11 +215,18 @@ describe('web/domain/hitl', () => {
             id: 'call-hitl-1',
             type: 'function',
             function: {
-              name: 'human_intervention_request',
+              name: 'ask_user_input',
               arguments: JSON.stringify({
-                question: 'Approve deployment?',
-                options: ['Yes', 'No'],
-                defaultOption: 'No',
+                type: 'single-select',
+                questions: [{
+                  id: 'question-1',
+                  header: 'Approve deployment?',
+                  question: 'Approve deployment?',
+                  options: [
+                    { id: 'yes', label: 'Yes' },
+                    { id: 'no', label: 'No' },
+                  ],
+                }],
               }),
             },
           },
@@ -259,10 +249,18 @@ describe('web/domain/hitl', () => {
             id: 'call-hitl-2',
             type: 'function',
             function: {
-              name: 'human_intervention_request',
+              name: 'ask_user_input',
               arguments: JSON.stringify({
-                question: 'Approve cleanup?',
-                options: ['Yes', 'No'],
+                type: 'single-select',
+                questions: [{
+                  id: 'question-1',
+                  header: 'Approve cleanup?',
+                  question: 'Approve cleanup?',
+                  options: [
+                    { id: 'approve', label: 'Approve' },
+                    { id: 'decline', label: 'Decline' },
+                  ],
+                }],
               }),
             },
           },
@@ -280,13 +278,18 @@ describe('web/domain/hitl', () => {
     expect(reconstructed[0]).toMatchObject({
       requestId: 'call-hitl-2',
       chatId: 'chat-1',
-      title: 'Human input required',
-      message: 'Approve cleanup?',
-      defaultOptionId: 'opt_1',
+      type: 'single-select',
     });
-    expect(reconstructed[0]?.options).toEqual([
-      { id: 'opt_1', label: 'Yes' },
-      { id: 'opt_2', label: 'No' },
+    expect(reconstructed[0]?.questions).toEqual([
+      {
+        id: 'question-1',
+        header: 'Approve cleanup?',
+        question: 'Approve cleanup?',
+        options: [
+          { id: 'approve', label: 'Approve', description: undefined },
+          { id: 'decline', label: 'Decline', description: undefined },
+        ],
+      },
     ]);
   });
 });

@@ -333,6 +333,7 @@ export default function WorldChat(props: WorldChatProps) {
   const waitingMessageUiConfig = getWaitingMessageUiConfig();
   const messageMetaUiConfig = getMessageMetaUiConfig();
   const legendUiConfig = getWorldChatLegendUiConfig();
+  const primaryHitlQuestion = activeHitlPrompt?.questions?.[0] || null;
   const agentSpriteByName = new Map<string, number>();
   const agentSpriteById = new Map<string, number>();
 
@@ -783,13 +784,13 @@ export default function WorldChat(props: WorldChatProps) {
               </div>
               <div className="message system-message hitl-inline-message">
                 <div className="message-sender">
-                  {activeHitlPrompt.title || 'Human input required'}
+                  {primaryHitlQuestion?.header || 'Human input required'}
                 </div>
                 <div className="message-content">
-                  {(activeHitlPrompt.message || 'Please choose an option to continue.').replace(/\n\s*\n+/g, '\n')}
+                  {(primaryHitlQuestion?.question || 'Please choose an option to continue.').replace(/\n\s*\n+/g, '\n')}
                 </div>
                 <div className="hitl-inline-actions hitl-inline-option-actions">
-                  {activeHitlPrompt.options.map((option) => {
+                  {(primaryHitlQuestion?.options || []).map((option) => {
                     const isSubmitting = submittingHitlRequestId === activeHitlPrompt.requestId;
                     return (
                       <ActionButton
@@ -798,7 +799,10 @@ export default function WorldChat(props: WorldChatProps) {
                         disabled={isSubmitting}
                         $onclick={['respond-hitl-option', {
                           requestId: activeHitlPrompt.requestId,
-                          optionId: option.id,
+                          answers: [{
+                            questionId: primaryHitlQuestion?.id || 'question-1',
+                            optionIds: [option.id]
+                          }],
                           chatId: activeHitlPrompt.chatId
                         }]}
                         data-testid={`hitl-option-${option.id}`}
@@ -807,6 +811,20 @@ export default function WorldChat(props: WorldChatProps) {
                       </ActionButton>
                     );
                   })}
+                  {activeHitlPrompt.allowSkip ? (
+                    <ActionButton
+                      className="btn-secondary px-4 py-2 rounded shrink-0"
+                      disabled={submittingHitlRequestId === activeHitlPrompt.requestId}
+                      $onclick={['respond-hitl-option', {
+                        requestId: activeHitlPrompt.requestId,
+                        skipped: true,
+                        chatId: activeHitlPrompt.chatId
+                      }]}
+                      data-testid="hitl-skip"
+                    >
+                      <div className="font-bold">Skip</div>
+                    </ActionButton>
+                  ) : null}
                 </div>
               </div>
             </div>

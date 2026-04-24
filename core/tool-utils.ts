@@ -153,7 +153,57 @@ function normalizeKnownParameterAliases(toolName: string, args: any): {
       corrections.push("confirmation_message removed (deprecated)");
     }
 
+    if (
+      normalizedArgs.questions === undefined
+      && typeof normalizedArgs.question === 'string'
+      && Array.isArray(normalizedArgs.options)
+    ) {
+      const normalizedOptions = normalizedArgs.options
+        .map((option: unknown, index: number) => {
+          if (option && typeof option === 'object' && !Array.isArray(option)) {
+            const optionRecord = option as Record<string, unknown>;
+            const label = typeof optionRecord.label === 'string' ? optionRecord.label.trim() : '';
+            if (!label) {
+              return null;
+            }
+            const id = typeof optionRecord.id === 'string' && optionRecord.id.trim()
+              ? optionRecord.id.trim()
+              : `opt_${index + 1}`;
+            return {
+              id,
+              label,
+              ...(typeof optionRecord.description === 'string' && optionRecord.description.trim()
+                ? { description: optionRecord.description.trim() }
+                : {}),
+            };
+          }
+
+          const label = String(option || '').trim();
+          if (!label) {
+            return null;
+          }
+          return {
+            id: `opt_${index + 1}`,
+            label,
+          };
+        })
+        .filter(Boolean);
+
+      normalizedArgs.questions = [{
+        id: 'question-1',
+        header: typeof normalizedArgs.title === 'string' && normalizedArgs.title.trim()
+          ? normalizedArgs.title.trim()
+          : 'Human input required',
+        question: normalizedArgs.question,
+        options: normalizedOptions,
+      }];
+      corrections.push('question/options -> questions[0]');
+    }
+
     delete normalizedArgs.prompt;
+    delete normalizedArgs.question;
+    delete normalizedArgs.options;
+    delete normalizedArgs.defaultOption;
     delete normalizedArgs.default_option;
     delete normalizedArgs.requireConfirmation;
     delete normalizedArgs.require_confirmation;
@@ -229,8 +279,8 @@ export function filterAndHandleEmptyNamedFunctionCalls(
   world: World,
   agent: Agent,
   messageId: string,
-  chatId: string
-): { validCalls: FunctionCall[]; toolResults: ChatMessage[] } {
+  chatId?: string,
+) {
   const validCalls: FunctionCall[] = [];
   const toolResults: ChatMessage[] = [];
 
@@ -238,16 +288,13 @@ export function filterAndHandleEmptyNamedFunctionCalls(
     const toolName = call.function?.name || '';
     const toolCallId = call.id || generateFallbackId();
 
-    // Check if name is missing or empty
     if (!toolName || toolName.trim() === '') {
-      // Create tool result message for conversation history
       toolResults.push({
         role: 'tool',
         content: `Error: Malformed tool call - empty or missing tool name. Tool call ID: ${toolCallId}`,
         tool_call_id: toolCallId,
       });
 
-      // Emit tool-error event on world channel (best-effort)
       try {
         publishToolEvent(world, {
           agentName: agent.id || agent.name || 'unknown',
@@ -261,13 +308,12 @@ export function filterAndHandleEmptyNamedFunctionCalls(
           },
         });
       } catch (error) {
-        // Best-effort: don't throw if event publishing fails
         console.error('Failed to publish tool-error event:', error);
       }
-    } else {
-      // Valid call with non-empty name
-      validCalls.push(call);
+      continue;
     }
+
+    validCalls.push(call);
   }
 
   return { validCalls, toolResults };

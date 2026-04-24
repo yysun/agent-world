@@ -10,28 +10,33 @@
  * - Fallback/invalid input behavior.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   markHitlRequestHandled,
   parseHitlPromptFromToolEvent,
   parseHitlOptionRequest,
+  resolveHitlPromptSelectionInput,
   resolveHitlOptionSelectionInput,
+  submitCliHitlSelection,
 } from '../../cli/hitl.js';
 
 describe('cli/hitl', () => {
-  it('parses a valid pending HITL prompt payload', () => {
+  it('parses a valid structured pending HITL prompt payload', () => {
     const parsed = parseHitlOptionRequest({
       chatId: 'chat-1',
       prompt: {
         requestId: 'req-1',
-        title: 'Run scripts?',
-        message: 'Please confirm.',
-        defaultOptionId: 'yes_once',
-        options: [
-          { id: 'yes_once', label: 'Yes once' },
-          { id: 'yes_in_session', label: 'Yes in this session' },
-          { id: 'no', label: 'No' },
-        ],
+        type: 'single-select',
+        questions: [{
+          id: 'question-1',
+          header: 'Run scripts?',
+          question: 'Please confirm.',
+          options: [
+            { id: 'yes_once', label: 'Yes once' },
+            { id: 'yes_in_session', label: 'Yes in this session' },
+            { id: 'no', label: 'No' },
+          ],
+        }],
       },
     });
 
@@ -41,7 +46,8 @@ describe('cli/hitl', () => {
       message: 'Please confirm.',
       chatId: 'chat-1',
       mode: 'option',
-      defaultOptionId: 'yes_once',
+      allowSkip: false,
+      defaultOptionId: 'no',
       options: [
         { id: 'yes_once', label: 'Yes once', description: undefined },
         { id: 'yes_in_session', label: 'Yes in this session', description: undefined },
@@ -50,20 +56,23 @@ describe('cli/hitl', () => {
     });
   });
 
-  it('parses a valid HITL prompt from tool-progress metadata', () => {
+  it('parses a valid structured HITL prompt from tool-progress metadata', () => {
     const parsed = parseHitlPromptFromToolEvent({
       chatId: 'chat-2',
       toolExecution: {
         metadata: {
           hitlPrompt: {
             requestId: 'req-tool-1',
-            title: 'Approval required',
-            message: 'Approve?',
-            defaultOptionId: 'yes',
-            options: [
-              { id: 'yes', label: 'Yes' },
-              { id: 'no', label: 'No' },
-            ],
+            type: 'single-select',
+            questions: [{
+              id: 'question-1',
+              header: 'Approval required',
+              question: 'Approve?',
+              options: [
+                { id: 'yes', label: 'Yes' },
+                { id: 'no', label: 'No' },
+              ],
+            }],
           }
         }
       }
@@ -71,7 +80,31 @@ describe('cli/hitl', () => {
 
     expect(parsed?.requestId).toBe('req-tool-1');
     expect(parsed?.chatId).toBe('chat-2');
-    expect(parsed?.defaultOptionId).toBe('yes');
+    expect(parsed?.allowSkip).toBe(false);
+    expect(parsed?.defaultOptionId).toBe('no');
+  });
+
+  it('parses allowSkip from a structured pending HITL prompt payload', () => {
+    const parsed = parseHitlOptionRequest({
+      chatId: 'chat-skip',
+      prompt: {
+        requestId: 'req-skip',
+        type: 'single-select',
+        allowSkip: true,
+        questions: [{
+          id: 'question-1',
+          header: 'Optional follow-up',
+          question: 'Skip if you do not want to answer now.',
+          options: [
+            { id: 'yes', label: 'Yes' },
+            { id: 'no', label: 'No' },
+          ],
+        }],
+      },
+    });
+
+    expect(parsed?.allowSkip).toBe(true);
+    expect(parsed?.defaultOptionId).toBe('no');
   });
 
   it('returns null for non-hitl payloads', () => {
@@ -111,6 +144,84 @@ describe('cli/hitl', () => {
     ];
     expect(resolveHitlOptionSelectionInput(options, '', 'no')).toBe('no');
     expect(resolveHitlOptionSelectionInput(options, '999', 'no')).toBeNull();
+  });
+
+  it('resolves skip input only when the prompt allows skipping', () => {
+    const options = [
+      { id: 'yes_once', label: 'Yes once' },
+      { id: 'no', label: 'No' },
+    ];
+
+    expect(resolveHitlPromptSelectionInput(options, 'skip', 'no', true)).toEqual({ kind: 'skip' });
+    expect(resolveHitlPromptSelectionInput(options, 'S', 'no', true)).toEqual({ kind: 'skip' });
+    expect(resolveHitlPromptSelectionInput(options, 'skip', 'no', false)).toBeNull();
+    expect(resolveHitlPromptSelectionInput(options, '', 'no', true)).toEqual({ kind: 'option', optionId: 'no' });
+  });
+
+  it('submits an interactive skip response with skipped=true', () => {
+    const submitResponse = vi.fn(() => ({ accepted: true }));
+
+    const result = submitCliHitlSelection(submitResponse, {
+      worldId: 'world-1',
+      request: {
+        requestId: 'req-skip',
+        title: 'Optional step',
+        message: 'You may skip this prompt.',
+        chatId: 'chat-1',
+        mode: 'option',
+        allowSkip: true,
+        options: [
+          { id: 'yes', label: 'Yes' },
+          { id: 'no', label: 'No' },
+        ],
+        defaultOptionId: 'no',
+      },
+      selection: { kind: 'skip' },
+    });
+
+    expect(submitResponse).toHaveBeenCalledWith({
+      worldId: 'world-1',
+      requestId: 'req-skip',
+      skipped: true,
+      chatId: 'chat-1',
+    });
+    expect(result).toMatchObject({
+      accepted: true,
+      successMessage: 'Submitted HITL skip response.',
+    });
+  });
+
+  it('submits an interactive option response with optionId', () => {
+    const submitResponse = vi.fn(() => ({ accepted: true }));
+
+    const result = submitCliHitlSelection(submitResponse, {
+      worldId: 'world-1',
+      request: {
+        requestId: 'req-option',
+        title: 'Approval required',
+        message: 'Choose an option.',
+        chatId: 'chat-1',
+        mode: 'option',
+        allowSkip: false,
+        options: [
+          { id: 'yes_once', label: 'Yes once' },
+          { id: 'no', label: 'No' },
+        ],
+        defaultOptionId: 'no',
+      },
+      selection: { kind: 'option', optionId: 'yes_once' },
+    });
+
+    expect(submitResponse).toHaveBeenCalledWith({
+      worldId: 'world-1',
+      requestId: 'req-option',
+      optionId: 'yes_once',
+      chatId: 'chat-1',
+    });
+    expect(result).toMatchObject({
+      accepted: true,
+      successMessage: 'Submitted HITL option response.',
+    });
   });
 
   it('marks replayed request IDs as duplicates after first handling', () => {

@@ -555,13 +555,33 @@ describe('Tool Utils - validateToolParameters', () => {
     const schema = {
       type: 'object',
       properties: {
-        question: { type: 'string' },
-        options: {
+        questions: {
           type: 'array',
-          items: { type: 'string' },
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              header: { type: 'string' },
+              question: { type: 'string' },
+              options: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    label: { type: 'string' },
+                  },
+                  required: ['id', 'label'],
+                  additionalProperties: false,
+                },
+              },
+            },
+            required: ['id', 'header', 'question', 'options'],
+            additionalProperties: false,
+          },
         },
       },
-      required: ['question', 'options'],
+      required: ['questions'],
       additionalProperties: false,
     };
 
@@ -577,8 +597,15 @@ describe('Tool Utils - validateToolParameters', () => {
 
     expect(validation.valid).toBe(true);
     expect(validation.correctedArgs).toEqual({
-      question: 'Pick one',
-      options: ['A', 'B'],
+      questions: [{
+        id: 'question-1',
+        header: 'Human input required',
+        question: 'Pick one',
+        options: [
+          { id: 'opt_1', label: 'A' },
+          { id: 'opt_2', label: 'B' },
+        ],
+      }],
     });
   });
 
@@ -586,13 +613,33 @@ describe('Tool Utils - validateToolParameters', () => {
     const schema = {
       type: 'object',
       properties: {
-        question: { type: 'string' },
-        options: {
+        questions: {
           type: 'array',
-          items: { type: 'string' },
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              header: { type: 'string' },
+              question: { type: 'string' },
+              options: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    label: { type: 'string' },
+                  },
+                  required: ['id', 'label'],
+                  additionalProperties: false,
+                },
+              },
+            },
+            required: ['id', 'header', 'question', 'options'],
+            additionalProperties: false,
+          },
         },
       },
-      required: ['question', 'options'],
+      required: ['questions'],
       additionalProperties: false,
     };
 
@@ -608,8 +655,15 @@ describe('Tool Utils - validateToolParameters', () => {
 
     expect(validation.valid).toBe(true);
     expect(validation.correctedArgs).toEqual({
-      question: 'Pick one',
-      options: ['A', 'B'],
+      questions: [{
+        id: 'question-1',
+        header: 'Human input required',
+        question: 'Pick one',
+        options: [
+          { id: 'opt_1', label: 'A' },
+          { id: 'opt_2', label: 'B' },
+        ],
+      }],
     });
   });
 });

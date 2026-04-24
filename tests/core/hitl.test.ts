@@ -462,18 +462,27 @@ function makeLoadSkillApprovalAssistantMessage(toolCallId: string, skillId: stri
     role: 'assistant',
     sender: 'qwen',
     chatId: chatId || null,
-    content: `Calling tool: human_intervention_request (skill_id: "${skillId}")`,
+    content: `Calling tool: ask_user_input (skill_id: "${skillId}")`,
     tool_calls: [
       {
         id: toolCallId,
         function: {
-          name: 'human_intervention_request',
+          name: 'ask_user_input',
           arguments: JSON.stringify({
-            question: 'Approve applying this skill now?',
-            options: ['Yes once', 'Yes in this session', 'No'],
-            defaultOption: 'No',
+            type: 'single-select',
+            allowSkip: false,
+            questions: [{
+              id: 'question-1',
+              header: 'Approve applying this skill now?',
+              question: 'Approve applying this skill now?',
+              options: [
+                { id: 'yes_once', label: 'Yes once' },
+                { id: 'yes_session', label: 'Yes in this session' },
+                { id: 'no', label: 'No' },
+              ],
+            }],
             metadata: {
-              tool: 'human_intervention_request',
+              tool: 'ask_user_input',
               toolCallId,
               source: 'load_skill',
               skillId,
@@ -501,7 +510,7 @@ describe('listPendingHitlPromptEventsFromMessages (message-authoritative read mo
     expect(pending[0].prompt.requestId).toBe('call-1');
     expect(pending[0].prompt.toolCallId).toBe('call-1');
     expect(pending[0].chatId).toBe('chat-a');
-    expect(pending[0].prompt.options.map((o) => o.label)).toEqual(['Yes', 'No']);
+    expect(pending[0].prompt.questions[0]?.options.map((o) => o.label)).toEqual(['Yes', 'No']);
   });
 
   it('returns empty when tool-response message resolves the request', () => {
@@ -541,7 +550,7 @@ describe('listPendingHitlPromptEventsFromMessages (message-authoritative read mo
       prompt: {
         requestId: 'load-skill-approval-1',
         toolCallId: 'load-skill-approval-1',
-        toolName: 'human_intervention_request',
+        toolName: 'ask_user_input',
         agentName: 'qwen',
       },
     });
@@ -565,21 +574,24 @@ describe('listPendingHitlPromptEventsFromMessages (message-authoritative read mo
         role: 'assistant',
         sender: 'planner',
         chatId: 'chat-shell',
-        content: 'Calling tool: human_intervention_request',
+        content: 'Calling tool: ask_user_input',
         tool_calls: [
           {
             id: 'shell-approval-1',
             function: {
-              name: 'human_intervention_request',
+              name: 'ask_user_input',
               arguments: JSON.stringify({
-                title: 'Approve shell command?',
-                question: 'Run rm test.txt?',
-                options: [
-                  { id: 'approve', label: 'Approve' },
-                  { id: 'deny', label: 'Deny' },
-                ],
-                defaultOptionId: 'deny',
-                defaultOption: 'Deny',
+                type: 'single-select',
+                allowSkip: false,
+                questions: [{
+                  id: 'question-1',
+                  header: 'Approve shell command?',
+                  question: 'Run rm test.txt?',
+                  options: [
+                    { id: 'approve', label: 'Approve' },
+                    { id: 'deny', label: 'Deny' },
+                  ],
+                }],
                 metadata: {
                   tool: 'shell_cmd',
                   toolCallId: 'shell-call-1',
@@ -600,17 +612,22 @@ describe('listPendingHitlPromptEventsFromMessages (message-authoritative read mo
         requestId: 'shell-approval-1',
         toolCallId: 'shell-call-1',
         toolName: 'shell_cmd',
-        title: 'Approve shell command?',
-        defaultOptionId: 'deny',
-        options: [
-          { id: 'approve', label: 'Approve' },
-          { id: 'deny', label: 'Deny' },
-        ],
+        type: 'single-select',
+        allowSkip: false,
+        questions: [{
+          id: 'question-1',
+          header: 'Approve shell command?',
+          question: 'Run rm test.txt?',
+          options: [
+            { id: 'approve', label: 'Approve' },
+            { id: 'deny', label: 'Deny' },
+          ],
+        }],
       },
     });
   });
 
-  it('reconstructs unresolved ask_user_input prompts as HITL requests', () => {
+  it('reconstructs unresolved ask_user_input prompts as structured HITL requests', () => {
     const messages = [
       {
         role: 'assistant',
@@ -623,8 +640,16 @@ describe('listPendingHitlPromptEventsFromMessages (message-authoritative read mo
             function: {
               name: 'ask_user_input',
               arguments: JSON.stringify({
-                question: 'Proceed?',
-                options: ['Yes', 'No'],
+                type: 'single-select',
+                questions: [{
+                  id: 'question-1',
+                  header: 'Proceed?',
+                  question: 'Proceed?',
+                  options: [
+                    { id: 'yes', label: 'Yes' },
+                    { id: 'no', label: 'No' },
+                  ],
+                }],
               }),
             },
           },
@@ -641,11 +666,16 @@ describe('listPendingHitlPromptEventsFromMessages (message-authoritative read mo
         requestId: 'ask-user-input-1',
         toolCallId: 'ask-user-input-1',
         toolName: 'ask_user_input',
-        message: 'Proceed?',
-        options: [
-          { id: 'opt_1', label: 'Yes' },
-          { id: 'opt_2', label: 'No' },
-        ],
+        type: 'single-select',
+        questions: [{
+          id: 'question-1',
+          header: 'Proceed?',
+          question: 'Proceed?',
+          options: [
+            { id: 'yes', label: 'Yes' },
+            { id: 'no', label: 'No' },
+          ],
+        }],
       },
     });
   });

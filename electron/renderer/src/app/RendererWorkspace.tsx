@@ -204,6 +204,7 @@ type HitlPrompt = {
   requestId: string;
   chatId: string | null;
   toolCallId?: string;
+  allowSkip?: boolean;
   title: string;
   message: string;
   mode: 'option';
@@ -644,7 +645,10 @@ function AppContent({ api }: { api: DesktopApi }) {
     resetActivityRuntimeState,
   } = useStreamingActivity({ setMessages });
 
-  const respondToHitlPrompt = useCallback(async (prompt: HitlPrompt, optionId: string) => {
+  const respondToHitlPrompt = useCallback(async (prompt: HitlPrompt, responseInput: {
+    optionId?: string;
+    skipped?: boolean;
+  }) => {
     if (!prompt) return;
     const worldId = String(loadedWorld?.id || '').trim();
     if (!worldId) {
@@ -658,8 +662,9 @@ function AppContent({ api }: { api: DesktopApi }) {
       return;
     }
 
-    const normalizedOptionId = String(optionId || '').trim();
-    if (!normalizedOptionId) {
+    const normalizedOptionId = String(responseInput?.optionId || '').trim();
+    const skipped = responseInput?.skipped === true;
+    if (!normalizedOptionId && !skipped) {
       setStatusText('Invalid HITL response payload.', 'error');
       return;
     }
@@ -676,7 +681,9 @@ function AppContent({ api }: { api: DesktopApi }) {
 
       const responseChatId = prompt.chatId || selectedSessionId || null;
       const response = normalizeHitlResponse(
-        await api.respondHitlOption(worldId, requestId, normalizedOptionId, responseChatId)
+        skipped
+          ? await api.respondHitlInput(worldId, requestId, [], responseChatId, true)
+          : await api.respondHitlOption(worldId, requestId, normalizedOptionId, responseChatId)
       );
 
       if (!response.accepted) {
@@ -707,6 +714,8 @@ function AppContent({ api }: { api: DesktopApi }) {
 
       if (prompt?.metadata?.kind === 'create_agent_created') {
         setStatusText('Agent created confirmation dismissed.', 'success');
+      } else if (skipped) {
+        setStatusText('HITL prompt skipped.', 'info');
       } else if (normalizedOptionId === 'no') {
         setStatusText('Skill execution was declined.', 'info');
       } else {
@@ -2336,7 +2345,8 @@ function AppContent({ api }: { api: DesktopApi }) {
     inlineWorkingIndicatorState,
     activeHitlPrompt,
     submittingHitlRequestId,
-    onRespondHitlOption: (prompt: HitlPrompt, optionId: string) => respondToHitlPrompt(prompt, optionId),
+    onRespondHitlOption: (prompt: HitlPrompt, optionId: string) => respondToHitlPrompt(prompt, { optionId }),
+    onSkipHitlPrompt: (prompt: HitlPrompt) => respondToHitlPrompt(prompt, { skipped: true }),
   });
 
   const mainContentComposerProps = createMainContentComposerProps({

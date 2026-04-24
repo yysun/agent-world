@@ -56,20 +56,100 @@ type HitlOption = {
   description?: string;
 };
 
+type HitlQuestion = {
+  id: string;
+  header: string;
+  question: string;
+  options: HitlOption[];
+};
+
 type HitlPrompt = {
   requestId: string;
   chatId: string | null;
   toolCallId?: string;
+  type?: 'single-select' | 'multiple-select';
+  allowSkip?: boolean;
+  questions?: HitlQuestion[];
   title: string;
   message: string;
   mode: 'option';
   options: HitlOption[];
-  defaultOptionId?: string;
   metadata?: {
     refreshAfterDismiss?: boolean;
     kind?: string;
   };
 };
+
+function normalizeHitlOptions(optionsLike: unknown): HitlOption[] {
+  return Array.isArray(optionsLike)
+    ? optionsLike
+      .map((entry, index) => {
+        const optionRecord = entry && typeof entry === 'object' && !Array.isArray(entry)
+          ? entry as Record<string, unknown>
+          : null;
+        const id = String(optionRecord?.id || '').trim();
+        const label = optionRecord
+          ? String(optionRecord?.label || '').trim()
+          : String(entry || '').trim();
+        if (!id || !label) {
+          if (!optionRecord && label) {
+            return {
+              id: `opt_${index + 1}`,
+              label,
+            } satisfies HitlOption;
+          }
+          return null;
+        }
+        return {
+          id,
+          label,
+          description: typeof optionRecord?.description === 'string' ? optionRecord.description : undefined,
+        } satisfies HitlOption;
+      })
+      .filter((entry): entry is HitlOption => entry !== null)
+    : [];
+}
+
+function normalizeHitlQuestions(promptLike: Record<string, unknown>): HitlQuestion[] {
+  const structuredQuestions = Array.isArray(promptLike.questions)
+    ? promptLike.questions
+      .map((entry, index) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+          return null;
+        }
+        const questionRecord = entry as Record<string, unknown>;
+        const options = normalizeHitlOptions(questionRecord.options);
+        const question = String(questionRecord.question || '').trim();
+        if (!question || options.length === 0) {
+          return null;
+        }
+        return {
+          id: String(questionRecord.id || '').trim() || `question-${index + 1}`,
+          header: String(questionRecord.header || 'Human input required').trim() || 'Human input required',
+          question,
+          options,
+        } satisfies HitlQuestion;
+      })
+      .filter((entry): entry is HitlQuestion => entry !== null)
+    : [];
+
+  if (structuredQuestions.length > 0) {
+    return structuredQuestions;
+  }
+
+  const legacyQuestion = String(promptLike.question || promptLike.message || promptLike.prompt || '').trim();
+  const legacyOptions = normalizeHitlOptions(promptLike.options);
+  if (!legacyQuestion || legacyOptions.length === 0) {
+    return [];
+  }
+
+  return [{
+    id: 'question-1',
+    header: String(promptLike.title || 'Human input required').trim() || 'Human input required',
+    question: legacyQuestion,
+    options: legacyOptions,
+  }];
+}
 
 type RealtimeState = {
   getActiveCount: () => number;
@@ -182,16 +262,9 @@ export function enqueueHitlPromptFromToolEvent(
     return existing;
   }
 
-  const options = Array.isArray(content?.options)
-    ? content.options
-      .map((option) => ({
-        id: String(option?.id || '').trim(),
-        label: String(option?.label || '').trim(),
-        description: option?.description ? String(option.description) : ''
-      }))
-      .filter((option) => option.id && option.label)
-    : [];
-  if (options.length === 0) {
+  const questions = normalizeHitlQuestions(content);
+  const primaryQuestion = questions[0] || null;
+  if (!primaryQuestion) {
     return existing;
   }
 
@@ -212,11 +285,13 @@ export function enqueueHitlPromptFromToolEvent(
       requestId,
       chatId: promptChatId,
       ...(promptToolCallId ? { toolCallId: promptToolCallId } : {}),
-      title: String(content?.title || 'Approval required').trim() || 'Approval required',
-      message: String(content?.message || '').trim(),
+      type: content?.type === 'multiple-select' ? 'multiple-select' : 'single-select',
+      allowSkip: content?.allowSkip === true,
+      questions,
+      title: primaryQuestion.header,
+      message: primaryQuestion.question,
       mode: 'option',
-      options,
-      ...(typeof content?.defaultOptionId === 'string' ? { defaultOptionId: String(content.defaultOptionId) } : {}),
+      options: primaryQuestion.options,
       metadata: {
         refreshAfterDismiss: promptMetadata?.refreshAfterDismiss === true,
         kind: typeof promptMetadata?.kind === 'string' ? promptMetadata.kind : undefined,

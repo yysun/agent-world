@@ -640,6 +640,26 @@ describe('createMainIpcHandlers.respondHitlOption', () => {
     expect(result).toEqual({ accepted: true });
   });
 
+  it('delegates skipped HITL responses without synthesizing an option id', async () => {
+    const submitWorldHitlResponse = vi.fn(() => ({ accepted: true }));
+    const { handlers } = await createHandlers({ submitWorldHitlResponse });
+
+    const result = await handlers.respondHitlOption({
+      worldId: 'world-1',
+      requestId: 'req-skip',
+      skipped: true,
+      chatId: 'chat-1'
+    });
+
+    expect(submitWorldHitlResponse).toHaveBeenCalledWith({
+      worldId: 'world-1',
+      requestId: 'req-skip',
+      skipped: true,
+      chatId: 'chat-1'
+    });
+    expect(result).toEqual({ accepted: true });
+  });
+
 });
 
 describe('createMainIpcHandlers.listSkillRegistry', () => {

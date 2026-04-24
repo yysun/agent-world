@@ -2407,14 +2407,29 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     const worldId = String(payload?.worldId || '').trim();
     const requestId = String(payload?.requestId || '').trim();
     const optionId = String(payload?.optionId || '').trim();
+    const answers = Array.isArray(payload?.answers)
+      ? payload.answers
+        .map((answer: any) => ({
+          questionId: String(answer?.questionId || '').trim(),
+          optionIds: Array.isArray(answer?.optionIds)
+            ? answer.optionIds.map((entry: unknown) => String(entry || '').trim()).filter(Boolean)
+            : [],
+        }))
+        .filter((answer: { questionId: string; optionIds: string[] }) => answer.questionId && answer.optionIds.length > 0)
+      : undefined;
+    const skipped = payload?.skipped === true;
     const chatId = payload?.chatId !== undefined ? String(payload.chatId || '').trim() || null : undefined;
     if (!worldId) throw new Error('World ID is required.');
     if (!requestId) throw new Error('requestId is required.');
-    if (!optionId) throw new Error('optionId is required.');
+    if (!optionId && !skipped && (!answers || answers.length === 0)) {
+      throw new Error('optionId, answers, or skipped=true is required.');
+    }
     return submitWorldHitlResponse({
       worldId,
       requestId,
-      optionId,
+      ...(optionId ? { optionId } : {}),
+      ...(answers ? { answers } : {}),
+      ...(skipped ? { skipped: true } : {}),
       ...(chatId !== undefined ? { chatId } : {}),
     });
   }

@@ -18,6 +18,7 @@
  * - 2026-02-27: Added active-chat event scoping in CLI listeners to prevent cross-chat message/system/SSE/tool leakage.
  * - 2026-02-25: Added fallback shorthand attempt `@awesome-agent-world/<input>` when a provided local path does not exist.
  * - 2026-02-25: Added GitHub shorthand world source import support (`@awesome-agent-world/<world-name>`) with safe remote staging and automatic import mode.
+ * - 2026-04-24: Added interactive-only CLI Skip handling for HITL prompts when `allowSkip` is explicitly enabled by the prompt.
  * - 2026-02-20: Enforced options-only HITL handling in interactive and pipeline modes.
  * - 2026-02-14: Added interactive + pipeline HITL option response handling for generic approval requests.
  * - 2026-02-11: Fixed tool-stream timeout: extendTimeout() resets idle timeout on streaming data
@@ -123,8 +124,10 @@ import { getSystemEventDisplayText } from './system-events.js';
 import {
   markHitlRequestHandled,
   parseHitlPromptFromToolEvent,
-  resolveHitlOptionSelectionInput,
+  resolveHitlPromptSelectionInput,
+  submitCliHitlSelection,
   type HitlOptionRequestPayload,
+  type HitlPromptSelectionResult,
 } from './hitl.js';
 
 // Create CLI category logger after logger auto-initialization
@@ -399,7 +402,7 @@ async function promptHitlOptionSelection(
   request: HitlOptionRequestPayload,
   statusLine: StatusLineManager,
   rl: readline.Interface
-): Promise<string> {
+): Promise<HitlPromptSelectionResult> {
   const fallbackOptionId = request.defaultOptionId;
   statusLine.pause();
   try {
@@ -418,21 +421,32 @@ async function promptHitlOptionSelection(
           console.log(`     ${gray(option.description)}`);
         }
       });
-
-      const answer = await new Promise<string>((resolve) => {
-        rl.question(`${boldMagenta('Choice (number or option id):')} `, (input) => resolve(input.trim()));
-      });
-
-      const resolvedOptionId = resolveHitlOptionSelectionInput(
-        request.options,
-        answer,
-        fallbackOptionId
-      );
-      if (resolvedOptionId) {
-        return resolvedOptionId;
+      if (request.allowSkip) {
+        console.log(`  ${yellow('s.')} Skip`);
       }
 
-      console.log(boldRed('Invalid selection. Please choose a listed option.'));
+      const promptLabel = request.allowSkip
+        ? 'Choice (number, option id, or skip):'
+        : 'Choice (number or option id):';
+
+      const answer = await new Promise<string>((resolve) => {
+        rl.question(`${boldMagenta(promptLabel)} `, (input) => resolve(input.trim()));
+      });
+
+      const selection = resolveHitlPromptSelectionInput(
+        request.options,
+        answer,
+        fallbackOptionId,
+        request.allowSkip
+      );
+      if (selection) {
+        return selection;
+      }
+
+      const invalidMessage = request.allowSkip
+        ? 'Invalid selection. Please choose a listed option or type skip.'
+        : 'Invalid selection. Please choose a listed option.';
+      console.log(boldRed(invalidMessage));
     }
   } finally {
     statusLine.resume();
@@ -597,11 +611,11 @@ function attachCLIListeners(
           if (streaming && globalState && rl && statusLine) {
             globalState.hitlPromptActive = true;
             try {
-              const result = submitWorldHitlResponse({
+              const selectedResponse = await promptHitlOptionSelection(hitlRequest, statusLine, rl);
+              const result = submitCliHitlSelection(submitWorldHitlResponse, {
                 worldId: world.id,
-                requestId: hitlRequest.requestId,
-                optionId: await promptHitlOptionSelection(hitlRequest, statusLine, rl),
-                chatId: hitlRequest.chatId,
+                request: hitlRequest,
+                selection: selectedResponse,
               });
               if (!result.accepted) {
                 statusLine.pause();
@@ -610,7 +624,7 @@ function attachCLIListeners(
                 return;
               }
               statusLine.pause();
-              console.log(green('Submitted HITL option response.'));
+              console.log(green(result.successMessage || 'Submitted HITL response.'));
               statusLine.resume();
               return;
             } finally {

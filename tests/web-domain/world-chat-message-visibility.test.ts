@@ -16,6 +16,7 @@
  *
  * Summary of Recent Changes:
  * - 2026-03-01: Added regression coverage for hiding messages with logEvent (server logs).
+ * - 2026-04-24: Added regression coverage for hiding assistant `ask_user_input` placeholder rows while keeping the legacy alias hidden.
  * - 2026-02-28: Added regression coverage for hiding assistant `human_intervention_request` placeholder rows.
  */
 
@@ -38,7 +39,7 @@ describe('web world chat message visibility', () => {
   it('hides assistant HITL placeholder message by content text', () => {
     const message = createMessage({
       role: 'assistant',
-      text: 'Calling tool: human_intervention_request',
+      text: 'Calling tool: ask_user_input',
       messageId: 'msg-hitl-content-1',
     });
 
@@ -48,7 +49,7 @@ describe('web world chat message visibility', () => {
   it('hides assistant HITL placeholder message when tool call metadata is present', () => {
     const message = createMessage({
       role: 'assistant',
-      text: 'Calling tool: human_intervention_request (skill_id: "ian-gemini-web")',
+      text: 'Calling tool: ask_user_input (skill_id: "ian-gemini-web")',
       messageId: 'msg-hitl-tool-call-1',
     }) as Message & {
       tool_calls: Array<{ id: string; type: string; function: { name: string; arguments: string } }>;
@@ -58,7 +59,7 @@ describe('web world chat message visibility', () => {
         id: 'call_hitl_1',
         type: 'function',
         function: {
-          name: 'human_intervention_request',
+          name: 'ask_user_input',
           arguments: '{"question":"confirm?"}',
         },
       },
