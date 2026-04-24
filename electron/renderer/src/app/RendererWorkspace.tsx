@@ -112,7 +112,7 @@ import {
   getReasoningEffortLevel,
   getWorldFormFromWorld,
 } from '../utils/app-helpers';
-import { useChatEventSubscriptions } from '../hooks/useChatEventSubscriptions';
+import { shouldResetHitlQueueForWorldChange, useChatEventSubscriptions } from '../hooks/useChatEventSubscriptions';
 import { deriveHitlPromptDisplayState } from '../domain/hitl-scope';
 import { shouldShowQueuePanel } from '../domain/queue-visibility';
 import { useMessageQueue } from '../hooks/useMessageQueue';
@@ -203,6 +203,7 @@ type SetterProxy = {
 type HitlPrompt = {
   requestId: string;
   chatId: string | null;
+  toolCallId?: string;
   title: string;
   message: string;
   mode: 'option';
@@ -316,6 +317,7 @@ function BridgeUnavailableScreen({ timedOut }: { timedOut: boolean }) {
 function AppContent({ api }: { api: DesktopApi }) {
   const chatSubscriptionCounter = useRef(0);
   const messageRefreshCounter = useRef(0);
+  const previousLoadedWorldIdRef = useRef<string | null>(null);
   // Always reflects the latest selectedSessionId so async callbacks can read the
   // current value without stale closures. Updated synchronously each render below.
   const selectedSessionIdRef = useRef<string | null>(null);
@@ -622,6 +624,14 @@ function AppContent({ api }: { api: DesktopApi }) {
     activeHitlPrompt,
     hasActiveHitlPrompt,
   } = deriveHitlPromptDisplayState(hitlPromptQueue, selectedSessionId);
+  const pendingHitlSessionIds = useMemo(
+    () => Array.from(new Set(
+      hitlPromptQueue
+        .map((prompt: HitlPrompt) => String(prompt?.chatId || '').trim())
+        .filter(Boolean)
+    )),
+    [hitlPromptQueue]
+  );
 
   const scopedPanelLogs = filterPanelLogsForScope(panelLogs, loadedWorld?.id || null, selectedSessionId);
 
@@ -672,6 +682,11 @@ function AppContent({ api }: { api: DesktopApi }) {
       if (!response.accepted) {
         if (response.reason.includes('No pending HITL request found')) {
           setHitlPromptQueue((existing: HitlPrompt[]) => existing.filter((entry) => entry.requestId !== requestId));
+          setSessions((existing: any[]) => existing.map((session: any) => (
+            String(session?.id || '').trim() === String(prompt?.chatId || '').trim()
+              ? { ...session, hasPendingHitlPrompt: false }
+              : session
+          )));
           setStatusText('HITL request was already resolved.', 'info');
           return;
         }
@@ -679,6 +694,11 @@ function AppContent({ api }: { api: DesktopApi }) {
       }
 
       setHitlPromptQueue((existing: HitlPrompt[]) => existing.filter((entry) => entry.requestId !== requestId));
+      setSessions((existing: any[]) => existing.map((session: any) => (
+        String(session?.id || '').trim() === String(prompt?.chatId || '').trim()
+          ? { ...session, hasPendingHitlPrompt: false }
+          : session
+      )));
 
       if (prompt?.metadata?.refreshAfterDismiss) {
         await refreshWorldDetails(worldId);
@@ -1232,6 +1252,15 @@ function AppContent({ api }: { api: DesktopApi }) {
 
   // Phase 6.3: Sync world roster (agents + chats) into registry on every CRUD change
   useEffect(() => {
+    const nextWorldId = String(loadedWorld?.id || '').trim() || null;
+    if (shouldResetHitlQueueForWorldChange(previousLoadedWorldIdRef.current, nextWorldId)) {
+      setHitlPromptQueue([]);
+      setSubmittingHitlRequestId(null);
+    }
+    previousLoadedWorldIdRef.current = nextWorldId;
+  }, [loadedWorld?.id]);
+
+  useEffect(() => {
     if (!loadedWorld?.id) return;
     const chatIds = (sessions as any[]).map((s: any) => String(s?.id || '')).filter(Boolean);
     const agentIds = (Array.isArray(loadedWorld.agents) ? loadedWorld.agents : [])
@@ -1263,6 +1292,7 @@ function AppContent({ api }: { api: DesktopApi }) {
     api,
     loadedWorld,
     selectedSessionId,
+    sessions,
     setMessages,
     chatSubscriptionCounter,
     streamingStateRef,
@@ -2420,6 +2450,7 @@ function AppContent({ api }: { api: DesktopApi }) {
     sessions,
     filteredSessions,
     selectedSessionId,
+    pendingHitlSessionIds,
     onSelectSession,
     deletingSessionId,
     onDeleteSession,

@@ -13,6 +13,8 @@
  * - Accepts state setters/callbacks via dependency injection.
  *
  * Recent Changes:
+ * - 2026-04-24: Reconcile terminal tool events against the HITL queue and export a world-change reset helper so pending session indicators do not stay stale.
+ * - 2026-04-23: Added a world-wide HITL-only subscription so sidebar pending indicators update for all chats while preserving selected-chat replay and streaming isolation.
  * - 2026-03-10: Updated streaming-state typing to include chat-scoped assistant SSE start/chunk
  *   propagation so selected-chat refreshes can retain live streaming rows.
  * - 2026-03-06: Ref-ified callback dependencies (onSessionSystemEvent, refreshSessions, resetActivityRuntimeState, onMainLogEvent, setHitlPromptQueue) so subscription effects only re-run on data-identity changes (world/session switch), not callback identity changes.
@@ -57,6 +59,7 @@ type HitlOption = {
 type HitlPrompt = {
   requestId: string;
   chatId: string | null;
+  toolCallId?: string;
   title: string;
   message: string;
   mode: 'option';
@@ -86,6 +89,7 @@ type UseChatEventSubscriptionsArgs = {
   api: DesktopApi;
   loadedWorld: { id?: string } | null;
   selectedSessionId: string | null;
+  sessions: Array<{ id?: string | null; hasPendingHitlPrompt?: boolean }>;
   setMessages: Dispatch<SetStateAction<MessageLike[]>>;
   chatSubscriptionCounter: MutableRefObject<number>;
   streamingStateRef: MutableRefObject<RealtimeState | null>;
@@ -139,6 +143,26 @@ export function enqueueHitlPromptFromToolEvent(
     ? (payload.tool as Record<string, unknown>)
     : null;
   const eventType = String(toolPayload?.eventType || '').trim().toLowerCase();
+  const toolUseId = String(toolPayload?.toolUseId || '').trim();
+  const payloadChatId = String(payload?.chatId || '').trim() || null;
+
+  if (eventType === 'tool-result' || eventType === 'tool-error') {
+    if (!toolUseId || !payloadChatId) {
+      return existing;
+    }
+
+    return existing.filter((entry) => {
+      const entryChatId = String(entry?.chatId || '').trim() || null;
+      if (entryChatId !== payloadChatId) {
+        return true;
+      }
+
+      const entryToolCallId = String(entry?.toolCallId || '').trim();
+      const entryRequestId = String(entry?.requestId || '').trim();
+      return entryToolCallId !== toolUseId && entryRequestId !== toolUseId;
+    });
+  }
+
   if (eventType !== 'tool-progress') {
     return existing;
   }
@@ -180,11 +204,14 @@ export function enqueueHitlPromptFromToolEvent(
     return existing;
   }
 
+  const promptToolCallId = String(content?.toolCallId || toolUseId || '').trim();
+
   return [
     ...existing,
     {
       requestId,
       chatId: promptChatId,
+      ...(promptToolCallId ? { toolCallId: promptToolCallId } : {}),
       title: String(content?.title || 'Approval required').trim() || 'Approval required',
       message: String(content?.message || '').trim(),
       mode: 'option',
@@ -198,10 +225,20 @@ export function enqueueHitlPromptFromToolEvent(
   ];
 }
 
+export function shouldResetHitlQueueForWorldChange(
+  previousWorldId: string | null | undefined,
+  nextWorldId: string | null | undefined,
+): boolean {
+  const previous = String(previousWorldId || '').trim() || null;
+  const next = String(nextWorldId || '').trim() || null;
+  return previous !== null && previous !== next;
+}
+
 export function useChatEventSubscriptions({
   api,
   loadedWorld,
   selectedSessionId,
+  sessions,
   setMessages,
   chatSubscriptionCounter,
   streamingStateRef,
@@ -213,6 +250,8 @@ export function useChatEventSubscriptions({
 }: UseChatEventSubscriptionsArgs) {
   const pendingHitlEventsRef = useRef<any[]>([]);
   const pendingHitlFlushTimerRef = useRef<number | null>(null);
+  const globalPendingHitlEventsRef = useRef<any[]>([]);
+  const globalPendingHitlFlushTimerRef = useRef<number | null>(null);
 
   // Stable refs for callback-type dependencies so subscription effects never
   // re-run solely because a callback identity changed between renders.
@@ -222,6 +261,8 @@ export function useChatEventSubscriptions({
   onSessionSystemEventRef.current = onSessionSystemEvent;
   const refreshSessionsRef = useRef(refreshSessions);
   refreshSessionsRef.current = refreshSessions;
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
   const resetActivityRef = useRef(resetActivityRuntimeState);
   resetActivityRef.current = resetActivityRuntimeState;
   const setHitlPromptQueueRef = useRef(setHitlPromptQueue);
@@ -268,6 +309,10 @@ export function useChatEventSubscriptions({
 
     const removeListener = api.onChatEvent((payload: any) => {
       chatEventHandler(payload);
+
+      if (payload?.type !== 'tool') {
+        return;
+      }
 
       if (payload?.subscriptionId && payload.subscriptionId !== subscriptionId) {
         return;
@@ -331,5 +376,100 @@ export function useChatEventSubscriptions({
     selectedSessionId,
     setMessages,
     streamingStateRef,
+  ]);
+
+  useEffect(() => {
+    if (!loadedWorldId) {
+      return undefined;
+    }
+
+    const subscriptionId = `hitl-all-${Date.now()}-${chatSubscriptionCounter.current++}`;
+    rendererLogger.debug('electron.renderer.subscription', 'All-chat HITL subscription setup started', {
+      worldId: loadedWorldId,
+      subscriptionId
+    });
+
+    const removeListener = api.onChatEvent((payload: any) => {
+      if (payload?.type !== 'tool') {
+        return;
+      }
+      if (payload?.subscriptionId && payload.subscriptionId !== subscriptionId) {
+        return;
+      }
+      if (payload?.worldId && payload.worldId !== loadedWorldId) {
+        return;
+      }
+
+      globalPendingHitlEventsRef.current.push(payload);
+      if (globalPendingHitlFlushTimerRef.current === null) {
+        globalPendingHitlFlushTimerRef.current = window.setTimeout(() => {
+          const batch = globalPendingHitlEventsRef.current.splice(0);
+          globalPendingHitlFlushTimerRef.current = null;
+          if (batch.length === 0) return;
+          rendererLogger.debug('electron.renderer.subscription', 'Ingesting all-chat HITL prompt batch from realtime events', {
+            worldId: loadedWorldId,
+            eventCount: batch.length,
+            subscriptionId
+          });
+          const refreshChatIds = new Set<string>();
+          setHitlPromptQueueRef.current((existing) => {
+            let queue = existing;
+            for (const entry of batch) {
+              queue = enqueueHitlPromptFromToolEvent(queue, entry);
+            }
+
+            for (const entry of batch) {
+              const toolPayload = entry?.tool && typeof entry.tool === 'object'
+                ? (entry.tool as Record<string, unknown>)
+                : null;
+              const eventType = String(toolPayload?.eventType || '').trim().toLowerCase();
+              const chatId = String(entry?.chatId || '').trim();
+              if (!chatId || (eventType !== 'tool-result' && eventType !== 'tool-error')) {
+                continue;
+              }
+
+              const queueHadPendingState = existing.some((prompt) => String(prompt?.chatId || '').trim() === chatId);
+              const queueHasPendingState = queue.some((prompt) => String(prompt?.chatId || '').trim() === chatId);
+              const sessionHasPendingState = sessionsRef.current.some((session) => (
+                String(session?.id || '').trim() === chatId
+                && session?.hasPendingHitlPrompt === true
+              ));
+              if (queueHadPendingState || queueHasPendingState || sessionHasPendingState) {
+                refreshChatIds.add(chatId);
+              }
+            }
+
+            return queue;
+          });
+          for (const chatId of refreshChatIds) {
+            refreshSessionsRef.current(loadedWorldId, chatId).catch(() => { });
+          }
+        }, 0);
+      }
+    });
+
+    api.subscribeChatEvents(loadedWorldId, '', subscriptionId).catch(() => { });
+    rendererLogger.debug('electron.renderer.subscription', 'All-chat HITL subscription request dispatched', {
+      worldId: loadedWorldId,
+      subscriptionId
+    });
+
+    return () => {
+      rendererLogger.debug('electron.renderer.subscription', 'All-chat HITL subscription teardown started', {
+        worldId: loadedWorldId,
+        subscriptionId
+      });
+      removeListener();
+      api.unsubscribeChatEvents(subscriptionId).catch(() => { });
+      if (globalPendingHitlFlushTimerRef.current !== null) {
+        clearTimeout(globalPendingHitlFlushTimerRef.current);
+        globalPendingHitlFlushTimerRef.current = null;
+      }
+      globalPendingHitlEventsRef.current = [];
+    };
+  }, [
+    api,
+    chatSubscriptionCounter,
+    loadedWorldId,
   ]);
 }

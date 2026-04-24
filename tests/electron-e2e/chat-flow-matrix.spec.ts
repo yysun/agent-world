@@ -15,6 +15,7 @@
  * - Queue/error setup uses existing desktop bridge methods, not mocks.
  *
  * Recent Changes:
+ * - 2026-04-24: Added a focused Electron E2E that asserts the sidebar HITL indicator appears on the owning chat across session switches and clears after approval.
  * - 2026-04-23: Added a regression that re-editing a pending HITL turn clears the stale
  *   approval prompt and prevents it from replaying after a session switch.
  * - 2026-03-10: Fixed HITL session-scope bug: queue is preserved across session switches and
@@ -35,6 +36,7 @@ import {
   editLatestUserMessage,
   expectNotificationText,
   launchAndPrepare,
+  getDesktopState,
   respondToHitlPrompt,
   selectSessionByName,
   sendComposerMessage,
@@ -60,6 +62,78 @@ function buildShellHitlPrompt(label: string): string {
     'Do not ask me for confirmation in plain text.',
     `After approval, confirm completion for ${label}.`,
   ].join(' ');
+}
+
+async function getSessionIndicator(page: Parameters<typeof test>[0]['page'], name: string) {
+  const state = await getDesktopState(page);
+  const chatId = state.sessionIdsByName[name];
+  if (!chatId) {
+    throw new Error(`Session "${name}" was not found in the current world.`);
+  }
+
+  return getSessionIndicatorById(page, chatId);
+}
+
+async function getSessionIndicatorById(
+  page: Parameters<typeof test>[0]['page'],
+  chatId: string,
+) {
+  const normalizedChatId = String(chatId || '').trim();
+  if (!normalizedChatId) {
+    throw new Error('Session chat ID is required to resolve the sidebar indicator.');
+  }
+
+  return page
+    .getByTestId(`session-item-${normalizedChatId}`)
+    .locator('div.min-w-0 span[aria-hidden="true"]');
+}
+
+async function expectSessionIndicatorPending(
+  page: Parameters<typeof test>[0]['page'],
+  name: string,
+): Promise<void> {
+  await expect.poll(async () => {
+    return await (await getSessionIndicator(page, name)).getAttribute('class');
+  }, {
+    timeout: 15_000,
+    message: `Expected session "${name}" to show the pending HITL indicator.`,
+  }).toMatch(/bg-amber-(300|400)/);
+}
+
+async function expectSessionIndicatorPendingById(
+  page: Parameters<typeof test>[0]['page'],
+  chatId: string,
+): Promise<void> {
+  await expect.poll(async () => {
+    return await (await getSessionIndicatorById(page, chatId)).getAttribute('class');
+  }, {
+    timeout: 15_000,
+    message: `Expected session "${chatId}" to show the pending HITL indicator.`,
+  }).toMatch(/bg-amber-(300|400)/);
+}
+
+async function expectSessionIndicatorNotPending(
+  page: Parameters<typeof test>[0]['page'],
+  name: string,
+): Promise<void> {
+  await expect.poll(async () => {
+    return await (await getSessionIndicator(page, name)).getAttribute('class');
+  }, {
+    timeout: 15_000,
+    message: `Expected session "${name}" to clear the pending HITL indicator.`,
+  }).not.toMatch(/bg-amber-/);
+}
+
+async function expectSessionIndicatorNotPendingById(
+  page: Parameters<typeof test>[0]['page'],
+  chatId: string,
+): Promise<void> {
+  await expect.poll(async () => {
+    return await (await getSessionIndicatorById(page, chatId)).getAttribute('class');
+  }, {
+    timeout: 15_000,
+    message: `Expected session "${chatId}" to clear the pending HITL indicator.`,
+  }).not.toMatch(/bg-amber-/);
 }
 
 test.describe('Loaded Current Chat', () => {
@@ -190,6 +264,28 @@ test.describe('Loaded Current Chat', () => {
 });
 
 test.describe('Switched Chat', () => {
+  test('sidebar pending indicator stays on the owning chat across session switches and clears after approval', async ({ page }) => {
+    await launchAndPrepare(page);
+    await expectSessionIndicatorNotPending(page, CHAT_NAMES.current);
+    await expectSessionIndicatorNotPending(page, CHAT_NAMES.switched);
+
+    await selectSessionByName(page, CHAT_NAMES.switched);
+    await sendComposerMessage(page, buildShellHitlPrompt('switched chat sidebar indicator'));
+    await waitForHitlPrompt(page, 60_000);
+    await expectSessionIndicatorPending(page, CHAT_NAMES.switched);
+    await expectSessionIndicatorNotPending(page, CHAT_NAMES.current);
+
+    await selectSessionByName(page, CHAT_NAMES.current);
+    await expect(page.getByTestId('hitl-prompt')).toHaveCount(0);
+    await expectSessionIndicatorPending(page, CHAT_NAMES.switched);
+    await expectSessionIndicatorNotPending(page, CHAT_NAMES.current);
+
+    await selectSessionByName(page, CHAT_NAMES.switched);
+    await respondToHitlPrompt(page, 'Approve', 60_000);
+    await waitForAssistantToken(page, HITL_SHELL_SUCCESS_TOKEN, 60_000);
+    await expectSessionIndicatorNotPending(page, CHAT_NAMES.switched);
+  });
+
   test('send success after switching chats', async ({ page }) => {
     await launchAndPrepare(page);
     await selectSessionByName(page, CHAT_NAMES.switched);
@@ -286,6 +382,35 @@ test.describe('Switched Chat', () => {
 });
 
 test.describe('New Chat', () => {
+  test('sidebar pending indicator stays on a newly created chat across session switches and clears after approval', async ({ page }) => {
+    await launchAndPrepare(page);
+    await expectSessionIndicatorNotPending(page, CHAT_NAMES.current);
+    await expectSessionIndicatorNotPending(page, CHAT_NAMES.switched);
+
+    const newChatId = await createNewSession(page);
+    await expectSessionIndicatorNotPendingById(page, newChatId);
+
+    await sendComposerMessage(page, buildShellHitlPrompt('new chat sidebar indicator'));
+    await waitForHitlPrompt(page, 60_000);
+    await expectSessionIndicatorPendingById(page, newChatId);
+    await expectSessionIndicatorNotPending(page, CHAT_NAMES.current);
+    await expectSessionIndicatorNotPending(page, CHAT_NAMES.switched);
+
+    await selectSessionByName(page, CHAT_NAMES.current);
+    await expect(page.getByTestId('hitl-prompt')).toHaveCount(0);
+    await expectSessionIndicatorPendingById(page, newChatId);
+
+    await page.getByTestId(`session-item-${newChatId}`).click();
+    await expect.poll(async () => (await getDesktopState(page)).currentChatId, {
+      timeout: 15_000,
+      message: 'Expected the new chat session to become selected again.',
+    }).toBe(newChatId);
+
+    await respondToHitlPrompt(page, 'Approve', 60_000);
+    await waitForAssistantToken(page, HITL_SHELL_SUCCESS_TOKEN, 60_000);
+    await expectSessionIndicatorNotPendingById(page, newChatId);
+  });
+
   test('create new chat and send success', async ({ page }) => {
     await launchAndPrepare(page);
     await createNewSession(page);

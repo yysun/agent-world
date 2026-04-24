@@ -11,6 +11,7 @@
  * - Avoids Electron runtime and filesystem dependencies.
  *
  * Recent Changes:
+ * - 2026-04-23: Added coverage for world-wide chat subscriptions that forward HITL tool events from any chat.
  * - 2026-03-12: Added plain-text and message-fallback system-event forwarding coverage for selected-chat status parity.
  * - 2026-02-24: Reinstated strict chat-scope filtering coverage for unscoped SSE/tool events after source-side chatId streaming guarantees.
  * - 2026-02-20: Added coverage for chat-scoped HITL prompt delivery during chat subscription lifecycle transitions.
@@ -553,6 +554,62 @@ describe('createRealtimeEventsRuntime', () => {
     });
 
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('forwards HITL tool events from any chat when the subscription is world-wide', async () => {
+    const send = vi.fn();
+    const worldSubscription = createWorldSubscription();
+
+    const runtime = createRealtimeEventsRuntime({
+      getMainWindow: () => ({
+        isDestroyed: () => false,
+        webContents: { send }
+      }),
+      chatEventChannel: 'chat:event',
+      addLogStreamCallback: () => () => { },
+      subscribeWorld: async () => worldSubscription,
+      ensureCoreReady: async () => { }
+    });
+
+    await runtime.subscribeChatEvents({
+      subscriptionId: 'sub-all-hitl',
+      worldId: 'world-1',
+      chatId: ''
+    });
+
+    worldSubscription.world.eventEmitter.emit('world', {
+      type: 'tool-progress',
+      chatId: 'chat-2',
+      messageId: 'tool-progress-1',
+      toolExecution: {
+        toolName: 'load_skill',
+        toolCallId: 'call-load-skill-1',
+        metadata: {
+          hitlPrompt: {
+            requestId: 'req-load-skill-1',
+            title: 'Approval required',
+            message: 'Load demo-skill?',
+            options: [{ id: 'approve', label: 'Approve' }],
+            chatId: 'chat-2'
+          }
+        }
+      }
+    });
+
+    expect(send).toHaveBeenCalledWith(
+      'chat:event',
+      expect.objectContaining({
+        type: 'tool',
+        subscriptionId: 'sub-all-hitl',
+        worldId: 'world-1',
+        chatId: 'chat-2',
+        tool: expect.objectContaining({
+          eventType: 'tool-progress',
+          toolName: 'load_skill',
+          toolUseId: 'call-load-skill-1',
+        })
+      })
+    );
   });
 
   it('does not forward unscoped system events to chat-scoped subscriptions', async () => {

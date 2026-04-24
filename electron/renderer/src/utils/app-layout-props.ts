@@ -187,6 +187,7 @@ export function createLeftSidebarProps<T extends PropBag>(input: T) {
     sessions: input.sessions,
     filteredSessions: input.filteredSessions,
     selectedSessionId: input.selectedSessionId,
+    pendingHitlSessionIds: input.pendingHitlSessionIds,
     onSelectSession: input.onSelectSession,
     deletingSessionId: input.deletingSessionId,
     onDeleteSession: input.onDeleteSession,

@@ -66,6 +66,7 @@ export default function LeftSidebarPanel({
   sessions,
   filteredSessions,
   selectedSessionId,
+  pendingHitlSessionIds,
   onSelectSession,
   deletingSessionId,
   onDeleteSession,
@@ -216,6 +217,7 @@ export default function LeftSidebarPanel({
             sessions={sessions}
             filteredSessions={filteredSessions}
             selectedSessionId={selectedSessionId}
+            pendingHitlSessionIds={pendingHitlSessionIds}
             onSelectSession={onSelectSession}
             deletingSessionId={deletingSessionId}
             onDeleteSession={onDeleteSession}

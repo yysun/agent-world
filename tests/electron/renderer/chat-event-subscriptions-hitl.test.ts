@@ -7,8 +7,10 @@
  * Coverage:
  * - Enqueues valid HITL option prompts from tool-progress payloads.
  * - Deduplicates prompts by requestId.
+ * - Removes stale prompts when terminal tool events arrive.
  * - Ignores malformed or non-HITL tool payloads.
  * - Preserves metadata used by refresh-after-dismiss behavior.
+ * - Exposes a pure helper for resetting HITL queue state across world switches.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -18,7 +20,10 @@ vi.mock('react', () => ({
   useRef: (value?: unknown) => ({ current: value }),
 }), { virtual: true });
 
-import { enqueueHitlPromptFromToolEvent } from '../../../electron/renderer/src/hooks/useChatEventSubscriptions';
+import {
+  enqueueHitlPromptFromToolEvent,
+  shouldResetHitlQueueForWorldChange,
+} from '../../../electron/renderer/src/hooks/useChatEventSubscriptions';
 
 describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
   it('enqueues a valid HITL prompt from tool-progress payload', () => {
@@ -157,6 +162,41 @@ describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
     expect(malformed).toEqual(baseQueue);
   });
 
+  it('removes a queued HITL prompt when the matching tool call reaches a terminal event', () => {
+    const queue = enqueueHitlPromptFromToolEvent(
+      [],
+      {
+        chatId: 'chat-1',
+        tool: {
+          eventType: 'tool-progress',
+          toolUseId: 'call-hitl-1',
+          metadata: {
+            hitlPrompt: {
+              requestId: 'req-hitl-1',
+              toolCallId: 'call-hitl-1',
+              title: 'Approval required',
+              message: 'Proceed?',
+              options: [
+                { id: 'yes', label: 'Yes' },
+                { id: 'no', label: 'No' },
+              ],
+            },
+          },
+        },
+      },
+    );
+
+    const resolved = enqueueHitlPromptFromToolEvent(queue, {
+      chatId: 'chat-1',
+      tool: {
+        eventType: 'tool-result',
+        toolUseId: 'call-hitl-1',
+      },
+    });
+
+    expect(resolved).toEqual([]);
+  });
+
   it('enqueues all prompts when multiple tool events are batched sequentially', () => {
     const events = [
       {
@@ -200,5 +240,11 @@ describe('electron/renderer useChatEventSubscriptions HITL ingestion', () => {
 
     expect(queue).toHaveLength(2);
     expect(queue.map((p: any) => p.requestId)).toEqual(['req-batch-a', 'req-batch-b']);
+  });
+
+  it('requests a HITL queue reset when switching between worlds', () => {
+    expect(shouldResetHitlQueueForWorldChange('world-a', 'world-b')).toBe(true);
+    expect(shouldResetHitlQueueForWorldChange('world-a', 'world-a')).toBe(false);
+    expect(shouldResetHitlQueueForWorldChange(null, 'world-a')).toBe(false);
   });
 });
