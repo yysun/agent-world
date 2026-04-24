@@ -11,6 +11,8 @@
  * - Mocks the Electron `dialog` module virtually to avoid runtime Electron dependency.
  *
  * Recent Changes:
+ * - 2026-04-24: Updated mutation-flow restoreChat expectations to assert both
+ *   suppressAutoResume and suppressHitlReplay for edit/delete IPC handlers.
  * - 2026-03-19: Added regression coverage for preserving `openWorkspace(directoryPath)` direct-path behavior and for `pickDirectory(defaultPath)` dialog seeding.
  * - 2026-03-14: Added regression coverage for explicit heartbeat starts so the
  *   IPC layer syncs persisted config onto the runtime world and rejects silent no-op starts.
@@ -59,7 +61,7 @@ vi.mock('electron', () => ({
       openExternal: openExternalMock,
     }
   }
-}), { virtual: true });
+}));
 
 vi.mock('path', async (importOriginal) => {
   const actual = await importOriginal<typeof import('path')>();
@@ -221,7 +223,7 @@ describe('createMainIpcHandlers.workspace dialogs', () => {
 
 describe('createMainIpcHandlers.exportWorld', () => {
   it('omits world env data and current chat id from exported world config', async () => {
-    const saveWorld = vi.fn(async () => undefined);
+    const saveWorld = vi.fn(async (_world: any) => undefined);
     const createStorage = vi.fn(async () => ({
       saveWorld,
       saveAgent: vi.fn(async () => undefined),
@@ -404,7 +406,10 @@ describe('createMainIpcHandlers.deleteMessageFromChat', () => {
     });
 
     expect(removeMessagesFrom).toHaveBeenCalledWith('world-1', 'msg-1', 'chat-1');
-    expect(restoreChat).toHaveBeenCalledWith('world-1', 'chat-1', { suppressAutoResume: true });
+    expect(restoreChat).toHaveBeenCalledWith('world-1', 'chat-1', {
+      suppressAutoResume: true,
+      suppressHitlReplay: true,
+    });
     expect(refreshWorldSubscription).toHaveBeenCalledWith('world-1');
     expect(result).toEqual({ success: true, messagesRemovedTotal: 4 });
   });
@@ -545,7 +550,10 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
 
     expect(ensureWorldSubscribed).toHaveBeenCalledWith('world-1');
     expect(editUserMessage).toHaveBeenCalledWith('world-1', 'msg-1', 'updated prompt', 'chat-1', subscribedWorld);
-    expect(restoreChat).toHaveBeenCalledWith('world-1', 'chat-1', { suppressAutoResume: true });
+    expect(restoreChat).toHaveBeenCalledWith('world-1', 'chat-1', {
+      suppressAutoResume: true,
+      suppressHitlReplay: true,
+    });
     expect(refreshWorldSubscription).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       success: true,
@@ -1166,7 +1174,10 @@ describe('createMainIpcHandlers chat-flow scenario matrix', () => {
       newContent: `${lifecycle.label} edited prompt`
     });
 
-    expect(mocks.restoreChat).toHaveBeenCalledWith('world-1', prepared.activeChatId, { suppressAutoResume: true });
+    expect(mocks.restoreChat).toHaveBeenCalledWith('world-1', prepared.activeChatId, {
+      suppressAutoResume: true,
+      suppressHitlReplay: true,
+    });
     expect(editUserMessage).toHaveBeenCalledWith(
       'world-1',
       `${prepared.activeChatId}-msg-1`,

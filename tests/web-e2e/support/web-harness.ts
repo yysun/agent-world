@@ -94,6 +94,8 @@ type ChatSummary = {
 
 type WorldStatus = {
   isProcessing?: boolean;
+  activeChatIds?: string[];
+  queuedChatIds?: string[];
 };
 
 const COMPOSER_ACTION_RETRY_COUNT = 3;

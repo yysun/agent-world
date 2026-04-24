@@ -26,10 +26,10 @@
  * - 2026-03-10: Added full coverage for edit-error, edit-HITL, queue retry/skip/clear, delete chain, and cross-session contamination tests.
  */
 
+import type { Page } from '@playwright/test';
 import { test, expect } from './support/fixtures.js';
 import {
   CHAT_NAMES,
-  addQueueMessageToCurrentChat,
   createNewSession,
   deleteAllAgents,
   deleteLatestUserMessage,
@@ -64,7 +64,16 @@ function buildShellHitlPrompt(label: string): string {
   ].join(' ');
 }
 
-async function getSessionIndicator(page: Parameters<typeof test>[0]['page'], name: string) {
+async function createFailedQueueBacklog(
+  page: Page,
+  contentPrefix: string,
+): Promise<void> {
+  await sendComposerMessage(page, `${contentPrefix} first`);
+  await page.getByLabel('Send message').waitFor({ state: 'visible', timeout: 15_000 });
+  await sendComposerMessage(page, `${contentPrefix} second`);
+}
+
+async function getSessionIndicator(page: Page, name: string) {
   const state = await getDesktopState(page);
   const chatId = state.sessionIdsByName[name];
   if (!chatId) {
@@ -75,7 +84,7 @@ async function getSessionIndicator(page: Parameters<typeof test>[0]['page'], nam
 }
 
 async function getSessionIndicatorById(
-  page: Parameters<typeof test>[0]['page'],
+  page: Page,
   chatId: string,
 ) {
   const normalizedChatId = String(chatId || '').trim();
@@ -89,7 +98,7 @@ async function getSessionIndicatorById(
 }
 
 async function expectSessionIndicatorPending(
-  page: Parameters<typeof test>[0]['page'],
+  page: Page,
   name: string,
 ): Promise<void> {
   await expect.poll(async () => {
@@ -101,7 +110,7 @@ async function expectSessionIndicatorPending(
 }
 
 async function expectSessionIndicatorPendingById(
-  page: Parameters<typeof test>[0]['page'],
+  page: Page,
   chatId: string,
 ): Promise<void> {
   await expect.poll(async () => {
@@ -113,7 +122,7 @@ async function expectSessionIndicatorPendingById(
 }
 
 async function expectSessionIndicatorNotPending(
-  page: Parameters<typeof test>[0]['page'],
+  page: Page,
   name: string,
 ): Promise<void> {
   await expect.poll(async () => {
@@ -125,7 +134,7 @@ async function expectSessionIndicatorNotPending(
 }
 
 async function expectSessionIndicatorNotPendingById(
-  page: Parameters<typeof test>[0]['page'],
+  page: Page,
   chatId: string,
 ): Promise<void> {
   await expect.poll(async () => {
@@ -212,7 +221,7 @@ test.describe('Loaded Current Chat', () => {
     await launchAndPrepare(page);
     await selectSessionByName(page, CHAT_NAMES.current);
     await deleteAllAgents(page);
-    await addQueueMessageToCurrentChat(page, 'Current chat queued error for queue clear');
+    await createFailedQueueBacklog(page, 'Current chat queued error for queue clear');
     const queuePanel = await waitForQueuePanel(page);
     await waitForQueueStatus(page, 'Error');
     await queuePanel.getByLabel('Clear queue').click();
@@ -223,12 +232,12 @@ test.describe('Loaded Current Chat', () => {
     await launchAndPrepare(page);
     await selectSessionByName(page, CHAT_NAMES.current);
     await deleteAllAgents(page);
-    await addQueueMessageToCurrentChat(page, 'Current chat queued error for retry skip');
+    await createFailedQueueBacklog(page, 'Current chat queued error for retry skip');
     const queuePanel = await waitForQueuePanel(page);
     await waitForQueueStatus(page, 'Error');
-    await queuePanel.getByLabel('Retry failed message').click();
+    await queuePanel.getByLabel('Retry failed message').first().click();
     await waitForQueueStatus(page, 'Error');
-    await queuePanel.getByLabel('Skip failed message').click();
+    await queuePanel.getByLabel('Skip failed message').first().click();
     await expect(page.getByTestId('message-queue-panel')).toHaveCount(0);
   });
 
@@ -329,12 +338,12 @@ test.describe('Switched Chat', () => {
     await launchAndPrepare(page);
     await selectSessionByName(page, CHAT_NAMES.switched);
     await deleteAllAgents(page);
-    await addQueueMessageToCurrentChat(page, 'Switched chat queued error');
+    await createFailedQueueBacklog(page, 'Switched chat queued error');
     const queuePanel = await waitForQueuePanel(page);
     await waitForQueueStatus(page, 'Error');
-    await queuePanel.getByLabel('Retry failed message').click();
+    await queuePanel.getByLabel('Retry failed message').first().click();
     await waitForQueueStatus(page, 'Error');
-    await queuePanel.getByLabel('Skip failed message').click();
+    await queuePanel.getByLabel('Skip failed message').first().click();
     await expect(page.getByTestId('message-queue-panel')).toHaveCount(0);
   });
 
@@ -363,7 +372,7 @@ test.describe('Switched Chat', () => {
     await launchAndPrepare(page);
     await selectSessionByName(page, CHAT_NAMES.switched);
     await deleteAllAgents(page);
-    await addQueueMessageToCurrentChat(page, 'Switched chat queued error for queue clear');
+    await createFailedQueueBacklog(page, 'Switched chat queued error for queue clear');
     const queuePanel = await waitForQueuePanel(page);
     await waitForQueueStatus(page, 'Error');
     await queuePanel.getByLabel('Clear queue').click();
@@ -507,7 +516,7 @@ test.describe('New Chat', () => {
     await launchAndPrepare(page);
     await createNewSession(page);
     await deleteAllAgents(page);
-    await addQueueMessageToCurrentChat(page, 'New chat queued error for queue clear');
+    await createFailedQueueBacklog(page, 'New chat queued error for queue clear');
     const queuePanel = await waitForQueuePanel(page);
     await waitForQueueStatus(page, 'Error');
     await queuePanel.getByLabel('Clear queue').click();
@@ -528,12 +537,12 @@ test.describe('New Chat', () => {
     await launchAndPrepare(page);
     await createNewSession(page);
     await deleteAllAgents(page);
-    await addQueueMessageToCurrentChat(page, 'New chat queued error for retry skip');
+    await createFailedQueueBacklog(page, 'New chat queued error for retry skip');
     const queuePanel = await waitForQueuePanel(page);
     await waitForQueueStatus(page, 'Error');
-    await queuePanel.getByLabel('Retry failed message').click();
+    await queuePanel.getByLabel('Retry failed message').first().click();
     await waitForQueueStatus(page, 'Error');
-    await queuePanel.getByLabel('Skip failed message').click();
+    await queuePanel.getByLabel('Skip failed message').first().click();
     await expect(page.getByTestId('message-queue-panel')).toHaveCount(0);
   });
 

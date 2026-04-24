@@ -13,6 +13,8 @@
  * - Focuses on the hook boundary rather than DOM rendering.
  *
  * Recent Changes:
+ * - 2026-04-24: Updated the dependency snapshot to cover the added all-chat
+ *   HITL subscription effect while keeping callback-identity stability guarantees.
  * - 2026-03-10: Added regression coverage for AGENTS.md Rules 1-3.
  */
 
@@ -50,6 +52,7 @@ describe('useChatEventSubscriptions dependency stability', () => {
       api: api as any,
       loadedWorld: { id: 'world-1' },
       selectedSessionId: 'chat-1',
+      sessions: [],
       setMessages,
       chatSubscriptionCounter: chatSubscriptionCounter as any,
       streamingStateRef: streamingStateRef as any,
@@ -64,6 +67,7 @@ describe('useChatEventSubscriptions dependency stability', () => {
       api: api as any,
       loadedWorld: { id: 'world-1' },
       selectedSessionId: 'chat-1',
+      sessions: [],
       setMessages,
       chatSubscriptionCounter: chatSubscriptionCounter as any,
       streamingStateRef: streamingStateRef as any,
@@ -74,19 +78,33 @@ describe('useChatEventSubscriptions dependency stability', () => {
       onSessionSystemEvent: vi.fn(),
     });
 
-    expect(effectDeps).toHaveLength(4);
+    expect(effectDeps).toHaveLength(6);
 
-    const [firstGlobalLogDeps, firstSubscriptionDeps, secondGlobalLogDeps, secondSubscriptionDeps] = effectDeps;
+    const [
+      firstGlobalLogDeps,
+      firstSelectedSubscriptionDeps,
+      firstAllChatHitlDeps,
+      secondGlobalLogDeps,
+      secondSelectedSubscriptionDeps,
+      secondAllChatHitlDeps,
+    ] = effectDeps;
+
     expect(firstGlobalLogDeps).toEqual([api]);
     expect(secondGlobalLogDeps).toEqual([api]);
-    expect(firstSubscriptionDeps).toEqual(secondSubscriptionDeps);
-    expect(firstSubscriptionDeps).toEqual([
+    expect(firstSelectedSubscriptionDeps).toEqual(secondSelectedSubscriptionDeps);
+    expect(firstSelectedSubscriptionDeps).toEqual([
       api,
       chatSubscriptionCounter,
       'world-1',
       'chat-1',
       setMessages,
       streamingStateRef,
+    ]);
+    expect(firstAllChatHitlDeps).toEqual(secondAllChatHitlDeps);
+    expect(firstAllChatHitlDeps).toEqual([
+      api,
+      chatSubscriptionCounter,
+      'world-1',
     ]);
   });
 });

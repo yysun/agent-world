@@ -560,7 +560,11 @@ export async function waitForAssistantTokenOrHitlPrompt(
     },
   ).not.toBe('waiting');
 
-  return observedState === 'assistant' ? 'assistant' : 'hitl';
+  if (observedState === 'waiting') {
+    throw new Error(`Expected either a persisted assistant message containing "${token}" or a HITL prompt in the active Electron chat.`);
+  }
+
+  return observedState;
 }
 
 export async function expectNotificationText(page: Page, text: string): Promise<void> {
@@ -695,7 +699,7 @@ export async function waitForQueuePanel(page: Page): Promise<Locator> {
 }
 
 export async function waitForQueueStatus(page: Page, statusLabel: 'Queued' | 'Processing' | 'Error'): Promise<void> {
-  await page.getByLabel(`Status: ${statusLabel}`).waitFor({ state: 'visible' });
+  await page.getByLabel(`Status: ${statusLabel}`).first().waitFor({ state: 'visible' });
 }
 
 export async function launchAndPrepare(page: Page): Promise<void> {
