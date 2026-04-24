@@ -14,6 +14,7 @@
  * - Error-path setup resets agents through the live API where the web UI has no compact equivalent seam.
  *
  * Recent Changes:
+ * - 2026-04-23: Added regression coverage that re-editing a pending-HITL user turn clears the stale prompt and prevents replay after returning to the chat.
  * - 2026-03-11: Scoped switched-chat delete-isolation assertions to the conversation pane so the test
  *   follows rendered chat content instead of ambiguous duplicate page text.
  * - 2026-03-11: Hardened setup turns to explicitly forbid tool usage so real-model bootstrap messages do not
@@ -94,6 +95,28 @@ test.describe('Loaded Current Chat', () => {
     await waitForHitlPrompt(page, 60_000);
     await respondToHitlPrompt(page, 'approve', 60_000);
     await waitForShellHitlCompletion(page, 60_000);
+  });
+
+  test('re-editing a pending HITL turn clears the stale prompt and prevents replay', async ({ page, bootstrapState }) => {
+    test.setTimeout(LONG_REAL_BROWSER_HITL_TIMEOUT_MS);
+    await gotoWorld(page, bootstrapState);
+    const originalChatId = bootstrapState.currentChatId;
+    const otherChatId = await createNewChat(page);
+    await selectChatById(page, originalChatId);
+
+    await prepareEditableTurn(page, 'current-edit-clear-hitl-setup');
+    await editLatestUserMessage(page, buildShellHitlPrompt('loaded current chat edit clear'));
+    await waitForHitlPrompt(page, 60_000);
+
+    await editLatestUserMessage(page, 'Edited current chat success token current-edit-clears-hitl');
+    await expect(page.getByTestId('hitl-prompt')).toHaveCount(0);
+    await waitForAssistantToken(page, 'current-edit-clears-hitl', 60_000);
+
+    await selectChatById(page, otherChatId);
+    await expect(page.getByTestId('hitl-prompt')).toHaveCount(0);
+
+    await selectChatById(page, originalChatId);
+    await expect(page.getByTestId('hitl-prompt')).toHaveCount(0);
   });
 
   test('edit error after responders become unavailable', async ({ page, bootstrapState }) => {

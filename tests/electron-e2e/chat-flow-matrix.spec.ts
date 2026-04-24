@@ -15,6 +15,8 @@
  * - Queue/error setup uses existing desktop bridge methods, not mocks.
  *
  * Recent Changes:
+ * - 2026-04-23: Added a regression that re-editing a pending HITL turn clears the stale
+ *   approval prompt and prevents it from replaying after a session switch.
  * - 2026-03-10: Fixed HITL session-scope bug: queue is preserved across session switches and
  *   activeHitlPrompt/hasActiveHitlPrompt are now derived via selectHitlPromptForSession/
  *   hasHitlPromptForSession (hitl-scope.ts). Unskipped HITL scope+replay test.
@@ -38,6 +40,7 @@ import {
   sendComposerMessage,
   setSeededAgentSystemPrompt,
   waitForAssistantToken,
+  waitForPersistedAssistantToken,
   waitForHitlPrompt,
   waitForQueuePanel,
   waitForQueueStatus,
@@ -96,6 +99,27 @@ test.describe('Loaded Current Chat', () => {
     await editLatestUserMessage(page, buildShellHitlPrompt('loaded current chat edit'));
     await respondToHitlPrompt(page, 'Approve', 60_000);
     await waitForAssistantToken(page, HITL_SHELL_SUCCESS_TOKEN);
+  });
+
+  test('re-editing a pending HITL turn clears the stale prompt and prevents replay', async ({ page }) => {
+    await launchAndPrepare(page);
+    await selectSessionByName(page, CHAT_NAMES.current);
+    await sendComposerMessage(page, 'Current edit clear HITL setup token current-edit-clear-hitl-setup');
+    await waitForAssistantToken(page, 'current-edit-clear-hitl-setup');
+
+    await editLatestUserMessage(page, buildShellHitlPrompt('loaded current chat re-edit clear'));
+    await waitForHitlPrompt(page, 60_000);
+
+    await editLatestUserMessage(page, 'Edited current chat success token current-edit-clears-hitl');
+    await expectNotificationText(page, 'Message edited successfully');
+    await expect(page.getByTestId('hitl-prompt')).toHaveCount(0);
+    await waitForPersistedAssistantToken(page, 'current-edit-clears-hitl', 60_000);
+
+    await selectSessionByName(page, CHAT_NAMES.switched);
+    await expect(page.getByTestId('hitl-prompt')).toHaveCount(0);
+
+    await selectSessionByName(page, CHAT_NAMES.current);
+    await expect(page.getByTestId('hitl-prompt')).toHaveCount(0);
   });
 
   test('edit error after responders become unavailable', async ({ page }) => {

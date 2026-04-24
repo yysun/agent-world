@@ -309,7 +309,11 @@ interface MainIpcHandlerFactoryDependencies {
   };
   stopMessageProcessing: (worldId: string, chatId: string) => Promise<any> | any;
   activateChatWithSnapshot: (worldId: string, chatId: string) => Promise<{ world: any; chatId: string; hitlPrompts: any[] } | null>;
-  restoreChat: (worldId: string, chatId: string, options?: { suppressAutoResume?: boolean }) => Promise<any>;
+  restoreChat: (
+    worldId: string,
+    chatId: string,
+    options?: { suppressAutoResume?: boolean; suppressHitlReplay?: boolean }
+  ) => Promise<any>;
   updateWorld: (worldId: string, updates: Record<string, unknown>) => Promise<any>;
   editUserMessage: (worldId: string, messageId: string, newContent: string, chatId: string, targetWorld?: any) => Promise<any>;
   removeMessagesFrom: (worldId: string, messageId: string, chatId: string) => Promise<any>;
@@ -2344,7 +2348,10 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!chatId) throw new Error('Chat ID is required.');
     if (!newContent) throw new Error('New content is required.');
 
-    const restoredWorld = await restoreChat(worldId, chatId, { suppressAutoResume: true });
+    const restoredWorld = await restoreChat(worldId, chatId, {
+      suppressAutoResume: true,
+      suppressHitlReplay: true,
+    });
     if (!restoredWorld || !restoredWorld.chats?.has?.(chatId)) {
       throw new Error(`404 Chat not found: ${chatId}`);
     }
@@ -2363,7 +2370,10 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!messageId) throw new Error('Message ID is required.');
     if (!chatId) throw new Error('Chat ID is required.');
 
-    const restoredWorld = await restoreChat(worldId, chatId, { suppressAutoResume: true });
+    const restoredWorld = await restoreChat(worldId, chatId, {
+      suppressAutoResume: true,
+      suppressHitlReplay: true,
+    });
     if (!restoredWorld || !restoredWorld.chats?.has?.(chatId)) {
       throw new Error(`404 Chat not found: ${chatId}`);
     }

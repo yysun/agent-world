@@ -12,6 +12,7 @@
  * - Runtime validation remains in higher-level handlers.
  *
  * Recent Changes:
+ * - 2026-04-24: Added per-session pending HITL detection so the renderer chat list can surface unresolved approval prompts across tool flows.
  * - 2026-03-13: Included SSE `reasoningContent` in realtime serialization so renderer streaming state can preserve reasoning tokens.
  * - 2026-03-06: Preserved realtime log `worldId`/`chatId` scope so chat-scoped error logs can route into the selected renderer transcript.
  * - 2026-02-28: Preserved realtime `tool_call_id` on message events so renderer can link tool-result rows back to assistant tool-call requests.
@@ -23,9 +24,42 @@
  * - 2026-02-12: Extracted world/chat/message/event serialization helpers from `electron/main.ts`.
  */
 
-type GetMemory = (worldId: string, chatId: string | null) => Promise<any>;
-
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { countConversationDisplayMessages } from '../shared/conversation-message-counts.js';
+import { importCoreHitlModule } from './core-module-loader.js';
+
+type GetMemory = (worldId: string, chatId: string | null) => Promise<any>;
+type PendingHitlPromptDetector = (messages: any[], chatId: string | null) => any[];
+type SerializeChatsDependencies = {
+  listPendingHitlPromptEventsFromMessages?: PendingHitlPromptDetector;
+};
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const CORE_MODULE_BASE_DIR = path.resolve(__dirname, '..');
+
+let cachedPendingHitlPromptDetector: Promise<PendingHitlPromptDetector> | null = null;
+
+export async function loadPendingHitlPromptDetector(baseDir: string = CORE_MODULE_BASE_DIR): Promise<PendingHitlPromptDetector> {
+  if (!cachedPendingHitlPromptDetector || baseDir !== CORE_MODULE_BASE_DIR) {
+    const detectorPromise = importCoreHitlModule(baseDir).then((module) => {
+      if (typeof module?.listPendingHitlPromptEventsFromMessages !== 'function') {
+        throw new Error('Core HITL module does not export listPendingHitlPromptEventsFromMessages.');
+      }
+
+      return module.listPendingHitlPromptEventsFromMessages as PendingHitlPromptDetector;
+    });
+
+    if (baseDir === CORE_MODULE_BASE_DIR) {
+      cachedPendingHitlPromptDetector = detectorPromise;
+    }
+
+    return detectorPromise;
+  }
+
+  return cachedPendingHitlPromptDetector;
+}
 
 export function serializeAgentSummary(agent: any, fallbackIndex = 0): Record<string, unknown> {
   const rawId = typeof agent?.id === 'string' ? agent.id.trim() : '';
@@ -144,14 +178,16 @@ export function serializeChat(chat: any): Record<string, unknown> {
     description: chat.description || '',
     createdAt: chat.createdAt instanceof Date ? chat.createdAt.toISOString() : String(chat.createdAt),
     updatedAt: chat.updatedAt instanceof Date ? chat.updatedAt.toISOString() : String(chat.updatedAt),
-    messageCount: Number.isFinite(rawMessageCount) ? Math.max(0, Math.floor(rawMessageCount)) : 0
+    messageCount: Number.isFinite(rawMessageCount) ? Math.max(0, Math.floor(rawMessageCount)) : 0,
+    hasPendingHitlPrompt: chat?.hasPendingHitlPrompt === true
   };
 }
 
 export async function serializeChatsWithMessageCounts(
   worldId: string,
   chats: any[],
-  getMemory: GetMemory
+  getMemory: GetMemory,
+  dependencies: SerializeChatsDependencies = {}
 ): Promise<Record<string, unknown>[]> {
   const worldKey = String(worldId || '');
   if (!worldKey) {
@@ -160,6 +196,9 @@ export async function serializeChatsWithMessageCounts(
 
   const chatList = Array.isArray(chats) ? chats : [];
   const messageCounts = new Map<string, number>();
+  const pendingHitlPromptByChatId = new Map<string, boolean>();
+  const pendingHitlPromptDetector = dependencies.listPendingHitlPromptEventsFromMessages
+    ?? await loadPendingHitlPromptDetector();
 
   await Promise.all(chatList.map(async (chat) => {
     const chatId = String(chat?.id || '');
@@ -173,10 +212,16 @@ export async function serializeChatsWithMessageCounts(
           : [],
       );
       const count = countConversationDisplayMessages(normalizedMessages);
+      const pendingHitlPrompts = pendingHitlPromptDetector(
+        Array.isArray(messages) ? messages : [],
+        chatId,
+      );
       messageCounts.set(chatId, count);
+      pendingHitlPromptByChatId.set(chatId, pendingHitlPrompts.length > 0);
     } catch {
       const fallbackCount = Number(chat?.messageCount);
       messageCounts.set(chatId, Number.isFinite(fallbackCount) ? fallbackCount : 0);
+      pendingHitlPromptByChatId.set(chatId, chat?.hasPendingHitlPrompt === true);
     }
   }));
 
@@ -185,7 +230,8 @@ export async function serializeChatsWithMessageCounts(
     const derivedCount = messageCounts.get(chatId);
     return serializeChat({
       ...chat,
-      messageCount: Number.isFinite(Number(derivedCount)) ? Number(derivedCount) : chat?.messageCount
+      messageCount: Number.isFinite(Number(derivedCount)) ? Number(derivedCount) : chat?.messageCount,
+      hasPendingHitlPrompt: pendingHitlPromptByChatId.get(chatId) === true,
     });
   });
 }

@@ -519,6 +519,17 @@ export async function waitForAssistantToken(page: Page, token: string, timeoutMs
   await page.getByLabel('Send message').waitFor({ state: 'visible', timeout: resolvedTimeoutMs });
 }
 
+export async function waitForPersistedAssistantToken(page: Page, token: string, timeoutMs?: number): Promise<void> {
+  const resolvedTimeoutMs = timeoutMs ?? 15_000;
+  await expect.poll(
+    async () => await hasPersistedAssistantToken(page, token),
+    {
+      timeout: resolvedTimeoutMs,
+      message: `Expected a persisted non-user message containing "${token}" in the active Electron chat.`,
+    },
+  ).toBe(true);
+}
+
 export async function waitForAssistantTokenOrHitlPrompt(
   page: Page,
   token: string,

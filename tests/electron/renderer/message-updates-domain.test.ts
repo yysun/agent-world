@@ -11,6 +11,8 @@
  * - Avoids runtime dependencies beyond pure helper functions.
  *
  * Recent Changes:
+ * - 2026-04-23: Added edit-trim regression coverage so stale ask_user_input/tool rows do not
+ *   survive optimistic renderer cleanup when array order drifts from timestamp order.
  * - 2026-03-10: Added regressions for failed-turn system-error coalescing and refresh protection against stale live streaming rows overriding canonical refreshed messages.
  * - 2026-02-26: Added coverage for redundant error-log suppression/removal and chat-scoped transient error clearing.
  * - 2026-02-20: Added optimistic user-message lifecycle coverage (create/reconcile/remove + identical-content reconciliation safety).
@@ -448,6 +450,36 @@ describe('message-updates domain helpers', () => {
     }];
 
     const next = trimChatMessagesFromCutoff(existing, 'user-2', 'chat-1');
+    expect(next.map((message) => message.messageId)).toEqual(['user-1']);
+  });
+
+  it('trims stale ask_user_input tool rows even when they are ordered before the edited user row', () => {
+    const existing = [{
+      messageId: 'user-1',
+      role: 'user',
+      sender: 'human',
+      chatId: 'chat-1',
+      content: 'first',
+      createdAt: '2026-03-10T03:18:00.000Z',
+    }, {
+      messageId: 'ask-user-input-1',
+      role: 'tool',
+      sender: 'planner',
+      chatId: 'chat-1',
+      content: '{"question":"Proceed?"}',
+      createdAt: '2026-03-10T03:18:03.000Z',
+      toolName: 'ask_user_input',
+    }, {
+      messageId: 'user-2',
+      role: 'user',
+      sender: 'human',
+      chatId: 'chat-1',
+      content: 'edit me',
+      createdAt: '2026-03-10T03:18:01.000Z',
+    }];
+
+    const next = trimChatMessagesFromCutoff(existing, 'user-2', 'chat-1');
+
     expect(next.map((message) => message.messageId)).toEqual(['user-1']);
   });
 

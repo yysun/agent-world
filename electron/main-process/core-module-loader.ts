@@ -100,3 +100,30 @@ export async function importCoreGitHubWorldImportModule(baseDir: string): Promis
   const searched = candidates.map((item) => `'${item}'`).join(', ');
   throw new Error(`Failed to locate core GitHub world-import module. Searched: ${searched}`);
 }
+
+export async function importCoreHitlModule(baseDir: string): Promise<any> {
+  const candidates = [
+    path.resolve(baseDir, '../../dist/core/hitl.js'),
+    path.resolve(baseDir, '../dist/core/hitl.js')
+  ];
+
+  const existingCandidates = candidates
+    .filter((candidate) => fs.existsSync(candidate))
+    .map((candidate) => ({
+      candidate,
+      mtimeMs: fs.statSync(candidate).mtimeMs
+    }))
+    .sort((left, right) => {
+      if (right.mtimeMs !== left.mtimeMs) {
+        return right.mtimeMs - left.mtimeMs;
+      }
+      return candidates.indexOf(left.candidate) - candidates.indexOf(right.candidate);
+    });
+
+  if (existingCandidates.length > 0) {
+    return import(pathToFileURL(existingCandidates[0].candidate).href);
+  }
+
+  const searched = candidates.map((item) => `'${item}'`).join(', ');
+  throw new Error(`Failed to locate core HITL module. Searched: ${searched}`);
+}

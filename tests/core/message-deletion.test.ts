@@ -1,10 +1,13 @@
 /**
  * Unit Tests for Message Deletion Feature
- * 
+ *
  * Tests the removeMessagesFrom function which handles deletion of user messages
  * and all subsequent messages in a chat conversation.
- * 
+ *
  * Uses in-memory storage for testing.
+ *
+ * Recent Changes:
+ * - 2026-04-23: Added regression coverage to ensure successful delete cutoffs clear pending HITL prompts for the affected chat.
  */
 
 import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -39,7 +42,12 @@ vi.mock('../../core/storage/storage-factory.js', async (importOriginal) => {
   };
 });
 
-import { removeMessagesFrom } from '../../core/index.js';
+import {
+  clearHitlStateForTests,
+  listPendingHitlPromptEvents,
+  removeMessagesFrom,
+  requestWorldOption,
+} from '../../core/index.js';
 
 // Helper to create a test world
 function createTestWorld(overrides: Partial<World> = {}): World {
@@ -82,6 +90,8 @@ describe('Message Deletion Feature - Unit Tests', () => {
   });
 
   afterEach(async () => {
+    clearHitlStateForTests();
+
     // Clean up by deleting test world if it exists
     try {
       await getMemoryStorage().deleteWorld('test-world');
@@ -468,6 +478,50 @@ describe('Message Deletion Feature - Unit Tests', () => {
   });
 
   describe('Edge Cases', () => {
+    it('clears pending HITL prompts for the deleted chat after a successful cutoff', async () => {
+      const world = createTestWorld();
+      const agent = createTestAgent({
+        memory: [
+          { role: 'user', content: 'msg1', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-1' },
+          {
+            role: 'assistant',
+            content: 'Calling tool: shell_cmd',
+            messageId: 'msg-2',
+            chatId: 'chat-1',
+            createdAt: new Date('2024-01-01T10:01:00Z'),
+            agentId: 'agent-1',
+          },
+        ],
+      });
+      const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 2, createdAt: new Date(), updatedAt: new Date() };
+
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent);
+      await getMemoryStorage().saveChatData('test-world', chat);
+
+      void requestWorldOption(world, {
+        requestId: 'req-1',
+        title: 'Approve delete',
+        message: 'Delete the file?',
+        chatId: 'chat-1',
+        options: [
+          { id: 'yes', label: 'Yes' },
+          { id: 'no', label: 'No' },
+        ],
+        metadata: {
+          tool: 'shell_cmd',
+          toolCallId: 'msg-2',
+        },
+      });
+
+      expect(listPendingHitlPromptEvents(world, 'chat-1')).toHaveLength(1);
+
+      const result = await removeMessagesFrom('test-world', 'msg-2', 'chat-1');
+
+      expect(result.success).toBe(true);
+      expect(listPendingHitlPromptEvents(world, 'chat-1')).toHaveLength(0);
+    });
+
     it('should handle deletion of first message', async () => {
       const world = createTestWorld();
       const agent = createTestAgent({

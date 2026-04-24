@@ -9,6 +9,7 @@
  * - Uses pure helper tests with no Electron runtime dependencies.
  *
  * Recent Changes:
+ * - 2026-04-24: Added session-list coverage for unresolved persisted HITL prompts.
  * - 2026-03-21: Added regression coverage for persisted synthetic assistant tool-result rows so
  *   Electron renderer transport receives plain assistant markdown plus display-only linkage metadata.
  * - 2026-03-10: Added regression coverage ensuring activity event serialization includes chatId in nested object (E-Rule 4).
@@ -18,7 +19,7 @@
  * - 2026-02-15: Added regression coverage for agent-sender messages persisted with `role: 'user'`.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   normalizeSessionMessages,
   serializeMessage,
@@ -370,7 +371,10 @@ describe('serializeChatsWithMessageCounts', () => {
           createdAt: '2026-03-06T17:53:14.179Z',
           agentId: 'gemini'
         }
-      ])
+      ]),
+      {
+        listPendingHitlPromptEventsFromMessages: () => [],
+      }
     );
 
     expect(sessions).toHaveLength(1);
@@ -378,5 +382,106 @@ describe('serializeChatsWithMessageCounts', () => {
       id: 'chat-1',
       messageCount: 4,
     });
+  });
+
+  it('marks sessions that still have a pending HITL prompt', async () => {
+    const pendingHitlDetector = vi.fn((messages: any[], chatId: string | null) => {
+      return chatId === 'chat-pending' && Array.isArray(messages) && messages.length > 0
+        ? [{ requestId: 'req-load-skill-1' }]
+        : [];
+    });
+
+    const sessions = await serializeChatsWithMessageCounts(
+      'world-1',
+      [
+        { id: 'chat-pending', worldId: 'world-1', name: 'Pending Chat', messageCount: 0 },
+        { id: 'chat-resolved', worldId: 'world-1', name: 'Resolved Chat', messageCount: 0 },
+      ],
+      async (_worldId, chatId) => {
+        if (chatId === 'chat-pending') {
+          return [
+            {
+              messageId: 'assistant-hitl-pending',
+              role: 'assistant',
+              sender: 'gpt5',
+              content: 'Calling tool: human_intervention_request (skill_id: "demo-skill")',
+              chatId,
+              createdAt: '2026-04-24T00:27:20.776Z',
+              tool_calls: [{
+                id: 'call-hitl-pending',
+                function: {
+                  name: 'human_intervention_request',
+                  arguments: JSON.stringify({
+                    title: 'Approval required',
+                    question: 'Load demo-skill?',
+                    options: [{ id: 'approve', label: 'Approve' }],
+                    metadata: {
+                      source: 'load_skill',
+                      skillId: 'demo-skill',
+                    }
+                  })
+                }
+              }]
+            }
+          ];
+        }
+
+        return [
+          {
+            messageId: 'assistant-hitl-resolved',
+            role: 'assistant',
+            sender: 'gpt5',
+            content: 'Calling tool: human_intervention_request (skill_id: "demo-skill")',
+            chatId,
+            createdAt: '2026-04-24T00:27:20.776Z',
+            tool_calls: [{
+              id: 'call-hitl-resolved',
+              function: {
+                name: 'human_intervention_request',
+                arguments: JSON.stringify({
+                  title: 'Approval required',
+                  question: 'Load demo-skill?',
+                  options: [{ id: 'approve', label: 'Approve' }],
+                  metadata: {
+                    source: 'load_skill',
+                    skillId: 'demo-skill',
+                  }
+                })
+              }
+            }]
+          },
+          {
+            messageId: 'tool-hitl-resolved',
+            role: 'tool',
+            sender: 'gpt5',
+            content: '{"accepted":true}',
+            chatId,
+            createdAt: '2026-04-24T00:27:25.000Z',
+            tool_call_id: 'call-hitl-resolved'
+          }
+        ];
+      },
+      {
+        listPendingHitlPromptEventsFromMessages: pendingHitlDetector,
+      }
+    );
+
+    expect(pendingHitlDetector).toHaveBeenCalledTimes(2);
+    expect(pendingHitlDetector).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ messageId: 'assistant-hitl-pending' })
+      ]),
+      'chat-pending'
+    );
+    expect(pendingHitlDetector).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ messageId: 'assistant-hitl-resolved' })
+      ]),
+      'chat-resolved'
+    );
+    expect(sessions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'chat-pending', hasPendingHitlPrompt: true }),
+      expect.objectContaining({ id: 'chat-resolved', hasPendingHitlPrompt: false }),
+    ]));
   });
 });

@@ -16,6 +16,10 @@
  *   without dragging in Node-specific core runtime modules.
  *
  * Recent Changes:
+ * - 2026-04-23: Preserve earlier same-timestamp rows that still precede the edited message while continuing to trim later same-chat rows with equal-or-later timestamps.
+ * - 2026-04-23: Made timestamp-bearing rows authoritative during cutoff trimming so stale
+ *   HITL/tool rows are removed even when their local array order drifts ahead of the edited
+ *   user turn; index fallback now applies only to rows without usable timestamps.
  * - 2026-03-10: Extracted generic chat-tail cutoff logic from Electron renderer
  *   message updates so edit/delete flows can share one cutoff policy.
  */
@@ -65,20 +69,24 @@ export function trimChatItemsFromCutoff<T extends ChatCutoffItemLike>(
       return true;
     }
 
-    if (index < targetIndex) {
-      return true;
-    }
-
     if (cutoffTimestamp <= 0) {
-      return false;
+      return index < targetIndex;
     }
 
     const itemTimestamp = getChatCutoffItemTimestamp(item);
     if (itemTimestamp <= 0) {
+      return index < targetIndex;
+    }
+
+    if (itemTimestamp < cutoffTimestamp) {
+      return true;
+    }
+
+    if (itemTimestamp > cutoffTimestamp) {
       return false;
     }
 
-    return itemTimestamp < cutoffTimestamp;
+    return index < targetIndex;
   });
 
   return next.length === items.length ? items : next;

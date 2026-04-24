@@ -224,6 +224,70 @@ describe('restoreChat validation', () => {
     expect(publishMessageWithId).not.toHaveBeenCalled();
   });
 
+  it('can suppress HITL replay during mutation restore flows', async () => {
+    vi.resetModules();
+
+    const persistedWorld = createPersistedWorld('chat-1');
+
+    const storageWrappers = {
+      loadWorld: vi.fn().mockResolvedValue(persistedWorld),
+      listAgents: vi.fn().mockResolvedValue([
+        { id: 'agent-1', name: 'Agent 1', type: 'assistant', provider: 'openai', model: 'gpt-4o-mini', llmCallCount: 0, autoReply: true, status: 'active', memory: [] },
+      ]),
+      listChats: vi.fn().mockResolvedValue([
+        { id: 'chat-1', name: 'Chat 1', messageCount: 0 },
+        { id: 'chat-2', name: 'Chat 2', messageCount: 0 },
+      ]),
+      loadChatData: vi.fn().mockResolvedValue({ id: 'chat-2', name: 'Chat 2', messageCount: 0 }),
+      getMemory: vi.fn().mockResolvedValue([
+        {
+          role: 'assistant',
+          content: 'Calling tool: shell_cmd',
+          sender: 'assistant-1',
+          messageId: 'm-hitl',
+          chatId: 'chat-2',
+          createdAt: new Date('2026-02-24T10:00:01Z'),
+          tool_calls: [
+            { id: 'tc-1', type: 'function', function: { name: 'shell_cmd', arguments: '{"command":"rm","args":[".e2e-hitl-delete-me.txt"]}' } }
+          ]
+        }
+      ]),
+      saveWorld: vi.fn().mockResolvedValue(undefined)
+    };
+
+    mockStorageFactory(storageWrappers);
+
+    const replayPendingHitlRequests = vi.fn().mockReturnValue(1);
+    vi.doMock('../../core/hitl.js', async () => {
+      const actual = await vi.importActual<typeof import('../../core/hitl.js')>('../../core/hitl.js');
+      return {
+        ...actual,
+        replayPendingHitlRequests,
+      };
+    });
+
+    const resumePendingToolCallsForChat = vi.fn().mockResolvedValue(1);
+    vi.doMock('../../core/events/memory-manager.js', async () => {
+      const actual = await vi.importActual<typeof import('../../core/events/memory-manager.js')>('../../core/events/memory-manager.js');
+      return {
+        ...actual,
+        resumePendingToolCallsForChat,
+      };
+    });
+
+    const managers = await import('../../core/managers.js');
+    const restored = await managers.restoreChat('world-1', 'chat-2', {
+      suppressAutoResume: true,
+      suppressHitlReplay: true,
+    });
+    expect(restored).not.toBeNull();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(replayPendingHitlRequests).not.toHaveBeenCalled();
+    expect(resumePendingToolCallsForChat).not.toHaveBeenCalled();
+  });
+
   it('does not auto-submit a persisted user-last message when restoring a chat without queue ownership', async () => {
     vi.resetModules();
 

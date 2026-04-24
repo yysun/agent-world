@@ -29,6 +29,7 @@
  *   StorageAPI optional methods with a [] fallback when unavailable.
  *
  * Recent Changes:
+ * - 2026-04-23: Clear chat-scoped pending HITL requests and cached skill approvals after successful delete cutoffs so orphaned approval prompts cannot replay on later restore flows.
  * - 2026-03-10: Narrowed edit/delete cleanup to the removed tail only; no longer clears unrelated queued turns, and now drops persisted post-cutoff chat events so stale system errors do not reappear after refresh.
  * - 2026-03-10: Routed edit resubmission through the canonical queue-backed `enqueueAndProcessUserTurn` path.
  * - 2026-03-09: Extracted from managers.ts as part of god-module decomposition.
@@ -426,6 +427,8 @@ export async function removeMessagesFrom(
   // surface a queue error instead of a confusing "Failed to edit message".
   if (agents.length === 0) {
     await removeTrimmedQueueRowsAndEvents(resolvedWorldId, chatId, 0, new Set());
+    clearChatSkillApprovals(resolvedWorldId, chatId);
+    clearPendingHitlRequestsForChat(resolvedWorldId, chatId);
     return {
       success: true,
       messageId,
@@ -582,6 +585,8 @@ export async function removeMessagesFrom(
 
   if (failedAgents.length === 0) {
     await removeTrimmedQueueRowsAndEvents(resolvedWorldId, chatId, targetTimestampValue!, removedMessageIds);
+    clearChatSkillApprovals(resolvedWorldId, chatId);
+    clearPendingHitlRequestsForChat(resolvedWorldId, chatId);
     const { getActiveSubscribedWorld } = await import('./subscription.js');
     const activeWorld = getActiveSubscribedWorld(resolvedWorldId, chatId);
     const remainingQueueRows = await storageWrappers!.getQueuedMessages?.(resolvedWorldId, chatId);

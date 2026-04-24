@@ -140,6 +140,7 @@ export type ChatActivationSnapshot = {
 
 export type RestoreChatOptions = {
   suppressAutoResume?: boolean;
+  suppressHitlReplay?: boolean;
 };
 
 function triggerPendingToolCallResume(world: World, chatId: string, targetAssistantMessageId?: string): void {
@@ -1166,8 +1167,14 @@ async function activateChatResources(
   reconstructSkillApprovalsFromMessages(resolvedWorldId, chatId, Array.isArray(memoryForApprovals) ? memoryForApprovals : []);
   const { getActiveSubscribedWorld } = await import('./subscription.js');
   const runtimeWorld = getActiveSubscribedWorld(resolvedWorldId, chatId) || world;
-  const replayedHitlPromptCount = replayPendingHitlRequests(runtimeWorld, chatId);
-  loggerRestore.debug('Restore chat pending HITL replay triggered', { worldId: world.id, chatId });
+  const replayedHitlPromptCount = options?.suppressHitlReplay === true
+    ? 0
+    : replayPendingHitlRequests(runtimeWorld, chatId);
+  loggerRestore.debug('Restore chat pending HITL replay triggered', {
+    worldId: world.id,
+    chatId,
+    suppressed: options?.suppressHitlReplay === true,
+  });
   if (options?.suppressAutoResume === true) {
     loggerRestore.debug('Restore chat auto-resume suppressed for mutation flow', {
       worldId: world.id,
