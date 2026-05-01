@@ -38,6 +38,13 @@ export interface ChatMessage {
   tool_call_id?: string; // For tool response messages
 }
 
+export interface SystemPromptSections {
+  authoredPrompt?: string;
+  runtimeGuidanceSections?: string[];
+  projectInstructionSection?: string;
+  skillSection?: string;
+}
+
 export interface AgentMessage extends ChatMessage {
   /**
    * Unique message identifier. REQUIRED for all new messages.
@@ -87,6 +94,12 @@ export interface AgentMessage extends ChatMessage {
    * Maps tool_call_id to completion status and result payload.
    */
   toolCallStatus?: Record<string, { complete: boolean; result: any }>;
+
+  /**
+   * Transient structured sections for system-prompt composition.
+   * Used to rebuild the final LLM system prompt step by step before transport.
+   */
+  systemPromptSections?: SystemPromptSections;
 
   /**
    * Explicit runtime-owned turn metadata for durable loop state and completion semantics.

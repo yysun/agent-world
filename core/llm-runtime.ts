@@ -15,6 +15,7 @@
  * - Host-owned tools remain explicit extras so existing approval and persistence semantics are preserved.
  *
  * Recent Changes:
+ * - 2026-05-10: Updated late tool-rule injection to preserve final prompt precedence by inserting runtime tool guidance before project `AGENTS.md` and skill sections when present.
  * - 2026-04-23: Added a compatibility loader for `resolveTools` and `resolveToolsAsync` so published `llm-runtime@0.3.2` remains usable until the root exports are published.
  * - 2026-04-23: Disabled host-level `webSearch` by default without a host-side opt-in path.
  * - 2026-04-23: Switched tool discovery to the newly exported `resolveTools` and `resolveToolsAsync` package APIs from llm-runtime.
@@ -69,6 +70,7 @@ import { resolveSkillRootDescriptors } from './skill-root-contract.js';
 import { executeWebFetchWithHostSemantics } from './web-fetch-tool.js';
 import {
   buildToolUsagePromptSection,
+  composeSystemPromptFromSections,
   generateId,
   getDefaultWorkingDirectory,
   getEnvValueFromText,
@@ -355,14 +357,25 @@ function mapProvider(provider: LLMProvider): LLMProviderName {
 }
 
 function toRuntimeMessage(message: AgentMessage): ChatMessage {
-  const { sender, chatId, agentId, messageId, replyToMessageId, ...llmMessage } = message as AgentMessage & {
+  const { sender, chatId, agentId, messageId, replyToMessageId, systemPromptSections, ...llmMessage } = message as AgentMessage & {
     replyToMessageId?: string;
+    systemPromptSections?: unknown;
   };
   return llmMessage;
 }
 
 function stripCustomFieldsFromMessages(messages: AgentMessage[]): ChatMessage[] {
   return filterClientSideMessages(messages).map(toRuntimeMessage);
+}
+
+export function prepareMessagesForRuntime(
+  messages: AgentMessage[],
+  toolNames: string[],
+  options?: { workingDirectory?: string },
+): ChatMessage[] {
+  const filteredMessages = filterClientSideMessages(messages);
+  const messagesWithToolRules = appendToolRulesToSystemMessage(filteredMessages, toolNames, options);
+  return messagesWithToolRules.map(toRuntimeMessage);
 }
 
 function getReasoningEffort(world: World): 'default' | 'none' | 'low' | 'medium' | 'high' {
@@ -529,8 +542,30 @@ export function appendToolRulesToSystemMessage(
     return messages;
   }
 
+  if (systemMessage.systemPromptSections) {
+    const nextSections = {
+      ...systemMessage.systemPromptSections,
+      runtimeGuidanceSections: [
+        ...(systemMessage.systemPromptSections.runtimeGuidanceSections ?? []),
+        ...injectedSections,
+      ],
+    };
+
+    return [
+      {
+        ...systemMessage,
+        content: composeSystemPromptFromSections(nextSections),
+        systemPromptSections: nextSections,
+      },
+      ...messages.slice(1),
+    ];
+  }
+
+  const injectedContent = injectedSections.join('\n\n');
+  const nextContent = `${systemMessage.content}\n\n${injectedContent}`;
+
   return [
-    { ...systemMessage, content: `${systemMessage.content}\n\n${injectedSections.join('\n\n')}` },
+    { ...systemMessage, content: nextContent },
     ...messages.slice(1),
   ];
 }
@@ -547,10 +582,9 @@ async function executeGenerateAgentResponse(
   const provider = mapProvider(agent.provider);
   const providerConfig = getLLMProviderConfig(provider);
   const workingDirectory = String(getEnvValueFromText(world.variables, 'working_directory') || getDefaultWorkingDirectory()).trim();
-  let preparedMessages = stripCustomFieldsFromMessages(messages) as AgentMessage[];
   const advertisedTools = skipTools ? {} : await getRuntimeToolsForWorld(world);
   const hostTools = getHostToolMap();
-  preparedMessages = appendToolRulesToSystemMessage(preparedMessages, Object.keys(advertisedTools), { workingDirectory });
+  const preparedMessages = prepareMessagesForRuntime(messages, Object.keys(advertisedTools), { workingDirectory });
 
   const response = await generate({
     provider,
@@ -604,10 +638,9 @@ async function executeStreamAgentResponse(
   const provider = mapProvider(agent.provider);
   const providerConfig = getLLMProviderConfig(provider);
   const workingDirectory = String(getEnvValueFromText(world.variables, 'working_directory') || getDefaultWorkingDirectory()).trim();
-  let preparedMessages = stripCustomFieldsFromMessages(messages) as AgentMessage[];
   const runtimeTools = await getRuntimeToolsForWorld(world);
   const hostTools = getHostToolMap();
-  preparedMessages = appendToolRulesToSystemMessage(preparedMessages, Object.keys(runtimeTools), { workingDirectory });
+  const preparedMessages = prepareMessagesForRuntime(messages, Object.keys(runtimeTools), { workingDirectory });
 
   publishSSE(world, {
     agentName: agent.id,

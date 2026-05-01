@@ -14,12 +14,14 @@
  * - Focuses on injected prompt content, not provider execution.
  *
  * Recent Changes:
+ * - 2026-05-10: Added coverage ensuring late tool-rule injection preserves precedence by inserting runtime guidance before project and skill sections.
  * - 2026-03-06: Added regression coverage for shell scope prompt gating in llm-manager.
  */
 
 import { describe, expect, test } from 'vitest';
-import { appendToolRulesToSystemMessage } from '../../core/llm-runtime.js';
+import { appendToolRulesToSystemMessage, prepareMessagesForRuntime } from '../../core/llm-runtime.js';
 import type { AgentMessage } from '../../core/types.js';
+import { composeSystemPromptFromSections } from '../../core/utils.js';
 
 function createSystemMessages(): AgentMessage[] {
   return [
@@ -55,5 +57,73 @@ describe('appendToolRulesToSystemMessage', () => {
 
     expect(result[0]?.content).not.toContain('working directory scope');
     expect(result[0]?.content).toContain('You have access to tools.');
+  });
+
+  test('inserts runtime tool guidance before project and skill sections when present', () => {
+    const systemPromptSections = {
+      authoredPrompt: 'Base system prompt',
+      runtimeGuidanceSections: [
+        'Only use @mentions when handing off to another agent; for normal user replies, do not mention agents.',
+      ],
+      projectInstructionSection: [
+        '## Project Instructions',
+        '<project_agents_md>',
+        '# Project Rules',
+        '</project_agents_md>',
+      ].join('\n'),
+      skillSection: ['## Agent Skills', '<available_skills>', '</available_skills>'].join('\n'),
+    };
+    const result = appendToolRulesToSystemMessage([
+      {
+        role: 'system',
+        content: composeSystemPromptFromSections(systemPromptSections),
+        createdAt: new Date(),
+        systemPromptSections,
+      },
+    ], ['shell_cmd'], {
+      workingDirectory: '/tmp/project',
+    });
+
+    const content = result[0]?.content ?? '';
+    expect(content.indexOf('When using `shell_cmd`')).toBeGreaterThan(content.indexOf('Only use @mentions'));
+    expect(content.indexOf('When using `shell_cmd`')).toBeLessThan(content.indexOf('## Project Instructions'));
+    expect(content.indexOf('## Project Instructions')).toBeLessThan(content.indexOf('## Agent Skills'));
+  });
+
+  test('preserves structured prompt ordering through the runtime preparation pipeline', () => {
+    const systemPromptSections = {
+      authoredPrompt: 'Base system prompt',
+      runtimeGuidanceSections: [
+        'Only use @mentions when handing off to another agent; for normal user replies, do not mention agents.',
+      ],
+      projectInstructionSection: [
+        '## Project Instructions',
+        '<project_agents_md>',
+        '# Project Rules',
+        '</project_agents_md>',
+      ].join('\n'),
+      skillSection: ['## Agent Skills', '<available_skills>', '</available_skills>'].join('\n'),
+    };
+
+    const result = prepareMessagesForRuntime([
+      {
+        role: 'system',
+        content: composeSystemPromptFromSections(systemPromptSections),
+        createdAt: new Date(),
+        systemPromptSections,
+        sender: 'system',
+      },
+    ], ['shell_cmd'], {
+      workingDirectory: '/tmp/project',
+    });
+
+    const systemMessage = result[0];
+    const content = systemMessage?.content ?? '';
+
+    expect(content.indexOf('When using `shell_cmd`')).toBeGreaterThan(content.indexOf('Only use @mentions'));
+    expect(content.indexOf('When using `shell_cmd`')).toBeLessThan(content.indexOf('## Project Instructions'));
+    expect(content.indexOf('## Project Instructions')).toBeLessThan(content.indexOf('## Agent Skills'));
+    expect('systemPromptSections' in (systemMessage ?? {})).toBe(false);
+    expect('sender' in (systemMessage ?? {})).toBe(false);
   });
 });

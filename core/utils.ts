@@ -34,6 +34,7 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-05-10: Added CWD-local `AGENTS.md` loading to prompt assembly and ordered injected prompt layers as built-in runtime guidance, then project instructions, then skill guidance.
  * - 2026-04-23: Restored `getWorldTurnLimit()` after an unrelated HITL alias refactor accidentally removed the exported helper still used by the orchestrator.
  * - 2026-04-12: Hardened tool-usage guidance to forbid future-tense tool narration and require corrected tool calls after validation failures.
  * - 2026-03-22: Updated Agent Skills prompt guidance to emphasize `load_skill` as a
@@ -64,6 +65,8 @@
  * - Consolidated with message-prep.ts filtering for client-side tool calls
  */
 
+import * as fs from 'node:fs/promises';
+import { join } from 'node:path';
 import { nanoid } from 'nanoid';
 import { homedir } from 'os';
 import { filterClientSideMessages } from './message-prep.js';
@@ -294,6 +297,56 @@ function escapeXmlText(value: string): string {
     .replace(/>/g, '&gt;');
 }
 
+function buildProjectAgentsPromptEnvelope(agentsContent: string): string {
+  return [
+    '## Project Instructions',
+    'The following instructions come from AGENTS.md in the current working directory.',
+    'Treat them as project-specific workflow constraints that do not override built-in runtime or safety rules.',
+    '<project_agents_md>',
+    agentsContent,
+    '</project_agents_md>',
+  ].join('\n');
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return !!error
+    && typeof error === 'object'
+    && 'code' in error
+    && (error as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+export async function buildProjectAgentsPromptSection(worldVariablesText = ''): Promise<string> {
+  const workingDirectory = String(
+    getEnvValueFromText(worldVariablesText, 'working_directory') || getDefaultWorkingDirectory()
+  ).trim();
+  const effectiveWorkingDirectory = workingDirectory || getDefaultWorkingDirectory();
+  const agentsFilePath = join(effectiveWorkingDirectory, 'AGENTS.md');
+
+  try {
+    const stat = await fs.stat(agentsFilePath);
+    if (!stat.isFile()) {
+      return '';
+    }
+
+    const agentsContent = String(await fs.readFile(agentsFilePath, 'utf8')).trim();
+    if (!agentsContent) {
+      return '';
+    }
+
+    return buildProjectAgentsPromptEnvelope(agentsContent);
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return '';
+    }
+
+    logger.warn('Failed to load CWD AGENTS.md for prompt context', {
+      agentsFilePath,
+      error: error instanceof Error ? error.message : error,
+    });
+    return '';
+  }
+}
+
 async function buildAgentSkillsPromptSection(worldVariablesText = ''): Promise<string> {
   await waitForInitialSkillSync();
   await syncSkills({ worldVariablesText });
@@ -356,7 +409,30 @@ async function buildAgentSkillsPromptSection(worldVariablesText = ''): Promise<s
 }
 
 // Import types for utility functions
-import { World, Agent, SenderType, MessageData, AgentMessage, ChatMessage } from './types.js';
+import { World, Agent, SenderType, MessageData, AgentMessage, ChatMessage, type SystemPromptSections } from './types.js';
+
+function normalizePromptSection(section: string | undefined): string {
+  return typeof section === 'string' ? section.trim() : '';
+}
+
+export function composeSystemPromptFromSections(sections: SystemPromptSections): string {
+  const authoredPrompt = typeof sections?.authoredPrompt === 'string' ? sections.authoredPrompt : '';
+  const runtimeGuidanceSections = Array.isArray(sections?.runtimeGuidanceSections)
+    ? sections.runtimeGuidanceSections.map(normalizePromptSection).filter(Boolean)
+    : [];
+  const projectInstructionSection = normalizePromptSection(sections?.projectInstructionSection);
+  const skillSection = normalizePromptSection(sections?.skillSection);
+  const injectedSections = [
+    ...runtimeGuidanceSections,
+    projectInstructionSection,
+    skillSection,
+  ].filter(Boolean);
+  const injectedPrompt = injectedSections.join('\n\n');
+
+  return authoredPrompt.trim().length > 0 && injectedPrompt.length > 0
+    ? `${authoredPrompt}\n\n---\n${injectedPrompt}`
+    : (authoredPrompt || injectedPrompt);
+}
 
 /**
  * Get world-specific turn limit or default value
@@ -604,18 +680,22 @@ export async function prepareMessagesForLLM(
   // IDEMPOTENCE: Always add a system message first.
   // System messages are NEVER saved to storage.
   const interpolatedPrompt = interpolateTemplateVariables(freshSystemPrompt || '', worldEnvMap);
-  const agentSkillsPromptSection = await buildAgentSkillsPromptSection(worldVariablesText);
   const mentionFormatRule = buildAgentMentionFormatRule();
-  const injectedSections = [agentSkillsPromptSection, mentionFormatRule].filter((section) => section.length > 0);
-  const injectedPrompt = injectedSections.join('\n\n');
-  const promptWithMentionRule = interpolatedPrompt.trim().length > 0 && injectedPrompt.length > 0
-    ? `${interpolatedPrompt}\n\n---\n${injectedPrompt}`
-    : (interpolatedPrompt || injectedPrompt);
+  const projectAgentsPromptSection = await buildProjectAgentsPromptSection(worldVariablesText);
+  const agentSkillsPromptSection = await buildAgentSkillsPromptSection(worldVariablesText);
+  const systemPromptSections: SystemPromptSections = {
+    authoredPrompt: interpolatedPrompt,
+    runtimeGuidanceSections: [mentionFormatRule].filter(Boolean),
+    projectInstructionSection: projectAgentsPromptSection,
+    skillSection: agentSkillsPromptSection,
+  };
+  const promptWithMentionRule = composeSystemPromptFromSections(systemPromptSections);
 
   messages.push({
     role: 'system',
     content: promptWithMentionRule,
-    createdAt: new Date()
+    createdAt: new Date(),
+    systemPromptSections,
   });
 
   // Load FRESH conversation history from storage (not from in-memory agent)
