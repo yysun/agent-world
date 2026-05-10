@@ -6,6 +6,7 @@
  *   not merged away into tool result cards.
  *
  * Recent changes:
+ * - 2026-05-10: Added component-level chat-to-non-chat switch coverage so board/grid/canvas latest-user panels are validated through the actual render path.
  * - 2026-03-15: Added regression coverage for live shell stdout rows using `toolUseId-stdout` so streaming tool output merges into the existing tool request row.
  * - 2026-03-13: Added coverage for reserving avatar spacing on tool transcript rows.
  * - 2026-03-13: Added coverage for suppressing avatar chrome on tool transcript rows.
@@ -28,6 +29,7 @@ const { jsxFactory } = vi.hoisted(() => ({
 vi.mock('react', () => ({
   useMemo: (fn: () => unknown) => fn(),
   useCallback: (fn: unknown) => fn,
+  useState: (initial: unknown) => [initial, () => undefined],
 }), { virtual: true });
 
 vi.mock('react/jsx-runtime', () => ({
@@ -46,15 +48,102 @@ import {
   getBoardLaneClassName,
   buildCombinedRenderableMessages,
   getBoardLaneContainerClassName,
+  getGridCanvasBottomSectionClassName,
   getLatestUserMessageEntry,
   getMessageListViewportClassName,
+  getNonChatBaseContainerClassName,
   getNonChatLatestUserSectionClassName,
+  getNonChatRootClassName,
+  getNonChatViewportClassName,
+  MessageListPanel,
   isNarratedAssistantToolCallMessage,
   shouldReserveToolAvatarSpace,
   shouldShowMessageAvatar,
   shouldRenderNonChatSectionLabels,
   shouldShowMessageChrome,
 } from '../../../electron/renderer/src/features/chat';
+
+function allDescendants(node: any): any[] {
+  if (Array.isArray(node)) {
+    return node.flatMap(allDescendants);
+  }
+  if (!node || typeof node !== 'object') {
+    return [];
+  }
+
+  const children = node.props?.children;
+  const childArray = Array.isArray(children) ? children : children != null ? [children] : [];
+  return [node, ...childArray.flatMap(allDescendants)];
+}
+
+function renderPanel(worldViewMode: 'chat' | 'board' | 'grid' | 'canvas') {
+  const messages = [
+    {
+      messageId: 'human-earlier',
+      role: 'user',
+      sender: 'user',
+      content: 'Earlier user input',
+      createdAt: '2026-05-10T09:00:00.000Z',
+    },
+    {
+      messageId: 'planner-1',
+      role: 'assistant',
+      sender: 'Planner',
+      content: 'Planner output',
+      createdAt: '2026-05-10T09:01:00.000Z',
+    },
+    {
+      messageId: 'human-latest',
+      role: 'user',
+      sender: 'user',
+      content: 'Long human input that must remain visible after switching away from chat view.',
+      createdAt: '2026-05-10T09:02:00.000Z',
+    },
+    {
+      messageId: 'writer-1',
+      role: 'assistant',
+      sender: 'Writer',
+      content: 'Writer output',
+      createdAt: '2026-05-10T09:03:00.000Z',
+    },
+  ];
+
+  const messagesById = new Map(messages.map((message) => [message.messageId, message]));
+
+  return MessageListPanel({
+    worldViewMode,
+    worldGridLayoutChoiceId: '1+2',
+    messagesContainerRef: { current: null },
+    messagesLoading: false,
+    hasConversationMessages: true,
+    selectedSession: { id: 'chat-1', name: 'Chat 1' },
+    refreshSkillRegistry: () => undefined,
+    loadingSkillRegistry: false,
+    visibleSkillRegistryEntries: [],
+    skillRegistryError: '',
+    showToolMessages: true,
+    messages,
+    messagesById,
+    worldAgentsById: new Map(),
+    worldAgentsByName: new Map(),
+    editingText: '',
+    setEditingText: () => undefined,
+    editingMessageId: null,
+    deletingMessageId: null,
+    onCancelEditMessage: () => undefined,
+    onSaveEditMessage: () => undefined,
+    onStartEditMessage: () => undefined,
+    onDeleteMessage: () => undefined,
+    onBranchFromMessage: () => undefined,
+    onCopyRawMarkdownFromMessage: () => undefined,
+    showInlineWorkingIndicator: false,
+    inlineWorkingIndicatorState: null,
+    activeHitlPrompt: null,
+    submittingHitlRequestId: null,
+    onRespondHitlOption: () => undefined,
+    onSkipHitlPrompt: () => undefined,
+  });
+}
 
 describe('MessageListPanel narrated tool-call visibility', () => {
   it('shows message chrome only for chat view', () => {
@@ -65,8 +154,12 @@ describe('MessageListPanel narrated tool-call visibility', () => {
     expect(shouldShowMessageChrome('unsupported')).toBe(true);
 
     const chatViewportClassName = getMessageListViewportClassName('chat');
+    const nonChatViewportClassName = getNonChatViewportClassName();
     expect(chatViewportClassName).toContain('overflow-y-auto');
     expect(chatViewportClassName).not.toContain('floating-composer-height');
+    expect(getMessageListViewportClassName('board')).toBe(nonChatViewportClassName);
+    expect(nonChatViewportClassName).toContain('overflow-y-auto');
+    expect(nonChatViewportClassName).not.toContain('overflow-hidden');
   });
 
   it('suppresses avatar chrome for tool transcript rows only', () => {
@@ -92,9 +185,19 @@ describe('MessageListPanel narrated tool-call visibility', () => {
     expect(getLatestUserMessageEntry([])).toBeNull();
 
     const latestUserSectionClassName = getNonChatLatestUserSectionClassName();
+    const nonChatBaseContainerClassName = getNonChatBaseContainerClassName();
+    const nonChatRootClassName = getNonChatRootClassName();
+
     expect(latestUserSectionClassName).toContain('shrink-0');
-    expect(latestUserSectionClassName).toContain('max-h-');
-    expect(latestUserSectionClassName).toContain('overflow-y-auto');
+    expect(latestUserSectionClassName).not.toContain('rounded-lg');
+    expect(latestUserSectionClassName).not.toContain('border');
+    expect(latestUserSectionClassName).not.toContain('bg-card');
+    expect(latestUserSectionClassName).not.toContain('max-h-');
+    expect(latestUserSectionClassName).not.toContain('overflow-y-auto');
+    expect(nonChatBaseContainerClassName).toContain('min-h-full');
+    expect(nonChatBaseContainerClassName.split(' ')).not.toContain('h-full');
+    expect(nonChatRootClassName).toContain('min-h-full');
+    expect(nonChatRootClassName).toContain('gap-4');
   });
 
   it('hides non-chat section title labels', () => {
@@ -105,7 +208,7 @@ describe('MessageListPanel narrated tool-call visibility', () => {
     const className = getBoardLaneContainerClassName();
     expect(className).toContain('flex');
     expect(className).toContain('overflow-x-auto');
-    expect(className).toContain('flex-1');
+    expect(className).toContain('min-h-[20rem]');
     expect(className).toContain('items-stretch');
 
     const laneClassName = getBoardLaneClassName();
@@ -114,9 +217,42 @@ describe('MessageListPanel narrated tool-call visibility', () => {
 
     const boardSectionClassName = getBoardBottomSectionClassName();
     expect(boardSectionClassName).toContain('flex-col');
-    expect(boardSectionClassName).toContain('flex-1');
-    expect(boardSectionClassName).toContain('overflow-hidden');
+    expect(boardSectionClassName).toContain('min-h-[20rem]');
+    expect(boardSectionClassName).not.toContain('rounded-xl');
+    expect(boardSectionClassName).not.toContain('border');
+    expect(boardSectionClassName).not.toContain('bg-card');
     expect(boardSectionClassName).not.toContain('floating-composer-height');
+
+    const gridCanvasBottomSectionClassName = getGridCanvasBottomSectionClassName();
+    expect(gridCanvasBottomSectionClassName).toContain('min-h-[20rem]');
+    expect(gridCanvasBottomSectionClassName).not.toContain('rounded-xl');
+    expect(gridCanvasBottomSectionClassName).not.toContain('border');
+    expect(gridCanvasBottomSectionClassName).not.toContain('bg-card');
+  });
+
+  it('keeps the latest human message visible when switching from chat to board, grid, and canvas views', () => {
+    const chatTree: any = renderPanel('chat');
+    const chatNodes = allDescendants(chatTree);
+    const chatHumanRow = chatNodes.find((node: any) => node?.props?.['data-testid'] === 'message-row-human-latest');
+
+    expect(chatHumanRow).toBeDefined();
+
+    for (const mode of ['board', 'grid', 'canvas'] as const) {
+      const tree: any = renderPanel(mode);
+      const nodes = allDescendants(tree);
+      const latestHumanRow = nodes.find((node: any) => node?.props?.['data-testid'] === 'message-row-human-latest');
+      const nonChatRoot = nodes.find((node: any) => node?.type === 'div' && node?.props?.className === getNonChatRootClassName());
+      const latestHumanSection = nodes.find((node: any) => (
+        node?.type === 'section'
+        && node?.props?.className === getNonChatLatestUserSectionClassName()
+        && allDescendants(node).some((child: any) => child?.props?.['data-testid'] === 'message-row-human-latest')
+      ));
+
+      expect(latestHumanRow).toBeDefined();
+      expect(nonChatRoot).toBeDefined();
+      expect(latestHumanSection).toBeDefined();
+      expect(String(tree?.props?.className || '')).not.toContain('overflow-hidden');
+    }
   });
 
   it('detects narrated assistant tool-call rows as narrated messages', () => {

@@ -13,6 +13,8 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-05-10: Redesigned board/grid/canvas into a single scrollable non-chat column, removing the extra outer section cards and fixing top-row clipping after switching from chat view.
+ * - 2026-05-10: Restored natural-height rendering for the non-chat latest-user panel so the board/grid/canvas top row is not clipped by an internal max-height cap.
  * - 2026-05-10: Made the non-chat latest-user section scroll within a bounded height so long human input is not clipped in board/grid/canvas views.
  * - 2026-05-10: Removed floating-composer bottom inset padding so transcript panes end above the composer in the normal stacked layout.
  * - 2026-03-23: Rewired the inline message edit textarea onto the shared design-system primitive.
@@ -117,7 +119,7 @@ export function shouldRenderNonChatSectionLabels(): boolean {
 }
 
 export function getBoardLaneContainerClassName(): string {
-  return 'flex min-h-0 flex-1 items-stretch gap-3 overflow-x-auto pb-1';
+  return 'flex min-h-[20rem] items-stretch gap-3 overflow-x-auto pb-1';
 }
 
 export function getBoardLaneClassName(): string {
@@ -125,17 +127,33 @@ export function getBoardLaneClassName(): string {
 }
 
 export function getBoardBottomSectionClassName(): string {
-  return 'min-h-0 flex-1 overflow-hidden rounded-xl border border-border/70 bg-card/25 p-3 flex flex-col gap-3';
+  return 'min-h-[20rem] flex flex-col gap-3';
 }
 
 export function getNonChatLatestUserSectionClassName(): string {
-  return 'shrink-0 max-h-[clamp(9rem,28vh,16rem)] overflow-y-auto rounded-lg border border-border/70 bg-card/40 p-3';
+  return 'shrink-0';
+}
+
+export function getNonChatViewportClassName(): string {
+  return 'flex-1 overflow-y-auto overflow-x-hidden p-5';
+}
+
+export function getNonChatBaseContainerClassName(): string {
+  return 'min-h-full w-full';
+}
+
+export function getNonChatRootClassName(): string {
+  return 'flex min-h-full w-full flex-col gap-4';
+}
+
+export function getGridCanvasBottomSectionClassName(): string {
+  return 'min-h-[20rem] flex flex-col gap-3';
 }
 
 export function getMessageListViewportClassName(normalizedWorldViewMode: string): string {
   return normalizedWorldViewMode === 'chat'
     ? 'flex-1 overflow-y-auto overflow-x-hidden p-5'
-    : 'flex-1 overflow-hidden p-5';
+    : getNonChatViewportClassName();
 }
 
 export function getLatestUserMessageEntry(userMessages: Array<{ message: any; index: number }>): { message: any; index: number } | null {
@@ -804,7 +822,7 @@ export default function MessageListPanel({
     ? 'mx-auto flex min-h-full w-full max-w-[920px] items-start justify-center py-4'
     : normalizedWorldViewMode === 'chat'
       ? `mx-auto w-full ${MAIN_CONTENT_COLUMN_MAX_WIDTH_CLASS} space-y-3`
-      : 'h-full w-full';
+      : getNonChatBaseContainerClassName();
 
   const renderMessageCard = (message, messageIndex, sourceMessages) => {
     const senderLabel = getMessageSenderLabel(
@@ -1115,19 +1133,13 @@ export default function MessageListPanel({
           normalizedWorldViewMode === 'chat' ? (
             renderableMessages.map((message, messageIndex) => renderMessageCard(message, messageIndex, renderableMessages))
           ) : normalizedWorldViewMode === 'board' ? (
-            <div className="flex h-full min-h-0 w-full flex-col gap-3">
+            <div className={getNonChatRootClassName()}>
               {latestUserMessageEntry ? (
                 <section className={getNonChatLatestUserSectionClassName()}>
-                  {showNonChatSectionLabels ? (
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Latest User Message</div>
-                  ) : null}
                   {renderMessageCard(latestUserMessageEntry.message, latestUserMessageEntry.index, renderableMessages)}
                 </section>
               ) : null}
               <section className={getBoardBottomSectionClassName()}>
-                {showNonChatSectionLabels ? (
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Board</div>
-                ) : null}
                 <div className={getBoardLaneContainerClassName()}>
                   {partitionedMessages.agentLanes.map((lane) => (
                     <section key={lane.id} className={getBoardLaneClassName()}>
@@ -1149,19 +1161,13 @@ export default function MessageListPanel({
               </section>
             </div>
           ) : normalizedWorldViewMode === 'grid' ? (
-            <div className="flex h-full min-h-0 w-full flex-col gap-3">
+            <div className={getNonChatRootClassName()}>
               {latestUserMessageEntry ? (
                 <section className={getNonChatLatestUserSectionClassName()}>
-                  {showNonChatSectionLabels ? (
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Latest User Message</div>
-                  ) : null}
                   {renderMessageCard(latestUserMessageEntry.message, latestUserMessageEntry.index, renderableMessages)}
                 </section>
               ) : null}
-              <section className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-xl border border-border/70 bg-card/25 p-3">
-                {showNonChatSectionLabels ? (
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Grid</div>
-                ) : null}
+              <section className={getGridCanvasBottomSectionClassName()}>
                 <div className={getGridContainerClassName(normalizedGridChoiceId)}>
                   {sortedGridAgentLanes.map((lane, laneIndex) => (
                     <section key={lane.id} className={`rounded-lg border border-border/70 bg-card/40 p-3 ${getGridLaneClassName(normalizedGridChoiceId, laneIndex)}`}>
@@ -1183,19 +1189,13 @@ export default function MessageListPanel({
               </section>
             </div>
           ) : (
-            <div className="flex h-full min-h-0 w-full flex-col gap-3">
+            <div className={getNonChatRootClassName()}>
               {latestUserMessageEntry ? (
                 <section className={getNonChatLatestUserSectionClassName()}>
-                  {showNonChatSectionLabels ? (
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Latest User Message</div>
-                  ) : null}
                   {renderMessageCard(latestUserMessageEntry.message, latestUserMessageEntry.index, renderableMessages)}
                 </section>
               ) : null}
-              <section className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-xl border border-border/70 bg-card/25 p-3">
-                {showNonChatSectionLabels ? (
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Canvas</div>
-                ) : null}
+              <section className={getGridCanvasBottomSectionClassName()}>
                 <section className="rounded-xl border border-border/70 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.12),_transparent_56%),radial-gradient(circle_at_bottom,_rgba(16,185,129,0.12),_transparent_58%)] p-3">
                   {showNonChatSectionLabels ? (
                     <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Agent Canvas</div>
