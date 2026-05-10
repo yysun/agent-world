@@ -29,6 +29,7 @@ const { jsxFactory } = vi.hoisted(() => ({
 vi.mock('react', () => ({
   useMemo: (fn: () => unknown) => fn(),
   useCallback: (fn: unknown) => fn,
+  useEffect: (fn: () => void) => fn(),
   useState: (initial: unknown) => [initial, () => undefined],
 }), { virtual: true });
 
@@ -49,6 +50,7 @@ import {
   buildCombinedRenderableMessages,
   getBoardLaneContainerClassName,
   getGridCanvasBottomSectionClassName,
+  getNonChatContentPaneClassName,
   getLatestUserMessageEntry,
   getMessageListViewportClassName,
   getNonChatBaseContainerClassName,
@@ -95,7 +97,7 @@ function renderPanel(worldViewMode: 'chat' | 'board' | 'grid' | 'canvas') {
     {
       messageId: 'human-latest',
       role: 'user',
-      sender: 'user',
+      sender: 'you',
       content: 'Long human input that must remain visible after switching away from chat view.',
       createdAt: '2026-05-10T09:02:00.000Z',
     },
@@ -158,8 +160,10 @@ describe('MessageListPanel narrated tool-call visibility', () => {
     expect(chatViewportClassName).toContain('overflow-y-auto');
     expect(chatViewportClassName).not.toContain('floating-composer-height');
     expect(getMessageListViewportClassName('board')).toBe(nonChatViewportClassName);
-    expect(nonChatViewportClassName).toContain('overflow-y-auto');
-    expect(nonChatViewportClassName).not.toContain('overflow-hidden');
+    expect(nonChatViewportClassName).toContain('flex');
+    expect(nonChatViewportClassName).toContain('flex-col');
+    expect(nonChatViewportClassName).toContain('overflow-hidden');
+    expect(nonChatViewportClassName).not.toContain('overflow-y-auto');
   });
 
   it('suppresses avatar chrome for tool transcript rows only', () => {
@@ -187,17 +191,28 @@ describe('MessageListPanel narrated tool-call visibility', () => {
     const latestUserSectionClassName = getNonChatLatestUserSectionClassName();
     const nonChatBaseContainerClassName = getNonChatBaseContainerClassName();
     const nonChatRootClassName = getNonChatRootClassName();
+    const nonChatContentPaneClassName = getNonChatContentPaneClassName();
 
     expect(latestUserSectionClassName).toContain('shrink-0');
+    expect(latestUserSectionClassName).toContain('px-5');
+    expect(latestUserSectionClassName).toContain('pb-3');
+    expect(latestUserSectionClassName).not.toContain('sticky');
+    expect(latestUserSectionClassName).not.toContain('top-0');
     expect(latestUserSectionClassName).not.toContain('rounded-lg');
     expect(latestUserSectionClassName).not.toContain('border');
     expect(latestUserSectionClassName).not.toContain('bg-card');
     expect(latestUserSectionClassName).not.toContain('max-h-');
     expect(latestUserSectionClassName).not.toContain('overflow-y-auto');
-    expect(nonChatBaseContainerClassName).toContain('min-h-full');
-    expect(nonChatBaseContainerClassName.split(' ')).not.toContain('h-full');
-    expect(nonChatRootClassName).toContain('min-h-full');
-    expect(nonChatRootClassName).toContain('gap-4');
+    expect(nonChatBaseContainerClassName).toContain('flex');
+    expect(nonChatBaseContainerClassName).toContain('min-h-0');
+    expect(nonChatBaseContainerClassName).toContain('flex-1');
+    expect(nonChatRootClassName).toContain('flex');
+    expect(nonChatRootClassName).toContain('min-h-0');
+    expect(nonChatRootClassName).toContain('flex-1');
+    expect(nonChatRootClassName).not.toContain('gap-3');
+    expect(nonChatContentPaneClassName).toContain('overflow-y-auto');
+    expect(nonChatContentPaneClassName).toContain('flex-1');
+    expect(nonChatContentPaneClassName).toContain('px-5');
   });
 
   it('hides non-chat section title labels', () => {
@@ -208,23 +223,26 @@ describe('MessageListPanel narrated tool-call visibility', () => {
     const className = getBoardLaneContainerClassName();
     expect(className).toContain('flex');
     expect(className).toContain('overflow-x-auto');
-    expect(className).toContain('min-h-[20rem]');
-    expect(className).toContain('items-stretch');
+    expect(className).toContain('items-start');
+    expect(className).not.toContain('flex-1');
 
     const laneClassName = getBoardLaneClassName();
     expect(laneClassName).toContain('flex-col');
-    expect(laneClassName).toContain('min-h-0');
+    expect(laneClassName).toContain('self-stretch');
+    expect(laneClassName).toContain('gap-3');
 
     const boardSectionClassName = getBoardBottomSectionClassName();
     expect(boardSectionClassName).toContain('flex-col');
-    expect(boardSectionClassName).toContain('min-h-[20rem]');
+    expect(boardSectionClassName).toContain('min-h-full');
+    expect(boardSectionClassName).not.toContain('overflow-y-auto');
     expect(boardSectionClassName).not.toContain('rounded-xl');
     expect(boardSectionClassName).not.toContain('border');
     expect(boardSectionClassName).not.toContain('bg-card');
     expect(boardSectionClassName).not.toContain('floating-composer-height');
 
     const gridCanvasBottomSectionClassName = getGridCanvasBottomSectionClassName();
-    expect(gridCanvasBottomSectionClassName).toContain('min-h-[20rem]');
+    expect(gridCanvasBottomSectionClassName).toContain('min-h-full');
+    expect(gridCanvasBottomSectionClassName).not.toContain('overflow-y-auto');
     expect(gridCanvasBottomSectionClassName).not.toContain('rounded-xl');
     expect(gridCanvasBottomSectionClassName).not.toContain('border');
     expect(gridCanvasBottomSectionClassName).not.toContain('bg-card');
@@ -247,11 +265,96 @@ describe('MessageListPanel narrated tool-call visibility', () => {
         && node?.props?.className === getNonChatLatestUserSectionClassName()
         && allDescendants(node).some((child: any) => child?.props?.['data-testid'] === 'message-row-human-latest')
       ));
+      const contentPane = nodes.find((node: any) => (
+        node?.type === 'section' && node?.props?.className === getNonChatContentPaneClassName()
+      ));
+      const lowerScrollableSectionClassName = mode === 'board'
+        ? getBoardBottomSectionClassName()
+        : getGridCanvasBottomSectionClassName();
+      const lowerScrollableSection = nodes.find((node: any) => (
+        node?.type === 'section' && node?.props?.className === lowerScrollableSectionClassName
+      ));
 
       expect(latestHumanRow).toBeDefined();
       expect(nonChatRoot).toBeDefined();
       expect(latestHumanSection).toBeDefined();
-      expect(String(tree?.props?.className || '')).not.toContain('overflow-hidden');
+      expect(contentPane).toBeDefined();
+      expect(lowerScrollableSection).toBeDefined();
+      expect(String(latestHumanSection?.props?.className || '')).not.toContain('sticky');
+      expect(String(tree?.props?.className || '')).toContain('overflow-hidden');
+      expect(String(tree?.props?.className || '')).not.toContain('overflow-y-auto');
+      expect(String(contentPane?.props?.className || '')).toContain('overflow-y-auto');
+      expect(String(lowerScrollableSection?.props?.className || '')).not.toContain('overflow-y-auto');
+    }
+  });
+
+  it('renders non-chat HITL and working rows inside the scroll-owned content pane', () => {
+    const prompt = {
+      requestId: 'req-1',
+      chatId: 'chat-1',
+      title: 'Human input required',
+      message: 'Choose how to continue.',
+      mode: 'option' as const,
+      allowSkip: true,
+      options: [{ id: 'approve', label: 'Approve' }],
+    };
+
+    for (const mode of ['board', 'grid', 'canvas'] as const) {
+      const tree: any = MessageListPanel({
+        worldViewMode: mode,
+        worldGridLayoutChoiceId: '1+2',
+        messagesContainerRef: { current: null },
+        messagesLoading: false,
+        hasConversationMessages: true,
+        selectedSession: { id: 'chat-1', name: 'Chat 1' },
+        refreshSkillRegistry: () => undefined,
+        loadingSkillRegistry: false,
+        visibleSkillRegistryEntries: [],
+        skillRegistryError: '',
+        showToolMessages: true,
+        messages: [
+          {
+            messageId: 'human-latest',
+            role: 'user',
+            sender: 'you',
+            content: 'Latest human input',
+            createdAt: '2026-05-10T09:02:00.000Z',
+          },
+        ],
+        messagesById: new Map(),
+        worldAgentsById: new Map(),
+        worldAgentsByName: new Map(),
+        editingText: '',
+        setEditingText: () => undefined,
+        editingMessageId: null,
+        deletingMessageId: null,
+        onCancelEditMessage: () => undefined,
+        onSaveEditMessage: () => undefined,
+        onStartEditMessage: () => undefined,
+        onDeleteMessage: () => undefined,
+        onBranchFromMessage: () => undefined,
+        onCopyRawMarkdownFromMessage: () => undefined,
+        showInlineWorkingIndicator: true,
+        inlineWorkingIndicatorState: {
+          primaryText: 'Planner',
+          inlineStatusText: 'Planner working...',
+          detailText: 'Waiting for approval',
+          elapsedMs: 1200,
+        },
+        activeHitlPrompt: prompt,
+        submittingHitlRequestId: null,
+        onRespondHitlOption: () => undefined,
+        onSkipHitlPrompt: () => undefined,
+      });
+
+      const nodes = allDescendants(tree);
+      const contentPane = nodes.find((node: any) => (
+        node?.type === 'section' && node?.props?.className === getNonChatContentPaneClassName()
+      ));
+
+      expect(contentPane).toBeDefined();
+      expect(allDescendants(contentPane).some((node: any) => node?.props?.['data-testid'] === 'hitl-prompt')).toBe(true);
+      expect(allDescendants(contentPane).some((node: any) => node?.props?.['data-testid'] === 'inline-working-indicator')).toBe(true);
     }
   });
 

@@ -14,6 +14,7 @@
  * - Lives in the app layer so `App.tsx` can remain a thin assembly boundary.
  *
  * Recent Changes:
+ * - 2026-05-10: Stopped non-chat world views from auto-scrolling the outer transcript viewport so switching from chat no longer hides the top human-input panel.
  * - 2026-04-19: Moved workspace orchestration out of `App.tsx` into the app layer to keep the renderer root thin.
  * - 2026-04-14: Split the composer project affordance and added a full-area project folder viewer/editor with lazy file loading.
  * - 2026-04-11: Local install mode now scans the chosen root for SKILL.md plus nested skills directories before preview/install.
@@ -152,6 +153,7 @@ import {
   type WorldGridLayoutChoiceId,
   type WorldViewMode,
 } from '../domain/world-view';
+import { shouldAutoScrollOuterTranscript } from '../domain/transcript-scroll-policy';
 import { deriveWorldHeartbeatSummary } from '../domain/world-heartbeat';
 import { deriveWorldInfoStats } from '../domain/world-info-stats';
 import {
@@ -2210,6 +2212,11 @@ function AppContent({ api }: { api: DesktopApi }) {
   }, [composer]);
 
   useEffect(() => {
+    if (!shouldAutoScrollOuterTranscript(worldViewMode)) {
+      previousMessageCountRef.current = messages.length;
+      return;
+    }
+
     const container = messagesContainerRef.current;
     if (!container) return;
 
@@ -2221,16 +2228,17 @@ function AppContent({ api }: { api: DesktopApi }) {
       });
     });
     previousMessageCountRef.current = messages.length;
-  }, [messages]);
+  }, [messages, worldViewMode]);
 
   useEffect(() => {
+    if (!shouldAutoScrollOuterTranscript(worldViewMode)) return;
     if (!activeHitlPrompt) return;
     const container = messagesContainerRef.current;
     if (!container) return;
     requestAnimationFrame(() => {
       container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
     });
-  }, [activeHitlPrompt]);
+  }, [activeHitlPrompt, worldViewMode]);
 
   useEffect(() => {
     if (!selectedSessionId) return;

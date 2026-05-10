@@ -13,6 +13,11 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-05-10: Redesigned board/grid/canvas as a dedicated two-region shell with a fixed human panel and one scroll-owned lower content pane, removing the non-chat outer-scroll reset dependency.
+ * - 2026-05-10: Reset the outer transcript scroll when entering non-chat views and restored a full-height non-chat flex chain so the latest user row stays visible and lower panels can scroll reliably after switching from chat.
+ * - 2026-05-10: Removed the non-chat top padding and moved scrolling into the lower board/grid/canvas panels so the latest user message stays flush under the header and other content no longer slides underneath it.
+ * - 2026-05-10: Made the non-chat latest-user section sticky at the top of board/grid/canvas so the newest human message stays pinned while the rest of the view scrolls underneath.
+ * - 2026-05-10: Restored a constrained flexing lower pane for board view so per-lane scrolling still works after the non-chat layout redesign.
  * - 2026-05-10: Redesigned board/grid/canvas into a single scrollable non-chat column, removing the extra outer section cards and fixing top-row clipping after switching from chat view.
  * - 2026-05-10: Restored natural-height rendering for the non-chat latest-user panel so the board/grid/canvas top row is not clipped by an internal max-height cap.
  * - 2026-05-10: Made the non-chat latest-user section scroll within a bounded height so long human input is not clipped in board/grid/canvas views.
@@ -119,35 +124,43 @@ export function shouldRenderNonChatSectionLabels(): boolean {
 }
 
 export function getBoardLaneContainerClassName(): string {
-  return 'flex min-h-[20rem] items-stretch gap-3 overflow-x-auto pb-1';
+  return 'flex items-start gap-3 overflow-x-auto pb-1';
 }
 
 export function getBoardLaneClassName(): string {
-  return 'min-w-[260px] flex-1 min-h-0 rounded-lg border border-border/70 bg-card/40 p-3 flex flex-col';
+  return 'min-w-[260px] flex-1 self-stretch rounded-lg border border-border/70 bg-card/40 p-3 flex flex-col gap-3';
 }
 
 export function getBoardBottomSectionClassName(): string {
-  return 'min-h-[20rem] flex flex-col gap-3';
+  return 'flex min-h-full flex-col gap-3';
 }
 
 export function getNonChatLatestUserSectionClassName(): string {
-  return 'shrink-0';
+  return 'shrink-0 px-5 pb-3';
 }
 
 export function getNonChatViewportClassName(): string {
-  return 'flex-1 overflow-y-auto overflow-x-hidden p-5';
+  return 'flex min-h-0 flex-1 flex-col overflow-hidden overflow-x-hidden';
 }
 
 export function getNonChatBaseContainerClassName(): string {
-  return 'min-h-full w-full';
+  return 'flex min-h-0 flex-1 w-full flex-col';
 }
 
 export function getNonChatRootClassName(): string {
-  return 'flex min-h-full w-full flex-col gap-4';
+  return 'flex min-h-0 flex-1 w-full flex-col';
+}
+
+export function getNonChatContentPaneClassName(): string {
+  return 'min-h-0 flex-1 overflow-y-auto px-5 pb-5';
+}
+
+function getNonChatSupplementalContentClassName(): string {
+  return 'mt-3 flex flex-col gap-3';
 }
 
 export function getGridCanvasBottomSectionClassName(): string {
-  return 'min-h-[20rem] flex flex-col gap-3';
+  return 'flex min-h-full flex-col gap-3';
 }
 
 export function getMessageListViewportClassName(normalizedWorldViewMode: string): string {
@@ -1056,6 +1069,180 @@ export default function MessageListPanel({
     );
   };
 
+  const renderBoardContent = () => (
+    <section className={getBoardBottomSectionClassName()}>
+      <div className={getBoardLaneContainerClassName()}>
+        {partitionedMessages.agentLanes.map((lane) => (
+          <section key={lane.id} className={getBoardLaneClassName()}>
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{lane.label}</div>
+            <div className="space-y-3">
+              {lane.messages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
+            </div>
+          </section>
+        ))}
+      </div>
+      {partitionedMessages.systemMessages.length > 0 ? (
+        <section className="rounded-lg border border-dashed border-border/80 bg-muted/30 p-3">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">System</div>
+          <div className="space-y-3">
+            {partitionedMessages.systemMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
+          </div>
+        </section>
+      ) : null}
+    </section>
+  );
+
+  const renderGridContent = () => (
+    <section className={getGridCanvasBottomSectionClassName()}>
+      <div className={getGridContainerClassName(normalizedGridChoiceId)}>
+        {sortedGridAgentLanes.map((lane, laneIndex) => (
+          <section key={lane.id} className={`rounded-lg border border-border/70 bg-card/40 p-3 ${getGridLaneClassName(normalizedGridChoiceId, laneIndex)}`}>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{lane.label}</div>
+            <div className="space-y-3">
+              {lane.messages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
+            </div>
+          </section>
+        ))}
+      </div>
+      {partitionedMessages.systemMessages.length > 0 ? (
+        <section className="rounded-lg border border-dashed border-border/80 bg-muted/30 p-3">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">System</div>
+          <div className="space-y-3">
+            {partitionedMessages.systemMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
+          </div>
+        </section>
+      ) : null}
+    </section>
+  );
+
+  const renderCanvasContent = () => (
+    <section className={getGridCanvasBottomSectionClassName()}>
+      <section className="rounded-xl border border-border/70 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.12),_transparent_56%),radial-gradient(circle_at_bottom,_rgba(16,185,129,0.12),_transparent_58%)] p-3">
+        {showNonChatSectionLabels ? (
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Agent Canvas</div>
+        ) : null}
+        <div className="space-y-3">
+          {flatCanvasAgentMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
+        </div>
+      </section>
+      {partitionedMessages.systemMessages.length > 0 ? (
+        <section className="rounded-lg border border-dashed border-border/80 bg-muted/30 p-3">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">System</div>
+          <div className="space-y-3">
+            {partitionedMessages.systemMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
+          </div>
+        </section>
+      ) : null}
+    </section>
+  );
+
+  const renderHitlPrompt = () => {
+    if (!activeHitlPrompt) {
+      return null;
+    }
+
+    return (
+      <div className="flex min-w-0 w-full items-start gap-2 justify-start" data-testid="hitl-prompt">
+        <article className="min-w-0 w-full rounded-lg border border-dashed border-border bg-card/70 px-3 py-3">
+          <div className="mb-1 text-xs font-semibold text-foreground">
+            {activeHitlPrompt.title || 'Human input required'}
+          </div>
+          <div className="whitespace-pre-wrap text-xs text-muted-foreground">
+            {(activeHitlPrompt.message || 'Please choose an option to continue.').replace(/\n\s*\n+/g, '\n')}
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            {activeHitlPrompt.options.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                disabled={submittingHitlRequestId === activeHitlPrompt.requestId}
+                onClick={() => onRespondHitlOption(activeHitlPrompt, option.id)}
+                className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-60"
+                title={option.description || option.label}
+              >
+                {option.label}
+              </button>
+            ))}
+            {activeHitlPrompt.allowSkip ? (
+              <button
+                type="button"
+                disabled={submittingHitlRequestId === activeHitlPrompt.requestId}
+                onClick={() => onSkipHitlPrompt(activeHitlPrompt)}
+                className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-60"
+                data-testid="hitl-skip"
+              >
+                Skip
+              </button>
+            ) : null}
+          </div>
+        </article>
+      </div>
+    );
+  };
+
+  const renderInlineWorkingIndicator = () => {
+    if (!showInlineWorkingIndicator) {
+      return null;
+    }
+
+    return (
+      <div className="flex w-full items-start gap-2 justify-start" data-testid="inline-working-indicator">
+        <div className="flex flex-wrap items-center gap-2 px-1 py-1 text-[13px] text-muted-foreground">
+          <span className="inline-block h-2 w-2 rounded-full bg-foreground/70 animate-pulse" aria-hidden="true"></span>
+          <div className="text-[13px]">
+            {inlineStatusText || `${inlinePrimaryText} working...`}
+          </div>
+          {inlineDetailText ? (
+            <div className="text-[12px] text-muted-foreground/85">
+              · {inlineDetailText}
+            </div>
+          ) : null}
+          <ElapsedTimeCounter elapsedMs={inlineElapsedMs} showIcon={false} />
+        </div>
+      </div>
+    );
+  };
+
+  const renderSupplementalContent = () => {
+    const hitlPrompt = renderHitlPrompt();
+    const inlineWorkingIndicator = renderInlineWorkingIndicator();
+
+    if (!hitlPrompt && !inlineWorkingIndicator) {
+      return null;
+    }
+
+    return (
+      <section className={getNonChatSupplementalContentClassName()}>
+        {hitlPrompt}
+        {inlineWorkingIndicator}
+      </section>
+    );
+  };
+
+  const renderNonChatLayout = () => {
+    const content = normalizedWorldViewMode === 'board'
+      ? renderBoardContent()
+      : normalizedWorldViewMode === 'grid'
+        ? renderGridContent()
+        : renderCanvasContent();
+    const supplementalContent = renderSupplementalContent();
+
+    return (
+      <div className={getNonChatRootClassName()}>
+        {latestUserMessageEntry ? (
+          <section className={getNonChatLatestUserSectionClassName()}>
+            {renderMessageCard(latestUserMessageEntry.message, latestUserMessageEntry.index, renderableMessages)}
+          </section>
+        ) : null}
+        <section className={getNonChatContentPaneClassName()}>
+          {content}
+          {supplementalContent}
+        </section>
+      </div>
+    );
+  };
+
   return (
     <div
       ref={messagesContainerRef}
@@ -1132,146 +1319,11 @@ export default function MessageListPanel({
         ) : (
           normalizedWorldViewMode === 'chat' ? (
             renderableMessages.map((message, messageIndex) => renderMessageCard(message, messageIndex, renderableMessages))
-          ) : normalizedWorldViewMode === 'board' ? (
-            <div className={getNonChatRootClassName()}>
-              {latestUserMessageEntry ? (
-                <section className={getNonChatLatestUserSectionClassName()}>
-                  {renderMessageCard(latestUserMessageEntry.message, latestUserMessageEntry.index, renderableMessages)}
-                </section>
-              ) : null}
-              <section className={getBoardBottomSectionClassName()}>
-                <div className={getBoardLaneContainerClassName()}>
-                  {partitionedMessages.agentLanes.map((lane) => (
-                    <section key={lane.id} className={getBoardLaneClassName()}>
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{lane.label}</div>
-                      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
-                        {lane.messages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
-                      </div>
-                    </section>
-                  ))}
-                </div>
-                {partitionedMessages.systemMessages.length > 0 ? (
-                  <section className="shrink-0 rounded-lg border border-dashed border-border/80 bg-muted/30 p-3">
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">System</div>
-                    <div className="space-y-3">
-                      {partitionedMessages.systemMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
-                    </div>
-                  </section>
-                ) : null}
-              </section>
-            </div>
-          ) : normalizedWorldViewMode === 'grid' ? (
-            <div className={getNonChatRootClassName()}>
-              {latestUserMessageEntry ? (
-                <section className={getNonChatLatestUserSectionClassName()}>
-                  {renderMessageCard(latestUserMessageEntry.message, latestUserMessageEntry.index, renderableMessages)}
-                </section>
-              ) : null}
-              <section className={getGridCanvasBottomSectionClassName()}>
-                <div className={getGridContainerClassName(normalizedGridChoiceId)}>
-                  {sortedGridAgentLanes.map((lane, laneIndex) => (
-                    <section key={lane.id} className={`rounded-lg border border-border/70 bg-card/40 p-3 ${getGridLaneClassName(normalizedGridChoiceId, laneIndex)}`}>
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{lane.label}</div>
-                      <div className="space-y-3">
-                        {lane.messages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
-                      </div>
-                    </section>
-                  ))}
-                </div>
-                {partitionedMessages.systemMessages.length > 0 ? (
-                  <section className="rounded-lg border border-dashed border-border/80 bg-muted/30 p-3">
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">System</div>
-                    <div className="space-y-3">
-                      {partitionedMessages.systemMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
-                    </div>
-                  </section>
-                ) : null}
-              </section>
-            </div>
-          ) : (
-            <div className={getNonChatRootClassName()}>
-              {latestUserMessageEntry ? (
-                <section className={getNonChatLatestUserSectionClassName()}>
-                  {renderMessageCard(latestUserMessageEntry.message, latestUserMessageEntry.index, renderableMessages)}
-                </section>
-              ) : null}
-              <section className={getGridCanvasBottomSectionClassName()}>
-                <section className="rounded-xl border border-border/70 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.12),_transparent_56%),radial-gradient(circle_at_bottom,_rgba(16,185,129,0.12),_transparent_58%)] p-3">
-                  {showNonChatSectionLabels ? (
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Agent Canvas</div>
-                  ) : null}
-                  <div className="space-y-3">
-                    {flatCanvasAgentMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
-                  </div>
-                </section>
-                {partitionedMessages.systemMessages.length > 0 ? (
-                  <section className="rounded-lg border border-dashed border-border/80 bg-muted/30 p-3">
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">System</div>
-                    <div className="space-y-3">
-                      {partitionedMessages.systemMessages.map((entry) => renderMessageCard(entry.message, entry.index, renderableMessages))}
-                    </div>
-                  </section>
-                ) : null}
-              </section>
-            </div>
-          )
+          ) : renderNonChatLayout()
         )}
 
-        {activeHitlPrompt ? (
-          <div className="flex min-w-0 w-full items-start gap-2 justify-start" data-testid="hitl-prompt">
-            <article className="min-w-0 w-full rounded-lg border border-dashed border-border bg-card/70 px-3 py-3">
-              <div className="mb-1 text-xs font-semibold text-foreground">
-                {activeHitlPrompt.title || 'Human input required'}
-              </div>
-              <div className="whitespace-pre-wrap text-xs text-muted-foreground">
-                {(activeHitlPrompt.message || 'Please choose an option to continue.').replace(/\n\s*\n+/g, '\n')}
-              </div>
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                {activeHitlPrompt.options.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    disabled={submittingHitlRequestId === activeHitlPrompt.requestId}
-                    onClick={() => onRespondHitlOption(activeHitlPrompt, option.id)}
-                    className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-60"
-                    title={option.description || option.label}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-                {activeHitlPrompt.allowSkip ? (
-                  <button
-                    type="button"
-                    disabled={submittingHitlRequestId === activeHitlPrompt.requestId}
-                    onClick={() => onSkipHitlPrompt(activeHitlPrompt)}
-                    className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-60"
-                    data-testid="hitl-skip"
-                  >
-                    Skip
-                  </button>
-                ) : null}
-              </div>
-            </article>
-          </div>
-        ) : null}
-
-        {showInlineWorkingIndicator ? (
-          <div className="flex w-full items-start gap-2 justify-start">
-            <div className="flex flex-wrap items-center gap-2 px-1 py-1 text-[13px] text-muted-foreground">
-              <span className="inline-block h-2 w-2 rounded-full bg-foreground/70 animate-pulse" aria-hidden="true"></span>
-              <div className="text-[13px]">
-                {inlineStatusText || `${inlinePrimaryText} working...`}
-              </div>
-              {inlineDetailText ? (
-                <div className="text-[12px] text-muted-foreground/85">
-                  · {inlineDetailText}
-                </div>
-              ) : null}
-              <ElapsedTimeCounter elapsedMs={inlineElapsedMs} showIcon={false} />
-            </div>
-          </div>
-        ) : null}
+        {normalizedWorldViewMode === 'chat' ? renderHitlPrompt() : null}
+        {normalizedWorldViewMode === 'chat' ? renderInlineWorkingIndicator() : null}
       </div>
     </div>
   );

@@ -13,8 +13,11 @@
  * - Preserves deterministic ordering by carrying original message indexes.
  *
  * Recent Changes:
+ * - 2026-05-10: Reused the canonical renderer human-sender set so non-chat views continue showing the latest human input when persisted user rows use `sender='you'`.
  * - 2026-03-04: Added initial world-view types and message partitioning helpers for Chat/Board/Grid/Canvas rendering.
  */
+
+import { HUMAN_SENDER_VALUES } from '../constants/app-defaults';
 
 export type WorldViewMode = 'chat' | 'board' | 'grid' | 'canvas';
 
@@ -73,7 +76,7 @@ export function normalizeWorldGridLayoutChoiceId(value: unknown): WorldGridLayou
 
 function isHumanSenderValue(value: unknown): boolean {
   const normalized = String(value || '').trim().toLowerCase();
-  return normalized === 'human' || normalized === 'user';
+  return HUMAN_SENDER_VALUES.has(normalized);
 }
 
 function isLikelyHumanMessage(message: any): boolean {

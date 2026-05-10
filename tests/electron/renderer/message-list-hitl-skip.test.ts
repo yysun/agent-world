@@ -24,6 +24,7 @@ const { jsxFactory } = vi.hoisted(() => ({
 
 vi.mock('react', () => ({
   default: { createElement: jsxFactory },
+  useEffect: () => undefined,
   useState: (initial: unknown) => [initial, () => undefined],
 }), { virtual: true });
 

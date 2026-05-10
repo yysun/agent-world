@@ -14,6 +14,7 @@
  * - No filesystem, network, or renderer runtime dependencies.
  *
  * Summary of Recent Changes:
+ * - 2026-05-10: Added regression coverage for persisted human messages with `sender='you'` so alternate world views keep the latest human panel visible.
  * - 2026-03-04: Added initial regression coverage for new Electron world-view domain module.
  */
 
@@ -52,6 +53,16 @@ describe('electron/renderer world-view domain', () => {
     expect(partition.agentLanes.map((lane) => lane.label)).toEqual(['Planner', 'Writer']);
     expect(partition.agentLanes[0]?.messages.map((entry) => entry.message.messageId)).toEqual(['m2', 'm4']);
     expect(partition.agentLanes[1]?.messages.map((entry) => entry.message.messageId)).toEqual(['m3']);
+  });
+
+  it('treats canonical human sender values such as "you" as user messages', () => {
+    const partition = partitionWorldViewMessages([
+      { messageId: 'm1', role: 'user', sender: 'you', content: 'hello from you' },
+      { messageId: 'm2', role: 'assistant', sender: 'Planner', content: 'plan step 1' },
+    ]);
+
+    expect(partition.userMessages.map((entry) => entry.message.messageId)).toEqual(['m1']);
+    expect(partition.agentLanes.map((lane) => lane.label)).toEqual(['Planner']);
   });
 
   it('sorts grid lanes differently for 2+1 and 2+2 options', () => {
