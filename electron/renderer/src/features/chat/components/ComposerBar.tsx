@@ -11,6 +11,7 @@
  * - Keeps action-button sizing and iconography consistent with desktop UI updates
  *
  * Recent Changes:
+ * - 2026-05-10: Moved the project editor launcher to the header so the composer keeps only the project-folder chooser plus send controls.
  * - 2026-05-10: Replaced the Project text button with an icon-only project editor action and removed the unused attach button.
  * - 2026-05-10: Moved the reasoning dropdown to the right of tool permission and widened it so the compact label no longer truncates.
  * - 2026-04-15: Restyled the Project viewer button to the secondary button treatment so it reads as a contextual action instead of a muted text button.
@@ -34,7 +35,7 @@
  */
 
 import React from 'react';
-import { IconButton, Select, Textarea } from '../../../design-system/primitives';
+import { Select, Textarea } from '../../../design-system/primitives';
 import { MAIN_CONTENT_COLUMN_MAX_WIDTH_CLASS } from '../../../constants/ui-constants';
 
 export default function ComposerBar({
@@ -44,7 +45,6 @@ export default function ComposerBar({
   onComposerChange,
   onComposerKeyDown,
   onOpenProjectFolder,
-  onOpenProjectViewer,
   selectedProjectPath,
   canStopCurrentSession,
   isCurrentSessionStopping,
@@ -98,28 +98,6 @@ export default function ComposerBar({
               className="flex min-w-0 flex-nowrap items-center gap-1.5"
               data-testid="composer-project-controls-row"
             >
-              <IconButton
-                onClick={onOpenProjectViewer}
-                disabled={!selectedProjectPath}
-                variant="ghost"
-                className="h-9 w-9 shrink-0 rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-                label="Open project editor"
-                title={selectedProjectPath ? `Open project editor for ${selectedProjectPath}` : 'Select project folder first'}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="h-4 w-4"
-                >
-                  <path d="M12 20h9" />
-                  <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z" />
-                </svg>
-              </IconButton>
               <Select
                 size="sm"
                 value={toolPermission}

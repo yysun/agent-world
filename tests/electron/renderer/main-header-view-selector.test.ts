@@ -3,12 +3,13 @@
  *
  * Purpose:
  * - Verify the world view selector is rendered in the header controls and positioned
- *   before Logs and Settings actions.
+ *   before the project-editor, Logs, and Settings actions.
  *
  * Key Features:
  * - Confirms presence of world-view icon button controls.
+ * - Confirms the project-editor button lives in the header action cluster and respects project selection state.
  * - Confirms Grid mode reveals grid-layout submenu under the Grid icon.
- * - Confirms selector group is ordered before log/settings action buttons.
+ * - Confirms selector group is ordered before project-editor/log/settings action buttons.
  *
  * Implementation Notes:
  * - Uses JSX-runtime virtual mocks and inspects rendered element props directly.
@@ -98,8 +99,10 @@ function createProps(overrides: Record<string, unknown> = {}) {
     activeHeaderAgentIds: [],
     onOpenEditAgentPanel: () => { },
     onOpenCreateAgentPanel: () => { },
+    onOpenProjectViewer: () => { },
     onOpenSettingsPanel: () => { },
     onOpenLogsPanel: () => { },
+    selectedProjectPath: '/Users/test/project',
     worldViewMode: 'chat',
     worldGridLayoutChoiceId: '1+2',
     isGridLayoutSubmenuOpen: false,
@@ -115,7 +118,7 @@ function createProps(overrides: Record<string, unknown> = {}) {
 }
 
 describe('MainHeaderBar world view selector', () => {
-  it('renders world view icon buttons before Logs and Settings buttons', () => {
+  it('renders world view icon buttons before the project-editor, Logs, and Settings buttons', () => {
     const tree = MainHeaderBar(createProps()) as {
       props?: { children?: Array<{ props?: { children?: Array<any> } }> };
     };
@@ -130,8 +133,22 @@ describe('MainHeaderBar world view selector', () => {
     expect(selectorButtonIds).toContain('world-view-board-btn');
     expect(selectorButtonIds).toContain('world-view-grid-btn');
     expect(selectorButtonIds).toContain('world-view-canvas-btn');
-    expect(rightControlsChildren[1]?.props?.title).toBe('Logs');
-    expect(rightControlsChildren[2]?.props?.title).toBe('Settings');
+    expect(rightControlsChildren[1]?.props?.['aria-label']).toBe('Open project editor');
+    expect(rightControlsChildren[2]?.props?.title).toBe('Logs');
+    expect(rightControlsChildren[3]?.props?.title).toBe('Settings');
+  });
+
+  it('disables the project-editor header action when no project is selected', () => {
+    const tree = MainHeaderBar(createProps({ selectedProjectPath: null })) as {
+      props?: { children?: Array<{ props?: { children?: Array<any> } }> };
+    };
+
+    const topLevelChildren = tree.props?.children ?? [];
+    const rightControls = topLevelChildren[2];
+    const projectEditorButton = rightControls?.props?.children?.[1];
+
+    expect(projectEditorButton?.props?.disabled).toBe(true);
+    expect(projectEditorButton?.props?.title).toBe('Select project folder first');
   });
 
   it('shows grid layout submenu when Grid View is selected and submenu is open', () => {

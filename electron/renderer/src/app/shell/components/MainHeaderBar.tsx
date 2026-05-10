@@ -14,6 +14,7 @@
  * - Preserves existing drag/no-drag region behavior for Electron title area.
  *
  * Recent Changes:
+ * - 2026-05-10: Added the project-editor launcher to the header action cluster so project editing is available across all world views instead of living in the composer.
  * - 2026-03-15: Added a distinct editing highlight for the header agent currently open in the edit panel.
  * - 2026-03-06: Clicking the session title in the header now copies the chat/session ID to the clipboard.
  * - 2026-03-04: Grid submenu now dismisses on option select and is left-aligned to the Grid icon button.
@@ -108,8 +109,10 @@ export default function MainHeaderBar({
   editingAgentId,
   onOpenEditAgentPanel,
   onOpenCreateAgentPanel,
+  onOpenProjectViewer,
   onOpenSettingsPanel,
   onOpenLogsPanel,
+  selectedProjectPath,
   worldViewMode,
   worldGridLayoutChoiceId,
   isGridLayoutSubmenuOpen,
@@ -374,6 +377,31 @@ export default function MainHeaderBar({
             </svg>
           </button>
         </div>
+        <button
+          type="button"
+          onClick={onOpenProjectViewer}
+          disabled={!selectedProjectPath}
+          className={`flex h-7 w-7 items-center justify-center rounded transition-colors ${selectedProjectPath
+            ? 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+            : 'cursor-not-allowed text-muted-foreground/40'
+            }`}
+          title={selectedProjectPath ? `Open project editor for ${selectedProjectPath}` : 'Select project folder first'}
+          aria-label="Open project editor"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-4 w-4"
+          >
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z" />
+          </svg>
+        </button>
         <button
           type="button"
           onClick={onOpenLogsPanel}

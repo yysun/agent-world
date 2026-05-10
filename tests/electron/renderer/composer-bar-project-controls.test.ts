@@ -1,14 +1,14 @@
 /**
  * ComposerBar Project Controls Tests
  * Purpose:
- * - Verify the Electron composer exposes project-folder and project-editor icon actions.
+ * - Verify the Electron composer keeps only the project-folder control after the
+ *   project-editor launcher moved to the header.
  *
  * Key Features:
- * - Confirms the folder icon button and project-editor icon button are both present.
+ * - Confirms the folder icon button remains present.
  * - Confirms the legacy attach button is absent.
- * - Confirms the project-editor button disables cleanly when no project is selected.
- * - Confirms both callbacks fire when a project path is available.
- * - Confirms the project-editor action uses the shared IconButton primitive.
+ * - Confirms the project-editor action no longer renders in the composer.
+ * - Confirms the folder callback still fires when a project path is available.
  *
  * Implementation Notes:
  * - Uses virtual React/JSX mocks and inspects the returned element tree directly.
@@ -40,7 +40,6 @@ vi.mock('react/jsx-dev-runtime', () => ({
 }), { virtual: true });
 
 import { ComposerBar } from '../../../electron/renderer/src/features/chat';
-import { IconButton } from '../../../electron/renderer/src/design-system/primitives';
 
 function allDescendants(node: any): any[] {
   if (!node || typeof node !== 'object') return [];
@@ -51,7 +50,7 @@ function allDescendants(node: any): any[] {
 }
 
 describe('ComposerBar project controls', () => {
-  it('renders project-folder and project-editor icon buttons without the attach control', () => {
+  it('renders only the project-folder control without the attach or project-editor buttons', () => {
     const tree: any = ComposerBar({
       onSubmitMessage: (event: Event) => event.preventDefault(),
       composerTextareaRef: null,
@@ -59,7 +58,6 @@ describe('ComposerBar project controls', () => {
       onComposerChange: () => { },
       onComposerKeyDown: () => { },
       onOpenProjectFolder: () => { },
-      onOpenProjectViewer: () => { },
       selectedProjectPath: null,
       canStopCurrentSession: false,
       isCurrentSessionStopping: false,
@@ -73,24 +71,19 @@ describe('ComposerBar project controls', () => {
 
     const nodes = allDescendants(tree);
     const openFolderButton = nodes.find((node: any) => node?.type === 'button' && node?.props?.['aria-label'] === 'Open project folder');
-    const projectEditorButton = nodes.find((node: any) => node?.type === IconButton && node?.props?.label === 'Open project editor');
+    const projectEditorButton = nodes.find((node: any) => node?.props?.['aria-label'] === 'Open project editor' || node?.props?.label === 'Open project editor');
     const attachButton = nodes.find((node: any) => node?.type === 'button' && node?.props?.['aria-label'] === 'Attach file');
     const projectControlsRow = nodes.find((node: any) => node?.props?.['data-testid'] === 'composer-project-controls-row');
 
     expect(openFolderButton).toBeDefined();
-    expect(projectEditorButton).toBeDefined();
+    expect(projectEditorButton).toBeUndefined();
     expect(attachButton).toBeUndefined();
     expect(projectControlsRow).toBeDefined();
     expect(projectControlsRow.props.className).toContain('flex-nowrap');
-    expect(projectEditorButton.props.disabled).toBe(true);
-    expect(projectEditorButton.props.variant).toBe('ghost');
-    expect(projectEditorButton.props.className).toContain('h-9');
-    expect(projectEditorButton.props.className).toContain('w-9');
   });
 
-  it('fires separate callbacks when a project path is selected', () => {
+  it('fires the project-folder callback when a project path is selected', () => {
     const onOpenProjectFolder = vi.fn();
-    const onOpenProjectViewer = vi.fn();
     const tree: any = ComposerBar({
       onSubmitMessage: (event: Event) => event.preventDefault(),
       composerTextareaRef: null,
@@ -98,7 +91,6 @@ describe('ComposerBar project controls', () => {
       onComposerChange: () => { },
       onComposerKeyDown: () => { },
       onOpenProjectFolder,
-      onOpenProjectViewer,
       selectedProjectPath: '/Users/test/project',
       canStopCurrentSession: false,
       isCurrentSessionStopping: false,
@@ -112,13 +104,9 @@ describe('ComposerBar project controls', () => {
 
     const nodes = allDescendants(tree);
     const openFolderButton = nodes.find((node: any) => node?.type === 'button' && node?.props?.['aria-label'] === 'Open project folder');
-    const projectEditorButton = nodes.find((node: any) => node?.type === IconButton && node?.props?.label === 'Open project editor');
 
     openFolderButton.props.onClick();
-    projectEditorButton.props.onClick();
 
-    expect(projectEditorButton.props.disabled).toBe(false);
     expect(onOpenProjectFolder).toHaveBeenCalledTimes(1);
-    expect(onOpenProjectViewer).toHaveBeenCalledTimes(1);
   });
 });
