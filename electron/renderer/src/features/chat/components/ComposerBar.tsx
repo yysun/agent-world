@@ -11,6 +11,7 @@
  * - Keeps action-button sizing and iconography consistent with desktop UI updates
  *
  * Recent Changes:
+ * - 2026-05-10: Moved the reasoning dropdown to the right of tool permission and widened it so the compact label no longer truncates.
  * - 2026-04-15: Restyled the Project viewer button to the secondary button treatment so it reads as a contextual action instead of a muted text button.
  * - 2026-04-14: Increased the permission dropdown width after the compact layout clipped its label too aggressively.
  * - 2026-04-14: Rebalanced the compact composer dropdown widths after the previous forced sizing made their labels too cramped.
@@ -126,21 +127,6 @@ export default function ComposerBar({
               </button>
               <Select
                 size="sm"
-                value={reasoningEffort}
-                onChange={(e) => onSetReasoningEffort?.(e.target.value)}
-                className="!w-[78px] shrink-0 rounded-lg border-0 bg-transparent px-1.5 text-[12px] leading-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:border-transparent focus:ring-0"
-                aria-label="Reasoning effort"
-                title="Reasoning effort"
-                data-testid="composer-reasoning-effort"
-              >
-                <option value="default">Not set</option>
-                <option value="none">None</option>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </Select>
-              <Select
-                size="sm"
                 value={toolPermission}
                 onChange={(e) => onSetToolPermission?.(e.target.value)}
                 className="!w-[72px] shrink-0 rounded-lg border-0 bg-transparent px-1.5 text-[12px] leading-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:border-transparent focus:ring-0"
@@ -150,6 +136,21 @@ export default function ComposerBar({
                 <option value="read">Read</option>
                 <option value="ask">Ask</option>
                 <option value="auto">Auto</option>
+              </Select>
+              <Select
+                size="sm"
+                value={reasoningEffort}
+                onChange={(e) => onSetReasoningEffort?.(e.target.value)}
+                className="!w-[92px] shrink-0 rounded-lg border-0 bg-transparent px-1.5 text-[12px] leading-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:border-transparent focus:ring-0"
+                aria-label="Reasoning effort"
+                title="Reasoning effort"
+                data-testid="composer-reasoning-effort"
+              >
+                <option value="default">Not set</option>
+                <option value="none">None</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
               </Select>
             </div>
           </div>

@@ -8,6 +8,7 @@
  * - Confirms changing the dropdown calls the renderer action callback.
  * - Confirms the toolbar dropdowns request medium native control sizing on macOS.
  * - Confirms the toolbar dropdown labels use the smaller text treatment needed to avoid clipping.
+ * - Confirms tool permission renders before reasoning effort and the reasoning control stays wide enough for "Not set".
  *
  * Implementation Notes:
  * - Uses virtual React/JSX mocks and inspects the returned element tree directly.
@@ -115,7 +116,15 @@ describe('ComposerBar reasoning effort', () => {
     expect(autoOption.props.children).toBe('Auto');
     expect(reasoningSelect.props.size).toBe('sm');
     expect(toolPermissionSelect.props.size).toBe('sm');
-    expect(reasoningSelect.props.className).toContain('!w-[78px]');
+    const projectControlsChildren = Array.isArray(projectControlsRow.props.children)
+      ? projectControlsRow.props.children
+      : [projectControlsRow.props.children];
+    const selectChildren = projectControlsChildren.filter((child: any) => child?.type === Select);
+
+    expect(selectChildren).toHaveLength(2);
+    expect(selectChildren[0]?.props?.['aria-label']).toBe('Tool permission level');
+    expect(selectChildren[1]?.props?.['aria-label']).toBe('Reasoning effort');
+    expect(reasoningSelect.props.className).toContain('!w-[92px]');
     expect(reasoningSelect.props.className).toContain('shrink-0');
     expect(reasoningSelect.props.className).toContain('px-1.5');
     expect(reasoningSelect.props.className).toContain('text-[12px]');
