@@ -13,6 +13,7 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-05-10: Removed floating-composer bottom inset padding so transcript panes end above the composer in the normal stacked layout.
  * - 2026-03-23: Rewired the inline message edit textarea onto the shared design-system primitive.
  * - 2026-03-22: Render full skill descriptions in the welcome-card skill list instead of truncating them.
  * - 2026-03-22: Prefer terminal tool result rows over transient `-stdout` shell stream rows when both map to the same tool call, preventing duplicate result blocks inside merged Electron tool cards.
@@ -123,7 +124,13 @@ export function getBoardLaneClassName(): string {
 }
 
 export function getBoardBottomSectionClassName(): string {
-  return 'min-h-0 flex-1 overflow-hidden rounded-xl border border-border/70 bg-card/25 p-3 pb-[var(--floating-composer-height,8.5rem)] flex flex-col gap-3';
+  return 'min-h-0 flex-1 overflow-hidden rounded-xl border border-border/70 bg-card/25 p-3 flex flex-col gap-3';
+}
+
+export function getMessageListViewportClassName(normalizedWorldViewMode: string): string {
+  return normalizedWorldViewMode === 'chat'
+    ? 'flex-1 overflow-y-auto overflow-x-hidden p-5'
+    : 'flex-1 overflow-hidden p-5';
 }
 
 export function getLatestUserMessageEntry(userMessages: Array<{ message: any; index: number }>): { message: any; index: number } | null {
@@ -1029,9 +1036,7 @@ export default function MessageListPanel({
   return (
     <div
       ref={messagesContainerRef}
-      className={normalizedWorldViewMode === 'chat'
-        ? 'flex-1 overflow-y-auto overflow-x-hidden p-5 pb-[var(--floating-composer-height,8.5rem)]'
-        : 'flex-1 overflow-hidden p-5'}
+      className={getMessageListViewportClassName(normalizedWorldViewMode)}
     >
       <div
         className={baseContainerClassName}
@@ -1148,7 +1153,7 @@ export default function MessageListPanel({
                   {renderMessageCard(latestUserMessageEntry.message, latestUserMessageEntry.index, renderableMessages)}
                 </section>
               ) : null}
-              <section className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-xl border border-border/70 bg-card/25 p-3 pb-[var(--floating-composer-height,8.5rem)]">
+              <section className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-xl border border-border/70 bg-card/25 p-3">
                 {showNonChatSectionLabels ? (
                   <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Grid</div>
                 ) : null}
@@ -1182,7 +1187,7 @@ export default function MessageListPanel({
                   {renderMessageCard(latestUserMessageEntry.message, latestUserMessageEntry.index, renderableMessages)}
                 </section>
               ) : null}
-              <section className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-xl border border-border/70 bg-card/25 p-3 pb-[var(--floating-composer-height,8.5rem)]">
+              <section className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-xl border border-border/70 bg-card/25 p-3">
                 {showNonChatSectionLabels ? (
                   <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Canvas</div>
                 ) : null}

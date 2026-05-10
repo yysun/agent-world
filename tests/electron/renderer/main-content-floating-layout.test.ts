@@ -1,23 +1,22 @@
 /**
- * Electron Renderer Main Content Floating Layout Tests
+ * Electron Renderer Main Content Stacked Layout Tests
  *
  * Purpose:
- * - Verify `MainContentArea` keeps the message surface full-height while the queue/composer/status
- *   controls float above it as a bottom overlay stack.
+ * - Verify `MainContentArea` keeps the transcript above the queue/composer/status stack instead of
+ *   floating those controls over the message surface.
  *
  * Key Features:
  * - Confirms message list remains a direct flex child so it can own vertical scrolling.
- * - Confirms queue/composer/status render inside an absolute bottom overlay container.
- * - Confirms floating composer inset CSS variable is provided to descendants.
+ * - Confirms queue/composer/status render as normal stacked siblings after the transcript.
+ * - Confirms no floating overlay wrapper or inset variable remains in the main section contract.
  *
  * Implementation Notes:
  * - Uses JSX-runtime virtual mocks and inspects element props directly.
  * - Avoids DOM runtime dependencies for deterministic unit coverage.
  *
  * Summary of Recent Changes:
- * - 2026-03-11: Added no-queue regression coverage so the floating composer inset stays fixed across overlay variants.
- * - 2026-03-05: Updated queue wrapper overlap assertion to enforce lower queue placement near composer (`-mb-6`).
- * - 2026-03-04: Added regression coverage for floating composer/queue layout contract.
+ * - 2026-05-10: Updated coverage for the normal stacked transcript/composer layout so messages never extend behind the composer.
+ * - 2026-03-04: Added regression coverage for main-content queue/composer layout contract.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -58,10 +57,10 @@ vi.mock('../../../electron/renderer/src/app/shell/components/RightPanelShell', (
   default: rightPanelShellSpy,
 }));
 
-import MainContentArea, { DEFAULT_FLOATING_COMPOSER_HEIGHT } from '../../../electron/renderer/src/app/shell/components/MainContentArea';
+import MainContentArea from '../../../electron/renderer/src/app/shell/components/MainContentArea';
 
-describe('MainContentArea floating bottom stack layout', () => {
-  it('renders message panel full-height and floats queue/composer/status in a bottom overlay', () => {
+describe('MainContentArea stacked bottom controls layout', () => {
+  it('renders message panel above the queue/composer/status stack', () => {
     const queueProbe = { id: 'queue-probe' };
     const statusProbe = { id: 'status-probe' };
 
@@ -80,26 +79,21 @@ describe('MainContentArea floating bottom stack layout', () => {
     const mainSection = rootChildren[0];
     const mainSectionChildren = mainSection?.props?.children ?? [];
 
-    expect(String(mainSection?.props?.className || '')).toContain('relative');
     expect(String(mainSection?.props?.className || '')).toContain('flex-1');
-    expect((mainSection?.props?.style as Record<string, unknown>)?.['--floating-composer-height']).toBe(DEFAULT_FLOATING_COMPOSER_HEIGHT);
+    expect(mainSection?.props?.style).toBeUndefined();
 
     expect(mainSectionChildren[0]?.type).toBe(messageListPanelSpy);
-
     expect(mainSectionChildren[1]?.type).toBe('div');
-    expect(String(mainSectionChildren[1]?.props?.className || '')).toContain('absolute inset-x-0 bottom-0');
+    expect(String(mainSectionChildren[1]?.props?.className || '')).toContain('shrink-0');
 
-    const overlayInner = mainSectionChildren[1]?.props?.children;
-    const overlayChildren = overlayInner?.props?.children ?? [];
+    const stackedChildren = mainSectionChildren[1]?.props?.children ?? [];
 
-    expect(overlayChildren[0]?.type).toBe('div');
-    expect(String(overlayChildren[0]?.props?.className || '')).toContain('-mb-5');
-    expect(overlayChildren[0]?.props?.children).toBe(queueProbe);
-    expect(overlayChildren[1]?.type).toBe(composerBarSpy);
-    expect(overlayChildren[2]).toBe(statusProbe);
+    expect(stackedChildren[0]).toBe(queueProbe);
+    expect(stackedChildren[1]?.type).toBe(composerBarSpy);
+    expect(stackedChildren[2]).toBe(statusProbe);
   });
 
-  it('keeps the floating composer inset fixed when no queue panel is present', () => {
+  it('keeps the composer stack in normal flow when no queue panel is present', () => {
     const tree = MainContentArea({
       messageListProps: { a: 1 },
       composerProps: { b: 2 },
@@ -113,7 +107,13 @@ describe('MainContentArea floating bottom stack layout', () => {
 
     const rootChildren = tree.props?.children ?? [];
     const mainSection = rootChildren[0];
+    const mainSectionChildren = mainSection?.props?.children ?? [];
+    const stackedChildren = mainSectionChildren[1]?.props?.children ?? [];
 
-    expect((mainSection?.props?.style as Record<string, unknown>)?.['--floating-composer-height']).toBe(DEFAULT_FLOATING_COMPOSER_HEIGHT);
+    expect(mainSection?.props?.style).toBeUndefined();
+    expect(mainSectionChildren[0]?.type).toBe(messageListPanelSpy);
+    expect(stackedChildren[0]).toBeNull();
+    expect(stackedChildren[1]?.type).toBe(composerBarSpy);
+    expect(stackedChildren[2]).toBeNull();
   });
 });

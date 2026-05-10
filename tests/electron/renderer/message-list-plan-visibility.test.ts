@@ -47,6 +47,7 @@ import {
   buildCombinedRenderableMessages,
   getBoardLaneContainerClassName,
   getLatestUserMessageEntry,
+  getMessageListViewportClassName,
   isNarratedAssistantToolCallMessage,
   shouldReserveToolAvatarSpace,
   shouldShowMessageAvatar,
@@ -61,6 +62,10 @@ describe('MessageListPanel narrated tool-call visibility', () => {
     expect(shouldShowMessageChrome('grid')).toBe(false);
     expect(shouldShowMessageChrome('canvas')).toBe(false);
     expect(shouldShowMessageChrome('unsupported')).toBe(true);
+
+    const chatViewportClassName = getMessageListViewportClassName('chat');
+    expect(chatViewportClassName).toContain('overflow-y-auto');
+    expect(chatViewportClassName).not.toContain('floating-composer-height');
   });
 
   it('suppresses avatar chrome for tool transcript rows only', () => {
@@ -105,6 +110,7 @@ describe('MessageListPanel narrated tool-call visibility', () => {
     expect(boardSectionClassName).toContain('flex-col');
     expect(boardSectionClassName).toContain('flex-1');
     expect(boardSectionClassName).toContain('overflow-hidden');
+    expect(boardSectionClassName).not.toContain('floating-composer-height');
   });
 
   it('detects narrated assistant tool-call rows as narrated messages', () => {
