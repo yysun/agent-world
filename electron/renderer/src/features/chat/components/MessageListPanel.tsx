@@ -13,6 +13,7 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-05-10: Made the non-chat latest-user section scroll within a bounded height so long human input is not clipped in board/grid/canvas views.
  * - 2026-05-10: Removed floating-composer bottom inset padding so transcript panes end above the composer in the normal stacked layout.
  * - 2026-03-23: Rewired the inline message edit textarea onto the shared design-system primitive.
  * - 2026-03-22: Render full skill descriptions in the welcome-card skill list instead of truncating them.
@@ -125,6 +126,10 @@ export function getBoardLaneClassName(): string {
 
 export function getBoardBottomSectionClassName(): string {
   return 'min-h-0 flex-1 overflow-hidden rounded-xl border border-border/70 bg-card/25 p-3 flex flex-col gap-3';
+}
+
+export function getNonChatLatestUserSectionClassName(): string {
+  return 'shrink-0 max-h-[clamp(9rem,28vh,16rem)] overflow-y-auto rounded-lg border border-border/70 bg-card/40 p-3';
 }
 
 export function getMessageListViewportClassName(normalizedWorldViewMode: string): string {
@@ -1112,7 +1117,7 @@ export default function MessageListPanel({
           ) : normalizedWorldViewMode === 'board' ? (
             <div className="flex h-full min-h-0 w-full flex-col gap-3">
               {latestUserMessageEntry ? (
-                <section className="shrink-0 rounded-lg border border-border/70 bg-card/40 p-3">
+                <section className={getNonChatLatestUserSectionClassName()}>
                   {showNonChatSectionLabels ? (
                     <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Latest User Message</div>
                   ) : null}
@@ -1146,7 +1151,7 @@ export default function MessageListPanel({
           ) : normalizedWorldViewMode === 'grid' ? (
             <div className="flex h-full min-h-0 w-full flex-col gap-3">
               {latestUserMessageEntry ? (
-                <section className="shrink-0 rounded-lg border border-border/70 bg-card/40 p-3">
+                <section className={getNonChatLatestUserSectionClassName()}>
                   {showNonChatSectionLabels ? (
                     <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Latest User Message</div>
                   ) : null}
@@ -1180,7 +1185,7 @@ export default function MessageListPanel({
           ) : (
             <div className="flex h-full min-h-0 w-full flex-col gap-3">
               {latestUserMessageEntry ? (
-                <section className="shrink-0 rounded-lg border border-border/70 bg-card/40 p-3">
+                <section className={getNonChatLatestUserSectionClassName()}>
                   {showNonChatSectionLabels ? (
                     <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Latest User Message</div>
                   ) : null}

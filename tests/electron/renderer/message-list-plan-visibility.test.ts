@@ -48,6 +48,7 @@ import {
   getBoardLaneContainerClassName,
   getLatestUserMessageEntry,
   getMessageListViewportClassName,
+  getNonChatLatestUserSectionClassName,
   isNarratedAssistantToolCallMessage,
   shouldReserveToolAvatarSpace,
   shouldShowMessageAvatar,
@@ -89,6 +90,11 @@ describe('MessageListPanel narrated tool-call visibility', () => {
 
     expect(getLatestUserMessageEntry(entries)?.message?.messageId).toBe('u2');
     expect(getLatestUserMessageEntry([])).toBeNull();
+
+    const latestUserSectionClassName = getNonChatLatestUserSectionClassName();
+    expect(latestUserSectionClassName).toContain('shrink-0');
+    expect(latestUserSectionClassName).toContain('max-h-');
+    expect(latestUserSectionClassName).toContain('overflow-y-auto');
   });
 
   it('hides non-chat section title labels', () => {
