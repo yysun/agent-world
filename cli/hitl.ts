@@ -12,11 +12,12 @@
  * - Guard duplicate replayed requests via requestId-tracking helper.
  *
  * Implementation Notes:
- * - Parser accepts generic event payloads and rejects incomplete requests.
+ * - Parser accepts only structured `questions[]` payloads and rejects incomplete requests.
  * - Option fallback defaults to explicit `no` when available, otherwise first option.
  * - Skip is interactive-only and must be explicitly allowed by the prompt payload.
  *
  * Recent Changes:
+ * - 2026-05-10: Removed flat `question/options` prompt parsing so CLI replay matches the structured llm-runtime HITL contract.
  * - 2026-04-24: Added `allowSkip` parsing and skip-aware selection helpers for interactive CLI HITL prompts.
  * - 2026-02-20: Enforced options-only HITL parsing in CLI helpers.
  * - 2026-02-14: Added initial helper module for CLI HITL response flow support.
@@ -67,8 +68,11 @@ function normalizePromptPayload(promptData: Record<string, unknown>, fallbackCha
       return Array.isArray(questionRecord.options) && questionRecord.options.length > 0;
     }) as Record<string, unknown> | undefined
     : undefined;
+  if (!primaryQuestion) {
+    return null;
+  }
 
-  const optionsSource = primaryQuestion?.options ?? promptData.options;
+  const optionsSource = primaryQuestion.options;
   const options: HitlOptionPayload[] = Array.isArray(optionsSource)
     ? optionsSource
       .map((option, index): HitlOptionPayload | null => {
@@ -109,8 +113,8 @@ function normalizePromptPayload(promptData: Record<string, unknown>, fallbackCha
 
   return {
     requestId,
-    title: String(primaryQuestion?.header || promptData.title || 'Approval required').trim() || 'Approval required',
-    message: String(primaryQuestion?.question || promptData.message || promptData.question || '').trim(),
+    title: String(primaryQuestion.header || 'Approval required').trim() || 'Approval required',
+    message: String(primaryQuestion.question || '').trim(),
     chatId: fallbackChatId,
     mode: 'option',
     allowSkip: promptData.allowSkip === true,

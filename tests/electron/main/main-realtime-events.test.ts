@@ -651,17 +651,30 @@ describe('createRealtimeEventsRuntime', () => {
     const send = vi.fn();
     const worldSubscription = createWorldSubscription();
     const getMemory = vi.fn(async () => ([
-      { role: 'assistant', tool_calls: [{ id: 'req-replay-1', function: { name: 'human_intervention_request', arguments: '{"question":"Approve?","options":["Yes"]}' } }] }
+      {
+        role: 'assistant',
+        tool_calls: [{
+          id: 'req-replay-1',
+          function: {
+            name: 'human_intervention_request',
+            arguments: '{"type":"single-select","allowSkip":true,"questions":[{"id":"question-1","header":"Approval required","question":"Approve?","options":[{"id":"approve","label":"Approve"},{"id":"decline","label":"Decline"}]}]}'
+          }
+        }]
+      }
     ]));
     const listPendingHitlPromptEventsFromMessages = vi.fn(() => ([
       {
         chatId: 'chat-1',
         prompt: {
           requestId: 'req-replay-1',
-          title: 'Approval required',
-          message: 'Approve?',
-          options: [{ id: 'yes', label: 'Yes' }],
-          defaultOptionId: 'yes',
+          type: 'single-select',
+          allowSkip: true,
+          questions: [{
+            id: 'question-1',
+            header: 'Approval required',
+            question: 'Approve?',
+            options: [{ id: 'approve', label: 'Approve' }, { id: 'decline', label: 'Decline' }],
+          }],
           metadata: null,
           agentName: null,
           toolName: 'human_intervention_request',
@@ -699,7 +712,12 @@ describe('createRealtimeEventsRuntime', () => {
         worldId: 'world-1',
         chatId: 'chat-1',
         tool: expect.objectContaining({
-          eventType: 'tool-progress'
+          eventType: 'tool-progress',
+          metadata: expect.objectContaining({
+            hitlPrompt: expect.objectContaining({
+              allowSkip: true,
+            }),
+          }),
         })
       })
     );

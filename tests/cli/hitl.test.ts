@@ -112,6 +112,29 @@ describe('cli/hitl', () => {
     expect(parseHitlPromptFromToolEvent({ toolExecution: { metadata: {} } })).toBeNull();
   });
 
+  it('rejects legacy flat question/options HITL payloads', () => {
+    expect(parseHitlOptionRequest({
+      chatId: 'chat-legacy',
+      prompt: {
+        requestId: 'req-legacy',
+        question: 'Approve?',
+        options: ['Yes', 'No'],
+      },
+    })).toBeNull();
+
+    expect(parseHitlPromptFromToolEvent({
+      toolExecution: {
+        metadata: {
+          hitlPrompt: {
+            requestId: 'req-legacy-tool',
+            prompt: 'Approve?',
+            options: ['Yes', 'No'],
+          },
+        },
+      },
+    })).toBeNull();
+  });
+
   it('resolves option by numeric selection', () => {
     const resolved = resolveHitlOptionSelectionInput(
       [

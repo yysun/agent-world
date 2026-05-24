@@ -16,13 +16,12 @@
  * - Consistent parameter validation for both MCP and built-in tools
  *
  * Recent Changes:
+ * - 2026-05-10: Removed legacy HITL argument normalization so built-in HITL requests must already match llm-runtime's structured schema.
  * - 2026-04-12: Added optional recoverable-validation suppression so LLM turn retries can correct invalid tool args once without surfacing an immediate UI system error.
  * - 2026-03-11: Strip workingDirectory/working_directory from shell_cmd args in normalizeKnownParameterAliases; these are context fields the LLM echoes from the system prompt, not tool parameters.
  * - 2026-03-11: Emit system error event in wrapToolWithValidation when tool parameter validation fails so errors surface in the UI.
  * - 2026-03-01: Added backward-compatible normalization for `.includePattern` -> `includePattern` in `list_files` and `grep`.
  * - 2026-02-20: Enforced JSON-schema `additionalProperties: false` by rejecting unknown tool arguments during validation.
- * - 2026-02-27: Added backward-compat cleanup for removed HITL confirmation args by stripping them before schema validation.
- * - 2026-02-27: Removed deprecated `human_intervention_request` confirmation argument alias normalization; kept `prompt` -> `question` and `default_option` -> `defaultOption`.
  * - 2026-02-20: Added `create_agent` alias normalization for `auto-reply`/`auto_reply` -> `autoReply` and `next agent` variants -> `nextAgent`.
  * - 2026-02-19: Added parameter alias normalization for `read_file`/`read_files` (`path` -> `filePath`) and `grep` path aliases (`path` -> `directoryPath`) to align with shell-style path handling.
  * - 2026-02-06: Removed legacy manual tool-intervention functionality
@@ -33,7 +32,6 @@
 import { World, Agent, ChatMessage, WorldSSEEvent } from './types.js';
 import { publishToolEvent } from './events/index.js';
 import { publishEvent } from './events/publishers.js';
-import { isHitlToolName } from './hitl-tool-names.js';
 
 function normalizeKnownParameterAliases(toolName: string, args: any): {
   normalizedArgs: any;
@@ -125,91 +123,6 @@ function normalizeKnownParameterAliases(toolName: string, args: any): {
     delete normalizedArgs['next agent'];
     delete normalizedArgs['next-agent'];
     delete normalizedArgs.next_agent;
-  }
-
-  if (isHitlToolName(toolName)) {
-    if (normalizedArgs.question === undefined && normalizedArgs.prompt !== undefined) {
-      normalizedArgs.question = normalizedArgs.prompt;
-      corrections.push("prompt -> question");
-    }
-    if (normalizedArgs.defaultOption === undefined && normalizedArgs.default_option !== undefined) {
-      normalizedArgs.defaultOption = normalizedArgs.default_option;
-      corrections.push("default_option -> defaultOption");
-    }
-
-    if (normalizedArgs.requireConfirmation !== undefined) {
-      corrections.push("requireConfirmation removed (deprecated)");
-    }
-    if (normalizedArgs.require_confirmation !== undefined) {
-      corrections.push("require_confirmation removed (deprecated)");
-    }
-    if (normalizedArgs['require-confirmation'] !== undefined) {
-      corrections.push("require-confirmation removed (deprecated)");
-    }
-    if (normalizedArgs.confirmationMessage !== undefined) {
-      corrections.push("confirmationMessage removed (deprecated)");
-    }
-    if (normalizedArgs.confirmation_message !== undefined) {
-      corrections.push("confirmation_message removed (deprecated)");
-    }
-
-    if (
-      normalizedArgs.questions === undefined
-      && typeof normalizedArgs.question === 'string'
-      && Array.isArray(normalizedArgs.options)
-    ) {
-      const normalizedOptions = normalizedArgs.options
-        .map((option: unknown, index: number) => {
-          if (option && typeof option === 'object' && !Array.isArray(option)) {
-            const optionRecord = option as Record<string, unknown>;
-            const label = typeof optionRecord.label === 'string' ? optionRecord.label.trim() : '';
-            if (!label) {
-              return null;
-            }
-            const id = typeof optionRecord.id === 'string' && optionRecord.id.trim()
-              ? optionRecord.id.trim()
-              : `opt_${index + 1}`;
-            return {
-              id,
-              label,
-              ...(typeof optionRecord.description === 'string' && optionRecord.description.trim()
-                ? { description: optionRecord.description.trim() }
-                : {}),
-            };
-          }
-
-          const label = String(option || '').trim();
-          if (!label) {
-            return null;
-          }
-          return {
-            id: `opt_${index + 1}`,
-            label,
-          };
-        })
-        .filter(Boolean);
-
-      normalizedArgs.questions = [{
-        id: 'question-1',
-        header: typeof normalizedArgs.title === 'string' && normalizedArgs.title.trim()
-          ? normalizedArgs.title.trim()
-          : 'Human input required',
-        question: normalizedArgs.question,
-        options: normalizedOptions,
-      }];
-      corrections.push('question/options -> questions[0]');
-    }
-
-    delete normalizedArgs.prompt;
-    delete normalizedArgs.question;
-    delete normalizedArgs.options;
-    delete normalizedArgs.defaultOption;
-    delete normalizedArgs.default_option;
-    delete normalizedArgs.requireConfirmation;
-    delete normalizedArgs.require_confirmation;
-    delete normalizedArgs['require-confirmation'];
-    delete normalizedArgs.confirmationMessage;
-    delete normalizedArgs.confirmation_message;
   }
 
   if (toolName === 'web_fetch') {

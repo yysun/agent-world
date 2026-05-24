@@ -689,14 +689,15 @@ function AppContent({ api }: { api: DesktopApi }) {
       );
 
       if (!response.accepted) {
-        if (response.reason.includes('No pending HITL request found')) {
+        const normalizedReason = response.reason.toLowerCase();
+        if (normalizedReason.includes('no pending hitl request found') || normalizedReason.includes('superseded')) {
           setHitlPromptQueue((existing: HitlPrompt[]) => existing.filter((entry) => entry.requestId !== requestId));
           setSessions((existing: any[]) => existing.map((session: any) => (
             String(session?.id || '').trim() === String(prompt?.chatId || '').trim()
               ? { ...session, hasPendingHitlPrompt: false }
               : session
           )));
-          setStatusText('HITL request was already resolved.', 'info');
+          setStatusText(normalizedReason.includes('superseded') ? 'HITL request was superseded by a newer message.' : 'HITL request was already resolved.', 'info');
           return;
         }
         throw new Error(response.reason || 'HITL response was not accepted.');

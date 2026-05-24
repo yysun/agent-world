@@ -11,7 +11,7 @@
  *
  * Recent Changes:
  * - 2026-02-21: Updated assertions for Electron-style composer state (`composerDisabled`, icon-button class names, and simplified labels).
- * - 2026-02-20: Added coverage for send-button disable behavior while a HITL prompt is active.
+ * - 2026-05-10: Updated HITL coverage so pending prompts no longer disable new sends.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -88,7 +88,7 @@ describe('web/world-chat composer action', () => {
     expect(state.actionButtonDisabled).toBe(true);
   });
 
-  it('disables send mode while HITL prompt is active', () => {
+  it('keeps send mode enabled while HITL prompt is active', () => {
     const state = getComposerActionState({
       currentChatId: 'chat-1',
       isWaiting: false,
@@ -100,9 +100,9 @@ describe('web/world-chat composer action', () => {
     });
 
     expect(state.canStopCurrentSession).toBe(false);
-    expect(state.composerDisabled).toBe(true);
+    expect(state.composerDisabled).toBe(false);
     expect(state.actionButtonLabel).toBe('Send message');
-    expect(state.actionButtonDisabled).toBe(true);
+    expect(state.actionButtonDisabled).toBe(false);
   });
 
   it('keeps composer enabled during active stop-mode even with HITL prompt', () => {

@@ -40,7 +40,7 @@ vi.mock('react/jsx-dev-runtime', () => ({
 }), { virtual: true });
 
 import { ComposerBar } from '../../../electron/renderer/src/features/chat';
-import { Select } from '../../../electron/renderer/src/design-system/primitives';
+import { Select, Textarea } from '../../../electron/renderer/src/design-system/primitives';
 
 function allDescendants(node: any): any[] {
   if (!node || typeof node !== 'object') return [];
@@ -137,5 +137,33 @@ describe('ComposerBar reasoning effort', () => {
 
     reasoningSelect.props.onChange({ target: { value: 'none' } });
     expect(onSetReasoningEffort).toHaveBeenCalledWith('none');
+  });
+
+  it('keeps the composer enabled while a HITL prompt is active', () => {
+    const tree: any = ComposerBar({
+      onSubmitMessage: (event: Event) => event.preventDefault(),
+      composerTextareaRef: null,
+      composer: 'hello',
+      onComposerChange: () => { },
+      onComposerKeyDown: () => { },
+      onOpenProjectFolder: () => { },
+      onOpenProjectViewer: () => { },
+      selectedProjectPath: null,
+      canStopCurrentSession: false,
+      isCurrentSessionStopping: false,
+      isCurrentSessionSending: false,
+      hasActiveHitlPrompt: true,
+      reasoningEffort: 'default',
+      onSetReasoningEffort: () => { },
+      toolPermission: 'auto',
+      onSetToolPermission: () => { },
+    });
+
+    const nodes = allDescendants(tree);
+    const composerInput = nodes.find((node: any) => node?.type === Textarea);
+    const sendButton = nodes.find((node: any) => node?.type === 'button' && node?.props?.['aria-label'] === 'Send message');
+
+    expect(composerInput?.props?.disabled).toBe(false);
+    expect(sendButton?.props?.disabled).toBe(false);
   });
 });

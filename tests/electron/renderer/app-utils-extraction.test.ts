@@ -418,7 +418,7 @@ describe('extracted message utils', () => {
           type: 'function',
           function: {
             name: 'human_intervention_request',
-            arguments: '{"question":"pick an option"}'
+            arguments: '{"questions":[{"id":"question-1","header":"Pick","question":"pick an option","options":[{"id":"a","label":"A"},{"id":"b","label":"B"}]}]}'
           }
         }
       ]

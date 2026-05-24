@@ -24,7 +24,7 @@
  * - 2026-02-22: Removed renderer-side no-agent inference on send; status now follows core-emitted activity events only.
  * - 2026-02-22: Enforced strict pending semantics: `pendingResponseSessionIds` is now populated only from realtime agent-start signals, never on send.
  * - 2026-02-21: Added assistant-message raw-markdown copy action with clipboard API + legacy fallback.
- * - 2026-02-20: Blocked composer sends while HITL prompt queue is non-empty to enforce resolve-first workflow.
+ * - 2026-05-10: Allow newer user turns while HITL is pending and clear superseded prompt rows locally for the active chat.
  * - 2026-02-20: Added defensive renderer-side chatId invariant before IPC send so UI fails fast when session context is missing.
  * - 2026-02-20: Added optimistic user-message insertion and reconciliation aligned with web message timing behavior.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 3 custom hook migration.
@@ -61,7 +61,6 @@ export function useMessageManagement({
   setSelectedSessionId,
   setStatusText,
   streamingStateRef,
-  hasActiveHitlPrompt = false,
   setHitlPromptQueue,
   setSubmittingHitlRequestId,
   messageRefreshCounter,
@@ -91,11 +90,6 @@ export function useMessageManagement({
   }, [messagesById]);
 
   const onSendMessage = useCallback(async () => {
-    if (hasActiveHitlPrompt) {
-      setStatusText('Resolve the pending HITL prompt before sending a new message.', 'info');
-      return;
-    }
-
     const activeSessionId = String(selectedSessionId || '').trim() || null;
     if (activeSessionId && sendingSessionIds.has(activeSessionId)) return;
     if (!loadedWorldId || !activeSessionId) {
@@ -119,6 +113,15 @@ export function useMessageManagement({
     });
     setSendingSessionIds((prev) => new Set([...prev, activeSessionId]));
     setMessages((existing) => upsertMessageList(existing, optimisticUserMessage));
+    setHitlPromptQueue?.((existing) => existing.filter((entry) => {
+      const entryChatId = String(entry?.chatId || '').trim() || null;
+      return Boolean(entryChatId && entryChatId !== activeSessionId);
+    }));
+    setSessions((existing) => existing.map((session) => (
+      String(session?.id || '').trim() === activeSessionId
+        ? { ...session, hasPendingHitlPrompt: false }
+        : session
+    )));
     setComposer('');
     try {
       if (!activeSessionId || !String(activeSessionId).trim()) {
@@ -153,7 +156,7 @@ export function useMessageManagement({
         return next;
       });
     }
-  }, [api, composer, hasActiveHitlPrompt, loadedWorldId, selectedSessionId, sendingSessionIds, setMessages, setStatusText, systemSettings]);
+  }, [api, composer, loadedWorldId, selectedSessionId, sendingSessionIds, setHitlPromptQueue, setMessages, setSessions, setStatusText, systemSettings]);
 
   const onStopMessage = useCallback(async () => {
     if (!loadedWorldId || !selectedSessionId) {

@@ -31,6 +31,7 @@ import {
   requestWorldOption,
   submitWorldHitlResponse,
   submitWorldOptionResponse,
+  supersedePendingHitlRequestsForChat,
 } from '../../core/hitl.js';
 
 describe('core/hitl', () => {
@@ -274,6 +275,48 @@ describe('core/hitl', () => {
     expect(resolution.optionId).toBe('yes');
   });
 
+  it('supersedes pending requests for a chat and rejects stale responses deterministically', async () => {
+    const world = {
+      id: 'world-supersede',
+      currentChatId: 'chat-1',
+      eventEmitter: new EventEmitter(),
+    } as any;
+
+    const pending = requestWorldOption(world, {
+      requestId: 'req-supersede',
+      title: 'Approval required',
+      message: 'Continue?',
+      options: [
+        { id: 'yes', label: 'Yes' },
+        { id: 'no', label: 'No' },
+      ],
+      chatId: 'chat-1',
+    });
+
+    await Promise.resolve();
+
+    expect(supersedePendingHitlRequestsForChat(world, 'chat-1')).toBe(1);
+    await expect(pending).rejects.toMatchObject({
+      name: 'HitlRequestSupersededError',
+      requestId: 'req-supersede',
+    });
+
+    expect(submitWorldHitlResponse({
+      worldId: 'world-supersede',
+      requestId: 'req-supersede',
+      optionId: 'yes',
+      chatId: 'chat-1',
+    })).toMatchObject({
+      accepted: false,
+    });
+    expect(submitWorldHitlResponse({
+      worldId: 'world-supersede',
+      requestId: 'req-supersede',
+      optionId: 'yes',
+      chatId: 'chat-1',
+    }).reason).toContain('superseded');
+  });
+
   it('keeps a single logical pending request across repeated replay emissions', async () => {
     const world = {
       id: 'world-9',
@@ -450,7 +493,18 @@ function makeHitlAssistantMessage(toolCallId: string, question: string, options:
         id: toolCallId,
         function: {
           name: 'human_intervention_request',
-          arguments: JSON.stringify({ question, options }),
+          arguments: JSON.stringify({
+            type: 'single-select',
+            questions: [{
+              id: 'question-1',
+              header: 'Human input required',
+              question,
+              options: options.map((label, index) => ({
+                id: `opt_${index + 1}`,
+                label,
+              })),
+            }],
+          }),
         },
       },
     ],

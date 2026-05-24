@@ -16,6 +16,7 @@
  * - Runtime is in-memory and process-local by design.
  *
  * Recent Changes:
+ * - 2026-05-10: Removed flat `question/options` replay compatibility so pending HITL reconstruction only accepts structured `questions[]` payloads.
  * - 2026-04-24: Migrated the runtime prompt model to llm-runtime-compatible `ask_user_input` questions/answers while keeping legacy single-option compatibility helpers.
  * - 2026-03-12: Relaxed the hard `requestId === toolCallId` invariant so durable approval prompts can keep distinct request and owning-tool identities.
  * - 2026-03-06: Removed `world.currentChatId` fallback from HITL option requests; interactive requests now require explicit `chatId`.
@@ -95,6 +96,32 @@ export type HitlResponseResolution = {
   source: 'user' | 'timeout';
 };
 
+export class HitlRequestSupersededError extends Error {
+  requestId: string;
+  worldId: string;
+  chatId: string | null;
+  toolCallId: string;
+
+  constructor(params: {
+    requestId: string;
+    worldId: string;
+    chatId: string | null;
+    toolCallId: string;
+  }) {
+    const normalizedChatId = normalizeChatId(params.chatId);
+    super(
+      normalizedChatId
+        ? `HITL request '${params.requestId}' was superseded by a newer user turn in chat '${normalizedChatId}'.`
+        : `HITL request '${params.requestId}' was superseded by a newer user turn.`
+    );
+    this.name = 'HitlRequestSupersededError';
+    this.requestId = params.requestId;
+    this.worldId = params.worldId;
+    this.chatId = normalizedChatId;
+    this.toolCallId = params.toolCallId;
+  }
+}
+
 interface PendingHitlOptionRequest {
   worldId: string;
   requestId: string;
@@ -114,9 +141,11 @@ interface PendingHitlOptionRequest {
   };
   metadata: Record<string, unknown> | null;
   resolve: (resolution: HitlResponseResolution) => void;
+  reject: (error: unknown) => void;
 }
 
 const pendingHitlRequests = new Map<string, PendingHitlOptionRequest>();
+const supersededHitlRequests = new Map<string, { chatId: string | null; reason: string }>();
 let pendingRequestSequence = 0;
 const loggerHitl = createCategoryLogger('hitl');
 
@@ -149,6 +178,31 @@ function normalizeExplicitChatId(chatId: string | null | undefined): string | nu
   }
   const normalized = String(chatId).trim();
   return normalized || null;
+}
+
+function recordSupersededRequest(pending: PendingHitlOptionRequest, reason: string): void {
+  supersededHitlRequests.set(getPendingKey(pending.worldId, pending.requestId), {
+    chatId: pending.chatId,
+    reason,
+  });
+
+  if (supersededHitlRequests.size <= 200) {
+    return;
+  }
+
+  const [oldestKey] = supersededHitlRequests.keys();
+  if (oldestKey) {
+    supersededHitlRequests.delete(oldestKey);
+  }
+}
+
+function resolveSupersededReason(worldId: string, requestId: string): string | null {
+  return supersededHitlRequests.get(getPendingKey(worldId, requestId))?.reason || null;
+}
+
+export function isHitlRequestSupersededError(error: unknown): error is HitlRequestSupersededError {
+  return error instanceof HitlRequestSupersededError
+    || (error instanceof Error && error.name === 'HitlRequestSupersededError');
 }
 
 function resolvePendingRequest(params: {
@@ -248,6 +302,44 @@ export function clearPendingHitlRequestsForChat(worldId: string, chatId: string 
     if (normalizedChatId !== null && pending.chatId !== normalizedChatId) continue;
     pendingHitlRequests.delete(key);
   }
+}
+
+export function supersedePendingHitlRequestsForChat(world: World, chatId: string | null): number {
+  const normalizedChatId = normalizeChatId(chatId);
+  if (!normalizedChatId) {
+    return 0;
+  }
+
+  let supersededCount = 0;
+  for (const [pendingKey, pending] of pendingHitlRequests) {
+    if (pending.worldId !== world.id) {
+      continue;
+    }
+    if (pending.chatId !== null && pending.chatId !== normalizedChatId) {
+      continue;
+    }
+
+    pendingHitlRequests.delete(pendingKey);
+    const error = new HitlRequestSupersededError({
+      requestId: pending.requestId,
+      worldId: pending.worldId,
+      chatId: pending.chatId,
+      toolCallId: pending.prompt.toolCallId,
+    });
+    recordSupersededRequest(pending, error.message);
+    pending.reject(error);
+    supersededCount += 1;
+  }
+
+  if (supersededCount > 0) {
+    loggerHitl.info('Superseded pending HITL requests for newer user turn', {
+      worldId: world.id,
+      chatId: normalizedChatId,
+      supersededCount,
+    });
+  }
+
+  return supersededCount;
 }
 
 function validateResponseScope(
@@ -479,7 +571,7 @@ export async function requestWorldInput(
     toolCallId,
   };
 
-  return await new Promise<HitlResponseResolution>((resolve) => {
+  return await new Promise<HitlResponseResolution>((resolve, reject) => {
     const pending: PendingHitlOptionRequest = {
       worldId,
       requestId,
@@ -492,6 +584,7 @@ export async function requestWorldInput(
       prompt,
       metadata: requestMetadata,
       resolve: (resolution) => resolve(resolution),
+      reject,
     };
 
     pendingHitlRequests.set(pendingKey, pending);
@@ -551,71 +644,8 @@ function parseToolCallArguments(raw: unknown): Record<string, unknown> | null {
   }
 }
 
-function normalizeLegacyOptionsFromToolArgs(args: Record<string, unknown>): HitlOption[] {
-  const options = Array.isArray(args.options) ? args.options : [];
-  const normalized: HitlOption[] = [];
-  const seen = new Set<string>();
-
-  for (let index = 0; index < options.length; index += 1) {
-    const rawOption = options[index];
-    if (rawOption && typeof rawOption === 'object' && !Array.isArray(rawOption)) {
-      const optionRecord = rawOption as Record<string, unknown>;
-      const label = String(optionRecord.label || '').trim();
-      const id = String(optionRecord.id || '').trim();
-      if (!label || !id) {
-        continue;
-      }
-      const dedupeKey = id.toLowerCase();
-      if (seen.has(dedupeKey)) {
-        continue;
-      }
-      seen.add(dedupeKey);
-      normalized.push({
-        id,
-        label,
-        description: typeof optionRecord.description === 'string' ? optionRecord.description : undefined,
-      });
-      continue;
-    }
-
-    const label = String(rawOption || '').trim();
-    if (!label) {
-      continue;
-    }
-
-    const dedupeKey = label.toLowerCase();
-    if (seen.has(dedupeKey)) {
-      continue;
-    }
-
-    seen.add(dedupeKey);
-    normalized.push({
-      id: `opt_${normalized.length + 1}`,
-      label,
-    });
-  }
-
-  return normalized;
-}
-
 function normalizeQuestionsFromToolArgs(args: Record<string, unknown>): HitlQuestion[] {
-  const structuredQuestions = normalizeQuestions(args.questions, String(args.title || 'Human input required').trim() || 'Human input required');
-  if (structuredQuestions.length > 0) {
-    return structuredQuestions;
-  }
-
-  const legacyOptions = normalizeLegacyOptionsFromToolArgs(args);
-  const question = String(args.question || args.prompt || '').trim();
-  if (!question || legacyOptions.length === 0) {
-    return [];
-  }
-
-  return [{
-    id: 'question-1',
-    header: String(args.title || 'Human input required').trim() || 'Human input required',
-    question,
-    options: legacyOptions,
-  }];
+  return normalizeQuestions(args.questions, String(args.title || 'Human input required').trim() || 'Human input required');
 }
 
 export function listPendingHitlPromptEventsFromMessages(
@@ -763,12 +793,17 @@ export function submitWorldHitlResponse(params: {
   const pendingKey = getPendingKey(worldId, requestId);
   const pending = pendingHitlRequests.get(pendingKey);
   if (!pending) {
+    const supersededReason = resolveSupersededReason(worldId, requestId);
     loggerHitl.warn('HITL response rejected: request missing', {
       worldId,
       requestId,
       optionId,
+      superseded: Boolean(supersededReason),
     });
-    return { accepted: false, reason: `No pending HITL request found for requestId '${requestId}'.` };
+    return {
+      accepted: false,
+      reason: supersededReason || `No pending HITL request found for requestId '${requestId}'.`,
+    };
   }
 
   const scopeValidation = validateResponseScope(pending, params.chatId);
@@ -827,5 +862,6 @@ export function submitWorldHitlResponse(params: {
 
 export function clearHitlStateForTests(): void {
   pendingHitlRequests.clear();
+  supersededHitlRequests.clear();
   pendingRequestSequence = 0;
 }

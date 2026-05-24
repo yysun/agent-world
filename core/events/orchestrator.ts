@@ -125,6 +125,7 @@ import {
   setWaitingForHitlMetadata,
   setWaitingForToolResultMetadata,
 } from '../agent-turn.js';
+import { isHitlRequestSupersededError } from '../hitl.js';
 import { runAgentTurnLoop } from './agent-turn-loop.js';
 import {
   INTENT_ONLY_RETRY_NOTICE,
@@ -1057,6 +1058,33 @@ export async function processAgentMessage(
               toolName: toolCall.function.name,
               error: executionResult.error instanceof Error ? executionResult.error.message : String(executionResult.error),
             });
+          }
+
+          if (executionResult.status === 'error' && isHitlRequestSupersededError(executionResult.error)) {
+            const toolCallMsg = agent.memory.find(
+              m => m.role === 'assistant' && (m as any).tool_calls?.some((tc: any) => tc.id === toolCall.id)
+            );
+            if (toolCallMsg) {
+              setTerminalTurnMetadata(toolCallMsg as AgentMessage, {
+                turnId,
+                source: 'direct',
+                action: 'hitl_request',
+                outcome: 'superseded',
+              });
+            }
+            try {
+              const storage = await getStorageWrappers();
+              await storage.saveAgent(world.id, agent);
+            } catch (error) {
+              loggerAgent.error('Failed to save superseded HITL terminal metadata', {
+                worldId: world.id,
+                chatId: targetChatId,
+                agentId: agent.id,
+                toolCallId: toolCall.id,
+                error: error instanceof Error ? error.message : error,
+              });
+            }
+            return;
           }
 
           // Save agent with tool result

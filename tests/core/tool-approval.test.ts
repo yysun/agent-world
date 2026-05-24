@@ -19,6 +19,7 @@ const mockRequestWorldOption = vi.hoisted(() => vi.fn());
 
 vi.mock('../../core/hitl.js', () => ({
   requestWorldOption: mockRequestWorldOption,
+  isHitlRequestSupersededError: (error: unknown) => error instanceof Error && error.name === 'HitlRequestSupersededError',
 }));
 
 import { requestToolApproval } from '../../core/tool-approval.js';
@@ -174,6 +175,44 @@ describe('tool approval helper', () => {
       tool: 'shell_cmd',
       status: 'denied',
       reason: 'user_denied',
+    });
+  });
+
+  it('persists a superseded approval resolution before rethrowing', async () => {
+    mockRequestWorldOption.mockRejectedValueOnce(Object.assign(
+      new Error("HITL request 'shell-call-2::approval' was superseded by a newer user turn in chat 'chat-1'."),
+      { name: 'HitlRequestSupersededError' },
+    ));
+
+    const messages: any[] = [];
+
+    await expect(requestToolApproval({
+      world: { id: 'world-1' } as any,
+      chatId: 'chat-1',
+      toolCallId: 'shell-call-2',
+      title: 'Approve shell command?',
+      message: 'Run rm test.txt?',
+      options: [
+        { id: 'yes', label: 'Yes' },
+        { id: 'no', label: 'No' },
+      ],
+      defaultOptionId: 'no',
+      approvedOptionIds: ['yes'],
+      metadata: { tool: 'shell_cmd' },
+      agentName: 'planner',
+      messages,
+    })).rejects.toMatchObject({ name: 'HitlRequestSupersededError' });
+
+    expect(messages).toHaveLength(2);
+    expect(JSON.parse(messages[1].content)).toMatchObject({
+      requestId: 'shell-call-2::approval',
+      toolCallId: 'shell-call-2',
+      tool: 'shell_cmd',
+      status: 'superseded',
+      reason: 'superseded',
+      skipped: true,
+      answers: [],
+      optionId: null,
     });
   });
 });

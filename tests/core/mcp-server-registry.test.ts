@@ -122,14 +122,6 @@ vi.mock('../../core/create-agent-tool.js', () => ({
   })),
 }));
 
-vi.mock('../../core/hitl-tool.js', () => ({
-  createHitlToolDefinition: vi.fn(() => ({
-    description: 'hitl',
-    parameters: { type: 'object', properties: {} },
-    execute: vi.fn(),
-  })),
-}));
-
 vi.mock('../../core/send-message-tool.js', () => ({
   createSendMessageToolDefinition: vi.fn(() => ({
     description: 'send-message',

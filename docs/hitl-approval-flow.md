@@ -4,17 +4,20 @@ This document explains how Human-in-the-Loop (HITL) approval works in the curren
 
 ## Purpose
 
-HITL provides world-scoped human interaction gates for actions that require user confirmation or selection.
-The runtime is options-only, so features request selectable choices and block until:
+HITL provides world-scoped human interaction gates for actions that require user confirmation or structured selection.
+The public tool contract follows `llm-runtime`'s `ask_user_input` schema:
 
-- a user selects an option, or
-- the request is explicitly canceled/denied by user action.
+- `type?: "single-select" | "multiple-select"`
+- `allowSkip?: boolean`
+- `questions[]` with stable question and option IDs
 
 Current policy:
 
-- `human_intervention_request` (LLM-initiated HITL tool) is options-only.
-- System-enforced approvals (`create_agent`, `load_skill`) are also options-only.
-- While a HITL prompt is pending in UI, sending a new chat message is blocked until prompt resolution.
+- `ask_user_input` is the preferred public tool name.
+- `human_intervention_request` remains only as a legacy alias of the same structured schema.
+- System-enforced approvals (`create_agent`, `load_skill`) still use structured option prompts, but the host may add adjacent metadata for persistence and replay.
+- Pending HITL no longer blocks a newer user turn in the same chat; a newer accepted user turn supersedes the older pending HITL request.
+- `allowSkip` is honored only as an explicit skip capability. It does not mean the host should silently auto-skip or reinterpret supersession as a skip.
 
 ## Core Runtime
 
@@ -22,55 +25,57 @@ Primary implementation: `core/hitl.ts`.
 
 ## Route Separation
 
-HITL interactions use two distinct initiation routes that share the same runtime and client UI plumbing:
+HITL interactions use two initiation routes that share the same runtime and client UI plumbing:
 
 - System-enforced approval route:
-  - initiated inside specific tools/features (`create_agent`, `load_skill`) via `requestWorldOption(...)`.
+  - initiated inside specific tools/features (`create_agent`, `load_skill`) via structured host helpers such as `requestWorldOption(...)`.
 - LLM-initiated HITL route:
-  - initiated by built-in `human_intervention_request`.
+  - initiated by built-in `ask_user_input` (or the legacy alias `human_intervention_request`).
 
 Both routes resolve through the same response API (`submitWorldHitlResponse`) and the same client queue/UI rendering.
 
 ### Data Model
 
-- Request API: `requestWorldOption(world, request)`
-- Response API: `submitWorldOptionResponse({ worldId, requestId, optionId })`
-- Response API (shared): `submitWorldHitlResponse({ worldId, requestId, optionId })`
+- Structured request API: `requestWorldInput(world, { type, allowSkip, questions, ... })`
+- Convenience wrapper for structured option approvals: `requestWorldOption(world, request)`
+- Convenience response wrapper: `submitWorldOptionResponse({ worldId, requestId, optionId })`
+- Shared response API: `submitWorldHitlResponse({ worldId, requestId, optionId?, answers?, skipped?, chatId? })`
 - Pending requests are stored in-memory in a process-local map:
   - key: `worldId::requestId`
-  - value includes allowed option IDs, resolver, replay payload, and chat scope.
+  - value includes selection mode, question IDs, option IDs, replay payload, resolver, and chat scope.
 
 ### Request Lifecycle
 
-When `requestWorldOption()` is called:
+When a structured HITL request is created:
 
-1. Options are normalized and deduplicated.
+1. `type` defaults to `single-select` when omitted.
+2. `allowSkip` defaults to `false` when omitted.
+3. Questions and options are normalized with stable IDs.
 2. `requestId` is resolved (provided or generated).
-3. `chatId` is resolved (`request.chatId` or `world.currentChatId`).
-4. Default option is resolved:
-   - preferred default if valid
-   - else `no` if present
-   - else first option.
-5. Pending entry is inserted into the map.
+3. `chatId` is resolved from the explicit request or host context.
+4. Pending entry is inserted into the map.
 6. A world `tool-progress` event is emitted with payload:
-   - `toolExecution.metadata.hitlPrompt` containing request metadata (`requestId`, title, message, options, defaultOptionId, metadata).
+  - `toolExecution.metadata.hitlPrompt` containing `requestId`, `type`, `allowSkip`, `questions[]`, and host metadata needed for replay.
 7. The Promise remains pending until an explicit response is submitted.
 
 ### Resolution Lifecycle
 
 When `submitWorldOptionResponse()` or `submitWorldHitlResponse()` is called:
 
-1. Validates `worldId`, `requestId`, `optionId`.
+1. Validates `worldId`, `requestId`, and either structured `answers`, `optionId`, or `skipped: true`.
 2. Looks up pending request by `worldId::requestId`.
-3. Validates selected option against pending request option set.
+3. Validates chat scope, question IDs, option IDs, and skip eligibility.
 4. Removes pending map entry.
-5. Resolves requester promise with `{ source: "user", optionId, ... }`.
+5. Resolves requester promise with a structured result.
+
+If the request was superseded by a newer user turn in the same chat, the response is rejected deterministically rather than treated as an active pending prompt.
 
 ### Replay on Chat Load
 
 - When a chat is restored/loaded, unresolved HITL requests for that world/chat scope are replayed as `tool-progress` events containing `toolExecution.metadata.hitlPrompt`.
 - Replay preserves original `requestId` so frontend responses resolve the original pending request.
 - Replay is deterministic (stable order) and replay-only events are not re-persisted.
+- Replay reconstruction accepts only structured `questions[]` HITL tool calls. Older flat `question/options` payloads are no longer reconstructed as active pending prompts.
 
 ## Where HITL Is Triggered Today
 
@@ -78,8 +83,9 @@ Current triggers in core include:
 
 - `load_skill` performs a skill-level HITL gate before applying skill instructions.
 - `create_agent` uses HITL for pre-create approval and post-create informational dismissal.
-- Built-in `human_intervention_request` allows LLMs to ask a question, offer options, and optionally require confirm/cancel.
-  - `human_intervention_request` requires options and does not allow free-text mode.
+- Built-in `ask_user_input` allows LLMs to ask one or more structured choice questions.
+  - The legacy alias `human_intervention_request` resolves to the same structured contract.
+  - Free-text HITL mode is not part of the current runtime contract.
 
 ### `yes_once` vs `yes_in_session` (load_skill)
 
@@ -119,10 +125,10 @@ Flow:
 2. Electron main serializes and forwards as `chat:event` payload type `tool`.
 3. Renderer subscription handler parses tool payload and enqueues prompt.
 4. Inline HITL card is rendered in the message flow from queue (`hitlPromptQueue`).
-5. User selects option.
-6. Renderer calls preload bridge `respondHitlOption(...)`.
+5. User selects options or explicitly skips when `allowSkip` is true.
+6. Renderer calls preload bridge `respondHitlOption(...)` or `respondHitlInput(...)`.
 7. Main IPC handler delegates to `submitWorldHitlResponse(...)`.
-8. Core resolves blocked request.
+8. Core resolves the request or rejects it deterministically if it was already superseded.
 
 Invoke channel used for response:
 
@@ -142,10 +148,10 @@ Flow:
 1. Web receives `tool-progress` world event over SSE stream.
 2. `parseHitlPromptFromToolEvent()` validates/enriches request payload from `toolExecution.metadata.hitlPrompt`.
 3. Request is added to `hitlPromptQueue`.
-4. User responds via inline HITL card (current approval flows are option-based).
-5. Web calls `api.respondHitlOption(...)`.
+4. User responds via inline HITL card with structured answers or skip when allowed.
+5. Web calls `api.respondHitlOption(...)` or `api.respondHitlInput(...)`.
 6. Server endpoint `POST /worlds/:worldName/hitl/respond` calls `submitWorldHitlResponse`.
-7. Core resolves blocked request.
+7. Core resolves the request or returns a deterministic stale/superseded rejection.
 
 ## CLI Flow
 
@@ -159,8 +165,9 @@ Flow:
 1. CLI listens to world `tool-progress` events.
 2. `parseHitlPromptFromToolEvent()` parses HITL requests.
 3. Interactive mode:
-   - prompts user to choose by index or option ID,
-   - submits via `submitWorldHitlResponse`.
+  - prompts user to choose by index or option ID,
+  - supports skip only when `allowSkip` is true,
+  - submits via `submitWorldHitlResponse`.
 4. Pipeline/non-interactive mode:
    - auto-submits deterministic default response to avoid blocking.
 
@@ -173,7 +180,7 @@ sequenceDiagram
     participant Client as Electron/Web/CLI UI
     participant Bridge as IPC or REST
 
-    Feature->>Core: requestWorldOption(world, request)
+    Feature->>Core: requestWorldInput / requestWorldOption
     Core-->>Client: world tool-progress event (metadata.hitlPrompt)
     Client->>Client: render queue + prompt user
     Client->>Bridge: submit selected option
@@ -186,13 +193,16 @@ sequenceDiagram
 
 - Option IDs are validated against pending request option set.
 - Responses for unknown/expired `requestId` are rejected (`accepted: false`).
+- `skipped: true` is accepted only when the request's `allowSkip` is true.
 - Pending requests are durable in-process until explicit resolution.
 - Scope is world-specific (`worldId::requestId`) to avoid cross-world collisions.
 - Runtime is in-memory and process-local (not persisted across process restarts).
+- Client-side replay/parser helpers now require structured `questions[]` payloads; legacy flat HITL argument normalization has been removed.
 
 ## Operational Notes
 
 - Prompt visibility in clients depends on active event subscription for the target world/chat.
 - Multiple pending requests are supported through unique `requestId` keys.
+- A newer user turn in the same chat supersedes older pending HITL rather than silently skipping it.
 - For new HITL use cases, prefer `requestWorldOption()` rather than ad-hoc approval events.
-- Web and Electron composers prevent sending new chat messages while HITL prompt queue is non-empty.
+- Web and Electron composers no longer block sending a newer user turn just because HITL is pending.

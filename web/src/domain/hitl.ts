@@ -12,7 +12,6 @@
  *
  * Implementation Notes:
  * - Parsing is strict about required fields (`requestId`, `questions[]`, option ids/labels).
- * - Legacy flat `question/options` payloads are normalized for replay compatibility.
  *
  * Recent Changes:
  * - 2026-03-11: Added chat-scoped prompt selection helpers so pending HITL state can survive chat switches without
@@ -106,22 +105,7 @@ function normalizeQuestions(promptLike: Record<string, unknown>): HitlPromptQues
       .filter((question): question is HitlPromptQuestion => question !== null)
     : [];
 
-  if (structuredQuestions.length > 0) {
-    return structuredQuestions;
-  }
-
-  const legacyQuestion = String(promptLike.question || promptLike.message || promptLike.prompt || '').trim();
-  const legacyOptions = normalizeOptions(promptLike.options);
-  if (!legacyQuestion || legacyOptions.length === 0) {
-    return [];
-  }
-
-  return [{
-    id: 'question-1',
-    header: String(promptLike.title || 'Human input required').trim() || 'Human input required',
-    question: legacyQuestion,
-    options: legacyOptions,
-  }];
+  return structuredQuestions;
 }
 
 export function parseHitlPromptRequest(eventData: unknown): HitlPromptRequest | null {
@@ -183,6 +167,23 @@ export function removeHitlPromptByRequestId(
 ): HitlPromptRequest[] {
   const existing = Array.isArray(queue) ? queue : [];
   return existing.filter((entry) => entry.requestId !== requestId);
+}
+
+export function removeHitlPromptByToolCallId(
+  queue: HitlPromptRequest[],
+  toolCallId: string
+): HitlPromptRequest[] {
+  const existing = Array.isArray(queue) ? queue : [];
+  const normalizedToolCallId = String(toolCallId || '').trim();
+  if (!normalizedToolCallId) {
+    return existing;
+  }
+
+  return existing.filter((entry) => {
+    const entryToolCallId = String(entry?.toolCallId || '').trim();
+    const entryRequestId = String(entry?.requestId || '').trim();
+    return entryToolCallId !== normalizedToolCallId && entryRequestId !== normalizedToolCallId;
+  });
 }
 
 export function selectHitlPromptForChat(

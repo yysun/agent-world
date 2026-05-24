@@ -466,7 +466,7 @@ describe('message-updates domain helpers', () => {
       role: 'tool',
       sender: 'planner',
       chatId: 'chat-1',
-      content: '{"question":"Proceed?"}',
+      content: '{"questions":[{"id":"question-1","header":"Proceed","question":"Proceed?","options":[{"id":"yes","label":"Yes"},{"id":"no","label":"No"}]}]}',
       createdAt: '2026-03-10T03:18:03.000Z',
       toolName: 'ask_user_input',
     }, {

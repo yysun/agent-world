@@ -94,12 +94,11 @@ Then the pending prompt set should be reconstructed from authoritative messages
 And the reconstructed prompts should preserve `type`, `allowSkip`, `questions[]`, and stable IDs  
 And the pending ordering should remain deterministic.
 
-### 10. Historical flat-schema built-in requests remain replayable
+### 10. Historical flat-schema built-in requests are not replayed as active pending prompts
 
 Given a persisted chat transcript containing older unresolved built-in HITL tool calls that still use flat `question/options/defaultOption` arguments  
 When the chat is restored or replayed after the migration  
-Then Agent World should reconstruct a compatible structured pending request from those historical messages  
-And the request should remain resolvable through the new structured answer path  
+Then Agent World should not reconstruct those historical messages as active pending prompts  
 And no new prompt generation path should continue emitting that legacy flat schema.
 
 ### 11. Restart-safe response flow remains intact with structured prompts

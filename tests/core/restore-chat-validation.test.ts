@@ -368,7 +368,14 @@ describe('restoreChat validation', () => {
         chatId: 'chat-2',
         createdAt: new Date('2026-02-25T09:00:00Z'),
         tool_calls: [
-          { id: 'req-1', type: 'function', function: { name: 'human_intervention_request', arguments: '{"question":"Approve?","options":["Yes","No"]}' } }
+          {
+            id: 'req-1',
+            type: 'function',
+            function: {
+              name: 'human_intervention_request',
+              arguments: '{"type":"single-select","allowSkip":true,"questions":[{"id":"question-1","header":"Human input required","question":"Approve?","options":[{"id":"approve","label":"Approve"},{"id":"decline","label":"Decline"}]}]}'
+            }
+          }
         ]
       }
     ];
@@ -396,10 +403,14 @@ describe('restoreChat validation', () => {
         chatId: 'chat-2',
         prompt: {
           requestId: 'req-1',
-          title: 'Human input required',
-          message: 'Approve?',
-          options: [{ id: 'opt_1', label: 'Yes' }, { id: 'opt_2', label: 'No' }],
-          defaultOptionId: 'opt_2',
+          type: 'single-select',
+          allowSkip: true,
+          questions: [{
+            id: 'question-1',
+            header: 'Human input required',
+            question: 'Approve?',
+            options: [{ id: 'approve', label: 'Approve' }, { id: 'decline', label: 'Decline' }],
+          }],
           metadata: null,
           agentName: 'qwen',
           toolName: 'human_intervention_request',

@@ -354,7 +354,7 @@ export function createRealtimeEventsRuntime(
 
           const toolCallId = String(prompt.toolCallId || prompt.requestId || '').trim();
           const requestId = String(prompt.requestId || '').trim();
-          const toolName = String(prompt.toolName || 'human_intervention_request').trim() || 'human_intervention_request';
+          const toolName = String(prompt.toolName || 'ask_user_input').trim() || 'ask_user_input';
           if (!toolCallId || !requestId) {
             continue;
           }
@@ -413,7 +413,7 @@ export function createRealtimeEventsRuntime(
 
           const toolCallId = String(prompt.toolCallId || prompt.requestId || '').trim();
           const requestId = String(prompt.requestId || '').trim();
-          const toolName = String(prompt.toolName || 'human_intervention_request').trim() || 'human_intervention_request';
+          const toolName = String(prompt.toolName || 'ask_user_input').trim() || 'ask_user_input';
           if (!toolCallId || !requestId) {
             continue;
           }

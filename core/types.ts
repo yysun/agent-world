@@ -109,7 +109,7 @@ export interface AgentMessage extends ChatMessage {
 
 export type AgentTurnState = 'running' | 'waiting_for_hitl' | 'waiting_for_tool_result';
 
-export type AgentTurnOutcome = 'completed' | 'handoff_dispatched' | 'guardrailed' | 'cancelled' | 'timed_out';
+export type AgentTurnOutcome = 'completed' | 'handoff_dispatched' | 'guardrailed' | 'cancelled' | 'timed_out' | 'superseded';
 
 export type AgentTurnAction = 'tool_call' | 'agent_handoff' | 'final_response' | 'hitl_request';
 

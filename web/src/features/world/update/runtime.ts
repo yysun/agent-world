@@ -268,7 +268,8 @@ const handleToolResult = (state: WorldComponentState, data: any): WorldComponent
   const toolUseId = data.messageId;
   newState = {
     ...newState,
-    activeTools: newState.activeTools.filter(tool => tool.toolUseId !== toolUseId)
+    activeTools: newState.activeTools.filter(tool => tool.toolUseId !== toolUseId),
+    hitlPromptQueue: HitlDomain.removeHitlPromptByToolCallId(newState.hitlPromptQueue || [], toolUseId),
   };
 
   // Update busy state (safe check with optional chaining)
@@ -290,7 +291,11 @@ const handleToolError = (state: WorldComponentState, data: any): WorldComponentS
 
   // Tool events are informational - don't control spinner
   // Spinner is controlled by world events (pending count)
-  return handleToolErrorBase(state, data);
+  const nextState = handleToolErrorBase(state, data);
+  return {
+    ...nextState,
+    hitlPromptQueue: HitlDomain.removeHitlPromptByToolCallId(nextState.hitlPromptQueue || [], data.messageId),
+  };
 };
 
 /**
@@ -475,14 +480,6 @@ async function* refreshWorldState(
 }
 
 async function* sendMessageFlow(state: WorldComponentState): AsyncGenerator<WorldComponentState> {
-  if (HitlDomain.hasHitlPromptForChat(state.hitlPromptQueue || [], state.currentChat?.id || null)) {
-    yield {
-      ...state,
-      error: 'Resolve the pending HITL prompt before sending a new message.'
-    };
-    return;
-  }
-
   const prepared = InputDomain.validateAndPrepareMessage(state.userInput, state.worldName);
   if (!prepared) {
     return;
@@ -498,8 +495,13 @@ async function* sendMessageFlow(state: WorldComponentState): AsyncGenerator<Worl
   }
 
   const sendingState = InputDomain.createSendingState(state, prepared.message);
+  const nextHitlPromptQueue = (state.hitlPromptQueue || []).filter((entry) => {
+    const entryChatId = String(entry?.chatId || '').trim() || null;
+    return Boolean(entryChatId && entryChatId !== activeChatId);
+  });
   const optimisticState: WorldComponentState = {
     ...sendingState,
+    hitlPromptQueue: nextHitlPromptQueue,
     lastUserMessageText: prepared.text
   };
   yield optimisticState;
@@ -637,9 +639,6 @@ async function* handleComposerKeyPress(
   payload: WorldEventPayload<'key-press'>
 ): AsyncGenerator<WorldComponentState> {
   if (payload.nativeEvent?.isComposing || payload.keyCode === 229) {
-    return;
-  }
-  if (HitlDomain.hasHitlPromptForChat(state.hitlPromptQueue || [], state.currentChat?.id || null)) {
     return;
   }
   if (InputDomain.shouldSendOnEnter(payload.key, payload.shiftKey, state.userInput)) {
@@ -1153,6 +1152,18 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
             payload?.chatId ?? prompt.chatId ?? null,
           );
       if (!result?.accepted) {
+        const normalizedReason = String(result?.reason || '').trim().toLowerCase();
+        if (normalizedReason.includes('superseded') || normalizedReason.includes('no pending hitl request found')) {
+          yield {
+            ...state,
+            submittingHitlRequestId: null,
+            hitlPromptQueue: HitlDomain.removeHitlPromptByRequestId(state.hitlPromptQueue || [], requestId),
+            error: normalizedReason.includes('superseded')
+              ? 'HITL request was superseded by a newer message.'
+              : 'HITL request was already resolved.'
+          };
+          return;
+        }
         yield {
           ...state,
           submittingHitlRequestId: null,

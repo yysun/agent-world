@@ -276,15 +276,15 @@ Validation target:
   - `multiple-select` answer submission,
   - request-level skip validation,
   - internal approval flows emitting `ask_user_input`-shaped prompts,
-  - historical flat-schema replay compatibility,
+  - rejection of historical flat-schema replay as active pending prompts,
   - world/chat isolation for structured answers.
-- [ ] Update seeded agent prompts and e2e harness instructions that still tell the model to call `human_intervention_request` with flat `question/options` parameters.
-- [ ] Update user-facing docs such as `docs/hitl-approval-flow.md` to distinguish built-in structured HITL from internal approval prompts.
+- [x] Update seeded agent prompts and e2e harness instructions to use structured `ask_user_input` requests.
+- [x] Update user-facing docs such as `docs/hitl-approval-flow.md` to distinguish built-in structured HITL from internal approval prompts.
 
 ### Phase 8: Cleanup And Validation
 
 - [ ] Confirm no new code path still depends on built-in HITL `optionId` as the only answer representation.
-- [ ] Confirm no new prompt or harness still documents the deprecated flat built-in request schema.
+- [x] Confirm no new prompt or harness still documents the deprecated flat built-in request schema.
 - [ ] Run targeted unit tests for core, API, web-domain, and Electron HITL flows.
 - [ ] Run `npm run integration` because API/runtime transport paths are changing.
 

@@ -26,7 +26,7 @@
  * - 2026-02-27: Updated `onOpenLogsPanel` to toggle the right panel when logs mode is already active.
  * - 2026-02-27: Added `onOpenLogsPanel` action to open the right panel in unified logs mode from the header.
  * - 2026-02-26: Added `onOpenImportWorldPanel` to route world-import action into right-panel import form mode.
- * - 2026-02-20: Blocked Enter-to-send while HITL prompt queue is non-empty.
+ * - 2026-05-10: Allow Enter-to-send while HITL is pending so newer user turns can supersede older prompts.
  * - 2026-02-18: Updated create-agent panel defaults to inherit world chat LLM provider/model and default auto-reply to false.
  * - 2026-02-17: Extracted from App.tsx during CC pass.
  */
@@ -121,7 +121,6 @@ export function useAppActionHandlers({
   sendingSessionIds,
   stoppingSessionIds,
   pendingResponseSessionIds,
-  hasActiveHitlPrompt,
   composer,
   onSendMessage,
   loadSystemSettings,
@@ -407,9 +406,6 @@ export function useAppActionHandlers({
 
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      if (hasActiveHitlPrompt) {
-        return;
-      }
       const isCurrentSessionSending = selectedSessionId && sendingSessionIds.has(selectedSessionId);
       const isCurrentSessionStopping = selectedSessionId && stoppingSessionIds.has(selectedSessionId);
       const isCurrentSessionPendingResponse = selectedSessionId && pendingResponseSessionIds.has(selectedSessionId);
@@ -435,7 +431,6 @@ export function useAppActionHandlers({
     }
   }, [
     composer,
-    hasActiveHitlPrompt,
     loadedWorld?.id,
     onSendMessage,
     pendingResponseSessionIds,

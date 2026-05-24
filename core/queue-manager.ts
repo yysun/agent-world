@@ -52,7 +52,7 @@ import {
   subscribeWorldToMessages,
   setupWorldActivityListener,
 } from './events/index.js';
-import { listPendingHitlPromptEventsFromMessages } from './hitl.js';
+import { listPendingHitlPromptEventsFromMessages, supersedePendingHitlRequestsForChat } from './hitl.js';
 import { nanoid } from 'nanoid';
 import { readAgentTurnLifecycleFromMessages } from './agent-turn.js';
 import type {
@@ -1042,9 +1042,15 @@ export async function enqueueAndProcessUserTurn(
     throw new Error(`enqueueAndProcessUserTurn: sender '${sender}' is not a queue-eligible user sender.`);
   }
 
-  return addToQueue(worldId, targetChatId, content, sender, {
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  const runtimeWorld = await resolveRuntimeWorldForChat(resolvedWorldId, targetChatId, targetWorld);
+  if (runtimeWorld) {
+    supersedePendingHitlRequestsForChat(runtimeWorld, targetChatId);
+  }
+
+  return addToQueue(resolvedWorldId, targetChatId, content, sender, {
     triggerProcessing: true,
-    targetWorld,
+    targetWorld: runtimeWorld ?? targetWorld,
     source: options?.source,
     preassignedMessageId: options?.preassignedMessageId,
   });

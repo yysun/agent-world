@@ -123,6 +123,7 @@ import {
   setWaitingForToolResultMetadata,
   setTerminalTurnMetadata,
 } from '../agent-turn.js';
+import { isHitlRequestSupersededError } from '../hitl.js';
 import { runAgentTurnLoop } from './agent-turn-loop.js';
 import {
   getLatestUserMessageContent,
@@ -860,6 +861,24 @@ export async function resumePendingToolCallsForChat(
           toolCallId: toolCall.id,
           error: executionResult.error instanceof Error ? executionResult.error.message : String(executionResult.error),
         });
+        if (isHitlRequestSupersededError(executionResult.error)) {
+          setTerminalTurnMetadata(assistantMessage, {
+            turnId,
+            source: 'restore',
+            action: 'hitl_request',
+            outcome: 'superseded',
+          });
+          await storage.saveAgent(world.id, agent);
+          loggerRestoreResumeTools.debug('Resume pending tool calls stopped superseded HITL turn without continuation', {
+            worldId: world.id,
+            chatId,
+            agentId: agent.id,
+            toolCallId: toolCall.id,
+            turnId,
+          });
+          resumedCount += 1;
+          continue;
+        }
       } else if (executionResult.status === 'missing_tool') {
         loggerRestoreResumeTools.warn('Resume pending tool calls tool definition missing', {
           worldId: world.id,
@@ -1989,6 +2008,28 @@ export async function continueLLMAfterToolExecution(
           toolCallId: toolCall.id,
           error: error instanceof Error ? error.message : String(error),
         });
+      }
+
+      if (executionResult.status === 'error' && isHitlRequestSupersededError(executionResult.error)) {
+        setTerminalTurnMetadata(assistantToolCallMessage, {
+          turnId,
+          source: 'continuation',
+          action: 'hitl_request',
+          outcome: 'superseded',
+        });
+        try {
+          const storage = await getStorageWrappers();
+          await storage.saveAgent(world.id, agent);
+        } catch (error) {
+          loggerMemory.error('Failed to save continuation superseded HITL terminal metadata', {
+            worldId: world.id,
+            chatId: targetChatId,
+            agentId: agent.id,
+            toolCallId: toolCall.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        return;
       }
 
       const validationFailureResult = executionResult.status !== 'skipped_success_persistence'

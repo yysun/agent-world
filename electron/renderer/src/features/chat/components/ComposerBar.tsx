@@ -30,7 +30,7 @@
  * - 2026-03-13: Switched composer reasoning-effort options to `default`/`none` so users can distinguish omission from an explicit no-reasoning hint.
  * - 2026-03-13: Added world-scoped reasoning-effort dropdown to the composer toolbar.
  * - 2026-03-12: Added tool permission `<select>` dropdown after the Project button to expose world-level read/ask/auto permission control.
- * - 2026-02-20: Disabled new-message composer actions while a HITL prompt is pending.
+ * - 2026-05-10: Kept the composer active while HITL is pending so newer user turns can supersede older prompts.
  * - 2026-02-14: Extracted from App.jsx to simplify renderer orchestration logic.
  */
 
@@ -56,7 +56,6 @@ export default function ComposerBar({
   toolPermission = 'auto',
   onSetToolPermission,
 }) {
-  const composerDisabled = Boolean(hasActiveHitlPrompt) && !canStopCurrentSession;
   const showStopButton = canStopCurrentSession || isCurrentSessionSending;
   return (
     <form onSubmit={onSubmitMessage} className="px-4 pt-4 pb-2">
@@ -67,10 +66,10 @@ export default function ComposerBar({
           onChange={(event) => onComposerChange(event.target.value)}
           onKeyDown={onComposerKeyDown}
           rows={1}
-          placeholder={composerDisabled ? 'Resolve pending HITL prompt before sending a new message...' : 'Send a message...'}
+          placeholder="Send a message..."
           className="w-full resize-none border-0 bg-transparent px-1 py-1 text-sm text-foreground placeholder:text-muted-foreground focus:border-transparent focus:ring-0"
           aria-label="Message input"
-          disabled={composerDisabled}
+          disabled={false}
         />
         <div className="flex items-end justify-between gap-2">
           <div className="flex min-w-0 items-center gap-1.5">
@@ -129,7 +128,7 @@ export default function ComposerBar({
           </div>
           <button
             type="submit"
-            disabled={showStopButton ? (isCurrentSessionStopping || isCurrentSessionSending) : (!composer.trim() || composerDisabled)}
+            disabled={showStopButton ? (isCurrentSessionStopping || isCurrentSessionSending) : !composer.trim()}
             className="flex h-9 w-9 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-40"
             aria-label={showStopButton ? 'Stop message processing' : 'Send message'}
             title={showStopButton ? 'Stop processing' : 'Send message'}

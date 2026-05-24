@@ -60,7 +60,7 @@ describe('web world chat message visibility', () => {
         type: 'function',
         function: {
           name: 'ask_user_input',
-          arguments: '{"question":"confirm?"}',
+          arguments: '{"questions":[{"id":"question-1","header":"Confirm","question":"confirm?","options":[{"id":"yes","label":"Yes"},{"id":"no","label":"No"}]}]}',
         },
       },
     ];

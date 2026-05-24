@@ -8,7 +8,7 @@
  * - Structured pending prompt parsing.
  * - Structured tool-event payload parsing.
  * - Queue deduplication and removal behavior.
- * - Legacy transcript reconstruction compatibility.
+ * - Structured transcript reconstruction behavior.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -19,6 +19,7 @@ import {
   parseHitlPromptRequest,
   reconstructPendingHitlPromptsFromMessages,
   removeHitlPromptByRequestId,
+  removeHitlPromptByToolCallId,
   selectHitlPromptForChat,
 } from '../../web/src/domain/hitl';
 
@@ -174,6 +175,31 @@ describe('web/domain/hitl', () => {
     expect(remaining[0]?.requestId).toBe('req-2');
   });
 
+  it('removes prompts by owning tool call id for terminal tool events', () => {
+    const remaining = removeHitlPromptByToolCallId(
+      [
+        {
+          requestId: 'req-1',
+          toolCallId: 'shell-call-1',
+          chatId: 'chat-1',
+          type: 'single-select',
+          questions: [{ id: 'question-1', header: 'A', question: 'A', options: [{ id: 'no', label: 'No' }] }],
+        },
+        {
+          requestId: 'req-2',
+          toolCallId: 'shell-call-2',
+          chatId: 'chat-1',
+          type: 'single-select',
+          questions: [{ id: 'question-1', header: 'B', question: 'B', options: [{ id: 'no', label: 'No' }] }],
+        },
+      ],
+      'shell-call-1'
+    );
+
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.requestId).toBe('req-2');
+  });
+
   it('selects only the prompt that matches the active chat', () => {
     const selected = selectHitlPromptForChat([
       {
@@ -291,5 +317,29 @@ describe('web/domain/hitl', () => {
         ],
       },
     ]);
+  });
+
+  it('ignores unresolved legacy flat HITL tool calls during reconstruction', () => {
+    const reconstructed = reconstructPendingHitlPromptsFromMessages([
+      {
+        role: 'assistant',
+        chatId: 'chat-1',
+        tool_calls: [
+          {
+            id: 'call-hitl-legacy',
+            type: 'function',
+            function: {
+              name: 'ask_user_input',
+              arguments: JSON.stringify({
+                question: 'Approve deployment?',
+                options: ['Yes', 'No'],
+              }),
+            },
+          },
+        ],
+      },
+    ], 'chat-1');
+
+    expect(reconstructed).toEqual([]);
   });
 });

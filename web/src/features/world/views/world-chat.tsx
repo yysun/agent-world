@@ -264,12 +264,11 @@ export function getComposerActionState(params: {
     isBusy,
     isStopping,
     isSending,
-    hasActiveHitlPrompt,
     userInput,
   } = params;
 
   const canStopCurrentSession = Boolean(currentChatId) && (isWaiting || isBusy);
-  const composerDisabled = hasActiveHitlPrompt && !canStopCurrentSession;
+  const composerDisabled = false;
   const actionButtonDisabled = canStopCurrentSession
     ? isStopping
     : (isSending || !userInput.trim() || composerDisabled);

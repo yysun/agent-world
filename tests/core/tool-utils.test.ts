@@ -573,7 +573,7 @@ describe('Tool Utils - validateToolParameters', () => {
     expect(String(validation.error || '')).toContain("Unknown parameter 'answer' is not allowed");
   });
 
-  test('strips removed HITL confirmation parameters for backward compatibility', () => {
+  test('rejects deprecated HITL confirmation parameters under the structured schema', () => {
     const schema = {
       type: 'object',
       properties: {
@@ -609,29 +609,26 @@ describe('Tool Utils - validateToolParameters', () => {
 
     const validation = validateToolParameters(
       {
-        question: 'Pick one',
-        options: ['A', 'B'],
+        questions: [{
+          id: 'question-1',
+          header: 'Human input required',
+          question: 'Pick one',
+          options: [
+            { id: 'opt_1', label: 'A' },
+            { id: 'opt_2', label: 'B' },
+          ],
+        }],
         requireConfirmation: true,
       },
       schema,
       'human_intervention_request',
     );
 
-    expect(validation.valid).toBe(true);
-    expect(validation.correctedArgs).toEqual({
-      questions: [{
-        id: 'question-1',
-        header: 'Human input required',
-        question: 'Pick one',
-        options: [
-          { id: 'opt_1', label: 'A' },
-          { id: 'opt_2', label: 'B' },
-        ],
-      }],
-    });
+    expect(validation.valid).toBe(false);
+    expect(String(validation.error || '')).toContain("Unknown parameter 'requireConfirmation' is not allowed");
   });
 
-  test('applies HITL compatibility normalization for ask_user_input', () => {
+  test('rejects flat HITL prompt aliases for ask_user_input', () => {
     const schema = {
       type: 'object',
       properties: {
@@ -669,24 +666,14 @@ describe('Tool Utils - validateToolParameters', () => {
       {
         prompt: 'Pick one',
         options: ['A', 'B'],
-        requireConfirmation: true,
       },
       schema,
       'ask_user_input',
     );
 
-    expect(validation.valid).toBe(true);
-    expect(validation.correctedArgs).toEqual({
-      questions: [{
-        id: 'question-1',
-        header: 'Human input required',
-        question: 'Pick one',
-        options: [
-          { id: 'opt_1', label: 'A' },
-          { id: 'opt_2', label: 'B' },
-        ],
-      }],
-    });
+    expect(validation.valid).toBe(false);
+    expect(String(validation.error || '')).toContain("Required parameter 'questions' is missing or empty");
+    expect(String(validation.error || '')).toContain("Unknown parameter 'prompt' is not allowed");
   });
 });
 

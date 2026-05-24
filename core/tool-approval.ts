@@ -20,18 +20,29 @@
  * - 2026-02-28: Initial shared approval helper extracted for `load_skill`, `create_agent`, and `web_fetch`.
  */
 
-import { requestWorldOption, type HitlOption } from './hitl.js';
+import {
+  isHitlRequestSupersededError,
+  requestWorldOption,
+  type HitlOption,
+} from './hitl.js';
 import { createStorageWithWrappers } from './storage/storage-factory.js';
 import { generateId } from './utils.js';
 import { type AgentMessage, type World } from './types.js';
 
-export type ToolApprovalReason = 'approved' | 'user_denied' | 'timeout';
+export type ToolApprovalReason = 'approved' | 'user_denied' | 'timeout' | 'superseded';
 
 export type ToolApprovalResult = {
   approved: boolean;
   reason: ToolApprovalReason;
   optionId: string;
   source: 'user' | 'timeout';
+};
+
+type PersistedToolApprovalResult = ToolApprovalResult | {
+  approved: false;
+  reason: 'superseded';
+  optionId: null;
+  source: 'system';
 };
 
 export type ToolApprovalRequest = {
@@ -186,7 +197,7 @@ async function persistApprovalResolutionMessage(options: {
   request: ToolApprovalRequest;
   requestId: string;
   toolCallId: string;
-  result: ToolApprovalResult;
+  result: PersistedToolApprovalResult;
 }): Promise<void> {
   const messages = normalizeApprovalMessages(options.request.messages);
   if (!messages) {
@@ -208,16 +219,20 @@ async function persistApprovalResolutionMessage(options: {
     requestId: options.requestId,
     toolCallId: options.toolCallId,
     tool: toolName,
-    skipped: false,
-    answers: [{
-      questionId: 'question-1',
-      optionIds: [options.result.optionId],
-    }],
+    skipped: options.result.reason === 'superseded',
+    answers: options.result.optionId
+      ? [{
+        questionId: 'question-1',
+        optionIds: [options.result.optionId],
+      }]
+      : [],
     optionId: options.result.optionId,
     source: options.result.source,
     reason: options.result.reason,
     status: options.result.approved
       ? 'approved'
+      : options.result.reason === 'superseded'
+        ? 'superseded'
       : options.result.reason === 'timeout'
         ? 'timeout'
         : 'denied',
@@ -253,19 +268,37 @@ export async function requestToolApproval(request: ToolApprovalRequest): Promise
     toolCallId,
   });
 
-  const resolution = await requestWorldOption(request.world, {
-    requestId,
-    title: request.title,
-    message: request.message,
-    chatId: request.chatId,
-    defaultOptionId: request.defaultOptionId,
-    options: request.options,
-    metadata: {
-      ...(request.metadata && typeof request.metadata === 'object' ? request.metadata : {}),
-      toolCallId,
-    },
-    agentName: request.agentName ?? null,
-  });
+  let resolution;
+  try {
+    resolution = await requestWorldOption(request.world, {
+      requestId,
+      title: request.title,
+      message: request.message,
+      chatId: request.chatId,
+      defaultOptionId: request.defaultOptionId,
+      options: request.options,
+      metadata: {
+        ...(request.metadata && typeof request.metadata === 'object' ? request.metadata : {}),
+        toolCallId,
+      },
+      agentName: request.agentName ?? null,
+    });
+  } catch (error) {
+    if (isHitlRequestSupersededError(error)) {
+      await persistApprovalResolutionMessage({
+        request,
+        requestId,
+        toolCallId,
+        result: {
+          approved: false,
+          reason: 'superseded',
+          optionId: null,
+          source: 'system',
+        },
+      });
+    }
+    throw error;
+  }
 
   const result: ToolApprovalResult = approvedSet.has(resolution.optionId)
     ? {
