@@ -18,6 +18,7 @@
  * - Verifies queue status updates and publish calls as observable outcomes.
  *
  * Recent Changes:
+ * - 2026-05-24: Updated pending-HITL stale sending recovery coverage to use canonical structured `questions[]` persisted prompts.
  * - 2026-03-29: Added terminal-turn metadata recovery coverage so stale `sending` rows are removed instead of retried when persisted completion is already present.
  * - 2026-03-10: Removed memory-based restore resend and narrowed auto-resume to queue-owned recovery only.
  * - 2026-03-10: Added pending-HITL recovery coverage so stale `sending` rows do not auto-resume across persisted approval boundaries.
@@ -409,8 +410,19 @@ describe('restore-time queue-owned auto-resume guardrails', () => {
             function: {
               name: 'human_intervention_request',
               arguments: JSON.stringify({
-                question: 'Approve applying this skill now?',
-                options: ['Yes once', 'No'],
+                type: 'single-select',
+                allowSkip: false,
+                questions: [
+                  {
+                    id: 'question-1',
+                    header: 'Approve skill?',
+                    question: 'Approve applying this skill now?',
+                    options: [
+                      { id: 'yes-once', label: 'Yes once' },
+                      { id: 'no', label: 'No' },
+                    ],
+                  },
+                ],
                 metadata: {
                   source: 'load_skill',
                   skillId: 'yt-dlp',

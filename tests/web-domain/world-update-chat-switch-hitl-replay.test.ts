@@ -8,6 +8,9 @@
  * - Verifies `load-chat-from-history` no longer calls `api.setChat` directly.
  * - Confirms route navigation still proceeds to the selected chat path.
  * - Confirms pending HITL queue state survives the loading phase so chat-scoped replay can restore it.
+ *
+ * Recent Changes:
+ * - 2026-05-24: Updated HITL tool-progress fixtures to the canonical structured `questions[]` schema.
  */
 
 import { app } from 'apprun';
@@ -128,9 +131,16 @@ describe('web/world-update chat switch replay behavior', () => {
         metadata: {
           hitlPrompt: {
             requestId: 'req-1',
-            title: 'Approval required',
-            message: 'Approve?',
-            options: [{ id: 'approve', label: 'Approve' }],
+            type: 'single-select',
+            allowSkip: false,
+            questions: [
+              {
+                id: 'question-1',
+                header: 'Approval required',
+                question: 'Approve?',
+                options: [{ id: 'approve', label: 'Approve' }],
+              },
+            ],
           },
         },
       },

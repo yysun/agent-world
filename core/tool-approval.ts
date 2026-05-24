@@ -16,6 +16,7 @@
  * - When message context is available, persists canonical approval prompt/resolution artifacts
  *
  * Recent Changes:
+ * - 2026-05-24: Narrowed the normal return reason type to exclude superseded approvals, which are persisted and rethrown.
  * - 2026-03-12: Added optional durable approval prompt/resolution persistence with separate requestId vs owning toolCallId support.
  * - 2026-02-28: Initial shared approval helper extracted for `load_skill`, `create_agent`, and `web_fetch`.
  */
@@ -29,7 +30,7 @@ import { createStorageWithWrappers } from './storage/storage-factory.js';
 import { generateId } from './utils.js';
 import { type AgentMessage, type World } from './types.js';
 
-export type ToolApprovalReason = 'approved' | 'user_denied' | 'timeout' | 'superseded';
+export type ToolApprovalReason = 'approved' | 'user_denied' | 'timeout';
 
 export type ToolApprovalResult = {
   approved: boolean;

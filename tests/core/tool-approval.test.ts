@@ -9,6 +9,7 @@
  * - Mocks requestWorldOption to keep tests deterministic and offline
  *
  * Recent Changes:
+ * - 2026-05-24: Tightened superseded approval coverage around persisted system resolution behavior.
  * - 2026-03-12: Added durable synthetic approval prompt/resolution persistence coverage with distinct owning toolCallId.
  * - 2026-02-28: Added initial coverage for shared tool approval helper.
  */
@@ -211,6 +212,7 @@ describe('tool approval helper', () => {
       status: 'superseded',
       reason: 'superseded',
       skipped: true,
+      source: 'system',
       answers: [],
       optionId: null,
     });
